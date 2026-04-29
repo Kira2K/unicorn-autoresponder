@@ -1,0 +1,31 @@
+{
+  "name": "unicorn-hh-autoparcer",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dolphyn": "node dolphyn-connector.ts",
+    "messenger": "node messenger.ts",
+    "orchestrator": "node orchestrator.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "unicornveryevil@gmail.com",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/genai": "^1.50.1",
+    "axios": "^1.15.2",
+    "dotenv": "^17.2.2",
+    "googleapis": "^171.4.0",
+    "input": "^1.0.1",
+    "openapi-client-axios": "^7.9.0",
+    "openapi-typescript": "^7.13.0",
+    "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
