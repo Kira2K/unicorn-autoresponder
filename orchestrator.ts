@@ -20,6 +20,7 @@ const HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY = 'hh_ar_v2_successful_response
 const HH_AUTO_RESPONDER_LOGS_KEY = 'hh_ar_v2_logs'
 const HH_AUTO_RESPONDER_STOP_REASON_KEY = 'hh_ar_v2_stop_reason'
 const HH_AUTO_RESPONDER_PARSER_ERRORS_KEY = 'hh_ar_v2_parser_errors'
+const HH_AUTO_RESPONDER_RECENT_URLS_KEY = 'hh_ar_v2_recent_urls'
 const DEFAULT_WATCH_MS = 15 * 60 * 1000
 const AUTO_RESPONDER_WATCH_MS = Number(process.env.ORCHESTRATOR_WATCH_MS ?? DEFAULT_WATCH_MS)
 const DEFAULT_CLIENT_START_DELAY_MS = 20 * 1000
@@ -28,6 +29,7 @@ const EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS = 60 * 1000
 const EXTERNAL_TIMEOUT_MULTIPLIER = 1.1
 const DOLPHIN_HEADLESS = parseBooleanEnv(process.env.DOLPHIN_HEADLESS, true)
 const LOGS_CHANNEL_ID = process.env.logs_channel_id?.trim()
+const SUMMARY_LOGS_CHANNEL_ID = process.env.summary_logs_channel_id?.trim()
 const TELEGRAM_MESSAGE_LIMIT = 3900
 const MAX_PREEXISTING_DOLPHIN_PROFILES = Number(process.env.MAX_PREEXISTING_DOLPHIN_PROFILES ?? 3)
 const CONNECT_OVER_CDP_TIMEOUT_MS = 60000
@@ -36,7 +38,11 @@ const NORMAL_AUTO_RESPONDER_STOP_REASONS = new Set([
   'targets_processed',
   'no_new_targets',
   'limit_reached',
+  'hh_response_daily_limit_exceeded',
   'user_stop'
+])
+const AUTH_CHECK_PARSER_ERROR_CODES = new Set([
+  'ERROR_NO_MODAL'
 ])
 const HH_AUTO_RESPONDER_URL_PATTERNS = [
   /^https?:\/\/([^/?#]+\.)?hh\.ru\/search\/vacancy(?:[/?#]|$)/i,
@@ -122,6 +128,9 @@ type OrchestratorStatus = {
   parserErrorLogsCount?: number
   parserErrorCodes?: string[]
   parserLastErrorCode?: string
+  recentUrls?: RecentUrlEntry[]
+  authBeforeStart?: HhAuthCheck
+  authAfterParserStop?: HhAuthCheck
   parserLogsSent?: boolean
   manualVacanciesSent?: boolean
   profileTagAdded?: boolean
@@ -166,6 +175,7 @@ type AutoResponderStopReason = {
   details?: string
   ts?: number
   url?: string
+  recentUrls?: RecentUrlEntry[]
 }
 
 type ParserErrorEntry = {
@@ -173,6 +183,32 @@ type ParserErrorEntry = {
   details?: string
   ts?: number
   url?: string
+  recentUrls?: RecentUrlEntry[]
+}
+
+type RecentUrlEntry = {
+  url?: string
+  title?: string
+  reason?: string
+  ts?: number
+}
+
+type HhAuthState = 'logged_in' | 'logged_out' | 'unknown' | 'conflict'
+
+type HhAuthSignal = {
+  exists: boolean
+  tag?: string
+  dataQa?: string | null
+  href?: string | null
+  text?: string
+}
+
+type HhAuthCheck = {
+  state: HhAuthState
+  checkedAt: string
+  url: string
+  title: string
+  signals: Record<string, HhAuthSignal>
 }
 
 type LocalRunLogRecord = {
@@ -197,6 +233,7 @@ type OpenScenarioResult = {
     startButtonClicked: boolean
     pageTitle: string
     pageUrl: string
+    authBeforeStart?: HhAuthCheck
   }
 }
 
@@ -545,6 +582,108 @@ function extractParserErrorCodesFromLogs(parserLogs: ParserLogEntry[]): string[]
   return [...codes]
 }
 
+async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
+  const fallback = {
+    checkedAt: new Date().toISOString(),
+    url: page.isClosed() ? 'closed-page' : page.url(),
+    title: '',
+    signals: {}
+  }
+
+  if (page.isClosed()) {
+    return {
+      ...fallback,
+      state: 'unknown'
+    }
+  }
+
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    try {
+      await page.waitForLoadState('domcontentloaded', {
+        timeout: 5000
+      }).catch(() => undefined)
+
+      return await page.evaluate(() => {
+        const readSignal = (selector: string) => {
+          const element = document.querySelector(selector)
+
+          if (!element) {
+            return { exists: false }
+          }
+
+          return {
+            exists: true,
+            tag: element.tagName,
+            dataQa: element.getAttribute('data-qa'),
+            href: element.getAttribute('href'),
+            text: (element.textContent || '').trim().slice(0, 120)
+          }
+        }
+        const signals = {
+          login: readSignal('[data-qa="login"]'),
+          signup: readSignal('[data-qa="signup"]'),
+          anonymousProfileLink: readSignal('[data-qa="mainmenu_profile-link"][href*="/account/login"]'),
+          profileAndResumesButton: readSignal('[data-qa="profileAndResumes-button"]'),
+          vacancyResponsesButton: readSignal('[data-qa="vacancyResponses-button"]'),
+          mainmenuProfileAndResumes: readSignal('[data-qa="mainmenu_profileAndResumes"]'),
+          mainmenuVacancyResponses: readSignal('[data-qa="mainmenu_vacancyResponses"]')
+        }
+        const loggedOut =
+          signals.login.exists ||
+          signals.signup.exists ||
+          signals.anonymousProfileLink.exists
+        const loggedIn =
+          signals.profileAndResumesButton.exists ||
+          signals.vacancyResponsesButton.exists ||
+          signals.mainmenuProfileAndResumes.exists ||
+          signals.mainmenuVacancyResponses.exists
+        const state = loggedIn && !loggedOut
+          ? 'logged_in'
+          : loggedOut && !loggedIn
+            ? 'logged_out'
+            : loggedIn && loggedOut
+              ? 'conflict'
+              : 'unknown'
+
+        return {
+          state,
+          checkedAt: new Date().toISOString(),
+          url: location.href,
+          title: document.title,
+          signals
+        }
+      })
+    } catch (error: any) {
+      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+        throw error
+      }
+    }
+
+    await wait(500)
+  }
+
+  return {
+    ...fallback,
+    state: 'unknown'
+  }
+}
+
+function shouldCheckAuthAfterParserStop(status: OrchestratorStatus): boolean {
+  if (!status.autoResponderStopReason || isAutoResponderStopNormal(status)) {
+    return false
+  }
+
+  return (
+    status.autoResponderStopReason.includes('error') ||
+    AUTH_CHECK_PARSER_ERROR_CODES.has(status.autoResponderStopReason) ||
+    Boolean(
+      status.autoResponderStopReasonDetails &&
+      AUTH_CHECK_PARSER_ERROR_CODES.has(status.autoResponderStopReasonDetails)
+    ) ||
+    Boolean(status.parserErrorCodes?.some((code) => AUTH_CHECK_PARSER_ERROR_CODES.has(code)))
+  )
+}
+
 async function getAutoResponderParserErrors(page: any): Promise<ParserErrorEntry[]> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return []
@@ -565,6 +704,38 @@ async function getAutoResponderParserErrors(page: any): Promise<ParserErrorEntry
           return []
         }
       }, HH_AUTO_RESPONDER_PARSER_ERRORS_KEY)
+    } catch (error: any) {
+      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+        throw error
+      }
+    }
+
+    await wait(500)
+  }
+
+  return []
+}
+
+async function getAutoResponderRecentUrls(page: any): Promise<RecentUrlEntry[]> {
+  if (page.isClosed() || !isAutoResponderUrl(page.url())) {
+    return []
+  }
+
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    try {
+      await page.waitForLoadState('domcontentloaded', {
+        timeout: 5000
+      }).catch(() => undefined)
+
+      return await page.evaluate((recentUrlsKey: string) => {
+        try {
+          const parsed = JSON.parse(sessionStorage.getItem(recentUrlsKey) || '[]')
+
+          return Array.isArray(parsed) ? parsed : []
+        } catch {
+          return []
+        }
+      }, HH_AUTO_RESPONDER_RECENT_URLS_KEY)
     } catch (error: any) {
       if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
         throw error
@@ -741,6 +912,67 @@ function formatStatusFlag(label: string, value: unknown): string {
   return `${label}: ${value === undefined ? 'n/a' : String(value)}`
 }
 
+function truncateTelegramLine(value: string, maxLength = 350): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 14)}...truncated`
+}
+
+function escapeTelegramHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function getTelegramLinkLabel(parsedUrl: URL): string {
+  const vacancyId = getVacancyIdFromUrl(parsedUrl.href)
+
+  if (vacancyId) {
+    return `${parsedUrl.hostname}/vacancy/${vacancyId}`
+  }
+
+  if (parsedUrl.pathname === '/search/vacancy') {
+    return `${parsedUrl.hostname}/search/vacancy`
+  }
+
+  return `${parsedUrl.hostname}${parsedUrl.pathname}`
+}
+
+function formatTelegramLink(url: string | undefined, label?: string): string {
+  if (!url) {
+    return escapeTelegramHtml('n/a')
+  }
+
+  try {
+    const parsedUrl = new URL(url)
+
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return escapeTelegramHtml(url)
+    }
+
+    return `<a href="${escapeTelegramHtml(parsedUrl.href)}">${escapeTelegramHtml(label || getTelegramLinkLabel(parsedUrl))}</a>`
+  } catch {
+    return escapeTelegramHtml(url)
+  }
+}
+
+function replaceUrlsWithTelegramLinks(value: string, label?: string): string {
+  return escapeTelegramHtml(value).replace(/https?:\/\/[^\s<]+/g, (url) => {
+    const normalizedUrl = url.replace(/&amp;/g, '&')
+
+    return formatTelegramLink(normalizedUrl, label)
+  })
+}
+
+function formatAuthStatusForTelegram(status: OrchestratorStatus): string | undefined {
+  const states = [
+    status.authBeforeStart ? `before ${status.authBeforeStart.state}` : undefined,
+    status.authAfterParserStop ? `after ${status.authAfterParserStop.state}` : undefined
+  ].filter(Boolean)
+
+  return states.length ? `Auth status: ${states.join('; ')}` : undefined
+}
+
 function isAutoResponderStopNormal(status: OrchestratorStatus): boolean {
   if (status.autoResponderStopReason === 'orchestrator_stop_after_watch') {
     return Boolean(
@@ -765,7 +997,34 @@ function formatParserErrorCodesForTelegram(status: OrchestratorStatus): string |
     return undefined
   }
 
-  return `Parser error codes: ${status.parserErrorCodes.join(', ')}`
+  return `Parser error codes: ${escapeTelegramHtml(status.parserErrorCodes.join(', '))}`
+}
+
+function formatRecentUrlsForTelegram(status: OrchestratorStatus): string | undefined {
+  if (!status.recentUrls?.length) {
+    return undefined
+  }
+
+  const lines = status.recentUrls.slice(-2).map((entry, index) => {
+    const marker = index === status.recentUrls!.slice(-2).length - 1 ? 'current' : 'previous'
+    const reason = entry.reason ? ` (${escapeTelegramHtml(entry.reason)})` : ''
+    const title = entry.title ? ` - ${escapeTelegramHtml(entry.title)}` : ''
+
+    return `${escapeTelegramHtml(marker)}${reason}: ${formatTelegramLink(entry.url)}${title}`
+  })
+
+  return [
+    'Recent URLs:',
+    ...lines
+  ].join('\n')
+}
+
+function formatAuthCheckBrief(check: HhAuthCheck): string {
+  const signalNames = Object.entries(check.signals)
+    .filter(([, signal]) => signal.exists)
+    .map(([name]) => name)
+
+  return `${check.state}; signals ${signalNames.join(', ') || 'none'}; url ${check.url}`
 }
 
 function shouldSendParserLogsToTelegram(status: OrchestratorStatus, parserLogs: ParserLogEntry[]): boolean {
@@ -775,13 +1034,19 @@ function shouldSendParserLogsToTelegram(status: OrchestratorStatus, parserLogs: 
 function formatLifecycleEventForTelegram(status: OrchestratorStatus, item: LifecycleEvent): string {
   let details = item.details
 
+  if (details && item.event.startsWith('HH auth checked')) {
+    details = details.split(';')[0]
+  }
+
   if (isAutoResponderStopNormal(status) && details) {
     details = details
       .replace(/, parser errors \d+, parser codes .*?(?=, stop reason)/, '')
       .replace(/, parser errors \d+(?=, stop reason)/, '')
   }
 
-  return `${formatElapsed(item.elapsedMs)} ${item.event}${details ? `: ${details}` : ''}`
+  const line = `${formatElapsed(item.elapsedMs)} ${item.event}${details ? `: ${details}` : ''}`
+
+  return replaceUrlsWithTelegramLinks(truncateTelegramLine(line, 220), 'link')
 }
 
 function writeLocalRunLog(record: LocalRunLogRecord): void {
@@ -845,12 +1110,12 @@ function formatElapsed(ms: number): string {
 
 function formatClientErrorLog(status: OrchestratorStatus): string {
   const lines = [
-    'HH autoparcer error',
-    `Client: ${status.clientName}${status.market ? ` / ${status.market}` : ''}`,
-    `Stack: ${status.stack}`,
-    `Dolphin profile: ${status.dolphinProfileId}`,
-    status.error ? `Error: ${status.error}` : undefined,
-    status.telegramError ? `Telegram report error: ${status.telegramError}` : undefined,
+    '<b>HH autoparcer error</b>',
+    `Client: ${escapeTelegramHtml(status.clientName)}${status.market ? ` / ${escapeTelegramHtml(status.market)}` : ''}`,
+    `Stack: ${escapeTelegramHtml(status.stack)}`,
+    `Dolphin profile: ${escapeTelegramHtml(status.dolphinProfileId)}`,
+    status.error ? `Error: ${escapeTelegramHtml(status.error)}` : undefined,
+    status.telegramError ? `Telegram report error: ${escapeTelegramHtml(status.telegramError)}` : undefined,
     '',
     'Status:',
     formatStatusFlag('opened', status.opened),
@@ -858,8 +1123,8 @@ function formatClientErrorLog(status: OrchestratorStatus): string {
     formatStatusFlag('startButtonClicked', status.startButtonClicked),
     formatStatusFlag('autoResponderFinished', status.autoResponderFinished),
     formatStatusFlag('autoResponderWatchTimedOut', status.autoResponderWatchTimedOut),
-    `Stop reason: ${status.autoResponderStopReason ?? 'n/a'}`,
-    status.autoResponderStopReasonDetails ? `Stop reason details: ${status.autoResponderStopReasonDetails}` : undefined,
+    `Stop reason: ${escapeTelegramHtml(status.autoResponderStopReason ?? 'n/a')}`,
+    status.autoResponderStopReasonDetails ? `Stop reason details: ${escapeTelegramHtml(status.autoResponderStopReasonDetails)}` : undefined,
     formatStatusFlag('stopButtonClicked', status.stopButtonClicked),
     formatStatusFlag('profileStopped', status.profileStopped),
     formatStatusFlag('profileTagAdded', status.profileTagAdded),
@@ -872,30 +1137,40 @@ function formatClientErrorLog(status: OrchestratorStatus): string {
     `Confirmed responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed vacancies: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual vacancies: ${status.manualVacanciesCount ?? 'n/a'}`,
+    formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
-    status.pageUrl ? `Page URL: ${status.pageUrl}` : undefined,
-    status.errorStack ? `\nStack trace:\n${status.errorStack}` : undefined
+    formatRecentUrlsForTelegram(status),
+    status.pageUrl ? `Page: ${formatTelegramLink(status.pageUrl)}` : undefined,
+    status.errorStack ? `\nStack trace:\n${escapeTelegramHtml(status.errorStack)}` : undefined
   ].filter((line): line is string => line !== undefined)
 
   return truncateText(lines.join('\n'), TELEGRAM_MESSAGE_LIMIT)
 }
 
 function formatClientLifecycleLog(status: OrchestratorStatus): string {
+  const recentLifecycleEvents = status.lifecycleEvents.slice(-8)
+  const lifecycleQuote = recentLifecycleEvents.length
+    ? [
+      `Last lifecycle events: ${recentLifecycleEvents.length}/${status.lifecycleEvents.length}`,
+      `<blockquote expandable>${recentLifecycleEvents.map((item) => formatLifecycleEventForTelegram(status, item)).join('\n')}</blockquote>`
+    ].join('\n')
+    : undefined
   const lines = [
-    'HH autoparcer lifecycle',
-    `Client: ${status.clientName}${status.market ? ` / ${status.market}` : ''}`,
-    `Dolphin profile: ${status.dolphinProfileId}`,
-    `Result: ${hasClientFailure(status) ? 'ERROR' : 'OK'}`,
-    `Stop reason: ${status.autoResponderStopReason ?? 'n/a'}`,
+    '<b>HH autoparcer lifecycle</b>',
+    `Client: ${escapeTelegramHtml(status.clientName)}${status.market ? ` / ${escapeTelegramHtml(status.market)}` : ''}`,
+    `Dolphin profile: ${escapeTelegramHtml(status.dolphinProfileId)}`,
+    `Result: ${formatTechnicalRunResult(status)}`,
+    `Stop reason: ${escapeTelegramHtml(status.autoResponderStopReason ?? 'n/a')}`,
     `Responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual: ${status.manualVacanciesCount ?? 'n/a'}`,
+    formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
+    formatRecentUrlsForTelegram(status),
     '',
-    'Timeline:',
-    ...status.lifecycleEvents.map((item) => formatLifecycleEventForTelegram(status, item)),
-    status.error ? `\nError: ${status.error}` : undefined,
-    status.telegramError ? `Telegram report error: ${status.telegramError}` : undefined
+    lifecycleQuote,
+    status.error ? `\nError: ${escapeTelegramHtml(status.error)}` : undefined,
+    status.telegramError ? `Telegram report error: ${escapeTelegramHtml(status.telegramError)}` : undefined
   ].filter((line): line is string => line !== undefined)
 
   return truncateText(lines.join('\n'), TELEGRAM_MESSAGE_LIMIT)
@@ -907,7 +1182,9 @@ async function sendClientLifecycleLog(status: OrchestratorStatus): Promise<void>
   }
 
   try {
-    await sendTelegramMessage(LOGS_CHANNEL_ID, formatClientLifecycleLog(status))
+    await sendTelegramMessage(LOGS_CHANNEL_ID, formatClientLifecycleLog(status), {
+      parseMode: 'html'
+    })
   } catch (error: unknown) {
     console.error(`Failed to send lifecycle log to Telegram: ${getErrorMessage(error)}`)
   }
@@ -917,16 +1194,18 @@ function formatParserLogsMessage(status: OrchestratorStatus, parserLogs: ParserL
   const recentLogs = parserLogs.slice(-5)
   const errorLogs = parserLogs.filter((entry) => entry.isError)
   const lines = [
-    'HH autoparcer parser logs',
-    `Client: ${status.clientName}${status.market ? ` / ${status.market}` : ''}`,
-    `Dolphin profile: ${status.dolphinProfileId}`,
+    '<b>HH autoparcer parser logs</b>',
+    `Client: ${escapeTelegramHtml(status.clientName)}${status.market ? ` / ${escapeTelegramHtml(status.market)}` : ''}`,
+    `Dolphin profile: ${escapeTelegramHtml(status.dolphinProfileId)}`,
     `Parser logs: ${parserLogs.length}`,
     `Parser error logs: ${errorLogs.length}`,
-    `Stop reason: ${status.autoResponderStopReason ?? 'n/a'}`,
+    `Stop reason: ${escapeTelegramHtml(status.autoResponderStopReason ?? 'n/a')}`,
     `Responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual: ${status.manualVacanciesCount ?? 'n/a'}`,
+    formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
+    formatRecentUrlsForTelegram(status),
     '',
     'Recent parser log lines:',
     ...recentLogs.map((entry) => {
@@ -934,7 +1213,7 @@ function formatParserLogsMessage(status: OrchestratorStatus, parserLogs: ParserL
       const time = entry.time ?? (entry.ts ? new Date(Number(entry.ts)).toLocaleTimeString('ru-RU') : 'unknown')
       const message = String(entry.message ?? '').trim() || '(empty)'
 
-      return `[${time}] ${marker}: ${message}`
+      return `[${escapeTelegramHtml(time)}] ${marker}: ${replaceUrlsWithTelegramLinks(message)}`
     })
   ]
 
@@ -951,7 +1230,9 @@ async function sendParserLogsToTelegram(status: OrchestratorStatus, parserLogs: 
   for (let index = 0; index < chunks.length; index += 1) {
     const suffix = chunks.length > 1 ? `\n\nPart ${index + 1}/${chunks.length}` : ''
 
-    await sendTelegramMessage(LOGS_CHANNEL_ID, `${chunks[index]}${suffix}`)
+    await sendTelegramMessage(LOGS_CHANNEL_ID, `${chunks[index]}${suffix}`, {
+      parseMode: 'html'
+    })
   }
 }
 
@@ -961,7 +1242,9 @@ async function sendClientErrorLog(status: OrchestratorStatus): Promise<void> {
   }
 
   try {
-    await sendTelegramMessage(LOGS_CHANNEL_ID, formatClientErrorLog(status))
+    await sendTelegramMessage(LOGS_CHANNEL_ID, formatClientErrorLog(status), {
+      parseMode: 'html'
+    })
   } catch (error: unknown) {
     console.error(`Failed to send error log to Telegram: ${getErrorMessage(error)}`)
   }
@@ -973,60 +1256,113 @@ async function sendRunErrorLog(error: unknown): Promise<void> {
   }
 
   const message = truncateText([
-    'HH autoparcer fatal error',
-    `Error: ${getErrorMessage(error)}`,
-    getErrorStack(error) ? `\nStack trace:\n${getErrorStack(error)}` : undefined
+    '<b>HH autoparcer fatal error</b>',
+    `Error: ${escapeTelegramHtml(getErrorMessage(error))}`,
+    getErrorStack(error) ? `\nStack trace:\n${escapeTelegramHtml(getErrorStack(error))}` : undefined
   ].filter((line): line is string => line !== undefined).join('\n'), TELEGRAM_MESSAGE_LIMIT)
 
   try {
-    await sendTelegramMessage(LOGS_CHANNEL_ID, message)
+    await sendTelegramMessage(LOGS_CHANNEL_ID, message, {
+      parseMode: 'html'
+    })
   } catch (telegramError: unknown) {
     console.error(`Failed to send fatal error log to Telegram: ${getErrorMessage(telegramError)}`)
   }
+}
+
+function formatHumanStopReason(status: OrchestratorStatus): string {
+  if (status.error) {
+    return `ошибка: ${status.error}`
+  }
+
+  if (status.telegramError) {
+    return `отработал, но не удалось отправить сообщение клиенту: ${status.telegramError}`
+  }
+
+  if (!status.opened) {
+    return 'не удалось открыть профиль или HH'
+  }
+
+  if (!status.startButtonClicked) {
+    return 'не удалось нажать старт автооткликов'
+  }
+
+  switch (status.autoResponderStopReason) {
+    case 'orchestrator_stop_after_watch':
+      return 'завершили по таймеру'
+    case 'hh_response_daily_limit_exceeded':
+      return 'достигнут дневной лимит HH, остановили'
+    case 'targets_processed':
+      return 'обработал доступные вакансии'
+    case 'no_new_targets':
+      return 'новых вакансий для запуска не осталось'
+    case 'limit_reached':
+      return 'достигнут внутренний лимит сценария'
+    case 'user_stop':
+      return 'остановлен вручную'
+    case 'vacancy_processing_error':
+      return `остановился на обработке вакансии${status.autoResponderStopReasonDetails ? `: ${status.autoResponderStopReasonDetails}` : ''}`
+    default:
+      return status.autoResponderStopReason
+        ? `остановился: ${status.autoResponderStopReason}`
+        : 'нет финальной причины остановки'
+  }
+}
+
+function formatHumanRunResult(status: OrchestratorStatus): string {
+  if (hasClientFailure(status)) {
+    return '🔴 нужно проверить'
+  }
+
+  if (status.autoResponderStopReason === 'hh_response_daily_limit_exceeded') {
+    return '🟢 лимит HH'
+  }
+
+  return '🟢 ок'
+}
+
+function formatTechnicalRunResult(status: OrchestratorStatus): string {
+  return hasClientFailure(status) ? '🔴 ERROR' : '🟢 OK'
 }
 
 function formatRunSummaryLog(results: OrchestratorStatus[]): string {
   const successful = results.filter((status) => !hasClientFailure(status))
   const failed = results.filter(hasClientFailure)
   const responseCount = results.reduce((sum, status) => sum + (status.responseCount ?? 0), 0)
-  const viewedCount = results.reduce((sum, status) => sum + (status.vacancyTransitionCount ?? 0), 0)
   const manualCount = results.reduce((sum, status) => sum + (status.manualVacanciesCount ?? 0), 0)
-  const rows = results.map((status) => [
-    `${hasClientFailure(status) ? 'ERROR' : 'OK'} ${status.clientName}${status.market ? ` / ${status.market}` : ''}`,
-    `profile ${status.dolphinProfileId}`,
-    `stop ${status.autoResponderStopReason ?? 'n/a'}`,
-    isAutoResponderStopNormal(status) || !status.parserErrorCodes?.length
-      ? undefined
-      : `parser codes ${status.parserErrorCodes.join('|')}`,
-    `responses ${status.responseCount ?? 'n/a'}`,
-    `viewed ${status.vacancyTransitionCount ?? 'n/a'}`,
-    `manual ${status.manualVacanciesCount ?? 'n/a'}`,
-    !status.opened ? 'error: hh page was not opened' : undefined,
-    status.opened && !status.startButtonClicked ? 'error: start button was not clicked' : undefined,
-    status.error ? `error: ${status.error}` : undefined,
-    status.telegramError ? `telegram: ${status.telegramError}` : undefined
-  ].filter(Boolean).join(', '))
+  const rows = results.map((status) => {
+    const name = `${status.clientName}${status.market ? ` / ${status.market}` : ''}`
+    const pieces = [
+      `${escapeTelegramHtml(name)}: ${escapeTelegramHtml(formatHumanRunResult(status))}`,
+      escapeTelegramHtml(formatHumanStopReason(status)),
+      `откликов: ${status.responseCount ?? 0}`,
+      `ручных: ${status.manualVacanciesCount ?? 0}`
+    ]
+
+    return pieces.join(', ')
+  })
 
   return truncateText([
-    'HH autoparcer run summary',
-    `Total targets: ${results.length}`,
-    `Successful targets: ${successful.length}`,
-    `Failed targets: ${failed.length}`,
-    `Confirmed responses: ${responseCount}`,
-    `Viewed vacancies: ${viewedCount}`,
-    `Manual vacancies: ${manualCount}`,
+    '<b>Итоги автооткликов</b>',
+    `Профилей: ${results.length}`,
+    `🟢 Ок: ${successful.length}`,
+    `🔴 Нужно проверить: ${failed.length}`,
+    `Откликов всего: ${responseCount}`,
+    `Ручных вакансий всего: ${manualCount}`,
     '',
     ...rows
   ].join('\n'), TELEGRAM_MESSAGE_LIMIT)
 }
 
 async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
-  if (!LOGS_CHANNEL_ID) {
+  if (!SUMMARY_LOGS_CHANNEL_ID) {
     return
   }
 
   try {
-    await sendTelegramMessage(LOGS_CHANNEL_ID, formatRunSummaryLog(results))
+    await sendTelegramMessage(SUMMARY_LOGS_CHANNEL_ID, formatRunSummaryLog(results), {
+      parseMode: 'html'
+    })
   } catch (error: unknown) {
     console.error(`Failed to send run summary to Telegram: ${getErrorMessage(error)}`)
   }
@@ -1046,10 +1382,12 @@ function formatManualVacanciesMessage(
   clientName: string,
   vacancies: ManualVacancy[],
   _responseCount: number,
-  _vacancyTransitionCount: number
+  _vacancyTransitionCount: number,
+  isSuccessful = true
 ): string {
+  const resultEmoji = isSuccessful ? '🟢' : '🔴'
   const summary = [
-    `${clientName}: итоги автооткликов`,
+    `<b>${resultEmoji} ${escapeTelegramHtml(clientName)}: итоги автооткликов</b>`,
     `Вакансий для ручного отклика: ${vacancies.length}`,
     'Это первый день автооткликов, за баги не ругайтесь, а репортите, будем чинить!',
     'Важно: список ручных вакансий может содержать не новые позиции из прошлых прогонов. Это будет исправлено в будущей версии.'
@@ -1061,11 +1399,11 @@ function formatManualVacanciesMessage(
 
   const rows = vacancies.map((item, index) => {
     const savedAt = item.ts ? new Date(Number(item.ts)).toLocaleString('ru-RU') : 'unknown time'
+    const vacancyId = item.vid || 'n/a'
 
     return [
-      `${index + 1}. ID: ${item.vid || 'n/a'}`,
-      `Saved: ${savedAt}`,
-      `URL: ${item.url || 'n/a'}`
+      `${index + 1}. ID: ${formatTelegramLink(item.url, vacancyId)}`,
+      `Saved: ${escapeTelegramHtml(savedAt)}`
     ].filter(Boolean).join('\n')
   })
 
@@ -1080,19 +1418,23 @@ async function sendManualVacanciesToTelegram(
   clientName: string,
   vacancies: ManualVacancy[],
   responseCount: number,
-  vacancyTransitionCount: number
+  vacancyTransitionCount: number,
+  isSuccessful = true
 ): Promise<void> {
   const chunks = splitTelegramMessage(formatManualVacanciesMessage(
     clientName,
     vacancies,
     responseCount,
-    vacancyTransitionCount
+    vacancyTransitionCount,
+    isSuccessful
   ))
 
   for (let index = 0; index < chunks.length; index += 1) {
     const suffix = chunks.length > 1 ? `\n\nPart ${index + 1}/${chunks.length}` : ''
 
-    await sendTelegramMessage(chatId, `${chunks[index]}${suffix}`)
+    await sendTelegramMessage(chatId, `${chunks[index]}${suffix}`, {
+      parseMode: 'html'
+    })
   }
 }
 
@@ -1458,6 +1800,7 @@ async function openScenarioAndInjectIndex(
   const pageUrl = page.url()
   recordVacancyTransition(responseCounter, pageUrl)
   const opened = isAutoResponderUrl(pageUrl)
+  const authBeforeStart = await detectHhAuthState(page)
 
   if (!opened) {
     return {
@@ -1470,7 +1813,8 @@ async function openScenarioAndInjectIndex(
         watcherInstalled: true,
         startButtonClicked: false,
         pageTitle,
-        pageUrl
+        pageUrl,
+        authBeforeStart
       }
     }
   }
@@ -1504,7 +1848,8 @@ async function openScenarioAndInjectIndex(
       watcherInstalled: true,
       startButtonClicked: true,
       pageTitle,
-      pageUrl
+      pageUrl,
+      authBeforeStart
     }
   }
 }
@@ -1581,6 +1926,14 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
       ...status,
       ...pageResult.result
     }
+    if (status.authBeforeStart) {
+      status = addLifecycleEvent(
+        status,
+        runStartedAt,
+        'HH auth checked before start',
+        formatAuthCheckBrief(status.authBeforeStart)
+      )
+    }
     status = addLifecycleEvent(
       status,
       runStartedAt,
@@ -1622,6 +1975,8 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
         const responseCount = await getAutoResponderSuccessCount(pageResult.page)
         const parserLogs = await getParserLogs(pageResult.page)
         const structuredParserErrors = await getAutoResponderParserErrors(pageResult.page)
+        const storedRecentUrls = await getAutoResponderRecentUrls(pageResult.page)
+        const recentUrls = storedRecentUrls.length ? storedRecentUrls : stopReason?.recentUrls ?? []
         const parserErrorLogsCount = parserLogs.filter((entry) => entry.isError).length
         const parserErrorCodes = [
           ...new Set([
@@ -1646,7 +2001,21 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
           parserLogsCount: parserLogs.length,
           parserErrorLogsCount,
           parserErrorCodes,
-          parserLastErrorCode
+          parserLastErrorCode,
+          recentUrls
+        }
+        if (shouldCheckAuthAfterParserStop(status)) {
+          const authAfterParserStop = await detectHhAuthState(pageResult.page)
+          status = {
+            ...status,
+            authAfterParserStop
+          }
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'HH auth checked after parser stop',
+            formatAuthCheckBrief(authAfterParserStop)
+          )
         }
         status = addLifecycleEvent(
           status,
@@ -1661,7 +2030,8 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
           `${clientData.clientName} / ${clientData.market}`,
           manualVacancies,
           responseCount,
-          vacancyTransitionCount
+          vacancyTransitionCount,
+          !hasClientFailure(status)
         )
 
         status = {

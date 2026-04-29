@@ -130,14 +130,21 @@ async function createTelegramClient() {
   return client
 }
 
-async function sendTelegramMessage(to: string, message: string): Promise<void> {
+type TelegramParseMode = false | 'html' | 'md' | 'markdown'
+
+async function sendTelegramMessage(
+  to: string,
+  message: string,
+  options: { parseMode?: TelegramParseMode } = {}
+): Promise<void> {
   const client = await createTelegramClient()
 
   try {
     const target = await resolveTelegramTarget(client, to)
 
     await client.sendMessage(target, {
-      message
+      message,
+      parseMode: options.parseMode ?? false
     })
   } finally {
     await client.disconnect()
