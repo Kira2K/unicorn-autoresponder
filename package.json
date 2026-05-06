@@ -6,6 +6,8 @@
     "dolphyn": "node dolphyn-connector.ts",
     "messenger": "node messenger.ts",
     "orchestrator": "node orchestrator.ts",
+    "check-table": "node check-table-state.ts",
+    "table:state": "node check-table-state.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

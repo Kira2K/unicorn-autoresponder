@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["*.ts", "types/**/*.d.ts"]
+  "include": ["*.ts", "hh-auth/**/*.ts", "types/**/*.d.ts"]
 }

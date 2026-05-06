@@ -33,8 +33,8 @@
         nativeWrapper: '[data-qa="textarea-native-wrapper"]',
         relocationBtn: '[data-qa="relocation-warning-confirm"]',
         dailyResponseLimitWarning: '[data-qa-popup-error-code="negotiations-limit-exceeded"]',
-        vacancyLink: 'a[data-qa="serp-item__title"], a[data-qa="vacancy-serp__vacancy-title"]',
-        vacancyCard: 'div[data-qa="vacancy-serp__vacancy"], .vacancy-serp-item'
+        vacancyLink: 'a[data-qa="serp-item__title"], a[data-qa="vacancy-serp__vacancy-title"], a[href*="/vacancy/"]',
+        vacancyCard: 'div[data-qa="vacancy-serp__vacancy"], div[data-qa="serp-item"], .vacancy-serp-item'
     };
 
 
@@ -529,6 +529,46 @@
         return null;
     }
 
+    function getVacancyCard(node) {
+        if (!node || !node.closest) return null;
+        return node.closest(SELECTORS.vacancyCard)
+            || node.closest('article')
+            || node.closest('li');
+    }
+
+    function createVacancyLinkFallback(vid) {
+        const href = `https://hh.ru/vacancy/${vid}`;
+        return {
+            href,
+            getAttribute: (name) => name === 'href' ? href : null,
+            scrollIntoView: () => {}
+        };
+    }
+
+    function findVacancyLinkNear(node) {
+        if (!node) return null;
+
+        const directHref = node.href || (node.getAttribute && node.getAttribute('href')) || '';
+        if (getVacancyIDFromHref(directHref) && /\/vacancy\//.test(directHref)) {
+            return node;
+        }
+
+        let current = node;
+        for (let depth = 0; current && current !== document.body && depth < 10; depth++) {
+            if (current.querySelector) {
+                const link = current.querySelector(SELECTORS.vacancyLink);
+                const href = link?.href || (link?.getAttribute && link.getAttribute('href')) || '';
+                if (getVacancyIDFromHref(href)) {
+                    return link;
+                }
+            }
+            current = current.parentElement;
+        }
+
+        const vid = getVacancyIDFromHref(directHref);
+        return vid ? createVacancyLinkFallback(vid) : null;
+    }
+
     // Простой стабильный хеш (FNV-1a 32) — запасной вариант
     function fnv1a32(str) {
         let h = 0x811c9dc5;
@@ -543,8 +583,8 @@
     // Получение уникального ID вакансии для отслеживания — сначала по ссылке, затем по хешу
     function getVacancyID(node) {
         try {
-            const card = node.closest ? node.closest(SELECTORS.vacancyCard) : null;
-            const link = (card && card.querySelector) ? card.querySelector(SELECTORS.vacancyLink) : null;
+            const card = getVacancyCard(node);
+            const link = findVacancyLinkNear(node);
             const href = (link && link.href) || node.href || (node.getAttribute && node.getAttribute('href')) || '';
             const id = getVacancyIDFromHref(href);
             if (id) return 'v_' + id;
@@ -656,7 +696,7 @@
         return null;
     }
 
-    function handleManualResponsePage(reason) {
+    function handleManualResponsePage(reason, forceSaveBroken) {
         if (!isManualResponsePage()) return false;
         if (StateManager.hasTrapLock()) return true;
 
@@ -854,6 +894,12 @@
                     handleManualResponsePage('После клика открылась страница вопросов. Сохраняю для ручного отклика.');
                     return 'REDIRECT';
                 }
+
+                const wasTried = localStorage.getItem(wasTried);
+                if(!wasTried || wasTried !== vid) {
+                  localStorage.setItem(wasTried, vid)
+                  window.location.reload();
+                }
                 return 'ERROR_NO_MODAL';
             }
 
@@ -1026,9 +1072,7 @@
         }
 
         if (btn) {
-            const card = btn.closest(SELECTORS.vacancyCard);
-            const vacLink = card?.querySelector(SELECTORS.vacancyLink)
-                            || card?.querySelector('a[href*="/vacancy/"]');
+            const vacLink = findVacancyLinkNear(btn);
             if (!vacLink) {
                 log('Не найден селектор ссылки вакансии. Проверьте структуру карточки.', true);
                 return 'ERROR_NO_LINK';

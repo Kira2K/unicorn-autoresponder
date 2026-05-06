@@ -9,24 +9,43 @@ const GOOGLE_KEY_FILE = path.resolve(
   'project-f5183b61-c5a8-4384-bc9-10f265644c86.json'
 )
 
-const spreadsheetIdFromEnv: string | undefined = process.env.google_spreadsheet_id
-const GOOGLE_SHEET_EXPORT_FILE = path.resolve(__dirname, 'google-sheet-export.json')
-const CLIENT_STACK_MAPPING_EXPORT_FILE = path.resolve(__dirname, 'client-stack-mapping.json')
+const spreadsheetIdFromEnv: string | undefined =
+  process.env.google_spreadsheet_id
+const GOOGLE_SHEET_EXPORT_FILE = path.resolve(
+  __dirname,
+  'google-sheet-export.json'
+)
+const CLIENT_STACK_MAPPING_EXPORT_FILE = path.resolve(
+  __dirname,
+  'client-stack-mapping.json'
+)
 const PERSONAL_DATA_SHEET_NAME = 'ПЕРС ДАННЫЕ'
 const DOLPHIN_MAIN_SHEET_NAME = 'Dolphin main'
 const STACKS_SHEET_NAME = 'Стеки'
 const DOLPHIN_MAIN_NAME_LABEL = 'имя'
 const DOLPHIN_MAIN_STACK_LABEL = 'СТЕК'
-const tableToVarsTranslations: Record<keyof typeof TableToVarsTranslations, TableToVarsTranslations> = {
+const tableToVarsTranslations: Record<
+  keyof typeof TableToVarsTranslations,
+  TableToVarsTranslations
+> = {
+  // TODO: get rid of strings, it must be just enum reuse
   telegram: 'ТГ' as TableToVarsTranslations.telegram,
   stack: 'стек' as TableToVarsTranslations.stack,
-  dolphinProfileId: 'Dolphin Profile Id' as TableToVarsTranslations.dolphinProfileId,
-  dolphinProfileRuId: 'Dolphin Profile Ru Id' as TableToVarsTranslations.dolphinProfileRuId,
-  dolphinProfileEnId: 'Dolphin Profile En Id' as TableToVarsTranslations.dolphinProfileEnId,
+  hhRuPhoneNumber: 'rusPhoneNumber' as TableToVarsTranslations.hhRuPhoneNumber,
+  hhEmail: 'emailHH' as TableToVarsTranslations.hhEmail,
+  hhEmailPassword: 'passwordEmailHH' as TableToVarsTranslations.hhEmailPassword,
+  hhPassword: 'passwordHH' as TableToVarsTranslations.hhPassword,
+  dolphinProfileId:
+    'Dolphin Profile Id' as TableToVarsTranslations.dolphinProfileId,
+  dolphinProfileRuId:
+    'Dolphin Profile Ru Id' as TableToVarsTranslations.dolphinProfileRuId,
+  dolphinProfileEnId:
+    'Dolphin Profile En Id' as TableToVarsTranslations.dolphinProfileEnId,
   ruResponses: 'Делаем отклики Ru' as TableToVarsTranslations.ruResponses,
   enResponses: 'Делаем отклики En' as TableToVarsTranslations.enResponses,
   commonChatId: 'Id общего чата' as TableToVarsTranslations.commonChatId,
-  dolphinMainTelegramId: 'ТГ id' as TableToVarsTranslations.dolphinMainTelegramId,
+  dolphinMainTelegramId:
+    'ТГ id' as TableToVarsTranslations.dolphinMainTelegramId,
   coverRu: 'Сопровод Ru' as TableToVarsTranslations.coverRu,
   coverEn: 'Сопровод En' as TableToVarsTranslations.coverEn
 }
@@ -63,6 +82,15 @@ type ClientAutomationMapping = ClientStackMapping & {
   coverText?: string
 }
 
+type ClientHHAuthCredentials = {
+  clientName: string
+  phone: string
+  rawPhone: string
+  password: string
+  email?: string
+  emailPassword?: string
+}
+
 type ClientsStackMappingExport = {
   exportedAt: string
   spreadsheetId: string
@@ -93,7 +121,9 @@ async function createGoogleAuth() {
   })
 }
 
-async function findFirstAccessibleSpreadsheet(auth: any): Promise<SpreadsheetCandidate> {
+async function findFirstAccessibleSpreadsheet(
+  auth: any
+): Promise<SpreadsheetCandidate> {
   const drive = google.drive({ version: 'v3', auth })
   const response = await drive.files.list({
     q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
@@ -115,7 +145,10 @@ async function findFirstAccessibleSpreadsheet(auth: any): Promise<SpreadsheetCan
   }
 }
 
-async function getSheetInfo(auth: any, spreadsheetId: string): Promise<SheetInfo> {
+async function getSheetInfo(
+  auth: any,
+  spreadsheetId: string
+): Promise<SheetInfo> {
   const sheets = google.sheets({ version: 'v4', auth })
   const response = await sheets.spreadsheets.get({
     spreadsheetId,
@@ -205,9 +238,49 @@ async function fetchAllSheetValues(): Promise<{
   }
 }
 
+async function fetchNamedSheetValues(sheetNames: string[]): Promise<{
+  spreadsheet: SpreadsheetCandidate
+  spreadsheetTitle: string
+  sheets: Array<{
+    title: string
+    values: string[][]
+  }>
+}> {
+  const auth = await createGoogleAuth()
+  const sheetsApi = google.sheets({ version: 'v4', auth })
+  const spreadsheet = await resolveSpreadsheet(auth)
+  const sheetInfo = await getSheetInfo(auth, spreadsheet.id)
+  const availableSheetNames = new Map(
+    sheetInfo.sheetTitles.map((title: string) => [normalizeKey(title), title])
+  )
+  const ranges = sheetNames.map(sheetName => {
+    const title = availableSheetNames.get(normalizeKey(sheetName))
+
+    if (!title) {
+      throw new Error(`Sheet "${sheetName}" was not found`)
+    }
+
+    return `'${title}'`
+  })
+  const response = await sheetsApi.spreadsheets.values.batchGet({
+    spreadsheetId: spreadsheet.id,
+    ranges
+  })
+  const valueRanges = response.data.valueRanges ?? []
+
+  return {
+    spreadsheet,
+    spreadsheetTitle: sheetInfo.spreadsheetTitle,
+    sheets: sheetNames.map((sheetName, index) => ({
+      title: availableSheetNames.get(normalizeKey(sheetName)) ?? sheetName,
+      values: valueRanges[index]?.values ?? []
+    }))
+  }
+}
+
 async function fetchMinimalSheetData(): Promise<void> {
   const result = await fetchSheetValues()
-  const values = result.values.slice(0, 5).map((row) => row.slice(0, 5))
+  const values = result.values.slice(0, 5).map(row => row.slice(0, 5))
 
   console.log(`Sheet file: ${result.spreadsheet.name}`)
   console.log(`Range: ${result.range}!A1:E5 preview`)
@@ -215,7 +288,9 @@ async function fetchMinimalSheetData(): Promise<void> {
   console.log(JSON.stringify(values, null, 2))
 }
 
-async function exportSheetDataToJson(filePath = GOOGLE_SHEET_EXPORT_FILE): Promise<string> {
+async function exportSheetDataToJson(
+  filePath = GOOGLE_SHEET_EXPORT_FILE
+): Promise<string> {
   const result = await fetchSheetValues()
   const payload = {
     exportedAt: new Date().toISOString(),
@@ -243,7 +318,7 @@ function normalizeKey(value: unknown): string {
 }
 
 function isYes(value: unknown): boolean {
-  return normalizeKey(value) === 'да'
+  return value === 'TRUE' || value === true || normalizeKey(value) === 'да'
 }
 
 function getRequiredSheet(
@@ -253,7 +328,9 @@ function getRequiredSheet(
   }>,
   expectedTitle: string
 ): string[][] {
-  const sheet = sheets.find((item) => normalizeKey(item.title) === normalizeKey(expectedTitle))
+  const sheet = sheets.find(
+    item => normalizeKey(item.title) === normalizeKey(expectedTitle)
+  )
 
   if (!sheet) {
     throw new Error(`Sheet "${expectedTitle}" was not found`)
@@ -264,8 +341,8 @@ function getRequiredSheet(
 
 function findRowIndexByLabel(values: string[][], label: string): number {
   const normalizedLabel = normalizeKey(label)
-  const rowIndex = values.findIndex((row) =>
-    row.some((cell) => normalizeKey(cell) === normalizedLabel)
+  const rowIndex = values.findIndex(row =>
+    row.some(cell => normalizeKey(cell) === normalizedLabel)
   )
 
   if (rowIndex === -1) {
@@ -275,10 +352,13 @@ function findRowIndexByLabel(values: string[][], label: string): number {
   return rowIndex
 }
 
-function findRowIndexOptionalByLabel(values: string[][], label: string): number | undefined {
+function findRowIndexOptionalByLabel(
+  values: string[][],
+  label: string
+): number | undefined {
   const normalizedLabel = normalizeKey(label)
-  const rowIndex = values.findIndex((row) =>
-    row.some((cell) => normalizeKey(cell) === normalizedLabel)
+  const rowIndex = values.findIndex(row =>
+    row.some(cell => normalizeKey(cell) === normalizedLabel)
   )
 
   return rowIndex === -1 ? undefined : rowIndex
@@ -286,7 +366,9 @@ function findRowIndexOptionalByLabel(values: string[][], label: string): number 
 
 function findColumnIndexByValue(row: string[], value: string): number {
   const normalizedValue = normalizeKey(value)
-  const columnIndex = row.findIndex((cell) => normalizeKey(cell) === normalizedValue)
+  const columnIndex = row.findIndex(
+    cell => normalizeKey(cell) === normalizedValue
+  )
 
   if (columnIndex === -1) {
     throw new Error(`Column value "${value}" was not found`)
@@ -295,11 +377,29 @@ function findColumnIndexByValue(row: string[], value: string): number {
   return columnIndex
 }
 
-function findColumnIndexOptionalByValue(row: string[], value: string): number | undefined {
+function findColumnIndexOptionalByValue(
+  row: string[],
+  value: string
+): number | undefined {
   const normalizedValue = normalizeKey(value)
-  const columnIndex = row.findIndex((cell) => normalizeKey(cell) === normalizedValue)
+  const columnIndex = row.findIndex(
+    cell => normalizeKey(cell) === normalizedValue
+  )
 
   return columnIndex === -1 ? undefined : columnIndex
+}
+
+function findColumnIndexesByValue(row: string[], value: string): number[] {
+  const normalizedValue = normalizeKey(value)
+  const columnIndexes: number[] = []
+
+  for (let index = 0; index < row.length; index += 1) {
+    if (normalizeKey(row[index]) === normalizedValue) {
+      columnIndexes.push(index)
+    }
+  }
+
+  return columnIndexes
 }
 
 function getRowValueForClientColumn(
@@ -330,13 +430,20 @@ function getRowValueOptionalForClientColumn(
   return normalizeSheetValue(values[rowIndex]?.[clientColumnIndex])
 }
 
-function getClientColumnIndex(personalDataValues: string[][], clientName: string): number {
+function getClientColumnIndex(
+  personalDataValues: string[][],
+  clientName: string
+): number {
   const nameRowIndex = findRowIndexByLabel(personalDataValues, 'имя')
 
   return findColumnIndexByValue(personalDataValues[nameRowIndex], clientName)
 }
 
-function getClientColumnIndexOptional(values: string[][], clientName: string, nameLabel: string): number | undefined {
+function getClientColumnIndexOptional(
+  values: string[][],
+  clientName: string,
+  nameLabel: string
+): number | undefined {
   const nameRowIndex = findRowIndexOptionalByLabel(values, nameLabel)
 
   if (nameRowIndex === undefined) {
@@ -344,6 +451,20 @@ function getClientColumnIndexOptional(values: string[][], clientName: string, na
   }
 
   return findColumnIndexOptionalByValue(values[nameRowIndex] ?? [], clientName)
+}
+
+function getClientColumnIndexes(
+  values: string[][],
+  clientName: string,
+  nameLabel: string
+): number[] {
+  const nameRowIndex = findRowIndexOptionalByLabel(values, nameLabel)
+
+  if (nameRowIndex === undefined) {
+    return []
+  }
+
+  return findColumnIndexesByValue(values[nameRowIndex] ?? [], clientName)
 }
 
 function getGroupedStackForClientColumn(
@@ -355,7 +476,11 @@ function getGroupedStackForClientColumn(
   const stackRow = personalDataValues[stackRowIndex] ?? []
   let stack = ''
 
-  for (let columnIndex = 0; columnIndex <= clientColumnIndex; columnIndex += 1) {
+  for (
+    let columnIndex = 0;
+    columnIndex <= clientColumnIndex;
+    columnIndex += 1
+  ) {
     const explicitStack = normalizeSheetValue(stackRow[columnIndex])
 
     if (explicitStack) {
@@ -376,10 +501,14 @@ function getGroupedValueForClientColumn(
   }
 
   const rowIndex = findRowIndexOptionalByLabel(values, label)
-  const row = rowIndex === undefined ? [] : values[rowIndex] ?? []
+  const row = rowIndex === undefined ? [] : (values[rowIndex] ?? [])
   let value = ''
 
-  for (let columnIndex = 0; columnIndex <= clientColumnIndex; columnIndex += 1) {
+  for (
+    let columnIndex = 0;
+    columnIndex <= clientColumnIndex;
+    columnIndex += 1
+  ) {
     const explicitValue = normalizeSheetValue(row[columnIndex])
 
     if (explicitValue) {
@@ -405,7 +534,10 @@ function findStackScenario(
   return normalizeSheetValue(marketRow?.[stackColumnIndex]) || undefined
 }
 
-function normalizeAutomationStackForScenario(stack: string, clientName: string): string {
+function normalizeAutomationStackForScenario(
+  stack: string,
+  clientName: string
+): string {
   if (normalizeKey(stack) === 'frontend') {
     return normalizeKey(clientName) === 'кира' ? 'КИРА' : 'React'
   }
@@ -413,32 +545,66 @@ function normalizeAutomationStackForScenario(stack: string, clientName: string):
   return stack
 }
 
-function getAutomationStackForClient(
+function getAutomationStackForDolphinColumn(
   personalDataValues: string[][],
   dolphinMainValues: string[][],
-  clientName: string
+  clientName: string,
+  dolphinClientColumnIndex: number | undefined
 ): string {
-  const personalClientColumnIndex = getClientColumnIndexOptional(personalDataValues, clientName, 'имя')
-  const personalStack = personalClientColumnIndex === undefined
-    ? ''
-    : getGroupedStackForClientColumn(personalDataValues, personalClientColumnIndex)
-
-  if (personalStack) {
-    return normalizeAutomationStackForScenario(personalStack, clientName)
-  }
-
-  const dolphinClientColumnIndex = getClientColumnIndexOptional(
-    dolphinMainValues,
-    clientName,
-    DOLPHIN_MAIN_NAME_LABEL
-  )
   const dolphinStack = getGroupedValueForClientColumn(
     dolphinMainValues,
     DOLPHIN_MAIN_STACK_LABEL,
     dolphinClientColumnIndex
   )
 
-  return normalizeAutomationStackForScenario(dolphinStack, clientName)
+  if (dolphinStack) {
+    return normalizeAutomationStackForScenario(dolphinStack, clientName)
+  }
+
+  const personalClientColumnIndex = getClientColumnIndexOptional(
+    personalDataValues,
+    clientName,
+    'имя'
+  )
+  const personalStack =
+    personalClientColumnIndex === undefined
+      ? ''
+      : getGroupedStackForClientColumn(
+          personalDataValues,
+          personalClientColumnIndex
+        )
+
+  return personalStack
+    ? normalizeAutomationStackForScenario(personalStack, clientName)
+    : ''
+}
+
+function pickDolphinClientColumnForMarket(
+  dolphinMainValues: string[][],
+  clientName: string,
+  market: 'Ru' | 'En'
+): number | undefined {
+  const dolphinClientColumnIndexes = getClientColumnIndexes(
+    dolphinMainValues,
+    clientName,
+    DOLPHIN_MAIN_NAME_LABEL
+  )
+  const responseFlagLabel =
+    market === 'Ru'
+      ? tableToVarsTranslations.ruResponses
+      : tableToVarsTranslations.enResponses
+
+  return (
+    dolphinClientColumnIndexes.find(columnIndex =>
+      isYes(
+        getRowValueOptionalForClientColumn(
+          dolphinMainValues,
+          responseFlagLabel,
+          columnIndex
+        )
+      )
+    ) ?? dolphinClientColumnIndexes[0]
+  )
 }
 
 function getAutomationCoverText(
@@ -450,11 +616,82 @@ function getAutomationCoverText(
     return undefined
   }
 
-  const coverLabel = market === 'Ru'
-    ? tableToVarsTranslations.coverRu
-    : tableToVarsTranslations.coverEn
+  const coverLabel =
+    market === 'Ru'
+      ? tableToVarsTranslations.coverRu
+      : tableToVarsTranslations.coverEn
 
-  return getRowValueOptionalForClientColumn(dolphinMainValues, coverLabel, clientColumnIndex)
+  return getRowValueOptionalForClientColumn(
+    dolphinMainValues,
+    coverLabel,
+    clientColumnIndex
+  )
+}
+
+function normalizeRuPhoneForHH(rawPhone: string): string {
+  const digits = rawPhone.replace(/\D/g, '')
+
+  if (
+    digits.length === 11 &&
+    (digits.startsWith('7') || digits.startsWith('8'))
+  ) {
+    return digits.slice(1)
+  }
+
+  return digits
+}
+
+function mapClientHHAuthCredentials(
+  personalDataValues: string[][],
+  clientName = 'Кира'
+): ClientHHAuthCredentials {
+  const clientColumnIndex = getClientColumnIndex(personalDataValues, clientName)
+  const rawPhone = getRowValueOptionalForClientColumn(
+    personalDataValues,
+    tableToVarsTranslations.hhRuPhoneNumber,
+    clientColumnIndex
+  )
+  const password = getRowValueOptionalForClientColumn(
+    personalDataValues,
+    tableToVarsTranslations.hhPassword,
+    clientColumnIndex
+  )
+  const email = getRowValueOptionalForClientColumn(
+    personalDataValues,
+    tableToVarsTranslations.hhEmail,
+    clientColumnIndex
+  )
+  const emailPassword = getRowValueOptionalForClientColumn(
+    personalDataValues,
+    tableToVarsTranslations.hhEmailPassword,
+    clientColumnIndex
+  )
+  const phone = normalizeRuPhoneForHH(rawPhone)
+
+  if (!rawPhone) {
+    throw new Error(
+      `HH rusPhoneNumber for client "${clientName}" was not found`
+    )
+  }
+
+  if (!phone || phone.length !== 10) {
+    throw new Error(
+      `HH rusPhoneNumber for client "${clientName}" is invalid: ${rawPhone}`
+    )
+  }
+
+  if (!password) {
+    throw new Error(`HH passwordHH for client "${clientName}" was not found`)
+  }
+
+  return {
+    clientName,
+    phone,
+    rawPhone,
+    password,
+    email: email || undefined,
+    emailPassword: emailPassword || undefined
+  }
 }
 
 function mapClientAutomationData(
@@ -464,45 +701,79 @@ function mapClientAutomationData(
   clientName = 'Кира',
   market: 'Ru' | 'En' = 'Ru'
 ): ClientAutomationMapping {
-  const personalClientColumnIndex = getClientColumnIndexOptional(personalDataValues, clientName, 'имя')
-  const dolphinClientColumnIndex = getClientColumnIndexOptional(
+  const personalClientColumnIndex = getClientColumnIndexOptional(
+    personalDataValues,
+    clientName,
+    'имя'
+  )
+  const selectedDolphinClientColumnIndex = pickDolphinClientColumnForMarket(
     dolphinMainValues,
     clientName,
-    DOLPHIN_MAIN_NAME_LABEL
+    market
   )
-  const stack = getAutomationStackForClient(personalDataValues, dolphinMainValues, clientName)
-  const profileIdLabel = market === 'Ru'
-    ? tableToVarsTranslations.dolphinProfileRuId
-    : tableToVarsTranslations.dolphinProfileEnId
-  const responseFlagLabel = market === 'Ru'
-    ? tableToVarsTranslations.ruResponses
-    : tableToVarsTranslations.enResponses
+  const stack = getAutomationStackForDolphinColumn(
+    personalDataValues,
+    dolphinMainValues,
+    clientName,
+    selectedDolphinClientColumnIndex
+  )
+  const profileIdLabel =
+    market === 'Ru'
+      ? tableToVarsTranslations.dolphinProfileRuId
+      : tableToVarsTranslations.dolphinProfileEnId
+  const responseFlagLabel =
+    market === 'Ru'
+      ? tableToVarsTranslations.ruResponses
+      : tableToVarsTranslations.enResponses
   const rawDolphinProfileId =
-    getRowValueOptionalForClientColumn(dolphinMainValues, profileIdLabel, dolphinClientColumnIndex) ||
-    getRowValueOptionalForClientColumn(personalDataValues, profileIdLabel, personalClientColumnIndex)
+    getRowValueOptionalForClientColumn(
+      dolphinMainValues,
+      profileIdLabel,
+      selectedDolphinClientColumnIndex
+    ) ||
+    getRowValueOptionalForClientColumn(
+      personalDataValues,
+      profileIdLabel,
+      personalClientColumnIndex
+    )
   const responseFlag =
-    getRowValueOptionalForClientColumn(dolphinMainValues, responseFlagLabel, dolphinClientColumnIndex) ||
-    getRowValueOptionalForClientColumn(personalDataValues, responseFlagLabel, personalClientColumnIndex)
+    getRowValueOptionalForClientColumn(
+      dolphinMainValues,
+      responseFlagLabel,
+      selectedDolphinClientColumnIndex
+    ) ||
+    getRowValueOptionalForClientColumn(
+      personalDataValues,
+      responseFlagLabel,
+      personalClientColumnIndex
+    )
   const commonChatId =
     getRowValueOptionalForClientColumn(
       dolphinMainValues,
       tableToVarsTranslations.commonChatId,
-      dolphinClientColumnIndex
+      selectedDolphinClientColumnIndex
     ) ||
     getRowValueOptionalForClientColumn(
       dolphinMainValues,
       tableToVarsTranslations.dolphinMainTelegramId,
-      dolphinClientColumnIndex
+      selectedDolphinClientColumnIndex
     ) ||
     getRowValueOptionalForClientColumn(
       personalDataValues,
       tableToVarsTranslations.commonChatId,
       personalClientColumnIndex
     )
-  const coverText = getAutomationCoverText(dolphinMainValues, dolphinClientColumnIndex, market)
+  const coverText = getAutomationCoverText(
+    dolphinMainValues,
+    selectedDolphinClientColumnIndex,
+    market
+  )
   const dolphinProfileId = Number(rawDolphinProfileId)
 
-  if (personalClientColumnIndex === undefined && dolphinClientColumnIndex === undefined) {
+  if (
+    personalClientColumnIndex === undefined &&
+    selectedDolphinClientColumnIndex === undefined
+  ) {
     throw new Error(`Client "${clientName}" was not found in automation sheets`)
   }
 
@@ -515,7 +786,9 @@ function mapClientAutomationData(
   }
 
   if (!isYes(responseFlag)) {
-    throw new Error(`Responses for client "${clientName}" on market "${market}" are disabled`)
+    throw new Error(
+      `Responses for client "${clientName}" on market "${market}" are disabled`
+    )
   }
 
   if (!Number.isFinite(dolphinProfileId)) {
@@ -543,19 +816,28 @@ function mapClientAutomationDataFromPersonalOnly(
   market: 'Ru' | 'En' = 'Ru'
 ): ClientAutomationMapping {
   const clientColumnIndex = getClientColumnIndex(personalDataValues, clientName)
-  const stack = getGroupedStackForClientColumn(personalDataValues, clientColumnIndex)
-  const profileIdLabel = market === 'Ru'
-    ? tableToVarsTranslations.dolphinProfileRuId
-    : tableToVarsTranslations.dolphinProfileEnId
-  const responseFlagLabel = market === 'Ru'
-    ? tableToVarsTranslations.ruResponses
-    : tableToVarsTranslations.enResponses
+  const stack = getGroupedStackForClientColumn(
+    personalDataValues,
+    clientColumnIndex
+  )
+  const profileIdLabel =
+    market === 'Ru'
+      ? tableToVarsTranslations.dolphinProfileRuId
+      : tableToVarsTranslations.dolphinProfileEnId
+  const responseFlagLabel =
+    market === 'Ru'
+      ? tableToVarsTranslations.ruResponses
+      : tableToVarsTranslations.enResponses
   const rawDolphinProfileId = getRowValueForClientColumn(
     personalDataValues,
     profileIdLabel,
     clientColumnIndex
   )
-  const responseFlag = getRowValueForClientColumn(personalDataValues, responseFlagLabel, clientColumnIndex)
+  const responseFlag = getRowValueForClientColumn(
+    personalDataValues,
+    responseFlagLabel,
+    clientColumnIndex
+  )
   const commonChatId = getRowValueForClientColumn(
     personalDataValues,
     tableToVarsTranslations.commonChatId,
@@ -572,7 +854,9 @@ function mapClientAutomationDataFromPersonalOnly(
   }
 
   if (!isYes(responseFlag)) {
-    throw new Error(`Responses for client "${clientName}" on market "${market}" are disabled`)
+    throw new Error(
+      `Responses for client "${clientName}" on market "${market}" are disabled`
+    )
   }
 
   if (!Number.isFinite(dolphinProfileId)) {
@@ -592,13 +876,42 @@ function mapClientAutomationDataFromPersonalOnly(
   }
 }
 
-async function getClientAutomationData(clientName = 'Кира'): Promise<ClientAutomationMapping> {
-  const result = await fetchAllSheetValues()
-  const personalDataValues = getRequiredSheet(result.sheets, PERSONAL_DATA_SHEET_NAME)
-  const dolphinMainValues = getRequiredSheet(result.sheets, DOLPHIN_MAIN_SHEET_NAME)
+async function getClientAutomationData(
+  clientName = 'Кира'
+): Promise<ClientAutomationMapping> {
+  const result = await fetchNamedSheetValues([
+    PERSONAL_DATA_SHEET_NAME,
+    DOLPHIN_MAIN_SHEET_NAME,
+    STACKS_SHEET_NAME
+  ])
+  const personalDataValues = getRequiredSheet(
+    result.sheets,
+    PERSONAL_DATA_SHEET_NAME
+  )
+  const dolphinMainValues = getRequiredSheet(
+    result.sheets,
+    DOLPHIN_MAIN_SHEET_NAME
+  )
   const stacksValues = getRequiredSheet(result.sheets, STACKS_SHEET_NAME)
 
-  return mapClientAutomationData(personalDataValues, dolphinMainValues, stacksValues, clientName)
+  return mapClientAutomationData(
+    personalDataValues,
+    dolphinMainValues,
+    stacksValues,
+    clientName
+  )
+}
+
+async function getClientHHAuthCredentials(
+  clientName = 'Кира'
+): Promise<ClientHHAuthCredentials> {
+  const result = await fetchNamedSheetValues([PERSONAL_DATA_SHEET_NAME])
+  const personalDataValues = getRequiredSheet(
+    result.sheets,
+    PERSONAL_DATA_SHEET_NAME
+  )
+
+  return mapClientHHAuthCredentials(personalDataValues, clientName)
 }
 
 function mapAllClientsAutomationData(
@@ -608,12 +921,20 @@ function mapAllClientsAutomationData(
   options: AutomationMappingOptions = {}
 ): ClientAutomationMapping[] {
   const workWithRuOnly = options.workWithRuOnly ?? true
-  const nameRowIndex = findRowIndexByLabel(dolphinMainValues, DOLPHIN_MAIN_NAME_LABEL)
+  const nameRowIndex = findRowIndexByLabel(
+    dolphinMainValues,
+    DOLPHIN_MAIN_NAME_LABEL
+  )
   const nameRow = dolphinMainValues[nameRowIndex] ?? []
-  const firstClientColumnIndex = findColumnIndexByValue(nameRow, DOLPHIN_MAIN_NAME_LABEL) + 1
+  const firstClientColumnIndex =
+    findColumnIndexByValue(nameRow, DOLPHIN_MAIN_NAME_LABEL) + 1
   const mappings: ClientAutomationMapping[] = []
 
-  for (let columnIndex = firstClientColumnIndex; columnIndex < nameRow.length; columnIndex += 1) {
+  for (
+    let columnIndex = firstClientColumnIndex;
+    columnIndex < nameRow.length;
+    columnIndex += 1
+  ) {
     const clientName = normalizeSheetValue(nameRow[columnIndex])
     const commonChatId =
       getRowValueOptionalForClientColumn(
@@ -636,7 +957,12 @@ function mapAllClientsAutomationData(
       continue
     }
 
-    const stack = getAutomationStackForClient(personalDataValues, dolphinMainValues, clientName)
+    const stack = getAutomationStackForDolphinColumn(
+      personalDataValues,
+      dolphinMainValues,
+      clientName,
+      columnIndex
+    )
 
     if (!stack) {
       throw new Error(`Stack for client "${clientName}" was not found`)
@@ -651,11 +977,13 @@ function mapAllClientsAutomationData(
     }> = [
       {
         market: 'Ru',
-        enabled: isYes(getRowValueOptionalForClientColumn(
-          dolphinMainValues,
-          tableToVarsTranslations.ruResponses,
-          columnIndex
-        )),
+        enabled: isYes(
+          getRowValueOptionalForClientColumn(
+            dolphinMainValues,
+            tableToVarsTranslations.ruResponses,
+            columnIndex
+          )
+        ),
         rawDolphinProfileId: getRowValueOptionalForClientColumn(
           dolphinMainValues,
           tableToVarsTranslations.dolphinProfileRuId,
@@ -666,11 +994,13 @@ function mapAllClientsAutomationData(
       },
       {
         market: 'En',
-        enabled: isYes(getRowValueOptionalForClientColumn(
-          dolphinMainValues,
-          tableToVarsTranslations.enResponses,
-          columnIndex
-        )),
+        enabled: isYes(
+          getRowValueOptionalForClientColumn(
+            dolphinMainValues,
+            tableToVarsTranslations.enResponses,
+            columnIndex
+          )
+        ),
         rawDolphinProfileId: getRowValueOptionalForClientColumn(
           dolphinMainValues,
           tableToVarsTranslations.dolphinProfileEnId,
@@ -718,11 +1048,22 @@ async function getAllClientsAutomationData(
   options: AutomationMappingOptions = {}
 ): Promise<ClientAutomationMapping[]> {
   const result = await fetchAllSheetValues()
-  const personalDataValues = getRequiredSheet(result.sheets, PERSONAL_DATA_SHEET_NAME)
-  const dolphinMainValues = getRequiredSheet(result.sheets, DOLPHIN_MAIN_SHEET_NAME)
+  const personalDataValues = getRequiredSheet(
+    result.sheets,
+    PERSONAL_DATA_SHEET_NAME
+  )
+  const dolphinMainValues = getRequiredSheet(
+    result.sheets,
+    DOLPHIN_MAIN_SHEET_NAME
+  )
   const stacksValues = getRequiredSheet(result.sheets, STACKS_SHEET_NAME)
 
-  return mapAllClientsAutomationData(personalDataValues, dolphinMainValues, stacksValues, options)
+  return mapAllClientsAutomationData(
+    personalDataValues,
+    dolphinMainValues,
+    stacksValues,
+    options
+  )
 }
 
 function mapClientStack(
@@ -733,10 +1074,17 @@ function mapClientStack(
   const stackLabel = tableToVarsTranslations.stack
   const nameRowIndex = findRowIndexByLabel(personalDataValues, 'имя')
   const stackRowIndex = findRowIndexByLabel(personalDataValues, stackLabel)
-  const clientColumnIndex = findColumnIndexByValue(personalDataValues[nameRowIndex], clientName)
-  const stack = normalizeSheetValue(personalDataValues[stackRowIndex]?.[clientColumnIndex])
+  const clientColumnIndex = findColumnIndexByValue(
+    personalDataValues[nameRowIndex],
+    clientName
+  )
+  const stack = normalizeSheetValue(
+    personalDataValues[stackRowIndex]?.[clientColumnIndex]
+  )
   const marketRowIndex = findRowIndexByLabel(personalDataValues, 'рынок')
-  const market = normalizeSheetValue(personalDataValues[marketRowIndex]?.[clientColumnIndex])
+  const market = normalizeSheetValue(
+    personalDataValues[marketRowIndex]?.[clientColumnIndex]
+  )
 
   if (!stack) {
     throw new Error(`Stack for client "${clientName}" was not found`)
@@ -780,7 +1128,11 @@ function mapClientsByAllowedStacks(
 
     const stack = currentStack
 
-    if (!clientName || !stack || !normalizedAllowedStacks.has(normalizeKey(stack))) {
+    if (
+      !clientName ||
+      !stack ||
+      !normalizedAllowedStacks.has(normalizeKey(stack))
+    ) {
       continue
     }
 
@@ -806,11 +1158,19 @@ async function exportClientsStackMapping(
   filePath = CLIENT_STACK_MAPPING_EXPORT_FILE
 ): Promise<ClientStackMapping[]> {
   const result = await fetchAllSheetValues()
-  const personalDataValues = getRequiredSheet(result.sheets, PERSONAL_DATA_SHEET_NAME)
+  const personalDataValues = getRequiredSheet(
+    result.sheets,
+    PERSONAL_DATA_SHEET_NAME
+  )
   const stacksValues = getRequiredSheet(result.sheets, STACKS_SHEET_NAME)
-  const mappings = mapClientsByAllowedStacks(personalDataValues, stacksValues, allowedStacks, {
-    workWithRuOnly
-  })
+  const mappings = mapClientsByAllowedStacks(
+    personalDataValues,
+    stacksValues,
+    allowedStacks,
+    {
+      workWithRuOnly
+    }
+  )
   const payload: ClientsStackMappingExport = {
     exportedAt: new Date().toISOString(),
     spreadsheetId: result.spreadsheet.id,
@@ -823,11 +1183,7 @@ async function exportClientsStackMapping(
     mappings
   }
 
-  await fs.writeFile(
-    filePath,
-    JSON.stringify(payload, null, 2),
-    'utf8'
-  )
+  await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8')
 
   console.log(mappings)
   console.log(`Client stack mappings saved to ${filePath}`)
@@ -840,7 +1196,10 @@ async function exportClientStackMapping(
   filePath = CLIENT_STACK_MAPPING_EXPORT_FILE
 ): Promise<ClientStackMapping> {
   const result = await fetchAllSheetValues()
-  const personalDataValues = getRequiredSheet(result.sheets, PERSONAL_DATA_SHEET_NAME)
+  const personalDataValues = getRequiredSheet(
+    result.sheets,
+    PERSONAL_DATA_SHEET_NAME
+  )
   const stacksValues = getRequiredSheet(result.sheets, STACKS_SHEET_NAME)
   const mapping = mapClientStack(personalDataValues, stacksValues, clientName)
 
@@ -867,18 +1226,29 @@ async function exportClientStackMapping(
   return mapping
 }
 
-function mapNamesWithTelegramAccounts(values: string[][]): NameTelegramAccount[] {
-  const normalize = (value: unknown) => String(value ?? '').trim().toLowerCase()
+function mapNamesWithTelegramAccounts(
+  values: string[][]
+): NameTelegramAccount[] {
+  const normalize = (value: unknown) =>
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
   const isNameHeader = (header: string) => ['имя', 'name'].includes(header)
   const isTelegramHeader = (header: string) =>
-    ['tg', 'telegram', 'телеграм', 'тг', 'тг аккаунт', 'telegram account', 'tg account'].includes(
-      header
-    )
+    [
+      'tg',
+      'telegram',
+      'телеграм',
+      'тг',
+      'тг аккаунт',
+      'telegram account',
+      'tg account'
+    ].includes(header)
 
   const dedupeAccounts = (accounts: NameTelegramAccount[]) => {
     const seen = new Set<string>()
 
-    return accounts.filter((account) => {
+    return accounts.filter(account => {
       const key = `${account.name}\u0000${account.telegram.toLowerCase()}`
 
       if (seen.has(key)) {
@@ -891,10 +1261,13 @@ function mapNamesWithTelegramAccounts(values: string[][]): NameTelegramAccount[]
     })
   }
 
-  const headerRowIndex = values.findIndex((row) => {
+  const headerRowIndex = values.findIndex(row => {
     const normalizedHeaders = row.map(normalize)
 
-    return normalizedHeaders.some(isNameHeader) && normalizedHeaders.some(isTelegramHeader)
+    return (
+      normalizedHeaders.some(isNameHeader) &&
+      normalizedHeaders.some(isTelegramHeader)
+    )
   })
 
   if (headerRowIndex !== -1) {
@@ -907,11 +1280,11 @@ function mapNamesWithTelegramAccounts(values: string[][]): NameTelegramAccount[]
     if (nameColumnIndex !== -1 && telegramColumnIndex !== -1) {
       return dedupeAccounts(
         rows
-          .map((row) => ({
+          .map(row => ({
             name: String(row[nameColumnIndex] ?? '').trim(),
             telegram: String(row[telegramColumnIndex] ?? '').trim()
           }))
-          .filter((account) => account.name && account.telegram)
+          .filter(account => account.name && account.telegram)
       )
     }
   }
@@ -920,7 +1293,9 @@ function mapNamesWithTelegramAccounts(values: string[][]): NameTelegramAccount[]
 
   for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
     const row = values[rowIndex]
-    const nameLabelColumnIndex = row.findIndex((cell) => isNameHeader(normalize(cell)))
+    const nameLabelColumnIndex = row.findIndex(cell =>
+      isNameHeader(normalize(cell))
+    )
 
     if (nameLabelColumnIndex === -1) {
       continue
@@ -928,7 +1303,11 @@ function mapNamesWithTelegramAccounts(values: string[][]): NameTelegramAccount[]
 
     const namesByColumn = new Map<number, string>()
 
-    for (let columnIndex = nameLabelColumnIndex + 1; columnIndex < row.length; columnIndex += 1) {
+    for (
+      let columnIndex = nameLabelColumnIndex + 1;
+      columnIndex < row.length;
+      columnIndex += 1
+    ) {
       const name = String(row[columnIndex] ?? '').trim()
 
       if (name) {
@@ -936,7 +1315,11 @@ function mapNamesWithTelegramAccounts(values: string[][]): NameTelegramAccount[]
       }
     }
 
-    for (let dataRowIndex = rowIndex + 1; dataRowIndex < values.length; dataRowIndex += 1) {
+    for (
+      let dataRowIndex = rowIndex + 1;
+      dataRowIndex < values.length;
+      dataRowIndex += 1
+    ) {
       const dataRow = values[dataRowIndex]
       const rowLabel = normalize(dataRow[nameLabelColumnIndex])
 
@@ -966,7 +1349,9 @@ function mapNamesWithTelegramAccounts(values: string[][]): NameTelegramAccount[]
 
 async function logNamesWithTelegramAccounts(): Promise<NameTelegramAccount[]> {
   const result = await fetchAllSheetValues()
-  const accounts = result.sheets.flatMap((sheet) => mapNamesWithTelegramAccounts(sheet.values))
+  const accounts = result.sheets.flatMap(sheet =>
+    mapNamesWithTelegramAccounts(sheet.values)
+  )
 
   if (!accounts.length) {
     console.log(
@@ -991,13 +1376,16 @@ module.exports = {
   exportClientsStackMapping,
   exportSheetDataToJson,
   fetchSheetValues,
+  fetchNamedSheetValues,
   fetchAllSheetValues,
   fetchMinimalSheetData,
   logNamesWithTelegramAccounts,
   getAllClientsAutomationData,
   getClientAutomationData,
+  getClientHHAuthCredentials,
   mapAllClientsAutomationData,
   mapClientAutomationData,
+  mapClientHHAuthCredentials,
   mapClientStack,
   mapClientsByAllowedStacks,
   mapNamesWithTelegramAccounts

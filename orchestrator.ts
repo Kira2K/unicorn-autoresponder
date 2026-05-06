@@ -4,8 +4,14 @@ const path = require('node:path')
 const childProcess = require('node:child_process')
 require('dotenv').config({ quiet: true })
 
-const { getAllClientsAutomationData, getClientAutomationData } = require('./google-sheets-check.ts')
+const {
+  getAllClientsAutomationData,
+  getClientAutomationData,
+  getClientHHAuthCredentials
+} = require('./google-sheets-check.ts')
+const { makeHHAuth } = require('./hh-auth/index.ts')
 const { sendTelegramMessage } = require('./messenger.ts')
+const { runManualVacanciesCleanup } = require('./manual-vacancies-cleanup.ts')
 
 const DOLPHIN_LOCAL_API_BASE_URL = 'http://localhost:3001/v1.0'
 const DOLPHIN_CLOUD_API_BASE_URL = 'https://dolphin-anty-api.com'
@@ -16,24 +22,34 @@ const AUTOMATION_LOCK_STATUS_COLOR = 'orange'
 const HH_AUTO_RESPONDER_SETTINGS_KEY = 'hh_ar_v2_cfg_data'
 const HH_AUTO_RESPONDER_RUNNING_KEY = 'hh_ar_v2_is_active'
 const HH_AUTO_RESPONDER_MANUAL_LIST_KEY = 'hh_ar_v2_manual_list'
-const HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY = 'hh_ar_v2_successful_responses'
+const HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY =
+  'hh_ar_v2_successful_responses'
 const HH_AUTO_RESPONDER_LOGS_KEY = 'hh_ar_v2_logs'
 const HH_AUTO_RESPONDER_STOP_REASON_KEY = 'hh_ar_v2_stop_reason'
 const HH_AUTO_RESPONDER_PARSER_ERRORS_KEY = 'hh_ar_v2_parser_errors'
 const HH_AUTO_RESPONDER_RECENT_URLS_KEY = 'hh_ar_v2_recent_urls'
 const DEFAULT_WATCH_MS = 15 * 60 * 1000
-const AUTO_RESPONDER_WATCH_MS = Number(process.env.ORCHESTRATOR_WATCH_MS ?? DEFAULT_WATCH_MS)
+const AUTO_RESPONDER_WATCH_MS = Number(
+  process.env.ORCHESTRATOR_WATCH_MS ?? DEFAULT_WATCH_MS
+)
 const DEFAULT_CLIENT_START_DELAY_MS = 20 * 1000
-const CLIENT_START_DELAY_MS = Number(process.env.ORCHESTRATOR_START_DELAY_MS ?? DEFAULT_CLIENT_START_DELAY_MS)
+const CLIENT_START_DELAY_MS = Number(
+  process.env.ORCHESTRATOR_START_DELAY_MS ?? DEFAULT_CLIENT_START_DELAY_MS
+)
 const EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS = 60 * 1000
 const EXTERNAL_TIMEOUT_MULTIPLIER = 1.1
 const DOLPHIN_HEADLESS = parseBooleanEnv(process.env.DOLPHIN_HEADLESS, true)
+const HH_AUTH_DEBUG = parseBooleanEnv(process.env.HH_AUTH_DEBUG, false)
+const HH_AUTH_TIMEOUT_MS = Number(process.env.HH_AUTH_TIMEOUT_MS ?? 30000)
 const LOGS_CHANNEL_ID = process.env.logs_channel_id?.trim()
 const SUMMARY_LOGS_CHANNEL_ID = process.env.summary_logs_channel_id?.trim()
 const TELEGRAM_MESSAGE_LIMIT = 3900
-const MAX_PREEXISTING_DOLPHIN_PROFILES = Number(process.env.MAX_PREEXISTING_DOLPHIN_PROFILES ?? 3)
+const MAX_PREEXISTING_DOLPHIN_PROFILES = Number(
+  process.env.MAX_PREEXISTING_DOLPHIN_PROFILES ?? 3
+)
 const CONNECT_OVER_CDP_TIMEOUT_MS = 60000
-const HH_INITIAL_NAVIGATION_TIMEOUT_MS = 120000
+const HH_INITIAL_NAVIGATION_TIMEOUT_MS = 150000
+const DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS = 5000
 const NORMAL_AUTO_RESPONDER_STOP_REASONS = new Set([
   'targets_processed',
   'no_new_targets',
@@ -41,9 +57,7 @@ const NORMAL_AUTO_RESPONDER_STOP_REASONS = new Set([
   'hh_response_daily_limit_exceeded',
   'user_stop'
 ])
-const AUTH_CHECK_PARSER_ERROR_CODES = new Set([
-  'ERROR_NO_MODAL'
-])
+const AUTH_CHECK_PARSER_ERROR_CODES = new Set(['ERROR_NO_MODAL'])
 const HH_AUTO_RESPONDER_URL_PATTERNS = [
   /^https?:\/\/([^/?#]+\.)?hh\.ru\/search\/vacancy(?:[/?#]|$)/i,
   /^https?:\/\/([^/?#]+\.)?hh\.ru\/vacancy\/[^/?#]+/i,
@@ -51,7 +65,10 @@ const HH_AUTO_RESPONDER_URL_PATTERNS = [
 ]
 const LOCAL_RUN_LOG_DIR = path.resolve(__dirname, 'logs')
 const LOCAL_RUN_ID = new Date().toISOString().replace(/[:.]/g, '-')
-const LOCAL_RUN_LOG_FILE = path.join(LOCAL_RUN_LOG_DIR, `orchestrator-run-${LOCAL_RUN_ID}-${process.pid}.jsonl`)
+const LOCAL_RUN_LOG_FILE = path.join(
+  LOCAL_RUN_LOG_DIR,
+  `orchestrator-run-${LOCAL_RUN_ID}-${process.pid}.jsonl`
+)
 const startedProfileIds = new Set<number>()
 let automationLockStatusId: number | undefined
 
@@ -129,6 +146,7 @@ type OrchestratorStatus = {
   parserErrorCodes?: string[]
   parserLastErrorCode?: string
   recentUrls?: RecentUrlEntry[]
+  manualVacanciesCleanup?: ManualVacanciesCleanupResult
   authBeforeStart?: HhAuthCheck
   authAfterParserStop?: HhAuthCheck
   parserLogsSent?: boolean
@@ -145,6 +163,23 @@ type OrchestratorStatus = {
   telegramError?: string
   errorStack?: string
   error?: string
+}
+
+type ManualVacanciesCleanupResult = {
+  skipped: boolean
+  completed: boolean
+  initialCount: number
+  checkedCount: number
+  removedCount: number
+  remainingCount: number
+  keptCount: number
+  items: Array<{
+    id: string
+    url: string
+    title?: string
+    action: 'removed' | 'kept'
+    reason: string
+  }>
 }
 
 type LifecycleEvent = {
@@ -193,7 +228,12 @@ type RecentUrlEntry = {
   ts?: number
 }
 
-type HhAuthState = 'logged_in' | 'logged_out' | 'unknown' | 'conflict'
+type HhAuthState =
+  | 'logged_in'
+  | 'logged_out'
+  | 'captcha'
+  | 'unknown'
+  | 'conflict'
 
 type HhAuthSignal = {
   exists: boolean
@@ -233,11 +273,15 @@ type OpenScenarioResult = {
     startButtonClicked: boolean
     pageTitle: string
     pageUrl: string
+    manualVacanciesCleanup: ManualVacanciesCleanupResult
     authBeforeStart?: HhAuthCheck
   }
 }
 
-function parseBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+function parseBooleanEnv(
+  value: string | undefined,
+  fallback: boolean
+): boolean {
   if (value === undefined) {
     return fallback
   }
@@ -254,7 +298,7 @@ function loadPlaywright() {
 }
 
 function isAutoResponderUrl(url: string): boolean {
-  return HH_AUTO_RESPONDER_URL_PATTERNS.some((pattern) => pattern.test(url))
+  return HH_AUTO_RESPONDER_URL_PATTERNS.some(pattern => pattern.test(url))
 }
 
 function getVacancyIdFromUrl(url: string): string | undefined {
@@ -320,14 +364,20 @@ async function isAutoResponderRunning(page: any): Promise<boolean | undefined> {
   }
 }
 
-async function ensureIndexScript(page: any, indexScript: string, reason: string): Promise<boolean> {
+async function ensureIndexScript(
+  page: any,
+  indexScript: string,
+  reason: string
+): Promise<boolean> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return false
   }
 
-  await page.waitForLoadState('domcontentloaded', {
-    timeout: 10000
-  }).catch(() => undefined)
+  await page
+    .waitForLoadState('domcontentloaded', {
+      timeout: 10000
+    })
+    .catch(() => undefined)
 
   const injectionState = await page.evaluate((source: string) => {
     if (document.getElementById('ar-main-panel')) {
@@ -335,7 +385,9 @@ async function ensureIndexScript(page: any, indexScript: string, reason: string)
     }
 
     ;(0, eval)(source)
-    document.documentElement.appendChild(document.createComment('hh-autoparcer-index-loaded'))
+    document.documentElement.appendChild(
+      document.createComment('hh-autoparcer-index-loaded')
+    )
 
     return 'injected'
   }, indexScript)
@@ -351,8 +403,15 @@ async function ensureIndexScript(page: any, indexScript: string, reason: string)
   return true
 }
 
-async function applyAutoResponderCoverText(page: any, coverText: string | undefined): Promise<void> {
-  if (coverText === undefined || page.isClosed() || !isAutoResponderUrl(page.url())) {
+async function applyAutoResponderCoverText(
+  page: any,
+  coverText: string | undefined
+): Promise<void> {
+  if (
+    coverText === undefined ||
+    page.isClosed() ||
+    !isAutoResponderUrl(page.url())
+  ) {
     return
   }
 
@@ -438,7 +497,11 @@ async function waitForAutoResponderToFinish(
   let sawRunning = false
   let idleSince: number | undefined
 
-  while (!page.isClosed() && !isBrowserDisconnected() && Date.now() - startedAt < timeoutMs) {
+  while (
+    !page.isClosed() &&
+    !isBrowserDisconnected() &&
+    Date.now() - startedAt < timeoutMs
+  ) {
     const running = await isAutoResponderRunning(page)
 
     if (running === true) {
@@ -475,21 +538,28 @@ async function stopAutoResponder(page: any): Promise<boolean> {
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       const clicked = await page.evaluate((stopReasonKey: string) => {
         if (!sessionStorage.getItem(stopReasonKey)) {
-          sessionStorage.setItem(stopReasonKey, JSON.stringify({
-            reason: 'orchestrator_stop_after_watch',
-            details: 'Orchestrator clicked STOP after watch phase',
-            ts: Date.now(),
-            url: location.href
-          }))
+          sessionStorage.setItem(
+            stopReasonKey,
+            JSON.stringify({
+              reason: 'orchestrator_stop_after_watch',
+              details: 'Orchestrator clicked STOP after watch phase',
+              ts: Date.now(),
+              url: location.href
+            })
+          )
         }
 
-        const stopButton = document.getElementById('ar-stop-btn') as HTMLButtonElement | null
+        const stopButton = document.getElementById(
+          'ar-stop-btn'
+        ) as HTMLButtonElement | null
 
         if (!stopButton) {
           return false
@@ -509,7 +579,11 @@ async function stopAutoResponder(page: any): Promise<boolean> {
         return true
       }
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -520,16 +594,20 @@ async function stopAutoResponder(page: any): Promise<boolean> {
   return false
 }
 
-async function getAutoResponderStopReason(page: any): Promise<AutoResponderStopReason | undefined> {
+async function getAutoResponderStopReason(
+  page: any
+): Promise<AutoResponderStopReason | undefined> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return undefined
   }
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       return await page.evaluate((stopReasonKey: string) => {
         const raw = sessionStorage.getItem(stopReasonKey)
@@ -549,7 +627,11 @@ async function getAutoResponderStopReason(page: any): Promise<AutoResponderStopR
         }
       }, HH_AUTO_RESPONDER_STOP_REASON_KEY)
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -560,7 +642,9 @@ async function getAutoResponderStopReason(page: any): Promise<AutoResponderStopR
   return undefined
 }
 
-function extractParserErrorCodesFromLogs(parserLogs: ParserLogEntry[]): string[] {
+function extractParserErrorCodesFromLogs(
+  parserLogs: ParserLogEntry[]
+): string[] {
   const codes = new Set<string>()
   const knownCodePattern = /\b(?:ERROR_[A-Z0-9_]+|NO_[A-Z0-9_]+)\b/g
 
@@ -599,9 +683,11 @@ async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       return await page.evaluate(() => {
         const readSignal = (selector: string) => {
@@ -622,11 +708,21 @@ async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
         const signals = {
           login: readSignal('[data-qa="login"]'),
           signup: readSignal('[data-qa="signup"]'),
-          anonymousProfileLink: readSignal('[data-qa="mainmenu_profile-link"][href*="/account/login"]'),
-          profileAndResumesButton: readSignal('[data-qa="profileAndResumes-button"]'),
-          vacancyResponsesButton: readSignal('[data-qa="vacancyResponses-button"]'),
-          mainmenuProfileAndResumes: readSignal('[data-qa="mainmenu_profileAndResumes"]'),
-          mainmenuVacancyResponses: readSignal('[data-qa="mainmenu_vacancyResponses"]')
+          anonymousProfileLink: readSignal(
+            '[data-qa="mainmenu_profile-link"][href*="/account/login"]'
+          ),
+          profileAndResumesButton: readSignal(
+            '[data-qa="profileAndResumes-button"]'
+          ),
+          vacancyResponsesButton: readSignal(
+            '[data-qa="vacancyResponses-button"]'
+          ),
+          mainmenuProfileAndResumes: readSignal(
+            '[data-qa="mainmenu_profileAndResumes"]'
+          ),
+          mainmenuVacancyResponses: readSignal(
+            '[data-qa="mainmenu_vacancyResponses"]'
+          )
         }
         const loggedOut =
           signals.login.exists ||
@@ -637,13 +733,14 @@ async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
           signals.vacancyResponsesButton.exists ||
           signals.mainmenuProfileAndResumes.exists ||
           signals.mainmenuVacancyResponses.exists
-        const state = loggedIn && !loggedOut
-          ? 'logged_in'
-          : loggedOut && !loggedIn
-            ? 'logged_out'
-            : loggedIn && loggedOut
-              ? 'conflict'
-              : 'unknown'
+        const state =
+          loggedIn && !loggedOut
+            ? 'logged_in'
+            : loggedOut && !loggedIn
+              ? 'logged_out'
+              : loggedIn && loggedOut
+                ? 'conflict'
+                : 'unknown'
 
         return {
           state,
@@ -654,7 +751,11 @@ async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
         }
       })
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -680,24 +781,34 @@ function shouldCheckAuthAfterParserStop(status: OrchestratorStatus): boolean {
       status.autoResponderStopReasonDetails &&
       AUTH_CHECK_PARSER_ERROR_CODES.has(status.autoResponderStopReasonDetails)
     ) ||
-    Boolean(status.parserErrorCodes?.some((code) => AUTH_CHECK_PARSER_ERROR_CODES.has(code)))
+    Boolean(
+      status.parserErrorCodes?.some(code =>
+        AUTH_CHECK_PARSER_ERROR_CODES.has(code)
+      )
+    )
   )
 }
 
-async function getAutoResponderParserErrors(page: any): Promise<ParserErrorEntry[]> {
+async function getAutoResponderParserErrors(
+  page: any
+): Promise<ParserErrorEntry[]> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return []
   }
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       return await page.evaluate((parserErrorsKey: string) => {
         try {
-          const parsed = JSON.parse(sessionStorage.getItem(parserErrorsKey) || '[]')
+          const parsed = JSON.parse(
+            sessionStorage.getItem(parserErrorsKey) || '[]'
+          )
 
           return Array.isArray(parsed) ? parsed : []
         } catch {
@@ -705,7 +816,11 @@ async function getAutoResponderParserErrors(page: any): Promise<ParserErrorEntry
         }
       }, HH_AUTO_RESPONDER_PARSER_ERRORS_KEY)
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -716,20 +831,26 @@ async function getAutoResponderParserErrors(page: any): Promise<ParserErrorEntry
   return []
 }
 
-async function getAutoResponderRecentUrls(page: any): Promise<RecentUrlEntry[]> {
+async function getAutoResponderRecentUrls(
+  page: any
+): Promise<RecentUrlEntry[]> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return []
   }
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       return await page.evaluate((recentUrlsKey: string) => {
         try {
-          const parsed = JSON.parse(sessionStorage.getItem(recentUrlsKey) || '[]')
+          const parsed = JSON.parse(
+            sessionStorage.getItem(recentUrlsKey) || '[]'
+          )
 
           return Array.isArray(parsed) ? parsed : []
         } catch {
@@ -737,7 +858,11 @@ async function getAutoResponderRecentUrls(page: any): Promise<RecentUrlEntry[]> 
         }
       }, HH_AUTO_RESPONDER_RECENT_URLS_KEY)
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -755,9 +880,11 @@ async function getManualVacancies(page: any): Promise<ManualVacancy[]> {
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       return await page.evaluate((manualListKey: string) => {
         try {
@@ -770,7 +897,11 @@ async function getManualVacancies(page: any): Promise<ManualVacancy[]> {
         }
       }, HH_AUTO_RESPONDER_MANUAL_LIST_KEY)
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -788,17 +919,25 @@ async function getAutoResponderSuccessCount(page: any): Promise<number> {
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       return await page.evaluate((successfulResponsesKey: string) => {
-        const count = Number(sessionStorage.getItem(successfulResponsesKey) || '0')
+        const count = Number(
+          sessionStorage.getItem(successfulResponsesKey) || '0'
+        )
 
         return Number.isFinite(count) ? count : 0
       }, HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY)
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -816,9 +955,11 @@ async function getParserLogs(page: any): Promise<ParserLogEntry[]> {
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: 5000
-      }).catch(() => undefined)
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: 5000
+        })
+        .catch(() => undefined)
 
       return await page.evaluate((logsKey: string) => {
         try {
@@ -831,7 +972,11 @@ async function getParserLogs(page: any): Promise<ParserLogEntry[]> {
         }
       }, HH_AUTO_RESPONDER_LOGS_KEY)
     } catch (error: any) {
-      if (!String(error?.message ?? '').includes('Execution context was destroyed')) {
+      if (
+        !String(error?.message ?? '').includes(
+          'Execution context was destroyed'
+        )
+      ) {
         throw error
       }
     }
@@ -913,7 +1058,9 @@ function formatStatusFlag(label: string, value: unknown): string {
 }
 
 function truncateTelegramLine(value: string, maxLength = 350): string {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 14)}...truncated`
+  return value.length <= maxLength
+    ? value
+    : `${value.slice(0, maxLength - 14)}...truncated`
 }
 
 function escapeTelegramHtml(value: unknown): string {
@@ -957,20 +1104,66 @@ function formatTelegramLink(url: string | undefined, label?: string): string {
 }
 
 function replaceUrlsWithTelegramLinks(value: string, label?: string): string {
-  return escapeTelegramHtml(value).replace(/https?:\/\/[^\s<]+/g, (url) => {
+  return escapeTelegramHtml(value).replace(/https?:\/\/[^\s<]+/g, url => {
     const normalizedUrl = url.replace(/&amp;/g, '&')
 
     return formatTelegramLink(normalizedUrl, label)
   })
 }
 
-function formatAuthStatusForTelegram(status: OrchestratorStatus): string | undefined {
+function formatAuthStatusForTelegram(
+  status: OrchestratorStatus
+): string | undefined {
   const states = [
-    status.authBeforeStart ? `before ${status.authBeforeStart.state}` : undefined,
-    status.authAfterParserStop ? `after ${status.authAfterParserStop.state}` : undefined
+    status.authBeforeStart
+      ? `before ${status.authBeforeStart.state}`
+      : undefined,
+    status.authAfterParserStop
+      ? `after ${status.authAfterParserStop.state}`
+      : undefined
   ].filter(Boolean)
 
   return states.length ? `Auth status: ${states.join('; ')}` : undefined
+}
+
+function formatManualVacanciesCleanupBrief(
+  result: ManualVacanciesCleanupResult | undefined
+): string | undefined {
+  if (!result) {
+    return undefined
+  }
+
+  if (result.skipped) {
+    return 'manual vacancies list empty'
+  }
+
+  return [
+    `manual vacancies initial ${result.initialCount}`,
+    `checked ${result.checkedCount}`,
+    `removed ${result.removedCount}`,
+    `remaining ${result.remainingCount}`,
+    `kept ${result.keptCount}`
+  ].join(', ')
+}
+
+function formatManualVacanciesCleanupForHuman(
+  result: ManualVacanciesCleanupResult | undefined
+): string | undefined {
+  if (!result) {
+    return undefined
+  }
+
+  if (result.skipped) {
+    return 'Ручной список вакансий: список был пуст.'
+  }
+
+  return (
+    [
+      `Ручной список вакансий: успешно удалено ${result.removedCount}`,
+      `проверено ${result.checkedCount}`,
+      `осталось ${result.remainingCount}`
+    ].join(', ') + '.'
+  )
 }
 
 function isAutoResponderStopNormal(status: OrchestratorStatus): boolean {
@@ -992,7 +1185,9 @@ function isAutoResponderStopNormal(status: OrchestratorStatus): boolean {
   )
 }
 
-function formatParserErrorCodesForTelegram(status: OrchestratorStatus): string | undefined {
+function formatParserErrorCodesForTelegram(
+  status: OrchestratorStatus
+): string | undefined {
   if (isAutoResponderStopNormal(status) || !status.parserErrorCodes?.length) {
     return undefined
   }
@@ -1000,23 +1195,22 @@ function formatParserErrorCodesForTelegram(status: OrchestratorStatus): string |
   return `Parser error codes: ${escapeTelegramHtml(status.parserErrorCodes.join(', '))}`
 }
 
-function formatRecentUrlsForTelegram(status: OrchestratorStatus): string | undefined {
+function formatRecentUrlsForTelegram(
+  status: OrchestratorStatus
+): string | undefined {
   if (!status.recentUrls?.length) {
     return undefined
   }
 
   const lines = status.recentUrls.slice(-2).map((entry, index) => {
-    const marker = index === status.recentUrls!.slice(-2).length - 1 ? 'current' : 'previous'
+    const marker =
+      index === status.recentUrls!.slice(-2).length - 1 ? 'current' : 'previous'
     const reason = entry.reason ? ` (${escapeTelegramHtml(entry.reason)})` : ''
-    const title = entry.title ? ` - ${escapeTelegramHtml(entry.title)}` : ''
 
-    return `${escapeTelegramHtml(marker)}${reason}: ${formatTelegramLink(entry.url)}${title}`
+    return `${escapeTelegramHtml(marker)}${reason}: ${formatTelegramLink(entry.url)}`
   })
 
-  return [
-    'Recent URLs:',
-    ...lines
-  ].join('\n')
+  return ['Recent URLs:', ...lines].join('\n')
 }
 
 function formatAuthCheckBrief(check: HhAuthCheck): string {
@@ -1027,11 +1221,74 @@ function formatAuthCheckBrief(check: HhAuthCheck): string {
   return `${check.state}; signals ${signalNames.join(', ') || 'none'}; url ${check.url}`
 }
 
-function shouldSendParserLogsToTelegram(status: OrchestratorStatus, parserLogs: ParserLogEntry[]): boolean {
-  return Boolean(LOGS_CHANNEL_ID && parserLogs.length && !isAutoResponderStopNormal(status))
+function convertHHAuthResultToCheck(result: any): HhAuthCheck {
+  const signals = Object.fromEntries(
+    Object.entries(result?.signals ?? {}).map(([name, exists]) => [
+      name,
+      {
+        exists: Boolean(exists)
+      }
+    ])
+  )
+
+  return {
+    state: result?.state ?? 'unknown',
+    checkedAt: result?.checkedAt ?? new Date().toISOString(),
+    url: result?.url ?? '',
+    title: result?.title ?? '',
+    signals
+  }
 }
 
-function formatLifecycleEventForTelegram(status: OrchestratorStatus, item: LifecycleEvent): string {
+function getBestHHAuthCheck(result: any): HhAuthCheck {
+  return convertHHAuthResultToCheck(
+    result?.finalHeadless ??
+      result?.headfullAfterLogin ??
+      result?.initialHeadless ??
+      result
+  )
+}
+
+function getHHAuthArtifactDir(
+  clientData: ClientAutomationData
+): string | undefined {
+  if (!HH_AUTH_DEBUG) {
+    return undefined
+  }
+
+  return getHHAuthLogDir(clientData, 'hh-auth-orchestrator')
+}
+
+function getHHAuthErrorArtifactDir(clientData: ClientAutomationData): string {
+  return getHHAuthLogDir(clientData, 'hh-auth-errors')
+}
+
+function getHHAuthLogDir(
+  clientData: ClientAutomationData,
+  prefix: string
+): string {
+  const safeName = clientData.clientName.replace(/[\\/:*?"<>|\s]+/g, '_')
+  const safeMarket = clientData.market ?? 'default'
+
+  return path.join(
+    LOCAL_RUN_LOG_DIR,
+    `${prefix}-${LOCAL_RUN_ID}-${safeName}-${safeMarket}`
+  )
+}
+
+function shouldSendParserLogsToTelegram(
+  status: OrchestratorStatus,
+  parserLogs: ParserLogEntry[]
+): boolean {
+  return Boolean(
+    LOGS_CHANNEL_ID && parserLogs.length && !isAutoResponderStopNormal(status)
+  )
+}
+
+function formatLifecycleEventForTelegram(
+  status: OrchestratorStatus,
+  item: LifecycleEvent
+): string {
   let details = item.details
 
   if (details && item.event.startsWith('HH auth checked')) {
@@ -1093,10 +1350,7 @@ function addLifecycleEvent(
 
   return {
     ...status,
-    lifecycleEvents: [
-      ...status.lifecycleEvents,
-      lifecycleEvent
-    ]
+    lifecycleEvents: [...status.lifecycleEvents, lifecycleEvent]
   }
 }
 
@@ -1115,33 +1369,49 @@ function formatClientErrorLog(status: OrchestratorStatus): string {
     `Stack: ${escapeTelegramHtml(status.stack)}`,
     `Dolphin profile: ${escapeTelegramHtml(status.dolphinProfileId)}`,
     status.error ? `Error: ${escapeTelegramHtml(status.error)}` : undefined,
-    status.telegramError ? `Telegram report error: ${escapeTelegramHtml(status.telegramError)}` : undefined,
+    status.telegramError
+      ? `Telegram report error: ${escapeTelegramHtml(status.telegramError)}`
+      : undefined,
     '',
     'Status:',
     formatStatusFlag('opened', status.opened),
     formatStatusFlag('indexScriptInjected', status.indexScriptInjected),
     formatStatusFlag('startButtonClicked', status.startButtonClicked),
     formatStatusFlag('autoResponderFinished', status.autoResponderFinished),
-    formatStatusFlag('autoResponderWatchTimedOut', status.autoResponderWatchTimedOut),
+    formatStatusFlag(
+      'autoResponderWatchTimedOut',
+      status.autoResponderWatchTimedOut
+    ),
     `Stop reason: ${escapeTelegramHtml(status.autoResponderStopReason ?? 'n/a')}`,
-    status.autoResponderStopReasonDetails ? `Stop reason details: ${escapeTelegramHtml(status.autoResponderStopReasonDetails)}` : undefined,
+    status.autoResponderStopReasonDetails
+      ? `Stop reason details: ${escapeTelegramHtml(status.autoResponderStopReasonDetails)}`
+      : undefined,
     formatStatusFlag('stopButtonClicked', status.stopButtonClicked),
     formatStatusFlag('profileStopped', status.profileStopped),
     formatStatusFlag('profileTagAdded', status.profileTagAdded),
     formatStatusFlag('profileTagRemoved', status.profileTagRemoved),
-    formatStatusFlag('profileTagVerifiedAfterAdd', status.profileTagVerifiedAfterAdd),
-    formatStatusFlag('profileTagVerifiedAfterRemove', status.profileTagVerifiedAfterRemove),
+    formatStatusFlag(
+      'profileTagVerifiedAfterAdd',
+      status.profileTagVerifiedAfterAdd
+    ),
+    formatStatusFlag(
+      'profileTagVerifiedAfterRemove',
+      status.profileTagVerifiedAfterRemove
+    ),
     formatStatusFlag('profileStatusApplied', status.profileStatusApplied),
     formatStatusFlag('profileStatusRestored', status.profileStatusRestored),
     formatStatusFlag('manualVacanciesSent', status.manualVacanciesSent),
     `Confirmed responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed vacancies: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual vacancies: ${status.manualVacanciesCount ?? 'n/a'}`,
+    formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup),
     formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
     formatRecentUrlsForTelegram(status),
     status.pageUrl ? `Page: ${formatTelegramLink(status.pageUrl)}` : undefined,
-    status.errorStack ? `\nStack trace:\n${escapeTelegramHtml(status.errorStack)}` : undefined
+    status.errorStack
+      ? `\nStack trace:\n${escapeTelegramHtml(status.errorStack)}`
+      : undefined
   ].filter((line): line is string => line !== undefined)
 
   return truncateText(lines.join('\n'), TELEGRAM_MESSAGE_LIMIT)
@@ -1151,9 +1421,9 @@ function formatClientLifecycleLog(status: OrchestratorStatus): string {
   const recentLifecycleEvents = status.lifecycleEvents.slice(-8)
   const lifecycleQuote = recentLifecycleEvents.length
     ? [
-      `Last lifecycle events: ${recentLifecycleEvents.length}/${status.lifecycleEvents.length}`,
-      `<blockquote expandable>${recentLifecycleEvents.map((item) => formatLifecycleEventForTelegram(status, item)).join('\n')}</blockquote>`
-    ].join('\n')
+        `Last lifecycle events: ${recentLifecycleEvents.length}/${status.lifecycleEvents.length}`,
+        `<blockquote expandable>${recentLifecycleEvents.map(item => formatLifecycleEventForTelegram(status, item)).join('\n')}</blockquote>`
+      ].join('\n')
     : undefined
   const lines = [
     '<b>HH autoparcer lifecycle</b>',
@@ -1164,35 +1434,49 @@ function formatClientLifecycleLog(status: OrchestratorStatus): string {
     `Responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual: ${status.manualVacanciesCount ?? 'n/a'}`,
+    formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup),
     formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
     formatRecentUrlsForTelegram(status),
     '',
     lifecycleQuote,
     status.error ? `\nError: ${escapeTelegramHtml(status.error)}` : undefined,
-    status.telegramError ? `Telegram report error: ${escapeTelegramHtml(status.telegramError)}` : undefined
+    status.telegramError
+      ? `Telegram report error: ${escapeTelegramHtml(status.telegramError)}`
+      : undefined
   ].filter((line): line is string => line !== undefined)
 
   return truncateText(lines.join('\n'), TELEGRAM_MESSAGE_LIMIT)
 }
 
-async function sendClientLifecycleLog(status: OrchestratorStatus): Promise<void> {
+async function sendClientLifecycleLog(
+  status: OrchestratorStatus
+): Promise<void> {
   if (!LOGS_CHANNEL_ID) {
     return
   }
 
   try {
-    await sendTelegramMessage(LOGS_CHANNEL_ID, formatClientLifecycleLog(status), {
-      parseMode: 'html'
-    })
+    await sendTelegramMessage(
+      LOGS_CHANNEL_ID,
+      formatClientLifecycleLog(status),
+      {
+        parseMode: 'html'
+      }
+    )
   } catch (error: unknown) {
-    console.error(`Failed to send lifecycle log to Telegram: ${getErrorMessage(error)}`)
+    console.error(
+      `Failed to send lifecycle log to Telegram: ${getErrorMessage(error)}`
+    )
   }
 }
 
-function formatParserLogsMessage(status: OrchestratorStatus, parserLogs: ParserLogEntry[]): string {
+function formatParserLogsMessage(
+  status: OrchestratorStatus,
+  parserLogs: ParserLogEntry[]
+): string {
   const recentLogs = parserLogs.slice(-5)
-  const errorLogs = parserLogs.filter((entry) => entry.isError)
+  const errorLogs = parserLogs.filter(entry => entry.isError)
   const lines = [
     '<b>HH autoparcer parser logs</b>',
     `Client: ${escapeTelegramHtml(status.clientName)}${status.market ? ` / ${escapeTelegramHtml(status.market)}` : ''}`,
@@ -1203,14 +1487,19 @@ function formatParserLogsMessage(status: OrchestratorStatus, parserLogs: ParserL
     `Responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual: ${status.manualVacanciesCount ?? 'n/a'}`,
+    formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup),
     formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
     formatRecentUrlsForTelegram(status),
     '',
     'Recent parser log lines:',
-    ...recentLogs.map((entry) => {
+    ...recentLogs.map(entry => {
       const marker = entry.isError ? 'ERROR' : 'INFO'
-      const time = entry.time ?? (entry.ts ? new Date(Number(entry.ts)).toLocaleTimeString('ru-RU') : 'unknown')
+      const time =
+        entry.time ??
+        (entry.ts
+          ? new Date(Number(entry.ts)).toLocaleTimeString('ru-RU')
+          : 'unknown')
       const message = String(entry.message ?? '').trim() || '(empty)'
 
       return `[${escapeTelegramHtml(time)}] ${marker}: ${replaceUrlsWithTelegramLinks(message)}`
@@ -1220,15 +1509,21 @@ function formatParserLogsMessage(status: OrchestratorStatus, parserLogs: ParserL
   return truncateText(lines.join('\n'), TELEGRAM_MESSAGE_LIMIT)
 }
 
-async function sendParserLogsToTelegram(status: OrchestratorStatus, parserLogs: ParserLogEntry[]): Promise<void> {
+async function sendParserLogsToTelegram(
+  status: OrchestratorStatus,
+  parserLogs: ParserLogEntry[]
+): Promise<void> {
   if (!shouldSendParserLogsToTelegram(status, parserLogs)) {
     return
   }
 
-  const chunks = splitTelegramMessage(formatParserLogsMessage(status, parserLogs))
+  const chunks = splitTelegramMessage(
+    formatParserLogsMessage(status, parserLogs)
+  )
 
   for (let index = 0; index < chunks.length; index += 1) {
-    const suffix = chunks.length > 1 ? `\n\nPart ${index + 1}/${chunks.length}` : ''
+    const suffix =
+      chunks.length > 1 ? `\n\nPart ${index + 1}/${chunks.length}` : ''
 
     await sendTelegramMessage(LOGS_CHANNEL_ID, `${chunks[index]}${suffix}`, {
       parseMode: 'html'
@@ -1246,7 +1541,9 @@ async function sendClientErrorLog(status: OrchestratorStatus): Promise<void> {
       parseMode: 'html'
     })
   } catch (error: unknown) {
-    console.error(`Failed to send error log to Telegram: ${getErrorMessage(error)}`)
+    console.error(
+      `Failed to send error log to Telegram: ${getErrorMessage(error)}`
+    )
   }
 }
 
@@ -1255,18 +1552,27 @@ async function sendRunErrorLog(error: unknown): Promise<void> {
     return
   }
 
-  const message = truncateText([
-    '<b>HH autoparcer fatal error</b>',
-    `Error: ${escapeTelegramHtml(getErrorMessage(error))}`,
-    getErrorStack(error) ? `\nStack trace:\n${escapeTelegramHtml(getErrorStack(error))}` : undefined
-  ].filter((line): line is string => line !== undefined).join('\n'), TELEGRAM_MESSAGE_LIMIT)
+  const message = truncateText(
+    [
+      '<b>HH autoparcer fatal error</b>',
+      `Error: ${escapeTelegramHtml(getErrorMessage(error))}`,
+      getErrorStack(error)
+        ? `\nStack trace:\n${escapeTelegramHtml(getErrorStack(error))}`
+        : undefined
+    ]
+      .filter((line): line is string => line !== undefined)
+      .join('\n'),
+    TELEGRAM_MESSAGE_LIMIT
+  )
 
   try {
     await sendTelegramMessage(LOGS_CHANNEL_ID, message, {
       parseMode: 'html'
     })
   } catch (telegramError: unknown) {
-    console.error(`Failed to send fatal error log to Telegram: ${getErrorMessage(telegramError)}`)
+    console.error(
+      `Failed to send fatal error log to Telegram: ${getErrorMessage(telegramError)}`
+    )
   }
 }
 
@@ -1326,11 +1632,17 @@ function formatTechnicalRunResult(status: OrchestratorStatus): string {
 }
 
 function formatRunSummaryLog(results: OrchestratorStatus[]): string {
-  const successful = results.filter((status) => !hasClientFailure(status))
+  const successful = results.filter(status => !hasClientFailure(status))
   const failed = results.filter(hasClientFailure)
-  const responseCount = results.reduce((sum, status) => sum + (status.responseCount ?? 0), 0)
-  const manualCount = results.reduce((sum, status) => sum + (status.manualVacanciesCount ?? 0), 0)
-  const rows = results.map((status) => {
+  const responseCount = results.reduce(
+    (sum, status) => sum + (status.responseCount ?? 0),
+    0
+  )
+  const manualCount = results.reduce(
+    (sum, status) => sum + (status.manualVacanciesCount ?? 0),
+    0
+  )
+  const rows = results.map(status => {
     const name = `${status.clientName}${status.market ? ` / ${status.market}` : ''}`
     const pieces = [
       `${escapeTelegramHtml(name)}: ${escapeTelegramHtml(formatHumanRunResult(status))}`,
@@ -1342,16 +1654,19 @@ function formatRunSummaryLog(results: OrchestratorStatus[]): string {
     return pieces.join(', ')
   })
 
-  return truncateText([
-    '<b>Итоги автооткликов</b>',
-    `Профилей: ${results.length}`,
-    `🟢 Ок: ${successful.length}`,
-    `🔴 Нужно проверить: ${failed.length}`,
-    `Откликов всего: ${responseCount}`,
-    `Ручных вакансий всего: ${manualCount}`,
-    '',
-    ...rows
-  ].join('\n'), TELEGRAM_MESSAGE_LIMIT)
+  return truncateText(
+    [
+      '<b>Итоги автооткликов</b>',
+      `Профилей: ${results.length}`,
+      `🟢 Ок: ${successful.length}`,
+      `🔴 Нужно проверить: ${failed.length}`,
+      `Откликов всего: ${responseCount}`,
+      `Ручных вакансий всего: ${manualCount}`,
+      '',
+      ...rows
+    ].join('\n'),
+    TELEGRAM_MESSAGE_LIMIT
+  )
 }
 
 async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
@@ -1360,11 +1675,17 @@ async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
   }
 
   try {
-    await sendTelegramMessage(SUMMARY_LOGS_CHANNEL_ID, formatRunSummaryLog(results), {
-      parseMode: 'html'
-    })
+    await sendTelegramMessage(
+      SUMMARY_LOGS_CHANNEL_ID,
+      formatRunSummaryLog(results),
+      {
+        parseMode: 'html'
+      }
+    )
   } catch (error: unknown) {
-    console.error(`Failed to send run summary to Telegram: ${getErrorMessage(error)}`)
+    console.error(
+      `Failed to send run summary to Telegram: ${getErrorMessage(error)}`
+    )
   }
 }
 
@@ -1378,39 +1699,71 @@ function hasClientFailure(status: OrchestratorStatus): boolean {
   )
 }
 
+function isClientReportSuccessful(status: OrchestratorStatus): boolean {
+  if (
+    status.error ||
+    status.telegramError ||
+    !status.opened ||
+    !status.startButtonClicked
+  ) {
+    return false
+  }
+
+  if (status.autoResponderStopReason === 'orchestrator_stop_after_watch') {
+    return Boolean(
+      status.autoResponderWatchTimedOut && status.stopButtonClicked
+    )
+  }
+
+  return Boolean(
+    status.autoResponderStopReason &&
+    NORMAL_AUTO_RESPONDER_STOP_REASONS.has(status.autoResponderStopReason)
+  )
+}
+
 function formatManualVacanciesMessage(
   clientName: string,
   vacancies: ManualVacancy[],
   _responseCount: number,
   _vacancyTransitionCount: number,
-  isSuccessful = true
+  isSuccessful = true,
+  manualVacanciesCleanup?: ManualVacanciesCleanupResult
 ): string {
   const resultEmoji = isSuccessful ? '🟢' : '🔴'
+  const manualVacanciesCleanupLine = formatManualVacanciesCleanupForHuman(
+    manualVacanciesCleanup
+  )
   const summary = [
     `<b>${resultEmoji} ${escapeTelegramHtml(clientName)}: итоги автооткликов</b>`,
     `Вакансий для ручного отклика: ${vacancies.length}`,
+    manualVacanciesCleanupLine
+      ? escapeTelegramHtml(manualVacanciesCleanupLine)
+      : undefined,
     'Это первый день автооткликов, за баги не ругайтесь, а репортите, будем чинить!',
     'Важно: список ручных вакансий может содержать не новые позиции из прошлых прогонов. Это будет исправлено в будущей версии.'
-  ].join('\n')
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join('\n')
 
   if (!vacancies.length) {
     return `${summary}\n\nСписок вакансий для ручного отклика пуст.`
   }
 
   const rows = vacancies.map((item, index) => {
-    const savedAt = item.ts ? new Date(Number(item.ts)).toLocaleString('ru-RU') : 'unknown time'
+    const savedAt = item.ts
+      ? new Date(Number(item.ts)).toLocaleString('ru-RU')
+      : 'unknown time'
     const vacancyId = item.vid || 'n/a'
 
     return [
       `${index + 1}. ID: ${formatTelegramLink(item.url, vacancyId)}`,
       `Saved: ${escapeTelegramHtml(savedAt)}`
-    ].filter(Boolean).join('\n')
+    ]
+      .filter(Boolean)
+      .join('\n')
   })
 
-  return [
-    summary,
-    ...rows
-  ].join('\n\n')
+  return [summary, ...rows].join('\n\n')
 }
 
 async function sendManualVacanciesToTelegram(
@@ -1419,18 +1772,23 @@ async function sendManualVacanciesToTelegram(
   vacancies: ManualVacancy[],
   responseCount: number,
   vacancyTransitionCount: number,
-  isSuccessful = true
+  isSuccessful = true,
+  manualVacanciesCleanup?: ManualVacanciesCleanupResult
 ): Promise<void> {
-  const chunks = splitTelegramMessage(formatManualVacanciesMessage(
-    clientName,
-    vacancies,
-    responseCount,
-    vacancyTransitionCount,
-    isSuccessful
-  ))
+  const chunks = splitTelegramMessage(
+    formatManualVacanciesMessage(
+      clientName,
+      vacancies,
+      responseCount,
+      vacancyTransitionCount,
+      isSuccessful,
+      manualVacanciesCleanup
+    )
+  )
 
   for (let index = 0; index < chunks.length; index += 1) {
-    const suffix = chunks.length > 1 ? `\n\nPart ${index + 1}/${chunks.length}` : ''
+    const suffix =
+      chunks.length > 1 ? `\n\nPart ${index + 1}/${chunks.length}` : ''
 
     await sendTelegramMessage(chatId, `${chunks[index]}${suffix}`, {
       parseMode: 'html'
@@ -1439,7 +1797,7 @@ async function sendManualVacanciesToTelegram(
 }
 
 function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function getRecommendedExternalTimeoutMs(
@@ -1450,7 +1808,9 @@ function getRecommendedExternalTimeoutMs(
   const staggerTotalMs = Math.max(clientCount - 1, 0) * clientStartDelayMs
   const profileBufferMs = clientCount * EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS
 
-  return Math.ceil((watchMs + staggerTotalMs + profileBufferMs) * EXTERNAL_TIMEOUT_MULTIPLIER)
+  return Math.ceil(
+    (watchMs + staggerTotalMs + profileBufferMs) * EXTERNAL_TIMEOUT_MULTIPLIER
+  )
 }
 
 function getRunningDolphinBrowserProfileIds(): number[] {
@@ -1458,18 +1818,19 @@ function getRunningDolphinBrowserProfileIds(): number[] {
     '$ErrorActionPreference = "Stop";',
     'Get-CimInstance Win32_Process',
     "| Where-Object { $_.Name -eq 'anty.exe' -and $_.CommandLine -match 'browser_profiles\\\\\\d+\\\\data_dir' }",
-    '| ForEach-Object { if ($_.CommandLine -match \'browser_profiles\\\\(\\d+)\\\\data_dir\') { $Matches[1] } }',
+    "| ForEach-Object { if ($_.CommandLine -match 'browser_profiles\\\\(\\d+)\\\\data_dir') { $Matches[1] } }",
     '| Sort-Object -Unique',
     '| ConvertTo-Json'
   ].join(' ')
-  const stdout = childProcess.execFileSync('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    command
-  ], {
-    encoding: 'utf8'
-  }).trim()
+  const stdout = childProcess
+    .execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', command],
+      {
+        encoding: 'utf8'
+      }
+    )
+    .trim()
 
   if (!stdout) {
     return []
@@ -1478,9 +1839,7 @@ function getRunningDolphinBrowserProfileIds(): number[] {
   const parsed = JSON.parse(stdout)
   const ids = Array.isArray(parsed) ? parsed : [parsed]
 
-  return ids
-    .map((id) => Number(id))
-    .filter((id) => Number.isFinite(id))
+  return ids.map(id => Number(id)).filter(id => Number.isFinite(id))
 }
 
 async function assertPreexistingDolphinProfileLimit(): Promise<void> {
@@ -1489,14 +1848,41 @@ async function assertPreexistingDolphinProfileLimit(): Promise<void> {
   if (runningProfileIds.length > MAX_PREEXISTING_DOLPHIN_PROFILES) {
     throw new Error(
       `Too many Dolphin profiles are already open before automation start: ` +
-      `${runningProfileIds.length}/${MAX_PREEXISTING_DOLPHIN_PROFILES}. ` +
-      `Open profile ids: ${runningProfileIds.join(', ')}`
+        `${runningProfileIds.length}/${MAX_PREEXISTING_DOLPHIN_PROFILES}. ` +
+        `Open profile ids: ${runningProfileIds.join(', ')}`
     )
   }
 
   console.log(
     `Preflight Dolphin profiles: ${runningProfileIds.length}/${MAX_PREEXISTING_DOLPHIN_PROFILES}` +
-    (runningProfileIds.length ? ` (${runningProfileIds.join(', ')})` : '')
+      (runningProfileIds.length ? ` (${runningProfileIds.join(', ')})` : '')
+  )
+}
+
+async function assertDolphinAppRunning(): Promise<void> {
+  const controller = new AbortController()
+  const timeout = setTimeout(
+    () => controller.abort(),
+    DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS
+  )
+
+  try {
+    await fetch(`${DOLPHIN_LOCAL_API_BASE_URL}/browser_profiles`, {
+      method: 'GET',
+      signal: controller.signal
+    })
+  } catch (error: unknown) {
+    throw new Error(
+      `Dolphin Anty app is not reachable at ${DOLPHIN_LOCAL_API_BASE_URL}. ` +
+        `Open Dolphin Anty and wait until the local API on port 3001 is ready, then rerun. ` +
+        `Original error: ${getErrorMessage(error)}`
+    )
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  console.log(
+    `Preflight Dolphin app: local API is reachable at ${DOLPHIN_LOCAL_API_BASE_URL}`
   )
 }
 
@@ -1550,15 +1936,18 @@ async function requestDolphinCloudApi<T>(
     throw new Error('Missing required environment variable: dolphin_api_token')
   }
 
-  const response = await fetch(new URL(endpointPath, DOLPHIN_CLOUD_API_BASE_URL).toString(), {
-    method: options.method ?? 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {})
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  })
+  const response = await fetch(
+    new URL(endpointPath, DOLPHIN_CLOUD_API_BASE_URL).toString(),
+    {
+      method: options.method ?? 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined
+    }
+  )
   const responseText = await response.text()
   let data: any = null
 
@@ -1581,8 +1970,12 @@ async function requestDolphinCloudApi<T>(
   return data as T
 }
 
-async function getDolphinProfile(profileId: number): Promise<DolphinBrowserProfile> {
-  const response = await requestDolphinCloudApi<DolphinProfileResponse>(`/browser_profiles/${profileId}`)
+async function getDolphinProfile(
+  profileId: number
+): Promise<DolphinBrowserProfile> {
+  const response = await requestDolphinCloudApi<DolphinProfileResponse>(
+    `/browser_profiles/${profileId}`
+  )
 
   if (!response.data) {
     throw new Error(`Dolphin profile ${profileId} was not returned by API`)
@@ -1597,16 +1990,24 @@ async function getDolphinProfileTags(profileId: number): Promise<string[]> {
   return Array.isArray(profile.tags) ? profile.tags : []
 }
 
-async function updateDolphinProfileTags(profileId: number, tags: string[]): Promise<void> {
-  await requestDolphinCloudApi<DolphinProfileResponse>(`/browser_profiles/${profileId}`, {
-    method: 'PATCH',
-    body: {
-      tags
+async function updateDolphinProfileTags(
+  profileId: number,
+  tags: string[]
+): Promise<void> {
+  await requestDolphinCloudApi<DolphinProfileResponse>(
+    `/browser_profiles/${profileId}`,
+    {
+      method: 'PATCH',
+      body: {
+        tags
+      }
     }
-  })
+  )
 }
 
-function getDolphinProfileStatusId(profile: DolphinBrowserProfile): number | null {
+function getDolphinProfileStatusId(
+  profile: DolphinBrowserProfile
+): number | null {
   const statusId = Number(profile.status?.id)
 
   return Number.isFinite(statusId) ? statusId : null
@@ -1617,12 +2018,14 @@ async function ensureAutomationLockStatusId(): Promise<number> {
     return automationLockStatusId
   }
 
-  const statuses = await requestDolphinCloudApi<DolphinProfileStatusListResponse>(
-    '/browser_profiles/statuses?limit=50'
+  const statuses =
+    await requestDolphinCloudApi<DolphinProfileStatusListResponse>(
+      '/browser_profiles/statuses?limit=50'
+    )
+  const existingStatus = statuses.data?.find(
+    status =>
+      status.name === AUTOMATION_LOCK_STATUS_NAME && status.deleted !== 1
   )
-  const existingStatus = statuses.data?.find((status) => (
-    status.name === AUTOMATION_LOCK_STATUS_NAME && status.deleted !== 1
-  ))
   const existingStatusId = Number(existingStatus?.id)
 
   if (Number.isFinite(existingStatusId)) {
@@ -1630,36 +2033,47 @@ async function ensureAutomationLockStatusId(): Promise<number> {
     return automationLockStatusId
   }
 
-  const createdStatus = await requestDolphinCloudApi<DolphinProfileStatusResponse>(
-    '/browser_profiles/statuses',
-    {
-      method: 'POST',
-      body: {
-        name: AUTOMATION_LOCK_STATUS_NAME,
-        color: AUTOMATION_LOCK_STATUS_COLOR,
-        type: 'common'
+  const createdStatus =
+    await requestDolphinCloudApi<DolphinProfileStatusResponse>(
+      '/browser_profiles/statuses',
+      {
+        method: 'POST',
+        body: {
+          name: AUTOMATION_LOCK_STATUS_NAME,
+          color: AUTOMATION_LOCK_STATUS_COLOR,
+          type: 'common'
+        }
       }
-    }
-  )
+    )
   const createdStatusId = Number(createdStatus.data?.id)
 
   if (!Number.isFinite(createdStatusId)) {
-    throw new Error(`Dolphin automation status was not created: ${AUTOMATION_LOCK_STATUS_NAME}`)
+    throw new Error(
+      `Dolphin automation status was not created: ${AUTOMATION_LOCK_STATUS_NAME}`
+    )
   }
 
   automationLockStatusId = createdStatusId
   return automationLockStatusId
 }
 
-async function updateDolphinProfileStatus(profileId: number, statusId: number | null): Promise<void> {
-  await requestDolphinCloudApi<DolphinProfileResponse>(`/browser_profiles/${profileId}`, {
-    method: 'PATCH',
-    body: {
-      statusId: statusId ?? 0
+async function updateDolphinProfileStatus(
+  profileId: number,
+  statusId: number | null
+): Promise<void> {
+  await requestDolphinCloudApi<DolphinProfileResponse>(
+    `/browser_profiles/${profileId}`,
+    {
+      method: 'PATCH',
+      body: {
+        statusId: statusId ?? 0
+      }
     }
-  })
+  )
 
-  const verifiedStatusId = getDolphinProfileStatusId(await getDolphinProfile(profileId))
+  const verifiedStatusId = getDolphinProfileStatusId(
+    await getDolphinProfile(profileId)
+  )
 
   if (verifiedStatusId !== statusId) {
     throw new Error(
@@ -1668,7 +2082,10 @@ async function updateDolphinProfileStatus(profileId: number, statusId: number | 
   }
 }
 
-async function addDolphinProfileTag(profileId: number, tag: string): Promise<void> {
+async function addDolphinProfileTag(
+  profileId: number,
+  tag: string
+): Promise<void> {
   const tags = await getDolphinProfileTags(profileId)
 
   if (!tags.includes(tag)) {
@@ -1682,9 +2099,12 @@ async function addDolphinProfileTag(profileId: number, tag: string): Promise<voi
   }
 }
 
-async function removeDolphinProfileTag(profileId: number, tag: string): Promise<void> {
+async function removeDolphinProfileTag(
+  profileId: number,
+  tag: string
+): Promise<void> {
   const tags = await getDolphinProfileTags(profileId)
-  const nextTags = tags.filter((item) => item !== tag)
+  const nextTags = tags.filter(item => item !== tag)
 
   if (nextTags.length !== tags.length) {
     await updateDolphinProfileTags(profileId, nextTags)
@@ -1704,16 +2124,25 @@ async function stopDolphinProfile(profileId: number): Promise<void> {
 
 function isAlreadyRunningError(error: any): boolean {
   const duplicateCode = error?.details?.errorObject?.code
-  const message = String(error?.message ?? error?.details?.error ?? error?.details?.message ?? '')
-    .toLowerCase()
+  const message = String(
+    error?.message ?? error?.details?.error ?? error?.details?.message ?? ''
+  ).toLowerCase()
 
-  return duplicateCode === 'E_BROWSER_RUN_DUPLICATE' || message.includes('already running')
+  return (
+    duplicateCode === 'E_BROWSER_RUN_DUPLICATE' ||
+    message.includes('already running')
+  )
 }
 
 function isAlreadyRunningResponse(response: DolphinStartResponse): boolean {
-  const message = String(response.error ?? response.errorObject?.text ?? '').toLowerCase()
+  const message = String(
+    response.error ?? response.errorObject?.text ?? ''
+  ).toLowerCase()
 
-  return response.errorObject?.code === 'E_BROWSER_RUN_DUPLICATE' || message.includes('already running')
+  return (
+    response.errorObject?.code === 'E_BROWSER_RUN_DUPLICATE' ||
+    message.includes('already running')
+  )
 }
 
 async function requestDolphinProfileStart(
@@ -1732,7 +2161,11 @@ async function requestDolphinProfileStart(
   )
 
   if (response.success === false || isAlreadyRunningResponse(response)) {
-    const error = new Error(response.error || response.errorObject?.text || 'Dolphin profile start failed') as Error & {
+    const error = new Error(
+      response.error ||
+        response.errorObject?.text ||
+        'Dolphin profile start failed'
+    ) as Error & {
       details?: DolphinStartResponse
     }
     error.details = response
@@ -1743,10 +2176,13 @@ async function requestDolphinProfileStart(
   return response
 }
 
-async function startDolphinProfile(profileId: number): Promise<DolphinStartResponse> {
+async function startDolphinProfileWithHeadless(
+  profileId: number,
+  headless: boolean
+): Promise<DolphinStartResponse> {
   const body = {
     automation: true,
-    headless: DOLPHIN_HEADLESS
+    headless
   }
   const maxAttempts = 5
 
@@ -1766,7 +2202,83 @@ async function startDolphinProfile(profileId: number): Promise<DolphinStartRespo
     }
   }
 
-  throw new Error(`Dolphin profile ${profileId} did not start after ${maxAttempts} attempts`)
+  throw new Error(
+    `Dolphin profile ${profileId} did not start after ${maxAttempts} attempts`
+  )
+}
+
+async function startDolphinProfile(
+  profileId: number
+): Promise<DolphinStartResponse> {
+  return await startDolphinProfileWithHeadless(profileId, DOLPHIN_HEADLESS)
+}
+
+async function startDolphinProfileForAuth(
+  profileId: number,
+  mode: 'headless' | 'headfull'
+): Promise<{ profileId: number; mode: 'headless' | 'headfull'; port: number }> {
+  const response = await startDolphinProfileWithHeadless(
+    profileId,
+    mode === 'headless'
+  )
+  const port = response.automation?.port
+
+  if (!port) {
+    throw new Error(
+      `Dolphin did not return an automation port for HH auth profile ${profileId}`
+    )
+  }
+
+  return {
+    profileId,
+    mode,
+    port
+  }
+}
+
+async function connectToDolphinStartedProfile(startedProfile: {
+  port: number
+}): Promise<any> {
+  const { chromium } = loadPlaywright()
+
+  return await chromium.connectOverCDP(
+    `http://127.0.0.1:${startedProfile.port}`,
+    {
+      timeout: CONNECT_OVER_CDP_TIMEOUT_MS
+    }
+  )
+}
+
+async function ensureHHAuthForClient(
+  clientData: ClientAutomationData
+): Promise<HhAuthCheck> {
+  const hhAuth = makeHHAuth({
+    artifactDir: getHHAuthArtifactDir(clientData),
+    errorArtifactDir: getHHAuthErrorArtifactDir(clientData),
+    connectToProfile: connectToDolphinStartedProfile,
+    getCredentials: async () => {
+      const credentials = await getClientHHAuthCredentials(
+        clientData.clientName
+      )
+
+      return {
+        phone: credentials.phone,
+        password: credentials.password
+      }
+    },
+    log: (message: string, details?: Record<string, unknown>) => {
+      console.log(
+        `[hh auth] ${clientData.clientName}: ${message}`,
+        details ?? {}
+      )
+    },
+    startProfile: startDolphinProfileForAuth,
+    stopProfile: stopDolphinProfile,
+    timeoutMs: HH_AUTH_TIMEOUT_MS
+  })
+  const result = await hhAuth.ensureAuthorized(clientData.dolphinProfileId)
+
+  return getBestHHAuthCheck(result)
 }
 
 async function openScenarioAndInjectIndex(
@@ -1783,18 +2295,48 @@ async function openScenarioAndInjectIndex(
   browser.on('disconnected', () => {
     browserDisconnected = true
   })
-  const context = browser.contexts()[0] || await browser.newContext()
+  const context = browser.contexts()[0] || (await browser.newContext())
+  const cleanupPage = await context.newPage()
+  let manualVacanciesCleanup: ManualVacanciesCleanupResult | undefined
+
+  try {
+    manualVacanciesCleanup = await runManualVacanciesCleanup(cleanupPage, {
+      log: (message: string) =>
+        console.log(`[manual vacancies cleanup] ${message}`)
+    })
+  } finally {
+    await cleanupPage.close().catch(() => undefined)
+  }
+
+  if (!manualVacanciesCleanup) {
+    throw new Error('Manual vacancies cleanup did not return a result')
+  }
+
+  if (!manualVacanciesCleanup.completed) {
+    console.log(
+      `[manual vacancies cleanup] Manual vacancies cleanup left ` +
+        `${manualVacanciesCleanup.remainingCount} pending entries; ` +
+        `continuing standard scenario`
+    )
+  }
+
   const page = await context.newPage()
   const indexScript = await fs.readFile(INDEX_SCRIPT_PATH, 'utf8')
-  const disposeWatcher = installIndexReinjectWatcher(page, indexScript, responseCounter)
+  const disposeWatcher = installIndexReinjectWatcher(
+    page,
+    indexScript,
+    responseCounter
+  )
 
   await page.goto(stackScenario, {
     waitUntil: 'domcontentloaded',
     timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
   })
-  await page.waitForLoadState('load', {
-    timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
-  }).catch(() => undefined)
+  await page
+    .waitForLoadState('load', {
+      timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
+    })
+    .catch(() => undefined)
 
   const pageTitle = await page.title()
   const pageUrl = page.url()
@@ -1814,6 +2356,7 @@ async function openScenarioAndInjectIndex(
         startButtonClicked: false,
         pageTitle,
         pageUrl,
+        manualVacanciesCleanup,
         authBeforeStart
       }
     }
@@ -1823,13 +2366,19 @@ async function openScenarioAndInjectIndex(
     sessionStorage.setItem(successfulResponsesKey, '0')
   }, HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY)
   await applyAutoResponderCoverText(page, coverText)
-  const indexScriptInjected = await ensureIndexScript(page, indexScript, 'initial load')
+  const indexScriptInjected = await ensureIndexScript(
+    page,
+    indexScript,
+    'initial load'
+  )
   await page.waitForSelector('#ar-start-btn', {
     state: 'visible',
     timeout: 10000
   })
   await page.evaluate(() => {
-    const startButton = document.getElementById('ar-start-btn') as HTMLButtonElement | null
+    const startButton = document.getElementById(
+      'ar-start-btn'
+    ) as HTMLButtonElement | null
 
     if (!startButton) {
       throw new Error('Start button was not found')
@@ -1849,12 +2398,15 @@ async function openScenarioAndInjectIndex(
       startButtonClicked: true,
       pageTitle,
       pageUrl,
+      manualVacanciesCleanup,
       authBeforeStart
     }
   }
 }
 
-async function runClientOrchestrator(clientData: ClientAutomationData): Promise<OrchestratorStatus> {
+async function runClientOrchestrator(
+  clientData: ClientAutomationData
+): Promise<OrchestratorStatus> {
   if (!clientData.stackScenario) {
     throw new Error(`Stack scenario for ${clientData.clientName} was not found`)
   }
@@ -1881,15 +2433,27 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
   status = addLifecycleEvent(status, runStartedAt, 'client run started')
 
   try {
-    status = addLifecycleEvent(status, runStartedAt, 'applying automation profile lock')
+    status = addLifecycleEvent(
+      status,
+      runStartedAt,
+      'applying automation profile lock'
+    )
     const automationStatusId = await ensureAutomationLockStatusId()
-    const profileBeforeLock = await getDolphinProfile(clientData.dolphinProfileId)
+    const profileBeforeLock = await getDolphinProfile(
+      clientData.dolphinProfileId
+    )
     const currentProfileStatusId = getDolphinProfileStatusId(profileBeforeLock)
-    previousProfileStatusId = currentProfileStatusId === automationStatusId ? null : currentProfileStatusId
+    previousProfileStatusId =
+      currentProfileStatusId === automationStatusId
+        ? null
+        : currentProfileStatusId
 
     await addDolphinProfileTag(clientData.dolphinProfileId, AUTOMATION_LOCK_TAG)
     profileTagAdded = true
-    await updateDolphinProfileStatus(clientData.dolphinProfileId, automationStatusId)
+    await updateDolphinProfileStatus(
+      clientData.dolphinProfileId,
+      automationStatusId
+    )
     profileStatusApplied = true
     status = {
       ...status,
@@ -1904,6 +2468,19 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
       `status ${automationStatusId}, previous ${String(previousProfileStatusId)}`
     )
 
+    status = addLifecycleEvent(status, runStartedAt, 'ensuring HH auth')
+    const authBeforeStart = await ensureHHAuthForClient(clientData)
+    status = {
+      ...status,
+      authBeforeStart
+    }
+    status = addLifecycleEvent(
+      status,
+      runStartedAt,
+      'HH auth ensured',
+      formatAuthCheckBrief(authBeforeStart)
+    )
+
     status = addLifecycleEvent(status, runStartedAt, 'starting Dolphin profile')
     const startResponse = await startDolphinProfile(clientData.dolphinProfileId)
     const port = startResponse.automation?.port
@@ -1911,7 +2488,12 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
     if (!port) {
       throw new Error('Dolphin did not return an automation port')
     }
-    status = addLifecycleEvent(status, runStartedAt, 'Dolphin profile started', `port ${port}`)
+    status = addLifecycleEvent(
+      status,
+      runStartedAt,
+      'Dolphin profile started',
+      `port ${port}`
+    )
 
     status = addLifecycleEvent(status, runStartedAt, 'opening scenario')
     const pageResult = await openScenarioAndInjectIndex(
@@ -1926,6 +2508,18 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
       ...status,
       ...pageResult.result
     }
+    if (status.manualVacanciesCleanup) {
+      status = addLifecycleEvent(
+        status,
+        runStartedAt,
+        status.manualVacanciesCleanup.skipped
+          ? 'manual vacancies cleanup skipped'
+          : status.manualVacanciesCleanup.completed
+            ? 'manual vacancies cleanup completed'
+            : 'manual vacancies cleanup kept pending entries',
+        formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup)
+      )
+    }
     if (status.authBeforeStart) {
       status = addLifecycleEvent(
         status,
@@ -1937,7 +2531,9 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
     status = addLifecycleEvent(
       status,
       runStartedAt,
-      status.startButtonClicked ? 'auto responder started' : 'scenario opened without start',
+      status.startButtonClicked
+        ? 'auto responder started'
+        : 'scenario opened without start',
       pageResult.result.pageUrl
     )
 
@@ -1956,10 +2552,15 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
       status = addLifecycleEvent(
         status,
         runStartedAt,
-        autoResponderResult.finished ? 'auto responder finished itself' : 'auto responder watch timeout'
+        autoResponderResult.finished
+          ? 'auto responder finished itself'
+          : 'auto responder watch timeout'
       )
 
-      if (autoResponderResult.browserDisconnected || autoResponderResult.pageClosed) {
+      if (
+        autoResponderResult.browserDisconnected ||
+        autoResponderResult.pageClosed
+      ) {
         throw new Error(
           autoResponderResult.browserDisconnected
             ? 'Browser CDP connection was closed while auto responder was running'
@@ -1968,26 +2569,43 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
       }
 
       try {
-        status = addLifecycleEvent(status, runStartedAt, 'stopping auto responder')
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'stopping auto responder'
+        )
         const stopButtonClicked = await stopAutoResponder(pageResult.page)
         const stopReason = await getAutoResponderStopReason(pageResult.page)
         const manualVacancies = await getManualVacancies(pageResult.page)
-        const responseCount = await getAutoResponderSuccessCount(pageResult.page)
+        const responseCount = await getAutoResponderSuccessCount(
+          pageResult.page
+        )
         const parserLogs = await getParserLogs(pageResult.page)
-        const structuredParserErrors = await getAutoResponderParserErrors(pageResult.page)
-        const storedRecentUrls = await getAutoResponderRecentUrls(pageResult.page)
-        const recentUrls = storedRecentUrls.length ? storedRecentUrls : stopReason?.recentUrls ?? []
-        const parserErrorLogsCount = parserLogs.filter((entry) => entry.isError).length
+        const structuredParserErrors = await getAutoResponderParserErrors(
+          pageResult.page
+        )
+        const storedRecentUrls = await getAutoResponderRecentUrls(
+          pageResult.page
+        )
+        const recentUrls = storedRecentUrls.length
+          ? storedRecentUrls
+          : (stopReason?.recentUrls ?? [])
+        const parserErrorLogsCount = parserLogs.filter(
+          entry => entry.isError
+        ).length
         const parserErrorCodes = [
           ...new Set([
-            ...structuredParserErrors.map((entry) => entry.code).filter((code): code is string => Boolean(code)),
+            ...structuredParserErrors
+              .map(entry => entry.code)
+              .filter((code): code is string => Boolean(code)),
             ...extractParserErrorCodesFromLogs(parserLogs)
           ])
         ]
-        const parserLastErrorCode = structuredParserErrors
-          .map((entry) => entry.code)
-          .filter((code): code is string => Boolean(code))
-          .at(-1) ?? parserErrorCodes.at(-1)
+        const parserLastErrorCode =
+          structuredParserErrors
+            .map(entry => entry.code)
+            .filter((code): code is string => Boolean(code))
+            .at(-1) ?? parserErrorCodes.at(-1)
         const vacancyTransitionCount = responseCounter.vacancyIds.size
 
         status = {
@@ -2024,31 +2642,48 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
           `responses ${responseCount}, viewed ${vacancyTransitionCount}, manual ${manualVacancies.length}, parser errors ${parserErrorLogsCount}, parser codes ${parserErrorCodes.join(', ') || 'n/a'}, stop reason ${stopReason?.reason ?? 'n/a'}`
         )
 
-        status = addLifecycleEvent(status, runStartedAt, 'sending client Telegram report')
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'sending client Telegram report'
+        )
         await sendManualVacanciesToTelegram(
           clientData.commonChatId,
           `${clientData.clientName} / ${clientData.market}`,
           manualVacancies,
           responseCount,
           vacancyTransitionCount,
-          !hasClientFailure(status)
+          isClientReportSuccessful(status),
+          status.manualVacanciesCleanup
         )
 
         status = {
           ...status,
           manualVacanciesSent: true
         }
-        status = addLifecycleEvent(status, runStartedAt, 'client Telegram report sent')
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'client Telegram report sent'
+        )
 
         try {
           if (shouldSendParserLogsToTelegram(status, parserLogs)) {
-            status = addLifecycleEvent(status, runStartedAt, 'sending parser logs to logs chat')
+            status = addLifecycleEvent(
+              status,
+              runStartedAt,
+              'sending parser logs to logs chat'
+            )
             await sendParserLogsToTelegram(status, parserLogs)
             status = {
               ...status,
               parserLogsSent: true
             }
-            status = addLifecycleEvent(status, runStartedAt, 'parser logs sent to logs chat')
+            status = addLifecycleEvent(
+              status,
+              runStartedAt,
+              'parser logs sent to logs chat'
+            )
           } else {
             status = {
               ...status,
@@ -2058,7 +2693,9 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
               status,
               runStartedAt,
               'parser logs skipped',
-              isAutoResponderStopNormal(status) ? 'normal auto responder stop' : 'no parser logs'
+              isAutoResponderStopNormal(status)
+                ? 'normal auto responder stop'
+                : 'no parser logs'
             )
           }
         } catch (error: unknown) {
@@ -2066,8 +2703,15 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
             ...status,
             parserLogsSent: false
           }
-          status = addLifecycleEvent(status, runStartedAt, 'parser logs sending failed', getErrorMessage(error))
-          console.error(`Failed to send parser logs to Telegram: ${getErrorMessage(error)}`)
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'parser logs sending failed',
+            getErrorMessage(error)
+          )
+          console.error(
+            `Failed to send parser logs to Telegram: ${getErrorMessage(error)}`
+          )
         }
       } catch (error: unknown) {
         status = {
@@ -2089,13 +2733,21 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
 
     if (DOLPHIN_HEADLESS) {
       try {
-        status = addLifecycleEvent(status, runStartedAt, 'stopping Dolphin profile')
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'stopping Dolphin profile'
+        )
         await stopDolphinProfile(clientData.dolphinProfileId)
         status = {
           ...status,
           profileStopped: true
         }
-        status = addLifecycleEvent(status, runStartedAt, 'Dolphin profile stopped')
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'Dolphin profile stopped'
+        )
       } catch (error: unknown) {
         status = {
           ...status,
@@ -2108,14 +2760,25 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
 
     if (profileTagAdded) {
       try {
-        status = addLifecycleEvent(status, runStartedAt, 'removing automation tag')
-        await removeDolphinProfileTag(clientData.dolphinProfileId, AUTOMATION_LOCK_TAG)
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'removing automation tag'
+        )
+        await removeDolphinProfileTag(
+          clientData.dolphinProfileId,
+          AUTOMATION_LOCK_TAG
+        )
         status = {
           ...status,
           profileTagRemoved: true,
           profileTagVerifiedAfterRemove: true
         }
-        status = addLifecycleEvent(status, runStartedAt, 'automation tag removal verified')
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'automation tag removal verified'
+        )
       } catch (error: unknown) {
         status = {
           ...status,
@@ -2128,13 +2791,24 @@ async function runClientOrchestrator(clientData: ClientAutomationData): Promise<
 
     if (profileStatusApplied) {
       try {
-        status = addLifecycleEvent(status, runStartedAt, 'restoring previous Dolphin status')
-        await updateDolphinProfileStatus(clientData.dolphinProfileId, previousProfileStatusId ?? null)
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'restoring previous Dolphin status'
+        )
+        await updateDolphinProfileStatus(
+          clientData.dolphinProfileId,
+          previousProfileStatusId ?? null
+        )
         status = {
           ...status,
           profileStatusRestored: true
         }
-        status = addLifecycleEvent(status, runStartedAt, 'previous Dolphin status restored')
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'previous Dolphin status restored'
+        )
       } catch (error: unknown) {
         status = {
           ...status,
@@ -2168,11 +2842,14 @@ async function runKiraOrchestrator(): Promise<OrchestratorStatus> {
 function getConfiguredClientNames(): string[] {
   return String(process.env.ORCHESTRATOR_CLIENT_NAMES ?? '')
     .split(',')
-    .map((name) => name.trim())
+    .map(name => name.trim())
     .filter(Boolean)
 }
 
-async function runClientsOrchestrator(clients: ClientAutomationData[]): Promise<OrchestratorStatus[]> {
+async function runClientsOrchestrator(
+  clients: ClientAutomationData[]
+): Promise<OrchestratorStatus[]> {
+  await assertDolphinAppRunning()
   await assertPreexistingDolphinProfileLimit()
 
   if (!clients.length) {
@@ -2181,20 +2858,25 @@ async function runClientsOrchestrator(clients: ClientAutomationData[]): Promise<
 
   console.log(
     `Starting ${clients.length} clients with ${CLIENT_START_DELAY_MS}ms stagger: ${clients
-      .map((client) => `${client.clientName}/${client.market}(${client.dolphinProfileId})`)
+      .map(
+        client =>
+          `${client.clientName}/${client.market}(${client.dolphinProfileId})`
+      )
       .join(', ')}`
   )
   console.log(
     `Recommended external timeout: ${getRecommendedExternalTimeoutMs(clients.length)}ms ` +
-    `(formula: (watchMs + staggerMs + ${EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS}ms * profiles) * ${EXTERNAL_TIMEOUT_MULTIPLIER})`
+      `(formula: (watchMs + staggerMs + ${EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS}ms * profiles) * ${EXTERNAL_TIMEOUT_MULTIPLIER})`
   )
   writeLocalRunLog({
     kind: 'run-start',
     localRunLogFile: LOCAL_RUN_LOG_FILE,
     watchMs: AUTO_RESPONDER_WATCH_MS,
     clientStartDelayMs: CLIENT_START_DELAY_MS,
-    recommendedExternalTimeoutMs: getRecommendedExternalTimeoutMs(clients.length),
-    clients: clients.map((client) => ({
+    recommendedExternalTimeoutMs: getRecommendedExternalTimeoutMs(
+      clients.length
+    ),
+    clients: clients.map(client => ({
       clientName: client.clientName,
       market: client.market,
       stack: client.stack,
@@ -2202,16 +2884,20 @@ async function runClientsOrchestrator(clients: ClientAutomationData[]): Promise<
     }))
   })
 
-  const results = await Promise.all(clients.map(async (client, index) => {
-    const delayMs = index * CLIENT_START_DELAY_MS
+  const results = await Promise.all(
+    clients.map(async (client, index) => {
+      const delayMs = index * CLIENT_START_DELAY_MS
 
-    if (delayMs > 0) {
-      console.log(`Waiting ${delayMs}ms before starting ${client.clientName}/${client.market}(${client.dolphinProfileId})`)
-      await wait(delayMs)
-    }
+      if (delayMs > 0) {
+        console.log(
+          `Waiting ${delayMs}ms before starting ${client.clientName}/${client.market}(${client.dolphinProfileId})`
+        )
+        await wait(delayMs)
+      }
 
-    return runClientOrchestrator(client)
-  }))
+      return runClientOrchestrator(client)
+    })
+  )
 
   console.log(results)
   writeLocalRunLog({
@@ -2223,14 +2909,22 @@ async function runClientsOrchestrator(clients: ClientAutomationData[]): Promise<
   return results
 }
 
-async function runSelectedClientsOrchestrator(clientNames: string[]): Promise<OrchestratorStatus[]> {
+async function runSelectedClientsOrchestrator(
+  clientNames: string[]
+): Promise<OrchestratorStatus[]> {
   const allClients: ClientAutomationData[] = await getAllClientsAutomationData()
-  const selectedClients = allClients.filter((client) => clientNames.includes(client.clientName))
-  const selectedNames = new Set(selectedClients.map((client) => client.clientName))
-  const missingNames = clientNames.filter((name) => !selectedNames.has(name))
+  const selectedClients = allClients.filter(client =>
+    clientNames.includes(client.clientName)
+  )
+  const selectedNames = new Set(
+    selectedClients.map(client => client.clientName)
+  )
+  const missingNames = clientNames.filter(name => !selectedNames.has(name))
 
   if (missingNames.length) {
-    throw new Error(`Selected clients were not found or are not enabled: ${missingNames.join(', ')}`)
+    throw new Error(
+      `Selected clients were not found or are not enabled: ${missingNames.join(', ')}`
+    )
   }
 
   return runClientsOrchestrator(selectedClients)
@@ -2259,13 +2953,17 @@ async function stopStartedProfiles(): Promise<void> {
     return
   }
 
-  await Promise.all(profileIds.map(async (profileId) => {
-    try {
-      await stopDolphinProfile(profileId)
-    } catch (error: unknown) {
-      console.error(`Failed to stop Dolphin profile ${profileId}: ${getErrorMessage(error)}`)
-    }
-  }))
+  await Promise.all(
+    profileIds.map(async profileId => {
+      try {
+        await stopDolphinProfile(profileId)
+      } catch (error: unknown) {
+        console.error(
+          `Failed to stop Dolphin profile ${profileId}: ${getErrorMessage(error)}`
+        )
+      }
+    })
+  )
 }
 
 function installProcessShutdownCleanup(): void {
@@ -2276,7 +2974,9 @@ function installProcessShutdownCleanup(): void {
     }
 
     cleanupStarted = true
-    console.error(`Received ${signal}; stopping started Dolphin profiles before exit`)
+    console.error(
+      `Received ${signal}; stopping started Dolphin profiles before exit`
+    )
     writeLocalRunLog({
       kind: 'process-signal',
       signal,
@@ -2318,6 +3018,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertDolphinAppRunning,
   assertPreexistingDolphinProfileLimit,
   getLocalRunLogFile: () => LOCAL_RUN_LOG_FILE,
   getRecommendedExternalTimeoutMs,

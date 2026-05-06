@@ -1,4 +1,5 @@
 const { TelegramClient } = require("telegram");
+const { Logger, LogLevel } = require("telegram/extensions/Logger");
 const { StringSession } = require("telegram/sessions");
 const fs = require('node:fs')
 const path = require('node:path')
@@ -101,17 +102,18 @@ async function resolveTelegramTarget(client: any, to: string): Promise<any> {
 }
 
 async function createTelegramClient() {
-  console.log("start");
-
   const telegramSession = readStoredTelegramSession()
   const stringSession = new StringSession(telegramSession);
   const client = new TelegramClient(
     stringSession,
     apiId,
     apiHash,
-    { connectionRetries: 5 }
+    {
+      connectionRetries: 5,
+      baseLogger: new Logger(LogLevel.NONE)
+    }
   );
-  console.log("continue");
+  client.setLogLevel?.(LogLevel.NONE)
 
   await client.start({
     phoneNumber: async () => await input.text("Phone: +995595830004"),

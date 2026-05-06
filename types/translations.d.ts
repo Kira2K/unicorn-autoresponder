@@ -1,6 +1,10 @@
 declare enum TableToVarsTranslations {
   telegram = 'ТГ',
   stack = 'стек',
+  hhRuPhoneNumber = 'rusPhoneNumber',
+  hhEmail = 'emailHH',
+  hhEmailPassword = 'passwordEmailHH',
+  hhPassword = 'passwordHH',
   dolphinProfileId = 'Dolphin Profile Id',
   dolphinProfileRuId = 'Dolphin Profile Ru Id',
   dolphinProfileEnId = 'Dolphin Profile En Id',

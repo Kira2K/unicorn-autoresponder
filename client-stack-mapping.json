@@ -1,29 +1,14 @@
 {
-  "exportedAt": "2026-04-26T18:48:55.338Z",
+  "exportedAt": "2026-04-30T17:56:16.389Z",
   "spreadsheetId": "1-l7idG6QPBQNZZtqzSzdMWJgbDc0v-ClcpEsiaHeWDA",
   "spreadsheetTitle": "ПЕРСОНАЛЬНЫЕ ДАННЫЕ основная таблица",
   "personalDataSheetName": "ПЕРС ДАННЫЕ",
   "stacksSheetName": "Стеки",
-  "allowedStacks": [
-    "Кира",
-    "PYTHON"
-  ],
-  "workWithRuOnly": true,
-  "total": 2,
-  "mappings": [
-    {
-      "clientName": "Кира",
-      "stack": "КИРА",
-      "market": "Ru",
-      "stackSheetName": "Стеки",
-      "stackScenario": "https://hh.ru/search/vacancy?ored_clusters=true&search_field=name&enable_snippets=true&area=113&hhtmFrom=vacancy_search_list&hhtmFromLabel=vacancy_search_line&employment_form=FULL&text=%22react%22+or+%22frontend%22+or+%22front%22&excluded_text=svelte%2C+full%2C+native%2C+fullstack%2C+svelte%2C+angular%2C+nuxt%2C+angular.js%2C+flutterC%2B%2B%2C+C%23%2C+AI%2C+QA%2C+AQA%2C+%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5%2C+%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D1%89%D0%B8%D0%BA%2C+%D0%BD%D0%B5%D0%BC%D0%B5%D1%86%D0%BA%D0%B8%D0%B9%2C+%D1%84%D1%80%D0%B0%D0%BD%D1%86%D1%83%D0%B7%D1%81%D0%BA%D0%B8%D0%B9%2C+intern%2C+trainee%2C+%D1%81%D1%82%D0%B0%D0%B6%D0%B5%D1%80%2C+junior%2C+vue%2C+angular%2C+native&professional_role=96"
-    },
-    {
-      "clientName": "Владимир",
-      "stack": "PYTHON",
-      "market": "Ru",
-      "stackSheetName": "Стеки",
-      "stackScenario": "https://hh.ru/search/vacancy?area=113&employment_form=FULL&ored_clusters=true&search_field=name&hhtmFrom=vacancy_search_map&text=%22backend%22+or+%22back%22+or+%22python%22+or+%22fastapi%22+or+%22django%22&excluded_text=1%D0%A1%2C+1C%2C+SEO%2C+DevOps%2C+.net%2C+AI%2C+QA%2C+AQA%2C+%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5%2C+%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D1%89%D0%B8%D0%BA%2C+%D0%BD%D0%B5%D0%BC%D0%B5%D1%86%D0%BA%D0%B8%D0%B9%2C+%D1%84%D1%80%D0%B0%D0%BD%D1%86%D1%83%D0%B7%D1%81%D0%BA%D0%B8%D0%B9%2C+fullstack%2C+full%2C+stack%2C+frontend%2C+junior%2C+angular%2C+ETL%2C+jun%2C+jun%2B%2C+AI%2C+angular%2C+ETL%2C+java%2C+IOS%2C+node.js%2C+php%2C+ruby%2C+rust%2C+symfony%2C+scala%2C+android%2C+react-native%2C+react%2C+bitrix%2C+flutter%2C+intern%2C+trainee%2C+laravel%2C+golang%2C+go%2C+C%23&professional_role=96&enable_snippets=true"
-    }
-  ]
+  "mapping": {
+    "clientName": "Кира",
+    "stack": "КИРА",
+    "market": "Ru",
+    "stackSheetName": "Стеки",
+    "stackScenario": "https://hh.ru/search/vacancy?ored_clusters=true&search_field=name&enable_snippets=true&area=113&hhtmFrom=vacancy_search_list&hhtmFromLabel=vacancy_search_line&employment_form=FULL&text=%22react%22+or+%22frontend%22+or+%22front%22&excluded_text=svelte%2C+full%2C+native%2C+fullstack%2C+svelte%2C+angular%2C+nuxt%2C+angular.js%2C+flutterC%2B%2B%2C+C%23%2C+AI%2C+QA%2C+AQA%2C+%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5%2C+%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D1%89%D0%B8%D0%BA%2C+%D0%BD%D0%B5%D0%BC%D0%B5%D1%86%D0%BA%D0%B8%D0%B9%2C+%D1%84%D1%80%D0%B0%D0%BD%D1%86%D1%83%D0%B7%D1%81%D0%BA%D0%B8%D0%B9%2C+intern%2C+trainee%2C+%D1%81%D1%82%D0%B0%D0%B6%D0%B5%D1%80%2C+junior%2C+vue%2C+angular%2C+native&professional_role=96"
+  }
 }
