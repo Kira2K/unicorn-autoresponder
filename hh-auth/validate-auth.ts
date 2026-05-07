@@ -50,6 +50,7 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     loginButton: await isAttached(page, hhAuthSelectors.loginForm.loginButton, timeoutMs),
     accountTypeCards: await isAttached(page, hhAuthSelectors.loginForm.accountTypeCards, timeoutMs),
     phoneInput: await isAttached(page, hhAuthSelectors.loginForm.phone, timeoutMs),
+    emailInput: await isAttached(page, hhAuthSelectors.loginForm.email, timeoutMs),
     passwordInput: await isAttached(page, hhAuthSelectors.loginForm.password, timeoutMs),
     captchaContainer: await isAttached(page, hhAuthSelectors.captcha.container, timeoutMs),
     captchaChallenge: await isAttached(page, hhAuthSelectors.captcha.challenge, timeoutMs)
@@ -64,6 +65,7 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     signals.loginButton ||
     signals.accountTypeCards ||
     signals.phoneInput ||
+    signals.emailInput ||
     signals.passwordInput ||
     /^https:\/\/([^/]+\.)?hh\.ru\/account\/login/i.test(page.url())
   ) {

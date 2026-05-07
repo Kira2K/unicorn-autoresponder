@@ -3,8 +3,15 @@ const path = require('node:path')
 
 require('dotenv').config({ quiet: true })
 
-const DOLPHIN_API_BASE_URL = 'https://dolphin-anty-api.com'
 const PROFILES_EXPORT_FILE = path.resolve(__dirname, 'dolphin-profiles.json')
+const {
+  requestDolphinCloudApi
+} = require('./orchestrator/dolphin-cloud-api.ts') as {
+  requestDolphinCloudApi<T>(
+    endpointPath: string,
+    options?: ApiRequestOptions
+  ): Promise<T>
+}
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT'
 
@@ -52,61 +59,8 @@ if (!dolphinApiToken) {
   throw new Error('Missing required environment variable: dolphin_api_token')
 }
 
-console.log(dolphinApiToken)
-
-function buildUrl(path: string, query?: ApiRequestOptions['query']): string {
-  const url = new URL(path, DOLPHIN_API_BASE_URL)
-
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined) {
-        url.searchParams.set(key, String(value))
-      }
-    }
-  }
-
-  return url.toString()
-}
-
-async function requestDolphinApi<T>(
-  path: string,
-  options: ApiRequestOptions = {}
-): Promise<T> {
-  const method = options.method ?? 'GET'
-  const response = await fetch(buildUrl(path, options.query), {
-    method,
-    headers: {
-      Authorization: `Bearer ${dolphinApiToken}`,
-      Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {})
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  })
-
-  const responseText = await response.text()
-  let data: any = null
-
-  try {
-    data = responseText ? JSON.parse(responseText) : null
-  } catch {
-    data = responseText
-  }
-
-  if (!response.ok) {
-    const message =
-      data?.message ||
-      data?.error ||
-      (typeof data === 'string' && data.trim()) ||
-      `Dolphin API request failed: ${response.status} ${response.statusText}`
-
-    throw new Error(message)
-  }
-
-  return data as T
-}
-
 async function loginWithToken(): Promise<DolphinLoginResponse> {
-  return requestDolphinApi<DolphinLoginResponse>('/v1.0/auth/login-with-token', {
+  return requestDolphinCloudApi<DolphinLoginResponse>('/v1.0/auth/login-with-token', {
     method: 'POST',
     body: {
       token: dolphinApiToken
@@ -117,7 +71,7 @@ async function loginWithToken(): Promise<DolphinLoginResponse> {
 async function getBrowserProfiles(
   limit = 10
 ): Promise<DolphinPaginatedResponse<DolphinBrowserProfile>> {
-  return requestDolphinApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
+  return requestDolphinCloudApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
     '/browser_profiles',
     {
       query: {
@@ -129,7 +83,7 @@ async function getBrowserProfiles(
 
 async function getAllBrowserProfiles(): Promise<DolphinBrowserProfile[]> {
   const limit = 100
-  const firstPage = await requestDolphinApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
+  const firstPage = await requestDolphinCloudApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
     '/browser_profiles',
     {
       query: {
@@ -145,7 +99,7 @@ async function getAllBrowserProfiles(): Promise<DolphinBrowserProfile[]> {
   while (profiles.length < total) {
     currentPage += 1
 
-    const nextPage = await requestDolphinApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
+    const nextPage = await requestDolphinCloudApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
       '/browser_profiles',
       {
         query: {
@@ -166,7 +120,7 @@ async function getAllBrowserProfiles(): Promise<DolphinBrowserProfile[]> {
 }
 
 async function getProxies(limit = 10): Promise<DolphinPaginatedResponse<DolphinProxy>> {
-  return requestDolphinApi<DolphinPaginatedResponse<DolphinProxy>>('/proxy', {
+  return requestDolphinCloudApi<DolphinPaginatedResponse<DolphinProxy>>('/proxy', {
     query: {
       limit
     }
@@ -212,5 +166,5 @@ module.exports = {
   getBrowserProfiles,
   getProxies,
   loginWithToken,
-  requestDolphinApi
+  requestDolphinCloudApi
 }

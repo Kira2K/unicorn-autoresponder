@@ -2,6 +2,7 @@ const MANUAL_LIST_STORAGE_URL = 'https://hh.ru/'
 const DEFAULT_TIMEOUT_MS = 150000
 const DEFAULT_MAX_CHECKS = 200
 const DEFAULT_MANUAL_LIST_KEY = 'hh_ar_v2_manual_list'
+const { normalizeHhUrl } = require('./shared/hh-url.ts')
 
 const APPLY_BUTTON_SELECTOR = [
   '[data-qa="vacancy-response-link-top"]',
@@ -43,28 +44,6 @@ type ManualVacanciesCleanupResult = {
   remainingCount: number
   keptCount: number
   items: ManualVacancyCleanupItem[]
-}
-
-function normalizeHhUrl(rawUrl: unknown): string | undefined {
-  if (!rawUrl) {
-    return undefined
-  }
-
-  try {
-    const parsedUrl = new URL(String(rawUrl), 'https://hh.ru')
-
-    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-      return undefined
-    }
-
-    if (!/(^|\.)hh\.ru$/i.test(parsedUrl.hostname)) {
-      return undefined
-    }
-
-    return parsedUrl.href
-  } catch {
-    return undefined
-  }
 }
 
 function getVacancyIdFromValue(value: unknown): string | undefined {

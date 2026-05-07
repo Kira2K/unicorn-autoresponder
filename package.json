@@ -8,6 +8,7 @@
     "orchestrator": "node orchestrator.ts",
     "check-table": "node check-table-state.ts",
     "table:state": "node check-table-state.ts",
+    "test:refactor": "node refactor-checks.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

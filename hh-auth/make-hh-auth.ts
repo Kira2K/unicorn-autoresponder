@@ -89,6 +89,95 @@ async function fillAuthField(
   return container
 }
 
+async function ensureEmailLoginMode(
+  page: any,
+  options: MakeHHAuthOptions
+): Promise<void> {
+  if (await selectorExists(page, hhAuthSelectors.loginForm.email)) {
+    return
+  }
+
+  if (await selectorExists(page, hhAuthSelectors.loginForm.emailCredentialType)) {
+    const emailCredentialType = await waitForAuthSelector(
+      page,
+      hhAuthSelectors.loginForm.emailCredentialType,
+      'email-credential-type',
+      options
+    )
+    await emailCredentialType.click({ timeout: options.timeoutMs })
+    await page.waitForTimeout(500)
+  } else {
+    const emailTab = page.getByText?.('Почта', { exact: true }).first()
+
+    if (emailTab && (await emailTab.count().catch(() => 0))) {
+      await emailTab.click({ timeout: options.timeoutMs })
+      await page.waitForTimeout(500)
+    }
+  }
+
+  await waitForAuthSelector(
+    page,
+    hhAuthSelectors.loginForm.email,
+    'email-input',
+    options
+  )
+}
+
+async function ensureLoginFormOpen(
+  page: any,
+  options: MakeHHAuthOptions
+): Promise<void> {
+  const loginFormVisible = async () =>
+    (await selectorExists(page, hhAuthSelectors.loginForm.phone)) ||
+    (await selectorExists(page, hhAuthSelectors.loginForm.email)) ||
+    (await selectorExists(page, hhAuthSelectors.loginForm.emailCredentialType)) ||
+    (await selectorExists(page, hhAuthSelectors.loginForm.accountTypeCards))
+
+  if (await loginFormVisible()) {
+    return
+  }
+
+  if (await selectorExists(page, hhAuthSelectors.loginForm.loginButton)) {
+    const loginButton = await waitForAuthSelector(
+      page,
+      hhAuthSelectors.loginForm.loginButton,
+      'login-button',
+      options
+    )
+    await loginButton.click({ timeout: options.timeoutMs })
+    await page.waitForLoadState('domcontentloaded', {
+      timeout: options.timeoutMs
+    }).catch(() => undefined)
+    await page.waitForTimeout(1500)
+  }
+
+  if (await loginFormVisible()) {
+    return
+  }
+
+  await page.goto('https://hh.ru/account/login', {
+    waitUntil: 'domcontentloaded',
+    timeout: options.timeoutMs
+  })
+  await page.waitForLoadState('domcontentloaded', {
+    timeout: options.timeoutMs
+  }).catch(() => undefined)
+  await page.waitForTimeout(1500)
+
+  if (await loginFormVisible()) {
+    return
+  }
+
+  throw new HHAuthError(
+    'selector_missing',
+    'HH login form did not open from the home page or direct login URL',
+    {
+      url: page.url(),
+      dataQa: await collectDataQa(page)
+    }
+  )
+}
+
 async function openConnectedPage(options: MakeHHAuthOptions, profileId: number, mode: 'headless' | 'headfull'): Promise<{
   startedProfile: StartedProfile
   browser: any
@@ -217,17 +306,7 @@ function makeHHAuth(options: MakeHHAuthOptions) {
         timeout: options.timeoutMs
       })
 
-      if (!await selectorExists(headfull.page, hhAuthSelectors.loginForm.phone)) {
-        if (await selectorExists(headfull.page, hhAuthSelectors.loginForm.loginButton)) {
-          const loginButton = await waitForAuthSelector(
-            headfull.page,
-            hhAuthSelectors.loginForm.loginButton,
-            'login-button',
-            options
-          )
-          await loginButton.click({ timeout: options.timeoutMs })
-        }
-      }
+      await ensureLoginFormOpen(headfull.page, options)
 
       if (!await selectorExists(headfull.page, hhAuthSelectors.loginForm.phone)) {
         if (await selectorExists(headfull.page, hhAuthSelectors.loginForm.accountTypeCards)) {
@@ -245,14 +324,16 @@ function makeHHAuth(options: MakeHHAuthOptions) {
         }
       }
 
+      await ensureEmailLoginMode(headfull.page, options)
+
       await fillAuthField(
         headfull.page,
-        hhAuthSelectors.loginForm.phone,
-        'phone-input',
-        credentials.phone,
+        hhAuthSelectors.loginForm.email,
+        'email-input',
+        credentials.email,
         options
       )
-      await takeScreenshot(headfull.page, options.artifactDir, '02-auth-phone-entered.png')
+      await takeScreenshot(headfull.page, options.artifactDir, '02-auth-email-entered.png')
       await headfull.page.keyboard.press('Escape').catch(() => undefined)
       await headfull.page.waitForTimeout(500)
 

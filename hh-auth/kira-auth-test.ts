@@ -222,15 +222,13 @@ async function main(): Promise<void> {
 
       log('Loaded Kira HH auth credentials from sheet', {
         clientName: credentials.clientName,
-        rawPhone: credentials.rawPhone,
-        phone: credentials.phone,
+        email: credentials.email,
         hasPassword: Boolean(credentials.password),
-        hasEmail: Boolean(credentials.email),
         hasEmailPassword: Boolean(credentials.emailPassword)
       })
 
       return {
-        phone: credentials.phone,
+        email: credentials.email,
         password: credentials.password
       }
     },

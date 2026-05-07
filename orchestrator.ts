@@ -4,83 +4,95 @@ const path = require('node:path')
 const childProcess = require('node:child_process')
 require('dotenv').config({ quiet: true })
 
+const { getClientHHAuthCredentials } = require('./google-sheets-check.ts')
 const {
-  getAllClientsAutomationData,
-  getClientAutomationData,
-  getClientHHAuthCredentials
-} = require('./google-sheets-check.ts')
+  createClientAutomationRepository
+} = require('./sheets/automation-repository.ts')
 const { makeHHAuth } = require('./hh-auth/index.ts')
 const { sendTelegramMessage } = require('./messenger.ts')
 const { runManualVacanciesCleanup } = require('./manual-vacancies-cleanup.ts')
-
-const DOLPHIN_LOCAL_API_BASE_URL = 'http://localhost:3001/v1.0'
-const DOLPHIN_CLOUD_API_BASE_URL = 'https://dolphin-anty-api.com'
-const INDEX_SCRIPT_PATH = path.resolve(__dirname, 'index.js')
-const AUTOMATION_LOCK_TAG = 'Автоотклики, не трогай'
-const AUTOMATION_LOCK_STATUS_NAME = 'Автоотклики, не трогай'
-const AUTOMATION_LOCK_STATUS_COLOR = 'orange'
-const HH_AUTO_RESPONDER_SETTINGS_KEY = 'hh_ar_v2_cfg_data'
-const HH_AUTO_RESPONDER_RUNNING_KEY = 'hh_ar_v2_is_active'
-const HH_AUTO_RESPONDER_MANUAL_LIST_KEY = 'hh_ar_v2_manual_list'
-const HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY =
-  'hh_ar_v2_successful_responses'
-const HH_AUTO_RESPONDER_LOGS_KEY = 'hh_ar_v2_logs'
-const HH_AUTO_RESPONDER_STOP_REASON_KEY = 'hh_ar_v2_stop_reason'
-const HH_AUTO_RESPONDER_PARSER_ERRORS_KEY = 'hh_ar_v2_parser_errors'
-const HH_AUTO_RESPONDER_RECENT_URLS_KEY = 'hh_ar_v2_recent_urls'
-const DEFAULT_WATCH_MS = 15 * 60 * 1000
-const AUTO_RESPONDER_WATCH_MS = Number(
-  process.env.ORCHESTRATOR_WATCH_MS ?? DEFAULT_WATCH_MS
-)
-const DEFAULT_CLIENT_START_DELAY_MS = 20 * 1000
-const CLIENT_START_DELAY_MS = Number(
-  process.env.ORCHESTRATOR_START_DELAY_MS ?? DEFAULT_CLIENT_START_DELAY_MS
-)
-const EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS = 60 * 1000
-const EXTERNAL_TIMEOUT_MULTIPLIER = 1.1
-const DOLPHIN_HEADLESS = parseBooleanEnv(process.env.DOLPHIN_HEADLESS, true)
-const HH_AUTH_DEBUG = parseBooleanEnv(process.env.HH_AUTH_DEBUG, false)
-const HH_AUTH_TIMEOUT_MS = Number(process.env.HH_AUTH_TIMEOUT_MS ?? 30000)
-const LOGS_CHANNEL_ID = process.env.logs_channel_id?.trim()
-const SUMMARY_LOGS_CHANNEL_ID = process.env.summary_logs_channel_id?.trim()
-const TELEGRAM_MESSAGE_LIMIT = 3900
-const MAX_PREEXISTING_DOLPHIN_PROFILES = Number(
-  process.env.MAX_PREEXISTING_DOLPHIN_PROFILES ?? 3
-)
-const CONNECT_OVER_CDP_TIMEOUT_MS = 60000
-const HH_INITIAL_NAVIGATION_TIMEOUT_MS = 150000
-const DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS = 5000
-const NORMAL_AUTO_RESPONDER_STOP_REASONS = new Set([
-  'targets_processed',
-  'no_new_targets',
-  'limit_reached',
-  'hh_response_daily_limit_exceeded',
-  'user_stop'
-])
-const AUTH_CHECK_PARSER_ERROR_CODES = new Set(['ERROR_NO_MODAL'])
-const HH_AUTO_RESPONDER_URL_PATTERNS = [
-  /^https?:\/\/([^/?#]+\.)?hh\.ru\/search\/vacancy(?:[/?#]|$)/i,
-  /^https?:\/\/([^/?#]+\.)?hh\.ru\/vacancy\/[^/?#]+/i,
-  /^https?:\/\/([^/?#]+\.)?hh\.ru\/applicant\/vacancy_response(?:[/?#]|$)/i
-]
-const LOCAL_RUN_LOG_DIR = path.resolve(__dirname, 'logs')
-const LOCAL_RUN_ID = new Date().toISOString().replace(/[:.]/g, '-')
-const LOCAL_RUN_LOG_FILE = path.join(
+const {
+  getVacancyIdFromUrl,
+  isAutoResponderUrl
+} = require('./shared/hh-url.ts')
+const { requestDolphinCloudApi } =
+  require('./orchestrator/dolphin-cloud-api.ts') as {
+    requestDolphinCloudApi<T>(
+      endpointPath: string,
+      options?: {
+        method?: 'GET' | 'PATCH' | 'POST' | 'DELETE' | 'PUT'
+        query?: Record<string, string | number | boolean | undefined>
+        body?: unknown
+      }
+    ): Promise<T>
+  }
+const { splitTelegramMessage } = require('./orchestrator/reports.ts')
+const {
+  AUTOMATION_LOCK_STATUS_COLOR,
+  AUTOMATION_LOCK_STATUS_NAME,
+  AUTOMATION_LOCK_TAG,
+  AUTO_RESPONDER_WATCH_MS,
+  AUTH_CHECK_PARSER_ERROR_CODES,
+  CLIENT_START_DELAY_MS,
+  CONNECT_OVER_CDP_TIMEOUT_MS,
+  DOLPHIN_HEADLESS,
+  DOLPHIN_LOCAL_API_BASE_URL,
+  DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS,
+  DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS,
+  DOLPHIN_PROFILE_START_MAX_ATTEMPTS,
+  DOLPHIN_PROFILE_START_RETRY_BASE_MS,
+  EXTERNAL_TIMEOUT_MULTIPLIER,
+  EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS,
+  HH_AUTH_DEBUG,
+  HH_AUTH_TIMEOUT_MS,
+  HH_AUTO_RESPONDER_LOGS_KEY,
+  HH_AUTO_RESPONDER_MANUAL_LIST_KEY,
+  HH_AUTO_RESPONDER_PARSER_ERRORS_KEY,
+  HH_AUTO_RESPONDER_RECENT_URLS_KEY,
+  HH_AUTO_RESPONDER_RUNNING_KEY,
+  HH_AUTO_RESPONDER_SETTINGS_KEY,
+  HH_AUTO_RESPONDER_STOP_REASON_KEY,
+  HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
+  HH_INITIAL_NAVIGATION_TIMEOUT_MS,
+  INDEX_SCRIPT_PATH,
+  LOCAL_RUN_ID,
   LOCAL_RUN_LOG_DIR,
-  `orchestrator-run-${LOCAL_RUN_ID}-${process.pid}.jsonl`
-)
+  LOCAL_RUN_LOG_FILE,
+  LOGS_CHANNEL_ID,
+  MAX_PREEXISTING_DOLPHIN_PROFILES,
+  NORMAL_AUTO_RESPONDER_STOP_REASONS,
+  ORCHESTRATOR_WORK_WITH_MARKET,
+  SUMMARY_LOGS_CHANNEL_ID,
+  TELEGRAM_MESSAGE_LIMIT
+} = require('./orchestrator/config.ts')
 const startedProfileIds = new Set<number>()
 let automationLockStatusId: number | undefined
 
 type ClientAutomationData = {
   clientName: string
   stack: string
-  market?: string
+  market: 'Ru' | 'En'
   stackSheetName: string
   stackScenario?: string
   dolphinProfileId: number
   commonChatId: string
   coverText?: string
+  hhAuthCredentials?: ClientHHAuthCredentials
+}
+
+type ClientHHAuthCredentials = {
+  clientName: string
+  market?: 'Ru' | 'En'
+  phone: string
+  rawPhone: string
+  password: string
+  email: string
+  emailPassword?: string
+}
+
+type AutomationTargetOptions = {
+  workWithRuOnly?: boolean
+  market?: 'Ru' | 'En'
 }
 
 type DolphinStartResponse = {
@@ -278,44 +290,11 @@ type OpenScenarioResult = {
   }
 }
 
-function parseBooleanEnv(
-  value: string | undefined,
-  fallback: boolean
-): boolean {
-  if (value === undefined) {
-    return fallback
-  }
-
-  return ['1', 'true', 'yes', 'да', 'y'].includes(value.trim().toLowerCase())
-}
-
 function loadPlaywright() {
   try {
     return require('playwright')
   } catch {
     return require('C:/Users/kiras/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
-  }
-}
-
-function isAutoResponderUrl(url: string): boolean {
-  return HH_AUTO_RESPONDER_URL_PATTERNS.some(pattern => pattern.test(url))
-}
-
-function getVacancyIdFromUrl(url: string): string | undefined {
-  try {
-    const parsedUrl = new URL(url)
-    const pathMatch = parsedUrl.pathname.match(/\/vacancy\/(\d+)/)
-
-    if (pathMatch?.[1]) {
-      return pathMatch[1]
-    }
-
-    return parsedUrl.searchParams.get('vacancyId') || undefined
-  } catch {
-    const pathMatch = url.match(/\/vacancy\/(\d+)/)
-    const queryMatch = url.match(/[?&]vacancyId=(\d+)/)
-
-    return pathMatch?.[1] || queryMatch?.[1]
   }
 }
 
@@ -987,28 +966,6 @@ async function getParserLogs(page: any): Promise<ParserLogEntry[]> {
   return []
 }
 
-function splitTelegramMessage(message: string): string[] {
-  const chunks: string[] = []
-  let rest = message
-
-  while (rest.length > TELEGRAM_MESSAGE_LIMIT) {
-    let cutIndex = rest.lastIndexOf('\n\n', TELEGRAM_MESSAGE_LIMIT)
-
-    if (cutIndex < TELEGRAM_MESSAGE_LIMIT / 2) {
-      cutIndex = TELEGRAM_MESSAGE_LIMIT
-    }
-
-    chunks.push(rest.slice(0, cutIndex).trim())
-    rest = rest.slice(cutIndex).trim()
-  }
-
-  if (rest) {
-    chunks.push(rest)
-  }
-
-  return chunks
-}
-
 function truncateText(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
     return value
@@ -1170,7 +1127,6 @@ function isAutoResponderStopNormal(status: OrchestratorStatus): boolean {
   if (status.autoResponderStopReason === 'orchestrator_stop_after_watch') {
     return Boolean(
       status.autoResponderWatchTimedOut &&
-      status.stopButtonClicked &&
       status.profileStopped &&
       status.profileTagRemoved &&
       status.profileStatusRestored &&
@@ -1711,7 +1667,9 @@ function isClientReportSuccessful(status: OrchestratorStatus): boolean {
 
   if (status.autoResponderStopReason === 'orchestrator_stop_after_watch') {
     return Boolean(
-      status.autoResponderWatchTimedOut && status.stopButtonClicked
+      status.autoResponderWatchTimedOut &&
+      !status.error &&
+      !status.telegramError
     )
   }
 
@@ -1739,8 +1697,8 @@ function formatManualVacanciesMessage(
     manualVacanciesCleanupLine
       ? escapeTelegramHtml(manualVacanciesCleanupLine)
       : undefined,
-    'Это первый день автооткликов, за баги не ругайтесь, а репортите, будем чинить!',
-    'Важно: список ручных вакансий может содержать не новые позиции из прошлых прогонов. Это будет исправлено в будущей версии.'
+    'Отклики на ру рынке стабилизированы. Если видите баги, репортите, будем чинить!',
+    'Апдейты: успешно откликнутые вакансии для мануального отклика больше не попадают в выборку.'
   ]
     .filter((line): line is string => line !== undefined)
     .join('\n')
@@ -1918,53 +1876,6 @@ async function requestLocalDolphin<T>(
     error.details = data
 
     throw error
-  }
-
-  return data as T
-}
-
-async function requestDolphinCloudApi<T>(
-  endpointPath: string,
-  options: {
-    method?: 'GET' | 'PATCH' | 'POST'
-    body?: unknown
-  } = {}
-): Promise<T> {
-  const token = process.env.dolphin_api_token
-
-  if (!token) {
-    throw new Error('Missing required environment variable: dolphin_api_token')
-  }
-
-  const response = await fetch(
-    new URL(endpointPath, DOLPHIN_CLOUD_API_BASE_URL).toString(),
-    {
-      method: options.method ?? 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {})
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined
-    }
-  )
-  const responseText = await response.text()
-  let data: any = null
-
-  try {
-    data = responseText ? JSON.parse(responseText) : null
-  } catch {
-    data = responseText
-  }
-
-  if (!response.ok) {
-    const message =
-      stringifyApiMessage(data?.message) ||
-      stringifyApiMessage(data?.error) ||
-      stringifyApiMessage(data) ||
-      `Dolphin cloud API failed: ${response.status} ${response.statusText}`
-
-    throw new Error(message)
   }
 
   return data as T
@@ -2184,7 +2095,7 @@ async function startDolphinProfileWithHeadless(
     automation: true,
     headless
   }
-  const maxAttempts = 5
+  const maxAttempts = DOLPHIN_PROFILE_START_MAX_ATTEMPTS
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -2197,8 +2108,13 @@ async function startDolphinProfileWithHeadless(
         throw error
       }
 
+      const retryDelayMs = DOLPHIN_PROFILE_START_RETRY_BASE_MS * attempt
+      console.warn(
+        `Dolphin profile ${profileId} is still running before start attempt ` +
+          `${attempt + 1}/${maxAttempts}; stopping and waiting ${retryDelayMs}ms`
+      )
       await stopDolphinProfile(profileId).catch(() => undefined)
-      await wait(3000 * attempt)
+      await wait(retryDelayMs)
     }
   }
 
@@ -2257,12 +2173,12 @@ async function ensureHHAuthForClient(
     errorArtifactDir: getHHAuthErrorArtifactDir(clientData),
     connectToProfile: connectToDolphinStartedProfile,
     getCredentials: async () => {
-      const credentials = await getClientHHAuthCredentials(
-        clientData.clientName
-      )
+      const credentials =
+        clientData.hhAuthCredentials ??
+        (await getClientHHAuthCredentials(clientData.clientName, clientData.market))
 
       return {
-        phone: credentials.phone,
+        email: credentials.email,
         password: credentials.password
       }
     },
@@ -2480,6 +2396,16 @@ async function runClientOrchestrator(
       'HH auth ensured',
       formatAuthCheckBrief(authBeforeStart)
     )
+
+    if (DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS > 0) {
+      status = addLifecycleEvent(
+        status,
+        runStartedAt,
+        'waiting for Dolphin profile release after HH auth',
+        `${DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS}ms`
+      )
+      await wait(DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS)
+    }
 
     status = addLifecycleEvent(status, runStartedAt, 'starting Dolphin profile')
     const startResponse = await startDolphinProfile(clientData.dolphinProfileId)
@@ -2834,16 +2760,102 @@ async function runClientOrchestrator(
 }
 
 async function runKiraOrchestrator(): Promise<OrchestratorStatus> {
-  const clientData: ClientAutomationData = await getClientAutomationData('Кира')
+  const repository = await createClientAutomationRepository()
+  const clientData: ClientAutomationData = attachHHAuthCredentials(
+    [repository.getAutomationTarget('Кира')],
+    repository
+  )[0]
 
   return runClientOrchestrator(clientData)
 }
 
 function getConfiguredClientNames(): string[] {
-  return String(process.env.ORCHESTRATOR_CLIENT_NAMES ?? '')
+  return parseCommaSeparatedEnv(process.env.ORCHESTRATOR_CLIENT_NAMES)
+}
+
+function getConfiguredClientIds(): string[] {
+  return parseCommaSeparatedEnv(process.env.ORCHESTRATOR_CLIENT_IDS)
+}
+
+function getConfiguredAutomationTargetOptions(): AutomationTargetOptions {
+  return {
+    market: ORCHESTRATOR_WORK_WITH_MARKET
+  }
+}
+
+function parseCommaSeparatedEnv(value: string | undefined): string[] {
+  return String(value ?? '')
     .split(',')
-    .map(name => name.trim())
+    .map(item => item.trim())
     .filter(Boolean)
+}
+
+function attachHHAuthCredentials(
+  clients: ClientAutomationData[],
+  repository: {
+    getHHAuthCredentialsByCommonChatId(
+      commonChatId: string,
+      market?: 'Ru' | 'En'
+    ): ClientHHAuthCredentials
+  }
+): ClientAutomationData[] {
+  return clients.map(client => ({
+    ...client,
+    hhAuthCredentials: repository.getHHAuthCredentialsByCommonChatId(
+      client.commonChatId,
+      client.market
+    )
+  }))
+}
+
+function selectClientsByCommonChatIds(
+  allClients: ClientAutomationData[],
+  clientIds: string[]
+): ClientAutomationData[] {
+  const selectedClients = allClients.filter(client =>
+    clientIds.includes(client.commonChatId)
+  )
+  const selectedIds = new Set(
+    selectedClients.map(client => client.commonChatId)
+  )
+  const missingIds = clientIds.filter(id => !selectedIds.has(id))
+
+  if (missingIds.length) {
+    throw new Error(
+      `Selected client ids were not found or are not enabled: ${missingIds.join(', ')}`
+    )
+  }
+
+  return selectedClients
+}
+
+function selectClientsByUniqueNames(
+  allClients: ClientAutomationData[],
+  clientNames: string[]
+): ClientAutomationData[] {
+  const selectedClients: ClientAutomationData[] = []
+
+  for (const clientName of clientNames) {
+    const matches = allClients.filter(client => client.clientName === clientName)
+
+    if (!matches.length) {
+      throw new Error(
+        `Selected clients were not found or are not enabled: ${clientName}`
+      )
+    }
+
+    if (matches.length > 1) {
+      throw new Error(
+        `Client name "${clientName}" is ambiguous. Matching chat ids: ${matches
+          .map(client => client.commonChatId)
+          .join(', ')}`
+      )
+    }
+
+    selectedClients.push(matches[0])
+  }
+
+  return selectedClients
 }
 
 async function runClientsOrchestrator(
@@ -2860,7 +2872,7 @@ async function runClientsOrchestrator(
     `Starting ${clients.length} clients with ${CLIENT_START_DELAY_MS}ms stagger: ${clients
       .map(
         client =>
-          `${client.clientName}/${client.market}(${client.dolphinProfileId})`
+          `${client.clientName}/${client.commonChatId}/${client.market}(${client.dolphinProfileId})`
       )
       .join(', ')}`
   )
@@ -2871,6 +2883,7 @@ async function runClientsOrchestrator(
   writeLocalRunLog({
     kind: 'run-start',
     localRunLogFile: LOCAL_RUN_LOG_FILE,
+    market: ORCHESTRATOR_WORK_WITH_MARKET,
     watchMs: AUTO_RESPONDER_WATCH_MS,
     clientStartDelayMs: CLIENT_START_DELAY_MS,
     recommendedExternalTimeoutMs: getRecommendedExternalTimeoutMs(
@@ -2878,6 +2891,7 @@ async function runClientsOrchestrator(
     ),
     clients: clients.map(client => ({
       clientName: client.clientName,
+      commonChatId: client.commonChatId,
       market: client.market,
       stack: client.stack,
       dolphinProfileId: client.dolphinProfileId
@@ -2912,32 +2926,54 @@ async function runClientsOrchestrator(
 async function runSelectedClientsOrchestrator(
   clientNames: string[]
 ): Promise<OrchestratorStatus[]> {
-  const allClients: ClientAutomationData[] = await getAllClientsAutomationData()
-  const selectedClients = allClients.filter(client =>
-    clientNames.includes(client.clientName)
+  const repository = await createClientAutomationRepository()
+  const allClients: ClientAutomationData[] =
+    repository.getAllAutomationTargets(getConfiguredAutomationTargetOptions())
+  const selectedClients = attachHHAuthCredentials(
+    selectClientsByUniqueNames(allClients, clientNames),
+    repository
   )
-  const selectedNames = new Set(
-    selectedClients.map(client => client.clientName)
-  )
-  const missingNames = clientNames.filter(name => !selectedNames.has(name))
 
-  if (missingNames.length) {
-    throw new Error(
-      `Selected clients were not found or are not enabled: ${missingNames.join(', ')}`
-    )
-  }
+  return runClientsOrchestrator(selectedClients)
+}
+
+async function runSelectedClientIdsOrchestrator(
+  clientIds: string[]
+): Promise<OrchestratorStatus[]> {
+  const repository = await createClientAutomationRepository()
+  const allClients: ClientAutomationData[] =
+    repository.getAllAutomationTargets(getConfiguredAutomationTargetOptions())
+  const selectedClients = attachHHAuthCredentials(
+    selectClientsByCommonChatIds(allClients, clientIds),
+    repository
+  )
 
   return runClientsOrchestrator(selectedClients)
 }
 
 async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
-  const clients: ClientAutomationData[] = await getAllClientsAutomationData()
+  const repository = await createClientAutomationRepository()
+  const clients: ClientAutomationData[] = attachHHAuthCredentials(
+    repository.getAllAutomationTargets(getConfiguredAutomationTargetOptions()),
+    repository
+  )
 
   return runClientsOrchestrator(clients)
 }
 
 async function runConfiguredOrchestrator(): Promise<OrchestratorStatus[]> {
+  const clientIds = getConfiguredClientIds()
   const clientNames = getConfiguredClientNames()
+
+  if (clientIds.length) {
+    if (clientNames.length) {
+      console.warn(
+        'ORCHESTRATOR_CLIENT_IDS is set; ignoring ORCHESTRATOR_CLIENT_NAMES.'
+      )
+    }
+
+    return runSelectedClientIdsOrchestrator(clientIds)
+  }
 
   if (clientNames.length) {
     return runSelectedClientsOrchestrator(clientNames)
@@ -3027,5 +3063,9 @@ module.exports = {
   runAllClientsOrchestrator,
   runClientOrchestrator,
   runConfiguredOrchestrator,
-  runKiraOrchestrator
+  isClientReportSuccessful,
+  runKiraOrchestrator,
+  selectClientsByCommonChatIds,
+  selectClientsByUniqueNames,
+  splitTelegramMessage
 }
