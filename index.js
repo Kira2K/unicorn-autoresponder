@@ -19,7 +19,8 @@
         manualList: STORAGE_PREFIX + 'manual_list',
         stopReason: STORAGE_PREFIX + 'stop_reason',
         parserErrors: STORAGE_PREFIX + 'parser_errors',
-        recentUrls: STORAGE_PREFIX + 'recent_urls'
+        recentUrls: STORAGE_PREFIX + 'recent_urls',
+        modalRetry: STORAGE_PREFIX + 'modal_retry'
     };
 
     // Важные селекторы, используемые в скрипте
@@ -34,7 +35,12 @@
         relocationBtn: '[data-qa="relocation-warning-confirm"]',
         dailyResponseLimitWarning: '[data-qa-popup-error-code="negotiations-limit-exceeded"]',
         vacancyLink: 'a[data-qa="serp-item__title"], a[data-qa="vacancy-serp__vacancy-title"], a[href*="/vacancy/"]',
-        vacancyCard: 'div[data-qa="vacancy-serp__vacancy"], div[data-qa="serp-item"], .vacancy-serp-item'
+        vacancyCard: 'div[data-qa="vacancy-serp__vacancy"], div[data-qa="serp-item"], .vacancy-serp-item',
+        login: '[data-qa="login"]',
+        signup: '[data-qa="signup"]',
+        anonymousProfileLink: '[data-qa="mainmenu_profile-link"][href*="/account/login"]',
+        loginFormEmail: '[data-qa="applicant-login-input-email"]',
+        loginFormPhone: '[data-qa="account-login-input"]'
     };
 
 
@@ -612,6 +618,37 @@
         return location.href.includes('/applicant/vacancy_response');
     }
 
+    function isAuthRequiredPage() {
+        const url = location.href;
+        const path = location.pathname;
+        const text = getNormalizedPageText();
+
+        return (
+            path.startsWith('/account/login') ||
+            /\/account\/login/i.test(url) ||
+            document.querySelector(SELECTORS.login) ||
+            document.querySelector(SELECTORS.signup) ||
+            document.querySelector(SELECTORS.anonymousProfileLink) ||
+            document.querySelector(SELECTORS.loginFormEmail) ||
+            document.querySelector(SELECTORS.loginFormPhone) ||
+            (
+                text.includes('войдите') &&
+                (text.includes('отклик') || text.includes('резюм'))
+            )
+        );
+    }
+
+    function markAuthRequired(reason) {
+        const details = reason || 'HH requested login while processing vacancy';
+
+        log(details, true);
+        StateManager.addParserError('AUTH_REQUIRED', details);
+        StateManager.setStopReason('auth_required', details, true);
+        StateManager.setRunning(false);
+        StateManager.releaseInstanceLock(TAB_ID);
+        setStatus('error', 'Требуется вход');
+    }
+
     function getNormalizedPageText() {
         return (document.body?.innerText || '')
             .toLowerCase()
@@ -771,6 +808,10 @@
     async function processVacancy(btn, isSecond = false) {
         log("начало")
         if (stopSignal) return 'STOPPED';
+        if (isAuthRequiredPage()) {
+            markAuthRequired('HH показал форму входа перед обработкой вакансии.');
+            return 'AUTH_REQUIRED';
+        }
 
         if (location.pathname.startsWith('/vacancy/')) {
             const vid = getStableVacancyId(btn);
@@ -840,6 +881,10 @@
 
             await actionPause();
             if (stopSignal) return 'STOPPED';
+            if (isAuthRequiredPage()) {
+                markAuthRequired('HH запросил вход после клика по кнопке отклика.');
+                return 'AUTH_REQUIRED';
+            }
             if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) {
                 log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                 return 'DAILY_RESPONSE_LIMIT';
@@ -877,6 +922,10 @@
             }
 
             if (!submitButton) {
+                if (isAuthRequiredPage()) {
+                    markAuthRequired('HH запросил вход вместо формы отклика.');
+                    return 'AUTH_REQUIRED';
+                }
                 if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) {
                     log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                     return 'DAILY_RESPONSE_LIMIT';
@@ -895,11 +944,14 @@
                     return 'REDIRECT';
                 }
 
-                const wasTried = localStorage.getItem(wasTried);
-                if(!wasTried || wasTried !== vid) {
-                  localStorage.setItem(wasTried, vid)
-                  window.location.reload();
+                const modalRetryId = sessionStorage.getItem(KEYS.modalRetry);
+                if (modalRetryId !== vid) {
+                    sessionStorage.setItem(KEYS.modalRetry, vid);
+                    StateManager.rememberUrl(location.href, 'retry-no-modal');
+                    window.location.reload();
+                    return 'RETRYING_NO_MODAL';
                 }
+                sessionStorage.removeItem(KEYS.modalRetry);
                 return 'ERROR_NO_MODAL';
             }
 
@@ -957,6 +1009,10 @@
                 log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                 return 'DAILY_RESPONSE_LIMIT';
             }
+            if (isAuthRequiredPage()) {
+                markAuthRequired('HH запросил вход после отправки формы отклика.');
+                return 'AUTH_REQUIRED';
+            }
             if (isResumeVisibilityRequiredResponse()) {
                 markVacancyProcessedAndReturn(
                     vid,
@@ -972,6 +1028,7 @@
                 const start = Date.now();
                 while (Date.now() - start < timeout) {
                     if (stopSignal) return false;
+                    if (isAuthRequiredPage()) return 'AUTH_REQUIRED';
                     if (document.querySelector('[data-qa="vacancy-response-link-view-topic"]')) return true;
                     if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) return 'DAILY_RESPONSE_LIMIT';
                     if (isResumeVisibilityRequiredResponse()) return 'RESUME_VISIBILITY_REQUIRED';
@@ -997,6 +1054,11 @@
             if (confirmationResult === 'DAILY_RESPONSE_LIMIT') {
                 log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                 return 'DAILY_RESPONSE_LIMIT';
+            }
+
+            if (confirmationResult === 'AUTH_REQUIRED') {
+                markAuthRequired('HH запросил вход во время ожидания подтверждения отклика.');
+                return 'AUTH_REQUIRED';
             }
 
             if (confirmationResult === 'RESUME_VISIBILITY_REQUIRED') {
@@ -1029,6 +1091,10 @@
                 await wait(800);
                 return 'OK';
             } else {
+                if (isAuthRequiredPage()) {
+                    markAuthRequired('HH запросил вход вместо подтверждения отклика.');
+                    return 'AUTH_REQUIRED';
+                }
                 if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) {
                     log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                     return 'DAILY_RESPONSE_LIMIT';
@@ -1110,6 +1176,12 @@
         StateManager.setRunning(true);
         setStatus('running');
 
+        if (isAuthRequiredPage()) {
+            markAuthRequired('HH показал форму входа при старте автооткликов.');
+            isLoopActive = false;
+            return;
+        }
+
         if (isManualResponsePage()) {
             handleManualResponsePage('Стартовали сразу на странице вопросов. Сохраняю вакансию для ручного отклика.');
             isLoopActive = false;
@@ -1151,6 +1223,9 @@
                 StateManager.setRunning(false);
                 StateManager.releaseInstanceLock(TAB_ID);
                 setStatus('done');
+                return;
+            } else if (res === 'AUTH_REQUIRED') {
+                isLoopActive = false;
                 return;
             } else if (res === 'NO_APPLY_RETURNED' || res === 'ERROR_NO_MODAL' || res === 'NO_CONFIRM') {
                 log(`Обработка завершилась с кодом ${res}. Завершаю цикл.`, true);
@@ -1213,6 +1288,14 @@
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
                 return;
+            } else if (result === 'AUTH_REQUIRED') {
+                isLoopActive = false;
+                return;
+            } else if (result === 'RETRYING_NO_MODAL') {
+                log('Не нашёл форму отклика, перезагружаю вакансию и повторю один раз.', true);
+                isLoopActive = false;
+                setStatus('running', 'Повтор после reload...');
+                return;
             } else {
                 log(`Ошибка при обработке: ${result}`, true);
                 StateManager.addParserError(result, 'Ошибка при обработке вакансии из списка');
@@ -1227,12 +1310,20 @@
                  : '';
              if (stopSignal) {
                  StateManager.setStopReason('user_stop', `Получен stopSignal${parserErrorDetails}`);
-             } else if (count >= config.limit) {
-                 StateManager.setStopReason('limit_reached', `Достигнут лимит ${config.limit}${parserErrorDetails}`);
-             } else if (!targets.length) {
-                 StateManager.setStopReason('no_new_targets', `Всего кнопок: ${allBtns.length}, новых: ${targets.length}${parserErrorDetails}`);
+             } else if (isAuthRequiredPage()) {
+                 markAuthRequired(`HH показал форму входа после цикла обработки${parserErrorDetails}`);
+                 return;
              } else if (!count && parserErrors.length) {
                  StateManager.setStopReason('parser_errors_only', `Цикл завершился без откликов${parserErrorDetails}`);
+             } else if (count >= config.limit) {
+                 StateManager.setStopReason('limit_reached', `Достигнут лимит ${config.limit}${parserErrorDetails}`);
+             } else if (!targets.length && StateManager.getManualList().length) {
+                 StateManager.setStopReason(
+                     'manual_targets_only',
+                     `Все доступные цели ушли в ручной список. Всего кнопок: ${allBtns.length}, новых: ${targets.length}, ручных: ${StateManager.getManualList().length}${parserErrorDetails}`
+                 );
+             } else if (!targets.length) {
+                 StateManager.setStopReason('no_new_targets', `Всего кнопок: ${allBtns.length}, новых: ${targets.length}${parserErrorDetails}`);
              } else {
                  StateManager.setStopReason('targets_processed', `Обработано в текущем цикле: ${count}, доступных целей: ${targets.length}${parserErrorDetails}`);
              }

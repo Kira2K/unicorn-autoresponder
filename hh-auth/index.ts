@@ -1,5 +1,5 @@
 const { hhAuthSelectors } = require('./auth-selectors.ts')
-const { makeHHAuth, HHAuthError } = require('./make-hh-auth.ts')
+const { authorizeHHPage, makeHHAuth, HHAuthError } = require('./make-hh-auth.ts')
 const {
   closeBrowser,
   collectDataQa,
@@ -10,6 +10,7 @@ const { validateAuth } = require('./validate-auth.ts')
 
 module.exports = {
   HHAuthError,
+  authorizeHHPage,
   closeBrowser,
   collectDataQa,
   hhAuthSelectors,

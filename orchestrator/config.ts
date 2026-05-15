@@ -50,7 +50,11 @@ module.exports = {
   AUTOMATION_LOCK_STATUS_NAME: 'Автоотклики, не трогай',
   AUTOMATION_LOCK_TAG: 'Автоотклики, не трогай',
   AUTO_RESPONDER_WATCH_MS,
-  AUTH_CHECK_PARSER_ERROR_CODES: new Set(['ERROR_NO_MODAL']),
+  AUTH_CHECK_PARSER_ERROR_CODES: new Set([
+    'AUTH_REQUIRED',
+    'auth_required',
+    'ERROR_NO_MODAL'
+  ]),
   CLIENT_START_DELAY_MS,
   CONNECT_OVER_CDP_TIMEOUT_MS: 60000,
   DEFAULT_CLIENT_START_DELAY_MS,
@@ -64,13 +68,19 @@ module.exports = {
   DOLPHIN_PROFILE_START_MAX_ATTEMPTS: Number(
     process.env.DOLPHIN_PROFILE_START_MAX_ATTEMPTS ?? 8
   ),
-  DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS: Number(
-    process.env.DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS ?? 15000
-  ),
   EXTERNAL_TIMEOUT_MULTIPLIER,
   EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS,
   HH_AUTH_DEBUG: parseBooleanEnv(process.env.HH_AUTH_DEBUG, false),
   HH_AUTH_TIMEOUT_MS: Number(process.env.HH_AUTH_TIMEOUT_MS ?? 30000),
+  HH_AUTH_TOTAL_TIMEOUT_MS: Number(
+    process.env.HH_AUTH_TOTAL_TIMEOUT_MS ?? 4 * 60 * 1000
+  ),
+  HH_SCENARIO_AUTH_UNKNOWN_RECHECK_INTERVAL_MS: Number(
+    process.env.HH_SCENARIO_AUTH_UNKNOWN_RECHECK_INTERVAL_MS ?? 3000
+  ),
+  HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS: Number(
+    process.env.HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS ?? 45000
+  ),
   HH_AUTO_RESPONDER_LOGS_KEY: HH_AUTO_RESPONDER_STORAGE_KEYS.logs,
   HH_AUTO_RESPONDER_MANUAL_LIST_KEY: HH_AUTO_RESPONDER_STORAGE_KEYS.manualList,
   HH_AUTO_RESPONDER_PARSER_ERRORS_KEY:
@@ -97,6 +107,7 @@ module.exports = {
     'targets_processed',
     'no_new_targets',
     'limit_reached',
+    'manual_targets_only',
     'hh_response_daily_limit_exceeded',
     'user_stop'
   ]),

@@ -32,6 +32,8 @@ export type HHAuthStepResult = {
   initialHeadless?: HHAuthResult
   headfullAfterLogin?: HHAuthResult
   finalHeadless?: HHAuthResult
+  runningProfile?: StartedProfile
+  usedHeadfullLogin?: boolean
 }
 
 export type ValidateAuthOptions = {
@@ -51,6 +53,19 @@ export type MakeHHAuthOptions = {
   startProfile: (profileId: number, mode: HHBrowserMode) => Promise<StartedProfile>
   stopProfile: (profileId: number) => Promise<void>
   connectToProfile: (startedProfile: StartedProfile) => Promise<any>
+  artifactDir?: string
+  errorArtifactDir?: string
+  keepProfileRunningOnSuccess?: boolean
+  loginInHeadlessOnBackUrl?: boolean
+  skipInitialHeadlessCheck?: boolean
+  verifyPersistedSession?: boolean
+  log?: HHAuthLogger
+  timeoutMs?: number
+}
+
+export type AuthorizeHHPageOptions = {
+  credentials?: HHCredentials
+  getCredentials?: () => Promise<HHCredentials>
   artifactDir?: string
   errorArtifactDir?: string
   log?: HHAuthLogger

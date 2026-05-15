@@ -8,7 +8,7 @@ const { getClientHHAuthCredentials } = require('./google-sheets-check.ts')
 const {
   createClientAutomationRepository
 } = require('./sheets/automation-repository.ts')
-const { makeHHAuth } = require('./hh-auth/index.ts')
+const { authorizeHHPage } = require('./hh-auth/index.ts')
 const { sendTelegramMessage } = require('./messenger.ts')
 const { runManualVacanciesCleanup } = require('./manual-vacancies-cleanup.ts')
 const {
@@ -38,13 +38,13 @@ const {
   DOLPHIN_HEADLESS,
   DOLPHIN_LOCAL_API_BASE_URL,
   DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS,
-  DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS,
   DOLPHIN_PROFILE_START_MAX_ATTEMPTS,
   DOLPHIN_PROFILE_START_RETRY_BASE_MS,
   EXTERNAL_TIMEOUT_MULTIPLIER,
   EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS,
   HH_AUTH_DEBUG,
   HH_AUTH_TIMEOUT_MS,
+  HH_AUTH_TOTAL_TIMEOUT_MS,
   HH_AUTO_RESPONDER_LOGS_KEY,
   HH_AUTO_RESPONDER_MANUAL_LIST_KEY,
   HH_AUTO_RESPONDER_PARSER_ERRORS_KEY,
@@ -54,6 +54,8 @@ const {
   HH_AUTO_RESPONDER_STOP_REASON_KEY,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
   HH_INITIAL_NAVIGATION_TIMEOUT_MS,
+  HH_SCENARIO_AUTH_UNKNOWN_RECHECK_INTERVAL_MS,
+  HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS,
   INDEX_SCRIPT_PATH,
   LOCAL_RUN_ID,
   LOCAL_RUN_LOG_DIR,
@@ -415,6 +417,16 @@ async function applyAutoResponderCoverText(
   )
 }
 
+async function removeAutoResponderUi(page: any): Promise<void> {
+  if (page.isClosed()) {
+    return
+  }
+
+  await page.evaluate(() => {
+    document.getElementById('ar-main-panel')?.remove()
+  }).catch(() => undefined)
+}
+
 function installIndexReinjectWatcher(
   page: any,
   indexScript: string,
@@ -701,12 +713,26 @@ async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
           ),
           mainmenuVacancyResponses: readSignal(
             '[data-qa="mainmenu_vacancyResponses"]'
-          )
+          ),
+          ddosGuard: {
+            exists:
+              /^ddos-guard$/i.test(document.title.trim()) ||
+              /\bddos-guard\b/i.test(document.body?.innerText ?? '')
+          },
+          loginUrl: {
+            exists: /^https:\/\/([^/]+\.)?hh\.ru\/account\/login/i.test(location.href)
+          },
+          loginUrlHasBackUrl: {
+            exists:
+              /^https:\/\/([^/]+\.)?hh\.ru\/account\/login/i.test(location.href) &&
+              /[?&]backUrl=/i.test(location.href)
+          }
         }
         const loggedOut =
           signals.login.exists ||
           signals.signup.exists ||
-          signals.anonymousProfileLink.exists
+          signals.anonymousProfileLink.exists ||
+          signals.loginUrl.exists
         const loggedIn =
           signals.profileAndResumesButton.exists ||
           signals.vacancyResponsesButton.exists ||
@@ -745,6 +771,66 @@ async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
   return {
     ...fallback,
     state: 'unknown'
+  }
+}
+
+function isIndecisiveHhAuthState(state: HhAuthState): boolean {
+  return state === 'unknown' || state === 'conflict'
+}
+
+function hasDdosGuardSignal(check: HhAuthCheck): boolean {
+  return Boolean(check.signals.ddosGuard?.exists)
+}
+
+function shouldRunHHAuthFallback(state: HhAuthState): boolean {
+  return state === 'logged_out' || state === 'captcha'
+}
+
+async function waitForScenarioAuthDecision(
+  page: any,
+  initialCheck: HhAuthCheck
+): Promise<{ check: HhAuthCheck; recheckCount: number }> {
+  if (!isIndecisiveHhAuthState(initialCheck.state)) {
+    return {
+      check: initialCheck,
+      recheckCount: 0
+    }
+  }
+
+  const startedAt = Date.now()
+  let latestCheck = initialCheck
+  let recheckCount = 0
+  let lastDdosReloadAt = 0
+
+  while (Date.now() - startedAt < HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS) {
+    if (
+      hasDdosGuardSignal(latestCheck) &&
+      Date.now() - lastDdosReloadAt >= 15000
+    ) {
+      lastDdosReloadAt = Date.now()
+      await page
+        .reload({
+          waitUntil: 'domcontentloaded',
+          timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
+        })
+        .catch(() => undefined)
+    }
+
+    await wait(HH_SCENARIO_AUTH_UNKNOWN_RECHECK_INTERVAL_MS)
+    latestCheck = await detectHhAuthState(page)
+    recheckCount += 1
+
+    if (!isIndecisiveHhAuthState(latestCheck.state)) {
+      return {
+        check: latestCheck,
+        recheckCount
+      }
+    }
+  }
+
+  return {
+    check: latestCheck,
+    recheckCount
   }
 }
 
@@ -1124,6 +1210,10 @@ function formatManualVacanciesCleanupForHuman(
 }
 
 function isAutoResponderStopNormal(status: OrchestratorStatus): boolean {
+  if (status.parserErrorCodes?.length) {
+    return false
+  }
+
   if (status.autoResponderStopReason === 'orchestrator_stop_after_watch') {
     return Boolean(
       status.autoResponderWatchTimedOut &&
@@ -1194,15 +1284,6 @@ function convertHHAuthResultToCheck(result: any): HhAuthCheck {
     title: result?.title ?? '',
     signals
   }
-}
-
-function getBestHHAuthCheck(result: any): HhAuthCheck {
-  return convertHHAuthResultToCheck(
-    result?.finalHeadless ??
-      result?.headfullAfterLogin ??
-      result?.initialHeadless ??
-      result
-  )
 }
 
 function getHHAuthArtifactDir(
@@ -1758,6 +1839,43 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function timeoutError(message: string): Error {
+  const error = new Error(message) as Error & { code?: string }
+  error.code = 'timeout'
+
+  return error
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  onTimeout?: () => Promise<void>
+): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(async () => {
+          try {
+            await onTimeout?.()
+          } catch {
+            // Preserve the original timeout reason.
+          }
+
+          reject(timeoutError(message))
+        }, timeoutMs)
+      })
+    ])
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
 function getRecommendedExternalTimeoutMs(
   clientCount: number,
   watchMs = AUTO_RESPONDER_WATCH_MS,
@@ -2045,6 +2163,21 @@ function isAlreadyRunningError(error: any): boolean {
   )
 }
 
+function isProfileStartBusyError(error: any): boolean {
+  const message = String(
+    error?.message ?? error?.details?.error ?? error?.details?.message ?? ''
+  ).toLowerCase()
+
+  return (
+    isAlreadyRunningError(error) ||
+    message.includes('ebusy') ||
+    message.includes('resource busy') ||
+    message.includes('devtoolsactiveport') ||
+    message.includes('profile is locked') ||
+    message.includes('still running')
+  )
+}
+
 function isAlreadyRunningResponse(response: DolphinStartResponse): boolean {
   const message = String(
     response.error ?? response.errorObject?.text ?? ''
@@ -2104,13 +2237,13 @@ async function startDolphinProfileWithHeadless(
 
       return response
     } catch (error: any) {
-      if (!isAlreadyRunningError(error) || attempt === maxAttempts) {
+      if (!isProfileStartBusyError(error) || attempt === maxAttempts) {
         throw error
       }
 
       const retryDelayMs = DOLPHIN_PROFILE_START_RETRY_BASE_MS * attempt
       console.warn(
-        `Dolphin profile ${profileId} is still running before start attempt ` +
+        `Dolphin profile ${profileId} is busy before start attempt ` +
           `${attempt + 1}/${maxAttempts}; stopping and waiting ${retryDelayMs}ms`
       )
       await stopDolphinProfile(profileId).catch(() => undefined)
@@ -2129,72 +2262,38 @@ async function startDolphinProfile(
   return await startDolphinProfileWithHeadless(profileId, DOLPHIN_HEADLESS)
 }
 
-async function startDolphinProfileForAuth(
-  profileId: number,
-  mode: 'headless' | 'headfull'
-): Promise<{ profileId: number; mode: 'headless' | 'headfull'; port: number }> {
-  const response = await startDolphinProfileWithHeadless(
-    profileId,
-    mode === 'headless'
-  )
-  const port = response.automation?.port
-
-  if (!port) {
-    throw new Error(
-      `Dolphin did not return an automation port for HH auth profile ${profileId}`
-    )
-  }
-
-  return {
-    profileId,
-    mode,
-    port
-  }
-}
-
-async function connectToDolphinStartedProfile(startedProfile: {
-  port: number
-}): Promise<any> {
-  const { chromium } = loadPlaywright()
-
-  return await chromium.connectOverCDP(
-    `http://127.0.0.1:${startedProfile.port}`,
-    {
-      timeout: CONNECT_OVER_CDP_TIMEOUT_MS
-    }
-  )
-}
-
-async function ensureHHAuthForClient(
-  clientData: ClientAutomationData
+async function ensureHHAuthOnCurrentPage(
+  clientData: ClientAutomationData,
+  page: any
 ): Promise<HhAuthCheck> {
-  const hhAuth = makeHHAuth({
-    artifactDir: getHHAuthArtifactDir(clientData),
-    errorArtifactDir: getHHAuthErrorArtifactDir(clientData),
-    connectToProfile: connectToDolphinStartedProfile,
-    getCredentials: async () => {
-      const credentials =
-        clientData.hhAuthCredentials ??
-        (await getClientHHAuthCredentials(clientData.clientName, clientData.market))
+  const result = await withTimeout<any>(
+    authorizeHHPage(page, {
+      artifactDir: getHHAuthArtifactDir(clientData),
+      errorArtifactDir: getHHAuthErrorArtifactDir(clientData),
+      getCredentials: async () => {
+        const credentials =
+          clientData.hhAuthCredentials ??
+          (await getClientHHAuthCredentials(clientData.clientName, clientData.market))
 
-      return {
-        email: credentials.email,
-        password: credentials.password
-      }
-    },
-    log: (message: string, details?: Record<string, unknown>) => {
-      console.log(
-        `[hh auth] ${clientData.clientName}: ${message}`,
-        details ?? {}
-      )
-    },
-    startProfile: startDolphinProfileForAuth,
-    stopProfile: stopDolphinProfile,
-    timeoutMs: HH_AUTH_TIMEOUT_MS
-  })
-  const result = await hhAuth.ensureAuthorized(clientData.dolphinProfileId)
+        return {
+          email: credentials.email,
+          password: credentials.password
+        }
+      },
+      log: (message: string, details?: Record<string, unknown>) => {
+        console.log(
+          `[hh auth] ${clientData.clientName}: ${message}`,
+          details ?? {}
+        )
+      },
+      timeoutMs: HH_AUTH_TIMEOUT_MS
+    }),
+    HH_AUTH_TOTAL_TIMEOUT_MS,
+    `HH auth timed out after ${HH_AUTH_TOTAL_TIMEOUT_MS}ms for ` +
+      `${clientData.clientName}/${clientData.market} on the current page`
+  )
 
-  return getBestHHAuthCheck(result)
+  return convertHHAuthResultToCheck(result)
 }
 
 async function openScenarioAndInjectIndex(
@@ -2261,6 +2360,24 @@ async function openScenarioAndInjectIndex(
   const authBeforeStart = await detectHhAuthState(page)
 
   if (!opened) {
+    return {
+      page,
+      disposeWatcher,
+      isBrowserDisconnected: () => browserDisconnected,
+      result: {
+        opened,
+        indexScriptInjected: false,
+        watcherInstalled: true,
+        startButtonClicked: false,
+        pageTitle,
+        pageUrl,
+        manualVacanciesCleanup,
+        authBeforeStart
+      }
+    }
+  }
+
+  if (authBeforeStart.state !== 'logged_in') {
     return {
       page,
       disposeWatcher,
@@ -2384,32 +2501,9 @@ async function runClientOrchestrator(
       `status ${automationStatusId}, previous ${String(previousProfileStatusId)}`
     )
 
-    status = addLifecycleEvent(status, runStartedAt, 'ensuring HH auth')
-    const authBeforeStart = await ensureHHAuthForClient(clientData)
-    status = {
-      ...status,
-      authBeforeStart
-    }
-    status = addLifecycleEvent(
-      status,
-      runStartedAt,
-      'HH auth ensured',
-      formatAuthCheckBrief(authBeforeStart)
-    )
-
-    if (DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS > 0) {
-      status = addLifecycleEvent(
-        status,
-        runStartedAt,
-        'waiting for Dolphin profile release after HH auth',
-        `${DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS}ms`
-      )
-      await wait(DOLPHIN_PROFILE_RELEASE_AFTER_AUTH_WAIT_MS)
-    }
-
     status = addLifecycleEvent(status, runStartedAt, 'starting Dolphin profile')
-    const startResponse = await startDolphinProfile(clientData.dolphinProfileId)
-    const port = startResponse.automation?.port
+    let startResponse = await startDolphinProfile(clientData.dolphinProfileId)
+    let port = startResponse.automation?.port
 
     if (!port) {
       throw new Error('Dolphin did not return an automation port')
@@ -2422,7 +2516,7 @@ async function runClientOrchestrator(
     )
 
     status = addLifecycleEvent(status, runStartedAt, 'opening scenario')
-    const pageResult = await openScenarioAndInjectIndex(
+    let pageResult = await openScenarioAndInjectIndex(
       port,
       clientData.stackScenario,
       responseCounter,
@@ -2446,13 +2540,210 @@ async function runClientOrchestrator(
         formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup)
       )
     }
-    if (status.authBeforeStart) {
+    let scenarioAuthBeforeStart = status.authBeforeStart
+
+    if (scenarioAuthBeforeStart) {
       status = addLifecycleEvent(
         status,
         runStartedAt,
         'HH auth checked before start',
-        formatAuthCheckBrief(status.authBeforeStart)
+        formatAuthCheckBrief(scenarioAuthBeforeStart)
       )
+
+      if (isIndecisiveHhAuthState(scenarioAuthBeforeStart.state)) {
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'HH auth state unclear before start; waiting for stable signal',
+          `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; timeout ${HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS}ms`
+        )
+        const authDecision = await waitForScenarioAuthDecision(
+          pageResult.page,
+          scenarioAuthBeforeStart
+        )
+        scenarioAuthBeforeStart = authDecision.check
+        status = {
+          ...status,
+          authBeforeStart: scenarioAuthBeforeStart
+        }
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'HH auth rechecked before start',
+          `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; rechecks ${authDecision.recheckCount}`
+        )
+      }
+
+      if (
+        scenarioAuthBeforeStart.state === 'logged_in' &&
+        !pageResult.result.startButtonClicked
+      ) {
+        disposeWatcher?.()
+        disposeWatcher = undefined
+        await pageResult.page.close().catch(() => undefined)
+
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'reopening scenario after delayed HH auth signal'
+        )
+        pageResult = await openScenarioAndInjectIndex(
+          port,
+          clientData.stackScenario,
+          responseCounter,
+          clientData.coverText
+        )
+        disposeWatcher = pageResult.disposeWatcher
+        status = {
+          ...status,
+          ...pageResult.result
+        }
+        if (status.manualVacanciesCleanup) {
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            status.manualVacanciesCleanup.skipped
+              ? 'manual vacancies cleanup skipped'
+              : status.manualVacanciesCleanup.completed
+                ? 'manual vacancies cleanup completed'
+                : 'manual vacancies cleanup kept pending entries',
+            formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup)
+          )
+        }
+        scenarioAuthBeforeStart = status.authBeforeStart
+
+        if (
+          scenarioAuthBeforeStart &&
+          isIndecisiveHhAuthState(scenarioAuthBeforeStart.state)
+        ) {
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'HH auth state unclear after delayed auth reopen; waiting for stable signal',
+            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; timeout ${HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS}ms`
+          )
+          const authDecision = await waitForScenarioAuthDecision(
+            pageResult.page,
+            scenarioAuthBeforeStart
+          )
+          scenarioAuthBeforeStart = authDecision.check
+          status = {
+            ...status,
+            authBeforeStart: scenarioAuthBeforeStart
+          }
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'HH auth rechecked before start after delayed auth reopen',
+            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; rechecks ${authDecision.recheckCount}`
+          )
+        }
+      }
+
+      if (!scenarioAuthBeforeStart) {
+        throw new Error('HH auth check before auto responder start is missing')
+      }
+
+      if (shouldRunHHAuthFallback(scenarioAuthBeforeStart.state)) {
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'HH auth missing on scenario; logging in on current page',
+          formatAuthCheckBrief(scenarioAuthBeforeStart)
+        )
+        disposeWatcher?.()
+        disposeWatcher = undefined
+        await removeAutoResponderUi(pageResult.page)
+
+        const currentPageAuth = await ensureHHAuthOnCurrentPage(
+          clientData,
+          pageResult.page
+        )
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'HH auth ensured',
+          formatAuthCheckBrief(currentPageAuth)
+        )
+        await pageResult.page.close().catch(() => undefined)
+
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'reopening scenario after current-page auth'
+        )
+        pageResult = await openScenarioAndInjectIndex(
+          port,
+          clientData.stackScenario,
+          responseCounter,
+          clientData.coverText
+        )
+        disposeWatcher = pageResult.disposeWatcher
+        status = {
+          ...status,
+          ...pageResult.result
+        }
+        if (status.manualVacanciesCleanup) {
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            status.manualVacanciesCleanup.skipped
+              ? 'manual vacancies cleanup skipped'
+              : status.manualVacanciesCleanup.completed
+                ? 'manual vacancies cleanup completed'
+                : 'manual vacancies cleanup kept pending entries',
+            formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup)
+          )
+        }
+        scenarioAuthBeforeStart = status.authBeforeStart
+        if (
+          scenarioAuthBeforeStart &&
+          isIndecisiveHhAuthState(scenarioAuthBeforeStart.state)
+        ) {
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'HH auth state unclear after current-page auth; waiting for stable signal',
+            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; timeout ${HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS}ms`
+          )
+          const authDecision = await waitForScenarioAuthDecision(
+            pageResult.page,
+            scenarioAuthBeforeStart
+          )
+          scenarioAuthBeforeStart = authDecision.check
+          status = {
+            ...status,
+            authBeforeStart: scenarioAuthBeforeStart
+          }
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'HH auth rechecked before start after current-page auth',
+            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; rechecks ${authDecision.recheckCount}`
+          )
+        }
+        if (!scenarioAuthBeforeStart || scenarioAuthBeforeStart.state !== 'logged_in') {
+          throw new Error(
+            `HH auth check before auto responder start failed after current-page auth: ${
+              scenarioAuthBeforeStart
+                ? formatAuthCheckBrief(scenarioAuthBeforeStart)
+                : 'missing auth check'
+            }`
+          )
+        }
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'HH auth checked before start after current-page auth',
+          formatAuthCheckBrief(scenarioAuthBeforeStart)
+        )
+      } else if (scenarioAuthBeforeStart.state !== 'logged_in') {
+        throw new Error(
+          `HH auth state before auto responder start stayed ${scenarioAuthBeforeStart.state}; ` +
+            `not running current-page auth without logged_out/captcha signal: ` +
+            formatAuthCheckBrief(scenarioAuthBeforeStart)
+        )
+      }
     }
     status = addLifecycleEvent(
       status,
