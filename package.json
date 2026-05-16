@@ -6,6 +6,7 @@
     "dolphyn": "node dolphyn-connector.ts",
     "messenger": "node messenger.ts",
     "orchestrator": "node orchestrator.ts",
+    "doctor": "node doctor.ts",
     "check-table": "node check-table-state.ts",
     "table:state": "node check-table-state.ts",
     "test:refactor": "node refactor-checks.ts",
