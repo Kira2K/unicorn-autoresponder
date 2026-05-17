@@ -4,7 +4,15 @@ const {
   DOLPHIN_PROFILE_START_RETRY_BASE_MS
 } = require('../orchestrator/config.ts')
 const { getErrorMessage, wait } = require('../orchestrator/runtime-utils.ts')
-const { requestLocalDolphin } = require('./local-api.ts')
+const { requestLocalDolphin } = require('./local-api.ts') as {
+  requestLocalDolphin<T>(
+    endpointPath: string,
+    options?: {
+      method?: 'GET' | 'POST'
+      body?: unknown
+    }
+  ): Promise<T>
+}
 
 type DolphinStartResponse = import('./types.ts').DolphinStartResponse
 

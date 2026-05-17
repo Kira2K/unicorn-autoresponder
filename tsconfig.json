@@ -11,5 +11,11 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["*.ts", "hh-auth/**/*.ts", "types/**/*.d.ts"]
+  "include": [
+    "*.ts",
+    "dolphin/**/*.ts",
+    "hh-auth/**/*.ts",
+    "tgChatIdChecker/**/*.ts",
+    "types/**/*.d.ts"
+  ]
 }

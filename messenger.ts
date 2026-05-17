@@ -13,6 +13,10 @@ const apiId: number = 37642224;
 const apiHash = "c44116585f70919fa02eb5b8fd121ebc";
 const TELEGRAM_SESSION_FILE = path.resolve(__dirname, '.telegram-session')
 
+type CreateTelegramClientOptions = {
+  saveSession?: boolean
+}
+
 function readStoredTelegramSession(): string {
   if (process.env.telegram_session) {
     return process.env.telegram_session
@@ -101,7 +105,10 @@ async function resolveTelegramTarget(client: any, to: string): Promise<any> {
   return dialog.inputEntity ?? dialog.entity
 }
 
-async function createTelegramClient() {
+async function createTelegramClient(
+  options: CreateTelegramClientOptions = {}
+) {
+  const shouldSaveSession = options.saveSession ?? true
   const telegramSession = readStoredTelegramSession()
   const stringSession = new StringSession(telegramSession);
   const client = new TelegramClient(
@@ -122,11 +129,13 @@ async function createTelegramClient() {
     onError: console.log,
   });
 
-  const savedSession = client.session.save()
-  saveTelegramSession(savedSession)
+  if (shouldSaveSession) {
+    const savedSession = client.session.save()
+    saveTelegramSession(savedSession)
 
-  if (!telegramSession) {
-    console.log(`Telegram session saved to ${TELEGRAM_SESSION_FILE}`)
+    if (!telegramSession) {
+      console.log(`Telegram session saved to ${TELEGRAM_SESSION_FILE}`)
+    }
   }
 
   return client
