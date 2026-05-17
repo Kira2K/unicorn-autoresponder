@@ -1,8 +1,8 @@
 require('dotenv').config({ quiet: true })
 
 const {
-  createClientAutomationRepository
-} = require('./sheets/automation-repository.ts')
+  createAppDb
+} = require('./db/index.ts')
 const {
   assertDolphinAppRunning,
   assertPreexistingDolphinProfileLimit,
@@ -125,12 +125,12 @@ async function runClientsOrchestrator(
 async function runSelectedClientsOrchestrator(
   clientNames: string[]
 ): Promise<OrchestratorStatus[]> {
-  const repository = await createClientAutomationRepository()
+  const db = createAppDb()
   const allClients: ClientAutomationData[] =
-    repository.getAllAutomationTargets(getConfiguredAutomationTargetOptions())
-  const selectedClients = attachHHAuthCredentials(
+    await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
+  const selectedClients = await attachHHAuthCredentials(
     selectClientsByUniqueNames(allClients, clientNames),
-    repository
+    db
   )
 
   return runClientsOrchestrator(selectedClients)
@@ -139,22 +139,22 @@ async function runSelectedClientsOrchestrator(
 async function runSelectedClientIdsOrchestrator(
   clientIds: string[]
 ): Promise<OrchestratorStatus[]> {
-  const repository = await createClientAutomationRepository()
+  const db = createAppDb()
   const allClients: ClientAutomationData[] =
-    repository.getAllAutomationTargets(getConfiguredAutomationTargetOptions())
-  const selectedClients = attachHHAuthCredentials(
+    await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
+  const selectedClients = await attachHHAuthCredentials(
     selectClientsByCommonChatIds(allClients, clientIds),
-    repository
+    db
   )
 
   return runClientsOrchestrator(selectedClients)
 }
 
 async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
-  const repository = await createClientAutomationRepository()
-  const clients: ClientAutomationData[] = attachHHAuthCredentials(
-    repository.getAllAutomationTargets(getConfiguredAutomationTargetOptions()),
-    repository
+  const db = createAppDb()
+  const clients: ClientAutomationData[] = await attachHHAuthCredentials(
+    await db.getAutomationTargets(getConfiguredAutomationTargetOptions()),
+    db
   )
 
   return runClientsOrchestrator(clients)

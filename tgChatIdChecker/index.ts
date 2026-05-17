@@ -80,25 +80,10 @@ type FreshStudentChatDialog = {
 const { createTelegramClient } = require('../messenger.ts') as {
   createTelegramClient(options?: { saveSession?: boolean }): Promise<any>
 }
-const {
-  PERSONAL_DATA_SHEET_NAME,
-  fetchNamedSheetValues,
-  getRequiredSheet
-} = require('../google-sheets-check.ts') as {
-  PERSONAL_DATA_SHEET_NAME: string
-  fetchNamedSheetValues(sheetNames: string[]): Promise<{
-    sheets: Array<{
-      title: string
-      values: string[][]
-    }>
-  }>
-  getRequiredSheet(
-    sheets: Array<{
-      title: string
-      values: string[][]
-    }>,
-    expectedTitle: string
-  ): string[][]
+const { createAppDb } = require('../db/index.ts') as {
+  createAppDb(): {
+    getStudentTelegramRecords(): Promise<StudentTelegramRecord[]>
+  }
 }
 
 const DEFAULT_BELONGINGS_OUTPUT_FILE = path.resolve(
@@ -291,10 +276,6 @@ function normalizeSheetValue(value: unknown): string {
   return String(value ?? '').trim()
 }
 
-function normalizeSheetKey(value: unknown): string {
-  return normalizeSheetValue(value).toLowerCase()
-}
-
 function normalizeMarketValue(value: unknown): string {
   return normalizeSheetValue(value)
     .replace(/\s+/g, '')
@@ -307,95 +288,8 @@ function shouldShowMarket(value: unknown): boolean {
   return normalizedMarket === 'en' || normalizedMarket === 'ru/en'
 }
 
-function findRowIndexWithValue(values: string[][], value: string): number {
-  const normalizedValue = normalizeSheetKey(value)
-  const rowIndex = values.findIndex(row =>
-    row.some(cell => normalizeSheetKey(cell) === normalizedValue)
-  )
-
-  if (rowIndex === -1) {
-    throw new Error(`Row with value "${value}" was not found`)
-  }
-
-  return rowIndex
-}
-
-function findCellIndex(row: string[], value: string): number {
-  const normalizedValue = normalizeSheetKey(value)
-  return row.findIndex(cell => normalizeSheetKey(cell) === normalizedValue)
-}
-
-function findRealDataRowIndex(values: string[][], label: string): number {
-  const realDataRowIndex = findRowIndexWithValue(values, 'Реальные данные')
-
-  for (
-    let rowIndex = realDataRowIndex;
-    rowIndex < values.length;
-    rowIndex += 1
-  ) {
-    const row = values[rowIndex] ?? []
-
-    if (rowIndex > realDataRowIndex && findCellIndex(row, 'Реальные данные') !== -1) {
-      break
-    }
-
-    if (findCellIndex(row, label) !== -1) {
-      return rowIndex
-    }
-  }
-
-  throw new Error(`"${label}" row was not found in "Реальные данные" section`)
-}
-
-function parseStudentTelegramRecords(
-  personalDataValues: string[][]
-): StudentTelegramRecord[] {
-  const nameRowIndex = findRowIndexWithValue(personalDataValues, 'имя')
-  const marketRowIndex = findRowIndexWithValue(personalDataValues, 'рынок')
-  const fullNameRowIndex = findRealDataRowIndex(personalDataValues, 'ФИО')
-  const telegramRowIndex = findRealDataRowIndex(personalDataValues, 'ТГ')
-  const commonChatIdRowIndex = findRowIndexWithValue(
-    personalDataValues,
-    'Id общего чата'
-  )
-  const nameRow = personalDataValues[nameRowIndex] ?? []
-  const marketRow = personalDataValues[marketRowIndex] ?? []
-  const fullNameRow = personalDataValues[fullNameRowIndex] ?? []
-  const telegramRow = personalDataValues[telegramRowIndex] ?? []
-  const commonChatIdRow = personalDataValues[commonChatIdRowIndex] ?? []
-  const records: StudentTelegramRecord[] = []
-
-  for (let columnIndex = 0; columnIndex < telegramRow.length; columnIndex += 1) {
-    const telegram = normalizeSheetValue(telegramRow[columnIndex])
-    const normalizedTelegram = normalizeTelegramUsername(telegram)
-
-    if (!normalizedTelegram) {
-      continue
-    }
-
-    records.push({
-      commonChatId: normalizeSheetValue(commonChatIdRow[columnIndex]),
-      market: normalizeSheetValue(marketRow[columnIndex]),
-      name:
-        normalizeSheetValue(fullNameRow[columnIndex]) ||
-        normalizeSheetValue(nameRow[columnIndex]) ||
-        'n/a',
-      telegram,
-      normalizedTelegram
-    })
-  }
-
-  return records
-}
-
 async function getStudentTelegramRecords(): Promise<StudentTelegramRecord[]> {
-  const state = await fetchNamedSheetValues([PERSONAL_DATA_SHEET_NAME])
-  const personalDataValues = getRequiredSheet(
-    state.sheets,
-    PERSONAL_DATA_SHEET_NAME
-  )
-
-  return parseStudentTelegramRecords(personalDataValues)
+  return await createAppDb().getStudentTelegramRecords()
 }
 
 async function getParticipantTelegramUsernames(

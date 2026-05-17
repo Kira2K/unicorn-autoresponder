@@ -2,21 +2,15 @@ require('dotenv').config({ quiet: true })
 
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const {
-  PERSONAL_DATA_SHEET_NAME,
-  fetchNamedSheetValues,
-  getRequiredSheet
-} = require('../../../google-sheets-check.ts') as {
-  PERSONAL_DATA_SHEET_NAME: string
-  fetchNamedSheetValues(sheetNames: string[]): Promise<{
-    spreadsheet: { id: string; name: string }
-    spreadsheetTitle: string
-    sheets: Array<{ title: string; values: string[][] }>
-  }>
-  getRequiredSheet(
-    sheets: Array<{ title: string; values: string[][] }>,
-    expectedTitle: string
-  ): string[][]
+const { createAppDb } = require('../../../db/index.ts') as {
+  createAppDb(): {
+    getProxyRequiredClients(market?: 'En' | 'Ru'): Promise<any[]>
+  }
+}
+const { SHEET_NAMES } = require('../../../db/schema.ts') as {
+  SHEET_NAMES: {
+    personalData: string
+  }
 }
 const {
   getAllDolphinProfileSnapshots,
@@ -32,7 +26,6 @@ const {
   findMatchingExistingProfiles,
   findExactProxyMatches,
   normalizeMarket,
-  parsePersonalDataClients,
   validateProxyName
 } = require('./logic.ts') as {
   classifyProxyClient(input: any): any
@@ -43,7 +36,6 @@ const {
   ): any[]
   findExactProxyMatches(proxies: any[], proxyName: string): any[]
   normalizeMarket(value: unknown): 'En' | 'Ru'
-  parsePersonalDataClients(values: string[][], market: 'En' | 'Ru'): any[]
   validateProxyName(proxyName: string, client: any, market: 'En' | 'Ru'): any
 }
 
@@ -388,17 +380,11 @@ async function runRequiredProxyCheck(options: RunOptions = {}) {
   await fs.mkdir(runDirectory, { recursive: true })
   log(`Proxy required check started. market=${market}`)
   log(`Proxy connection value redaction: ${redactProxyConnectionValues ? 'on' : 'off'}`)
-  log(`Reading sheet: ${PERSONAL_DATA_SHEET_NAME}`)
+  log(`Reading source through app DB: ${SHEET_NAMES.personalData}`)
 
   try {
-    const sheetState = await fetchNamedSheetValues([PERSONAL_DATA_SHEET_NAME])
-    const personalDataValues = getRequiredSheet(
-      sheetState.sheets,
-      PERSONAL_DATA_SHEET_NAME
-    )
-    const clients = parsePersonalDataClients(personalDataValues, market)
+    const clients = await createAppDb().getProxyRequiredClients(market)
 
-    log(`Spreadsheet: ${sheetState.spreadsheetTitle}`)
     log(`Selected clients with Id общего чата: ${clients.length}`)
     log('Reading Dolphin proxy and profile inventories once for this run.')
 
@@ -467,7 +453,7 @@ async function runRequiredProxyCheck(options: RunOptions = {}) {
     const payload = {
       generatedAt: new Date().toISOString(),
       market,
-      sourceSheet: PERSONAL_DATA_SHEET_NAME,
+      sourceSheet: SHEET_NAMES.personalData,
       total: results.length,
       counts,
       results

@@ -1,10 +1,35 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 
 const {
   mapAllClientsAutomationData,
   mapClientHHAuthCredentials,
   mapClientHHAuthCredentialsByCommonChatId
 } = require('./sheets/automation-mapper.ts')
+const { createAppDb } = require('./db/index.ts') as {
+  createAppDb(): any
+}
+const {
+  SHEET_LABELS,
+  SHEET_NAMES,
+  getMarketProfileIdLabel,
+  getMarketProxyLabel
+} = require('./db/schema.ts') as {
+  SHEET_LABELS: Record<string, string>
+  SHEET_NAMES: Record<string, string>
+  getMarketProfileIdLabel(market: 'Ru' | 'En'): string
+  getMarketProxyLabel(market: 'Ru' | 'En'): string
+}
+const {
+  createGoogleSheetsDbFromValues
+} = require('./db/google-sheets-db.ts') as {
+  createGoogleSheetsDbFromValues(values: {
+    personalDataValues?: string[][]
+    dolphinMainValues?: string[][]
+    stacksValues?: string[][]
+  }): any
+}
 const { parseMarketEnv } = require('./orchestrator/config.ts')
 const {
   getVacancyIdFromUrl,
@@ -209,4 +234,181 @@ assert.equal(
   true
 )
 
-console.log('Refactor regression checks passed')
+function getTypeScriptFiles(rootDir: string): string[] {
+  const files: string[] = []
+
+  for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === '.git') {
+      continue
+    }
+
+    const entryPath = path.join(rootDir, entry.name)
+
+    if (entry.isDirectory()) {
+      files.push(...getTypeScriptFiles(entryPath))
+      continue
+    }
+
+    if (entry.isFile() && entry.name.endsWith('.ts')) {
+      files.push(entryPath)
+    }
+  }
+
+  return files
+}
+
+function assertNoNewDirectGoogleSheetsImports(): void {
+  const allowedDirectImports = new Set(
+    [
+      'check-table-state.ts',
+      'db/google-sheets/google-sheets-db-factory.ts',
+      'db/google-sheets/sheet-state.ts',
+      'db/google-sheets-db.ts',
+      'doctor.ts',
+      'sheets/automation-mapper.ts',
+      'sheets/automation-repository.ts',
+      'sheets/google-client.ts'
+    ].map(item => item.replace(/\//g, path.sep))
+  )
+  const rootDir = __dirname
+  const offenders = getTypeScriptFiles(rootDir)
+    .map(filePath => path.relative(rootDir, filePath))
+    .filter(relativePath => {
+      if (allowedDirectImports.has(relativePath)) {
+        return false
+      }
+
+      const content = fs.readFileSync(path.join(rootDir, relativePath), 'utf8')
+
+      return /require\(['"][^'"]*google-sheets-check\.ts['"]\)/.test(content)
+    })
+
+  assert.deepEqual(offenders, [])
+}
+
+assertNoNewDirectGoogleSheetsImports()
+
+assert.equal(typeof createAppDb().getAutomationTargets, 'function')
+assert.equal(SHEET_NAMES.personalData, 'ПЕРС ДАННЫЕ')
+assert.equal(SHEET_LABELS.commonChatId, 'Id общего чата')
+assert.equal(getMarketProfileIdLabel('En'), 'Dolphin Profile En Id')
+assert.equal(getMarketProxyLabel('Ru'), 'Прокси Ru')
+
+async function runDbBoundaryChecks(): Promise<void> {
+  const db = createGoogleSheetsDbFromValues({
+    personalDataValues: [
+      ...personalDataValues,
+      ['рынок', 'Ru', 'Ru/En'],
+      ['Dolphin Profile En Id', '', '789'],
+      ['Dolphin Profile Ru Id', '123', '456'],
+      ['Прокси En', '', 'socks5://example.proxy:10000'],
+      ['Реальные данные', '', ''],
+      ['ФИО', 'Иван Иванов', 'Мария Петрова'],
+      ['ТГ', '@ivan', '@maria']
+    ],
+    dolphinMainValues,
+    stacksValues
+  })
+
+  const dbTargets = await db.getAutomationTargets()
+
+  assert.deepEqual(
+    dbTargets,
+    mapAllClientsAutomationData(
+      [
+        ...personalDataValues,
+        ['рынок', 'Ru', 'Ru/En'],
+        ['Dolphin Profile En Id', '', '789'],
+        ['Dolphin Profile Ru Id', '123', '456'],
+        ['Прокси En', '', 'socks5://example.proxy:10000'],
+        ['Реальные данные', '', ''],
+        ['ФИО', 'Иван Иванов', 'Мария Петрова'],
+        ['ТГ', '@ivan', '@maria']
+      ],
+      dolphinMainValues,
+      stacksValues
+    )
+  )
+  assert.equal(
+    (await db.getAutomationTargetByName('Иван', 'Ru')).dolphinProfileId,
+    123
+  )
+  assert.deepEqual(
+    await db.getHHAuthCredentialsByClientName('Мария', 'En'),
+    mapClientHHAuthCredentials(
+      [
+        ...personalDataValues,
+        ['рынок', 'Ru', 'Ru/En'],
+        ['Dolphin Profile En Id', '', '789'],
+        ['Dolphin Profile Ru Id', '123', '456'],
+        ['Прокси En', '', 'socks5://example.proxy:10000'],
+        ['Реальные данные', '', ''],
+        ['ФИО', 'Иван Иванов', 'Мария Петрова'],
+        ['ТГ', '@ivan', '@maria']
+      ],
+      'Мария',
+      'En'
+    )
+  )
+  assert.deepEqual(
+    await db.getHHAuthCredentialsByCommonChatId('200', 'Ru'),
+    mapClientHHAuthCredentialsByCommonChatId(
+      [
+        ...personalDataValues,
+        ['рынок', 'Ru', 'Ru/En'],
+        ['Dolphin Profile En Id', '', '789'],
+        ['Dolphin Profile Ru Id', '123', '456'],
+        ['Прокси En', '', 'socks5://example.proxy:10000'],
+        ['Реальные данные', '', ''],
+        ['ФИО', 'Иван Иванов', 'Мария Петрова'],
+        ['ТГ', '@ivan', '@maria']
+      ],
+      '200',
+      'Ru'
+    )
+  )
+  assert.deepEqual(
+    (await db.getStudentTelegramRecords()).map((record: any) => ({
+      name: record.name,
+      telegram: record.telegram,
+      normalizedTelegram: record.normalizedTelegram
+    })),
+    [
+      {
+        name: 'Иван Иванов',
+        telegram: '@ivan',
+        normalizedTelegram: 'ivan'
+      },
+      {
+        name: 'Мария Петрова',
+        telegram: '@maria',
+        normalizedTelegram: 'maria'
+      }
+    ]
+  )
+  assert.deepEqual(
+    (await db.getProxyRequiredClients('En')).map((record: any) => ({
+      firstName: record.firstName,
+      chatId: record.chatId,
+      profileId: record.profileId,
+      sheetProxyName: record.sheetProxyName
+    })),
+    [
+      {
+        firstName: 'Мария',
+        chatId: '200',
+        profileId: '789',
+        sheetProxyName: 'socks5://example.proxy:10000'
+      }
+    ]
+  )
+}
+
+runDbBoundaryChecks()
+  .then(() => {
+    console.log('Refactor regression checks passed')
+  })
+  .catch((error: unknown) => {
+    console.error(error instanceof Error ? error.stack : error)
+    process.exitCode = 1
+  })

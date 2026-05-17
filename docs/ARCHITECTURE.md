@@ -19,8 +19,21 @@ This project is still intentionally script-shaped, but the orchestration code is
 - `dolphin/index.ts` is the single Dolphin import surface used by the orchestrator.
 - `auto-responder/browser.ts` is the single auto-responder browser import surface.
 - `browser/` contains generic Playwright/page helpers that are not HH-specific.
+- `db/` is the new public data boundary. New data access should start from
+  `createAppDb()` instead of importing Google Sheets helpers directly.
 - `sheets/automation-mapper.ts` maps raw Google Sheet rows into enabled automation targets.
 - `google-sheets-check.ts` is the older sheet CLI/API surface kept for compatibility.
+
+Current DB boundary consumers:
+
+- `tgChatIdChecker/` reads student Telegram records through `createAppDb()`.
+- `dolphin/proxyProvider/checkRequiredProxy/` reads proxy-required clients through `createAppDb()`.
+- `hh-auth/` fallback credential reads use `createAppDb()`.
+- `orchestrator.ts` reads automation targets and attached HH credentials through
+  `createAppDb()`.
+
+Remaining direct `google-sheets-check.ts` imports are legacy wrappers or
+diagnostic scripts: `sheets/*`, `doctor.ts`, and `check-table-state.ts`.
 
 ## Current Boundaries
 
@@ -28,6 +41,8 @@ The biggest remaining file is `orchestrator/client-runner.ts` because it still c
 
 Good next extractions, when business-logic refactoring is allowed:
 
+- Migrate existing Google Sheets consumers to `db/` one by one before adding
+  the NocoDB implementation behind the same interface.
 - Run phases into `orchestrator/phases/`.
 - Auth decision handling into an HH-specific auth workflow module.
 - Telegram report composition into smaller report builders.

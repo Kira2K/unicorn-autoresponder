@@ -1,6 +1,10 @@
 const path = require('node:path')
 
-const { getClientHHAuthCredentials } = require('../google-sheets-check.ts')
+const { createAppDb } = require('../db/index.ts') as {
+  createAppDb(): {
+    getHHAuthCredentialsByClientName(clientName: string, market?: 'Ru' | 'En'): Promise<any>
+  }
+}
 const { authorizeHHPage } = require('./index.ts')
 const {
   isExecutionContextDestroyedError,
@@ -249,7 +253,10 @@ async function ensureHHAuthOnCurrentPage(
       getCredentials: async () => {
         const credentials =
           clientData.hhAuthCredentials ??
-          (await getClientHHAuthCredentials(clientData.clientName, clientData.market))
+          (await createAppDb().getHHAuthCredentialsByClientName(
+            clientData.clientName,
+            clientData.market
+          ))
 
         return {
           email: credentials.email,

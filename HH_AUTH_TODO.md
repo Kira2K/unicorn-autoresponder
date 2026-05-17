@@ -35,7 +35,8 @@ No login selectors, Playwright form-filling details, captcha checks, or auth sta
 
 Real data connection:
 
-- `google-sheets-check.ts` reads HH auth labels from `ПЕРС ДАННЫЕ`.
+- HH auth credentials are read through the `db/` boundary; the current backend
+  still maps Google Sheets labels from `ПЕРС ДАННЫЕ`.
 - Supported labels are `rusPhoneNumber`, `emailHH`, `passwordEmailHH`, and `passwordHH`.
 - `rusPhoneNumber` is normalized for HH login, for example `/+79775442105` -> `9775442105`.
 - `makeHHAuth` accepts either temporary `credentials` for local tests or lazy `getCredentials` for production orchestration.

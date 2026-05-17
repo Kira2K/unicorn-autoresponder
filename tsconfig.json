@@ -13,6 +13,7 @@
   },
   "include": [
     "*.ts",
+    "db/**/*.ts",
     "dolphin/**/*.ts",
     "hh-auth/**/*.ts",
     "tgChatIdChecker/**/*.ts",

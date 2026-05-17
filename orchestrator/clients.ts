@@ -25,22 +25,24 @@ function parseCommaSeparatedEnv(value: string | undefined): string[] {
     .filter(Boolean)
 }
 
-function attachHHAuthCredentials(
+async function attachHHAuthCredentials(
   clients: ClientAutomationData[],
   repository: {
     getHHAuthCredentialsByCommonChatId(
       commonChatId: string,
       market?: 'Ru' | 'En'
-    ): ClientHHAuthCredentials
+    ): Promise<ClientHHAuthCredentials>
   }
-): ClientAutomationData[] {
-  return clients.map(client => ({
-    ...client,
-    hhAuthCredentials: repository.getHHAuthCredentialsByCommonChatId(
-      client.commonChatId,
-      client.market
-    )
-  }))
+): Promise<ClientAutomationData[]> {
+  return await Promise.all(
+    clients.map(async client => ({
+      ...client,
+      hhAuthCredentials: await repository.getHHAuthCredentialsByCommonChatId(
+        client.commonChatId,
+        client.market
+      )
+    }))
+  )
 }
 
 function selectClientsByCommonChatIds(
