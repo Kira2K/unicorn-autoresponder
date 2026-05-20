@@ -37,6 +37,25 @@ const {
   normalizeHhUrl
 } = require('./shared/hh-url.ts')
 const {
+  createCompanyStopListBrowserSource,
+  findBlockedCompanyMatch,
+  normalizeBlockedCompanies
+} = require('./shared/company-stop-list.ts') as {
+  createCompanyStopListBrowserSource(): string
+  findBlockedCompanyMatch(companyName: unknown, blockedCompanies: unknown): any
+  normalizeBlockedCompanies(blockedCompanies: unknown): Array<{
+    id: string
+    name: string
+  }>
+}
+const {
+  MOCK_BLOCKED_COMPANIES,
+  attachBlockedCompanies
+} = require('./orchestrator/blocked-companies.ts') as {
+  MOCK_BLOCKED_COMPANIES: Array<{ id: string; name: string }>
+  attachBlockedCompanies(clients: any[]): any[]
+}
+const {
   isClientReportSuccessful,
   selectClientsByCommonChatIds,
   selectClientsByUniqueNames,
@@ -218,6 +237,70 @@ assert.equal(isAutoResponderUrl('https://hh.ru/search/vacancy?text=js'), true)
 assert.equal(isAutoResponderUrl('https://example.com/search/vacancy'), false)
 assert.equal(normalizeHhUrl('/vacancy/111'), 'https://hh.ru/vacancy/111')
 assert.equal(normalizeHhUrl('javascript:alert(1)'), undefined)
+
+const blockedCompanies = [
+  { id: 'mock-comtek', name: 'Comtek' },
+  { id: 'mock-trynexis', name: 'Trynexis' },
+  { id: 'mock-sberbank', name: 'Sberbank' }
+]
+assert.equal(
+  findBlockedCompanyMatch('Comtek', blockedCompanies)?.blockedCompany.id,
+  'mock-comtek'
+)
+assert.equal(
+  findBlockedCompanyMatch('  COMTEK, LLC  ', blockedCompanies)?.reason,
+  'substring'
+)
+assert.equal(
+  findBlockedCompanyMatch('Trynexiz', blockedCompanies)?.blockedCompany.id,
+  'mock-trynexis'
+)
+assert.equal(
+  findBlockedCompanyMatch('sber', blockedCompanies)?.blockedCompany.id,
+  'mock-sberbank'
+)
+assert.equal(
+  findBlockedCompanyMatch('Cberbank', blockedCompanies)?.reason,
+  'edit_distance_1'
+)
+assert.equal(findBlockedCompanyMatch('Totally Different', blockedCompanies), undefined)
+assert.deepEqual(normalizeBlockedCompanies([{ id: 1, name: ' Comtek ' }]), [
+  { id: '1', name: 'Comtek' }
+])
+assert.deepEqual(MOCK_BLOCKED_COMPANIES, [
+  { id: 'mock-comtek', name: 'Comtek' },
+  { id: 'mock-trynexis', name: 'Trynexis' }
+])
+assert.deepEqual(attachBlockedCompanies([targets[0]])[0].blockedCompanies, [
+  { id: 'mock-comtek', name: 'Comtek' },
+  { id: 'mock-trynexis', name: 'Trynexis' }
+])
+const browserStopListWindow: any = {}
+new Function(
+  'window',
+  `${createCompanyStopListBrowserSource()}; return window.HHCompanyStopList;`
+)(browserStopListWindow)
+assert.equal(
+  browserStopListWindow.HHCompanyStopList.findBlockedCompanyMatch(
+    'Comtek',
+    blockedCompanies
+  ).blockedCompany.id,
+  'mock-comtek'
+)
+
+const indexSource = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8')
+assert.match(indexSource, /blockedCompanies/)
+assert.match(indexSource, /COMPANY_STOP_LIST_SKIPPED/)
+assert.ok(
+  indexSource.indexOf('findBlockedCompanyMatch(companyName)') <
+    indexSource.indexOf('topBtn.click()')
+)
+
+const autoResponderControlSource = fs.readFileSync(
+  path.join(__dirname, 'auto-responder', 'control.ts'),
+  'utf8'
+)
+assert.match(autoResponderControlSource, /settings\.blockedCompanies/)
 
 const telegramChunks = splitTelegramMessage('x'.repeat(9000))
 assert.equal(telegramChunks.length, 3)

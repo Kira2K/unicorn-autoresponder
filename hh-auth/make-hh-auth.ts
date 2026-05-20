@@ -26,6 +26,19 @@ async function waitForAuthSelector(
   step: string,
   options: AuthorizeHHPageOptions
 ): Promise<any> {
+  const authStateBeforeWait: HHAuthResult = await validateAuth(page, {
+    log: options.log,
+    timeoutMs: Math.min(options.timeoutMs ?? 30000, 1000)
+  })
+
+  if (authStateBeforeWait.state === 'captcha') {
+    throw new HHAuthError(
+      'captcha_detected',
+      `HH captcha detected before waiting for auth selector at ${step}`,
+      authStateBeforeWait
+    )
+  }
+
   const locator = page.locator(selector).first()
 
   try {
@@ -36,6 +49,19 @@ async function waitForAuthSelector(
 
     return locator
   } catch (error: unknown) {
+    const authStateAfterWait: HHAuthResult = await validateAuth(page, {
+      log: options.log,
+      timeoutMs: Math.min(options.timeoutMs ?? 30000, 1000)
+    }).catch(() => undefined as unknown as HHAuthResult)
+
+    if (authStateAfterWait?.state === 'captcha') {
+      throw new HHAuthError(
+        'captcha_detected',
+        `HH captcha detected while waiting for auth selector at ${step}`,
+        authStateAfterWait
+      )
+    }
+
     const dataQa = await collectDataQa(page)
     const screenshot = await takeScreenshot(page, options.artifactDir, `debug-${step}-selector-missing.png`)
       .catch((screenshotError: unknown) => {

@@ -3,14 +3,20 @@ const fs = require('node:fs/promises')
 const { loadPlaywright } = require('../browser/playwright.ts')
 const { closePageQuietly } = require('../browser/page-utils.ts')
 const {
-  applyAutoResponderCoverText,
+  applyAutoResponderSettings,
   ensureIndexScript,
   installIndexReinjectWatcher,
   recordVacancyTransition
 } = require('../auto-responder/browser.ts')
+const {
+  createCompanyStopListBrowserSource
+} = require('../shared/company-stop-list.ts') as {
+  createCompanyStopListBrowserSource(): string
+}
 const { detectHhAuthState } = require('../hh-auth/orchestrator.ts')
 const { runManualVacanciesCleanup } = require('../manual-vacancies-cleanup.ts')
 const { isAutoResponderUrl } = require('../shared/hh-url.ts')
+const { getErrorMessage, withTimeout } = require('./runtime-utils.ts')
 const {
   CONNECT_OVER_CDP_TIMEOUT_MS,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
@@ -27,7 +33,10 @@ async function openScenarioAndInjectIndex(
   port: number,
   stackScenario: string,
   responseCounter: ResponseCounter,
-  coverText?: string
+  options: {
+    coverText?: string
+    blockedCompanies?: Array<{ id: string; name: string }>
+  } = {}
 ): Promise<OpenScenarioResult> {
   const { chromium } = loadPlaywright()
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {
@@ -42,10 +51,38 @@ async function openScenarioAndInjectIndex(
   let manualVacanciesCleanup: ManualVacanciesCleanupResult | undefined
 
   try {
-    manualVacanciesCleanup = await runManualVacanciesCleanup(cleanupPage, {
-      log: (message: string) =>
-        console.log(`[manual vacancies cleanup] ${message}`)
-    })
+    manualVacanciesCleanup = await withTimeout(
+      runManualVacanciesCleanup(cleanupPage, {
+        log: (message: string) =>
+          console.log(`[manual vacancies cleanup] ${message}`)
+      }),
+      HH_INITIAL_NAVIGATION_TIMEOUT_MS,
+      `Manual vacancies cleanup did not finish in ${HH_INITIAL_NAVIGATION_TIMEOUT_MS}ms`,
+      async () => {
+        await closePageQuietly(cleanupPage)
+      }
+    )
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error)
+    console.warn(`[manual vacancies cleanup] ${errorMessage}; continuing standard scenario`)
+    manualVacanciesCleanup = {
+      skipped: false,
+      completed: false,
+      initialCount: 0,
+      checkedCount: 0,
+      removedCount: 0,
+      remainingCount: 0,
+      keptCount: 0,
+      error: errorMessage,
+      items: [
+        {
+          id: 'manual-cleanup-error',
+          url: '',
+          action: 'kept',
+          reason: errorMessage
+        }
+      ]
+    }
   } finally {
     await closePageQuietly(cleanupPage)
   }
@@ -63,7 +100,10 @@ async function openScenarioAndInjectIndex(
   }
 
   const page = await context.newPage()
-  const indexScript = await fs.readFile(INDEX_SCRIPT_PATH, 'utf8')
+  const indexScript =
+    createCompanyStopListBrowserSource() +
+    '\n' +
+    (await fs.readFile(INDEX_SCRIPT_PATH, 'utf8'))
   const disposeWatcher = installIndexReinjectWatcher(
     page,
     indexScript,
@@ -125,7 +165,10 @@ async function openScenarioAndInjectIndex(
   await page.evaluate((successfulResponsesKey: string) => {
     sessionStorage.setItem(successfulResponsesKey, '0')
   }, HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY)
-  await applyAutoResponderCoverText(page, coverText)
+  await applyAutoResponderSettings(page, {
+    coverText: options.coverText,
+    blockedCompanies: options.blockedCompanies
+  })
   const indexScriptInjected = await ensureIndexScript(
     page,
     indexScript,

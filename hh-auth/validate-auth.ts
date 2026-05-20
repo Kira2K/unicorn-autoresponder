@@ -65,6 +65,34 @@ async function hasHhCaptchaChallenge(page: any): Promise<boolean> {
   }
 }
 
+async function getFastCaptchaSignals(page: any): Promise<{
+  ddosGuard: boolean
+  hhCaptchaChallenge: boolean
+  captchaContainer: boolean
+  captchaChallenge: boolean
+}> {
+  const fastTimeoutMs = 250
+  const [ddosGuard, hhCaptchaChallenge, captchaContainer, captchaChallenge] =
+    await Promise.all([
+      page.evaluate(() => {
+        return (
+          /^ddos-guard$/i.test(document.title.trim()) ||
+          /\bddos-guard\b/i.test(document.body?.innerText ?? '')
+        )
+      }).catch(() => false),
+      hasHhCaptchaChallenge(page),
+      isAttached(page, hhAuthSelectors.captcha.container, fastTimeoutMs),
+      isAttached(page, hhAuthSelectors.captcha.challenge, fastTimeoutMs)
+    ])
+
+  return {
+    ddosGuard,
+    hhCaptchaChallenge,
+    captchaContainer,
+    captchaChallenge
+  }
+}
+
 async function ensureHhPage(page: any, timeoutMs: number): Promise<void> {
   const isHhUrl = (value: string) => /^https:\/\/([^/]+\.)?hh\.ru\//i.test(value)
   const url = String(page.url?.() ?? '')
@@ -99,6 +127,41 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
   const currentUrl = String(page.url?.() ?? '')
   const isLoginUrl = /^https:\/\/([^/]+\.)?hh\.ru\/account\/login/i.test(currentUrl)
   const loginUrlHasBackUrl = isLoginUrl && /[?&]backUrl=/i.test(currentUrl)
+  const fastCaptchaSignals = await getFastCaptchaSignals(page)
+
+  if (
+    fastCaptchaSignals.ddosGuard ||
+    fastCaptchaSignals.hhCaptchaChallenge ||
+    fastCaptchaSignals.captchaContainer ||
+    fastCaptchaSignals.captchaChallenge
+  ) {
+    const result: HHAuthResult = {
+      state: 'captcha',
+      checkedAt: new Date().toISOString(),
+      url: page.url(),
+      title: await page.title().catch(() => ''),
+      signals: {
+        resumesAndProfile: false,
+        loginButton: false,
+        accountTypeCards: false,
+        phoneInput: false,
+        emailInput: false,
+        passwordInput: false,
+        vacancyResponsesButton: false,
+        mainmenuProfileAndResumes: false,
+        mainmenuVacancyResponses: false,
+        resumesAndProfileText: false,
+        vacancyResponsesText: false,
+        ...fastCaptchaSignals,
+        loginUrl: isLoginUrl,
+        loginUrlHasBackUrl
+      }
+    }
+
+    options.log?.('validateAuth completed', result)
+
+    return result
+  }
 
   const [
     resumesAndProfile,

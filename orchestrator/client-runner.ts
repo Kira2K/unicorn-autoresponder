@@ -105,7 +105,10 @@ async function openClientScenario(
     port,
     clientData.stackScenario!,
     responseCounter,
-    clientData.coverText
+    {
+      coverText: clientData.coverText,
+      blockedCompanies: clientData.blockedCompanies
+    }
   )
 
   return {

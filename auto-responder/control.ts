@@ -30,12 +30,17 @@ async function isAutoResponderRunning(page: any): Promise<boolean | undefined> {
   }
 }
 
-async function applyAutoResponderCoverText(
+type AutoResponderSettingsPatch = {
+  coverText?: string
+  blockedCompanies?: Array<{ id: string; name: string }>
+}
+
+async function applyAutoResponderSettings(
   page: any,
-  coverText: string | undefined
+  settingsPatch: AutoResponderSettingsPatch
 ): Promise<void> {
   if (
-    coverText === undefined ||
+    !settingsPatch ||
     page.isClosed() ||
     !isAutoResponderUrl(page.url())
   ) {
@@ -43,7 +48,13 @@ async function applyAutoResponderCoverText(
   }
 
   await page.evaluate(
-    ({ settingsKey, cover }: { settingsKey: string; cover: string }) => {
+    ({
+      settingsKey,
+      patch
+    }: {
+      settingsKey: string
+      patch: AutoResponderSettingsPatch
+    }) => {
       let settings: Record<string, unknown> = {}
 
       try {
@@ -52,15 +63,38 @@ async function applyAutoResponderCoverText(
         settings = {}
       }
 
-      settings.coverText = cover
-      settings.useCover = Boolean(cover.trim())
+      if (patch.coverText !== undefined) {
+        settings.coverText = patch.coverText
+        settings.useCover = Boolean(patch.coverText.trim())
+      }
+
+      if (Array.isArray(patch.blockedCompanies)) {
+        settings.blockedCompanies = patch.blockedCompanies
+          .filter(company => company && company.id && company.name)
+          .map(company => ({
+            id: String(company.id),
+            name: String(company.name)
+          }))
+      }
+
       localStorage.setItem(settingsKey, JSON.stringify(settings))
     },
     {
       settingsKey: HH_AUTO_RESPONDER_SETTINGS_KEY,
-      cover: coverText
+      patch: settingsPatch
     }
   )
+}
+
+async function applyAutoResponderCoverText(
+  page: any,
+  coverText: string | undefined
+): Promise<void> {
+  if (coverText === undefined) {
+    return
+  }
+
+  await applyAutoResponderSettings(page, { coverText })
 }
 
 async function waitForAutoResponderToFinish(
@@ -168,6 +202,7 @@ async function stopAutoResponder(page: any): Promise<boolean> {
 
 module.exports = {
   applyAutoResponderCoverText,
+  applyAutoResponderSettings,
   isAutoResponderRunning,
   stopAutoResponder,
   waitForAutoResponderToFinish

@@ -12,6 +12,7 @@ const {
 } = require('./dolphin/index.ts')
 const {
   attachHHAuthCredentials,
+  attachBlockedCompanies,
   getConfiguredAutomationTargetOptions,
   getConfiguredClientIds,
   getConfiguredClientNames,
@@ -129,7 +130,7 @@ async function runSelectedClientsOrchestrator(
   const allClients: ClientAutomationData[] =
     await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
   const selectedClients = await attachHHAuthCredentials(
-    selectClientsByUniqueNames(allClients, clientNames),
+    attachBlockedCompanies(selectClientsByUniqueNames(allClients, clientNames)),
     db
   )
 
@@ -143,7 +144,7 @@ async function runSelectedClientIdsOrchestrator(
   const allClients: ClientAutomationData[] =
     await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
   const selectedClients = await attachHHAuthCredentials(
-    selectClientsByCommonChatIds(allClients, clientIds),
+    attachBlockedCompanies(selectClientsByCommonChatIds(allClients, clientIds)),
     db
   )
 
@@ -153,7 +154,9 @@ async function runSelectedClientIdsOrchestrator(
 async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
   const db = createAppDb()
   const clients: ClientAutomationData[] = await attachHHAuthCredentials(
-    await db.getAutomationTargets(getConfiguredAutomationTargetOptions()),
+    attachBlockedCompanies(
+      await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
+    ),
     db
   )
 

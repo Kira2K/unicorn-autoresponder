@@ -7,6 +7,7 @@ export type ClientAutomationData = {
   dolphinProfileId: number
   commonChatId: string
   coverText?: string
+  blockedCompanies?: Array<{ id: string; name: string }>
   hhAuthCredentials?: ClientHHAuthCredentials
 }
 
@@ -77,6 +78,7 @@ export type ManualVacanciesCleanupResult = {
   removedCount: number
   remainingCount: number
   keptCount: number
+  error?: string
   items: Array<{
     id: string
     url: string

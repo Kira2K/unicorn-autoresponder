@@ -1,4 +1,7 @@
 const { ORCHESTRATOR_WORK_WITH_MARKET } = require('./config.ts')
+const { attachBlockedCompanies } = require('./blocked-companies.ts') as {
+  attachBlockedCompanies(clients: ClientAutomationData[]): ClientAutomationData[]
+}
 
 type AutomationTargetOptions = import('./types.ts').AutomationTargetOptions
 type ClientAutomationData = import('./types.ts').ClientAutomationData
@@ -100,6 +103,7 @@ module.exports = {
   getConfiguredAutomationTargetOptions,
   getConfiguredClientIds,
   getConfiguredClientNames,
+  attachBlockedCompanies,
   selectClientsByCommonChatIds,
   selectClientsByUniqueNames
 }

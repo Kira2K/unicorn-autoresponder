@@ -43,6 +43,7 @@ type ManualVacanciesCleanupResult = {
   removedCount: number
   remainingCount: number
   keptCount: number
+  error?: string
   items: ManualVacancyCleanupItem[]
 }
 

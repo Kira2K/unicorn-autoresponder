@@ -34,6 +34,9 @@
         nativeWrapper: '[data-qa="textarea-native-wrapper"]',
         relocationBtn: '[data-qa="relocation-warning-confirm"]',
         dailyResponseLimitWarning: '[data-qa-popup-error-code="negotiations-limit-exceeded"]',
+        vacancyResponseTopic: '[data-qa="vacancy-response-link-view-topic"]',
+        vacancyCompanyName: '[data-qa="vacancy-company-name"]',
+        vacancyCompanyLink: 'a[data-qa="vacancy-company-name"], [data-qa="vacancy-company-link"]',
         vacancyLink: 'a[data-qa="serp-item__title"], a[data-qa="vacancy-serp__vacancy-title"], a[href*="/vacancy/"]',
         vacancyCard: 'div[data-qa="vacancy-serp__vacancy"], div[data-qa="serp-item"], .vacancy-serp-item',
         login: '[data-qa="login"]',
@@ -59,8 +62,10 @@
         actionDelayMax: 150,
         waitForModalMs: 7000,
         instanceLockTtl: 25000,
-        continueOnNoModal: true
+        continueOnNoModal: true,
+        blockedCompanies: []
     };
+    const MAX_RESUME_ATTEMPTS_PER_VACANCY = 10;
 
     // Безопасные и предсказуемые значения конфигурации
     const toNum = (v, fallback) => {
@@ -85,7 +90,17 @@
             ...merged,
             coverText: String(merged.coverText ?? DEFAULTS.coverText).slice(0, 5000),
             useCover: merged.useCover === false ? false : true,
-            skipHidden: merged.skipHidden === false ? false : true
+            skipHidden: merged.skipHidden === false ? false : true,
+            blockedCompanies: Array.isArray(merged.blockedCompanies)
+                ? merged.blockedCompanies
+                    .filter(company => company && company.id && company.name)
+                    .map(company => ({
+                        id: String(company.id).trim(),
+                        name: String(company.name).trim()
+                    }))
+                    .filter(company => company.id && company.name)
+                    .slice(0, 500)
+                : []
         };
 
         normalized.delayMin = clamp(Math.round(toNum(merged.delayMin, DEFAULTS.delayMin)), 300, 4000);
@@ -243,11 +258,9 @@
         },
         addSuccessfulResponseID: (id) => {
             const successfulIds = StateManager.getSuccessfulResponseIDs();
-            if (successfulIds.has(id)) {
-                return StateManager.getSuccessfulResponses();
-            }
+            const responseKey = `${id || 'unknown'}:${Date.now()}:${successfulIds.size + 1}`;
 
-            successfulIds.add(id);
+            successfulIds.add(responseKey);
             sessionStorage.setItem(KEYS.successfulResponseIds, JSON.stringify([...successfulIds]));
             return StateManager.incrementSuccessfulResponses();
         },
@@ -427,6 +440,82 @@
                 resolve(null);
             }, timeout);
         });
+    }
+
+    function isElementVisible(element) {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    }
+
+    function queryVisible(selector) {
+        return Array.from(document.querySelectorAll(selector)).find(isElementVisible) || null;
+    }
+
+    async function waitForVisibleElement(selector, timeout = config.waitForModalMs) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const el = queryVisible(selector);
+            if (el) return el;
+            await wait(200);
+        }
+
+        return queryVisible(selector);
+    }
+
+    async function waitForElementGone(selector, timeout = 5000) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            if (!queryVisible(selector)) return true;
+            await wait(300);
+        }
+
+        return !queryVisible(selector);
+    }
+
+    async function submitFollowUpResponseModals(maxSteps = 3) {
+        let submittedSteps = 0;
+
+        for (let step = 1; step <= maxSteps; step += 1) {
+            await wait(700);
+            await actionPause();
+
+            if (stopSignal) return submittedSteps;
+            if (isManualResponsePage() || isAuthRequiredPage()) return submittedSteps;
+            if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) return submittedSteps;
+            if (isResumeVisibilityRequiredResponse()) return submittedSteps;
+
+            const followUpSubmit = queryVisible(SELECTORS.modalSubmit);
+            const followUpTextarea = queryVisible(SELECTORS.modalTextarea);
+            const submitText = (followUpSubmit?.innerText || followUpSubmit?.textContent || '').trim().toLowerCase();
+            const isFollowUpSubmit =
+                Boolean(followUpTextarea) ||
+                submitText.includes('отправить');
+
+            if (!followUpSubmit || !isFollowUpSubmit) {
+                return submittedSteps;
+            }
+
+            if (config.useCover && followUpTextarea) {
+                fillTextarea(followUpTextarea, config.coverText);
+                await actionPause();
+                if (stopSignal) return submittedSteps;
+            }
+
+            log(`Отправляю дополнительный шаг формы отклика: ${step}.`);
+            try {
+                followUpSubmit.click();
+            } catch(e) {
+                try {
+                    followUpSubmit.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+                } catch(_) {}
+            }
+            submittedSteps += 1;
+        }
+
+        return submittedSteps;
     }
 
     // Человеческий скролл: вниз до 50% страницы, пауза, и возврат вверх
@@ -618,6 +707,10 @@
         return location.href.includes('/applicant/vacancy_response');
     }
 
+    function isVacancySearchPage() {
+        return location.pathname.startsWith('/search/vacancy') || location.href.includes('/search/vacancy');
+    }
+
     function isAuthRequiredPage() {
         const url = location.href;
         const path = location.pathname;
@@ -657,6 +750,80 @@
             .replace(/[«»"']/g, '')
             .replace(/\s+/g, ' ')
             .trim();
+    }
+
+    function cleanCompanyNameText(text) {
+        return String(text || '')
+            .replace(/\u00a0/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function getVacancyCompanyName() {
+        const selectors = [
+            SELECTORS.vacancyCompanyName,
+            SELECTORS.vacancyCompanyLink,
+            '[data-qa="vacancy-company-name"] span',
+            '.vacancy-company-name',
+            '.vacancy-company-redesigned'
+        ];
+
+        for (const selector of selectors) {
+            const elements = Array.from(document.querySelectorAll(selector));
+
+            for (const element of elements) {
+                const text = cleanCompanyNameText(element.innerText || element.textContent || '');
+
+                if (text) {
+                    return text;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    function findBlockedCompanyMatch(companyName) {
+        const matcher = window.HHCompanyStopList;
+
+        if (!matcher || typeof matcher.findBlockedCompanyMatch !== 'function') {
+            return undefined;
+        }
+
+        return matcher.findBlockedCompanyMatch(companyName, config.blockedCompanies);
+    }
+
+    async function skipBlockedCompanyVacancy(vid, companyName, match) {
+        const blockedCompany = match?.blockedCompany || {};
+        const details = `Компания "${companyName}" совпала со stop-list: ${blockedCompany.name || 'n/a'} (${blockedCompany.id || 'n/a'}), reason ${match?.reason || 'n/a'}`;
+
+        log(`Пропускаю вакансию: ${details}`);
+        markVacancyProcessedAndReturn(
+            vid,
+            StateManager.getReturnUrl(),
+            `Компания в stop-list. ${details}`
+        );
+        await wait(800);
+        return 'SKIPPED_COMPANY_STOP_LIST';
+    }
+
+    function isAlreadyRespondedPage() {
+        if (document.querySelector(SELECTORS.vacancyResponseTopic)) return true;
+
+        const pageText = getNormalizedPageText();
+        const successTexts = [
+            'резюме доставлено',
+            'отклик отправлен',
+            'отклик был отправлен',
+            'вы откликнулись',
+            'сопроводительное письмо отправлено'
+        ];
+
+        return successTexts.some(text => pageText.includes(text));
+    }
+
+    function hasAdditionalResumeApplyButton() {
+        return Boolean(queryVisible(SELECTORS.top2DTimeApply));
     }
 
     function isResumeVisibilityRequiredResponse() {
@@ -805,7 +972,7 @@
     }
 
     // Обработка вакансии: работает и на странице вакансии, и для кнопки на листинге
-    async function processVacancy(btn, isSecond = false) {
+    async function processVacancy(btn, isSecond = false, resumeAttempt = 1) {
         log("начало")
         if (stopSignal) return 'STOPPED';
         if (isAuthRequiredPage()) {
@@ -817,6 +984,30 @@
             const vid = getStableVacancyId(btn);
             StateManager.setReturnUrl(document.referrer || '/search/vacancy');
 
+            if (resumeAttempt > MAX_RESUME_ATTEMPTS_PER_VACANCY) {
+                markVacancyProcessedAndReturn(
+                    vid,
+                    StateManager.getReturnUrl(),
+                    `Достигнут лимит ${MAX_RESUME_ATTEMPTS_PER_VACANCY} откликов разными резюме на одну вакансию. Помечаю обработанной.`
+                );
+                await wait(800);
+                return 'OK';
+            }
+
+            if (isAlreadyRespondedPage() && !hasAdditionalResumeApplyButton()) {
+                markVacancyProcessedAndReturn(
+                    vid,
+                    StateManager.getReturnUrl(),
+                    'Вакансия уже имеет отклик и кнопки отклика другим резюме нет. Помечаю обработанной и иду дальше.'
+                );
+                await wait(800);
+                return 'OK';
+            }
+
+            if (isAlreadyRespondedPage() && hasAdditionalResumeApplyButton()) {
+                log('Вакансия уже имеет отклик, но доступна кнопка "Отклик другим резюме". Продолжаю по следующему резюме.');
+            }
+
             const viewTime = randomDelay(config.viewMin, config.viewMax);
             log(`Читаю ~${Math.round(viewTime/1000)} сек (имитирую просмотр страницы).`);
             await humanScrollToCompanySectionAndReturn(viewTime);
@@ -824,13 +1015,24 @@
             //await actionPause();
             if (stopSignal) return 'STOPPED';
 
-            let applyBtn = document.querySelector(SELECTORS.topApply) || await waitForElement(SELECTORS.applyBtn, config.waitForModalMs);
-            let apply2DTime = document.querySelector(SELECTORS.top2DTimeApply) || await waitForElement(SELECTORS.top2DTimeApply, config.waitForModalMs);
+            const companyName = getVacancyCompanyName();
+            if (companyName) {
+                const blockedCompanyMatch = findBlockedCompanyMatch(companyName);
+
+                if (blockedCompanyMatch) {
+                    return await skipBlockedCompanyVacancy(vid, companyName, blockedCompanyMatch);
+                }
+            } else if (config.blockedCompanies.length) {
+                log('Не удалось определить компанию вакансии для проверки stop-list. Продолжаю без блокировки.', true);
+            }
+
+            let applyBtn = queryVisible(SELECTORS.topApply) || await waitForVisibleElement(SELECTORS.applyBtn, config.waitForModalMs);
+            let apply2DTime = queryVisible(SELECTORS.top2DTimeApply) || await waitForVisibleElement(SELECTORS.top2DTimeApply, config.waitForModalMs);
             log(apply2DTime);
             console.log(apply2DTime);
             //alert(apply2DTime.toString())
 
-            if (!applyBtn && !apply2DTime || isSecond && !apply2DTime) {
+            if ((!applyBtn && !apply2DTime) || (isSecond && !apply2DTime)) {
                 // Если нас уже редиректнуло на страницу с вопросами — помечаем вакансию и уходим
                 if (isManualResponsePage()) {
                     handleManualResponsePage('Открылась страница вопросов вместо вакансии. Сохраняю для ручного отклика.');
@@ -866,7 +1068,7 @@
             await actionPause();
             if (stopSignal) return 'STOPPED';
 
-            const topBtn = document.querySelector(SELECTORS.topApply) || document.querySelector(SELECTORS.top2DTimeApply);
+            const topBtn = queryVisible(SELECTORS.topApply) || queryVisible(SELECTORS.top2DTimeApply);
             if (topBtn) {
                 topBtn.scrollIntoView({ block: 'center', behavior: 'auto' });
                 await actionPause();
@@ -929,6 +1131,15 @@
                 if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) {
                     log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                     return 'DAILY_RESPONSE_LIMIT';
+                }
+                if (isAlreadyRespondedPage() && !hasAdditionalResumeApplyButton()) {
+                    markVacancyProcessedAndReturn(
+                        vid,
+                        StateManager.getReturnUrl(),
+                        'Вакансия уже имеет отклик и кнопки отклика другим резюме нет. Помечаю обработанной и иду дальше.'
+                    );
+                    await wait(800);
+                    return 'OK';
                 }
                 if (isResumeVisibilityRequiredResponse()) {
                     markVacancyProcessedAndReturn(
@@ -1001,10 +1212,15 @@
 
             // --- START: более надёжный возврат после отправки ---
             const returnUrl = StateManager.getReturnUrl() || '/search/vacancy';
+            const wasAlreadyRespondedBeforeSubmit = isAlreadyRespondedPage();
             await actionPause();
             if (stopSignal) return 'STOPPED';
             try { submitButton.click(); } catch(e) { try { submitButton.dispatchEvent(new MouseEvent('click', {bubbles:true})); } catch(_){} }
             await actionPause();
+            const followUpSubmitSteps = await submitFollowUpResponseModals();
+            if (followUpSubmitSteps) {
+                log(`Дополнительных шагов формы отклика отправлено: ${followUpSubmitSteps}.`);
+            }
             if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) {
                 log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                 return 'DAILY_RESPONSE_LIMIT';
@@ -1029,27 +1245,41 @@
                 while (Date.now() - start < timeout) {
                     if (stopSignal) return false;
                     if (isAuthRequiredPage()) return 'AUTH_REQUIRED';
-                    if (document.querySelector('[data-qa="vacancy-response-link-view-topic"]')) return true;
+                    if (isManualResponsePage()) return 'MANUAL_RESPONSE_REQUIRED';
+                    if (isVacancySearchPage()) return true;
+                    if (wasAlreadyRespondedBeforeSubmit) {
+                        if (!queryVisible(SELECTORS.modalSubmit)) return true;
+                    } else if (document.querySelector(SELECTORS.vacancyResponseTopic)) {
+                        return true;
+                    }
                     if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) return 'DAILY_RESPONSE_LIMIT';
                     if (isResumeVisibilityRequiredResponse()) return 'RESUME_VISIBILITY_REQUIRED';
-                    try {
-                        const pageText = getNormalizedPageText();
-                        const successTexts = [
-                            'резюме доставлено',
-                            'отклик отправлен',
-                            'отклик был отправлен',
-                            'вы откликнулись',
-                            'сопроводительное письмо отправлено'
-                        ];
+                    if (!wasAlreadyRespondedBeforeSubmit && isAlreadyRespondedPage()) return true;
+                    if (!wasAlreadyRespondedBeforeSubmit) {
+                        try {
+                            const pageText = getNormalizedPageText();
+                            const successTexts = [
+                                'резюме доставлено',
+                                'отклик отправлен',
+                                'отклик был отправлен',
+                                'вы откликнулись',
+                                'сопроводительное письмо отправлено'
+                            ];
 
-                        if (successTexts.some(text => pageText.includes(text))) return true;
-                    } catch (e) { /* ignore */ }
+                            if (successTexts.some(text => pageText.includes(text))) return true;
+                        } catch (e) { /* ignore */ }
+                    }
                     await wait(300);
                 }
                 return false;
             }
 
-            const confirmationResult = await waitForSubmitConfirmation(5000);
+            const repeatedResumeSubmitClosed =
+                wasAlreadyRespondedBeforeSubmit &&
+                await waitForElementGone(SELECTORS.modalSubmit, 5000);
+            const confirmationResult = repeatedResumeSubmitClosed
+                ? true
+                : await waitForSubmitConfirmation(5000);
 
             if (confirmationResult === 'DAILY_RESPONSE_LIMIT') {
                 log('HH показал дневной лимит откликов. Завершаю работу штатно.');
@@ -1071,12 +1301,19 @@
                 return 'SKIPPED_RESUME_VISIBILITY';
             }
 
+            if (confirmationResult === 'MANUAL_RESPONSE_REQUIRED') {
+                log('После отправки открылась страница доп. вопросов. Сохраняю для ручного отклика.', true);
+                handleManualResponsePage('После отправки открылась страница доп. вопросов. Сохраняю для ручного отклика.');
+                await wait(1000);
+                return 'REDIRECT';
+            }
+
             if (confirmationResult === true) {
                 const successfulResponses = StateManager.addSuccessfulResponseID(vid);
                 log(`Отклик подтверждён. Всего подтверждено: ${successfulResponses}`);
-                let apply2DTime = document.querySelector(SELECTORS.top2DTimeApply) || await waitForElement(SELECTORS.top2DTimeApply, config.waitForModalMs);
+                let apply2DTime = queryVisible(SELECTORS.top2DTimeApply) || await waitForVisibleElement(SELECTORS.top2DTimeApply, config.waitForModalMs);
                 log(apply2DTime);
-                if(apply2DTime) return processVacancy(btn, true)
+                if(apply2DTime) return processVacancy(btn, true, resumeAttempt + 1)
                 StateManager.addProcessedID(vid);
                 StateManager.clearLastAttemptID();
                 log('Перехожу к списку вакансий.');
@@ -1099,6 +1336,23 @@
                     log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                     return 'DAILY_RESPONSE_LIMIT';
                 }
+                if (isVacancySearchPage()) {
+                    const successfulResponses = StateManager.addSuccessfulResponseID(vid);
+                    StateManager.addProcessedID(vid);
+                    StateManager.clearLastAttemptID();
+                    log(`HH вернул на список вакансий после submit. Считаю отклик подтверждённым. Всего подтверждено: ${successfulResponses}`);
+                    await wait(800);
+                    return 'OK';
+                }
+                if (isAlreadyRespondedPage() && !hasAdditionalResumeApplyButton()) {
+                    markVacancyProcessedAndReturn(
+                        vid,
+                        returnUrl,
+                        'Подтверждение не найдено сразу, но HH показывает, что отклик уже есть и других резюме нет. Помечаю обработанной.'
+                    );
+                    await wait(800);
+                    return 'OK';
+                }
                 if (isResumeVisibilityRequiredResponse()) {
                     markVacancyProcessedAndReturn(
                         vid,
@@ -1115,8 +1369,15 @@
                     return 'REDIRECT';
                 }
 
-                // fallback: попробуем history.back(), если не сработает — редирект
-                log('Подтверждение не найдено — пробую history.back() (фоллбек).', true);
+                // fallback: если HH не дал понятного подтверждения, не валим весь сценарий.
+                // Сохраняем вакансию в ручной список и возвращаемся к поиску.
+                log('Подтверждение не найдено — сохраняю вакансию для ручной проверки и возвращаюсь к списку.', true);
+                try {
+                    saveCurrentManualResponse(vid, returnUrl);
+                } catch (e) {
+                    console.warn('save manual fallback entry error', e);
+                }
+
                 try {
                     StateManager.rememberUrl(location.href, 'history-back-no-confirm');
                     history.back();
@@ -1132,7 +1393,7 @@
                     window.location.href = returnUrl;
                 }
                 await wait(1000);
-                return 'NO_CONFIRM';
+                return 'REDIRECT';
             }
             // --- END ---
         }
@@ -1205,6 +1466,11 @@
                 return;
             } else if (res === 'SKIPPED_RESUME_VISIBILITY') {
                 log('Вакансия пропущена из-за требования изменить видимость резюме. Возвращаюсь к списку.');
+                isLoopActive = false;
+                setStatus('running', 'Возврат к списку...');
+                return;
+            } else if (res === 'SKIPPED_COMPANY_STOP_LIST') {
+                log('Вакансия пропущена по stop-list компании. Возвращаюсь к списку.');
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
                 return;
@@ -1288,6 +1554,9 @@
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
                 return;
+            } else if (result === 'SKIPPED_COMPANY_STOP_LIST') {
+                log('Вакансия пропущена по stop-list компании.');
+                await actionPause();
             } else if (result === 'AUTH_REQUIRED') {
                 isLoopActive = false;
                 return;

@@ -109,8 +109,11 @@ function formatManualVacanciesCleanupBrief(
     `checked ${result.checkedCount}`,
     `removed ${result.removedCount}`,
     `remaining ${result.remainingCount}`,
-    `kept ${result.keptCount}`
-  ].join(', ')
+    `kept ${result.keptCount}`,
+    result.error ? `error ${result.error}` : undefined
+  ]
+    .filter(Boolean)
+    .join(', ')
 }
 
 function formatManualVacanciesCleanupForHuman(
@@ -656,8 +659,7 @@ function formatManualVacanciesMessage(
     manualVacanciesCleanupLine
       ? escapeTelegramHtml(manualVacanciesCleanupLine)
       : undefined,
-    'Отклики на ру рынке стабилизированы. Если видите баги, репортите, будем чинить!',
-    'Апдейты: успешно откликнутые вакансии для мануального отклика больше не попадают в выборку.'
+    ''
   ]
     .filter((line): line is string => line !== undefined)
     .join('\n')
