@@ -8,6 +8,7 @@
     "orchestrator": "node orchestrator.ts",
     "doctor": "node doctor.ts",
     "tg:chat-id-checker": "node tgChatIdChecker.ts",
+    "tg:responses": "node telegramResponsesApplication/index.ts",
     "check-table": "node check-table-state.ts",
     "table:state": "node check-table-state.ts",
     "proxy:check-required": "node dolphin/proxyProvider/checkRequiredProxy/index.ts",

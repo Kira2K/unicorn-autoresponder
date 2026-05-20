@@ -18,8 +18,8 @@ type CreateTelegramClientOptions = {
 }
 
 function readStoredTelegramSession(): string {
-  if (process.env.telegram_session) {
-    return process.env.telegram_session
+  if (process.env.main_messenger_telegram_session) {
+    return process.env.main_messenger_telegram_session
   }
 
   if (!fs.existsSync(TELEGRAM_SESSION_FILE)) {

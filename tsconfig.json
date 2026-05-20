@@ -16,6 +16,7 @@
     "db/**/*.ts",
     "dolphin/**/*.ts",
     "hh-auth/**/*.ts",
+    "telegramResponsesApplication/**/*.ts",
     "tgChatIdChecker/**/*.ts",
     "types/**/*.d.ts"
   ]

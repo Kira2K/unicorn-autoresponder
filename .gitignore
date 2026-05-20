@@ -10,6 +10,7 @@ logs/
 .env.*
 !.env.example
 .telegram-session
+telegramResponsesApplication/.telegram-session
 
 project-*.json
 *-service-account*.json
