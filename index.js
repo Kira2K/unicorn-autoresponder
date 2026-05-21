@@ -804,7 +804,7 @@
             `Компания в stop-list. ${details}`
         );
         await wait(800);
-        return 'SKIPPED_COMPANY_STOP_LIST';
+        return 'COMPANY_STOP_LIST_SKIPPED';
     }
 
     function isAlreadyRespondedPage() {
@@ -1469,7 +1469,7 @@
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
                 return;
-            } else if (res === 'SKIPPED_COMPANY_STOP_LIST') {
+            } else if (res === 'COMPANY_STOP_LIST_SKIPPED') {
                 log('Вакансия пропущена по stop-list компании. Возвращаюсь к списку.');
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
@@ -1554,7 +1554,7 @@
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
                 return;
-            } else if (result === 'SKIPPED_COMPANY_STOP_LIST') {
+            } else if (result === 'COMPANY_STOP_LIST_SKIPPED') {
                 log('Вакансия пропущена по stop-list компании.');
                 await actionPause();
             } else if (result === 'AUTH_REQUIRED') {

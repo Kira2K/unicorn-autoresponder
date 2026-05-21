@@ -8,7 +8,12 @@ const {
   waitForDomContentLoaded
 } = require('../browser/page-utils.ts')
 const { wait } = require('../orchestrator/runtime-utils.ts')
+const {
+  normalizeParserErrors,
+  normalizeParserLogs
+} = require('../orchestrator/scraper-state.ts')
 
+type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
 type ParserErrorEntry = import('../orchestrator/types.ts').ParserErrorEntry
 type ParserLogEntry = import('../orchestrator/types.ts').ParserLogEntry
 
@@ -37,7 +42,7 @@ function extractParserErrorCodesFromLogs(
 }
 
 async function getAutoResponderParserErrors(
-  page: any
+  page: BrowserPageLike
 ): Promise<ParserErrorEntry[]> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return []
@@ -47,7 +52,7 @@ async function getAutoResponderParserErrors(
     try {
       await waitForDomContentLoaded(page)
 
-      return await page.evaluate((parserErrorsKey: string) => {
+      const rawParserErrors = await page.evaluate((parserErrorsKey: string) => {
         try {
           const parsed = JSON.parse(
             sessionStorage.getItem(parserErrorsKey) || '[]'
@@ -58,6 +63,8 @@ async function getAutoResponderParserErrors(
           return []
         }
       }, HH_AUTO_RESPONDER_PARSER_ERRORS_KEY)
+
+      return normalizeParserErrors(rawParserErrors)
     } catch (error: any) {
       if (!isExecutionContextDestroyedError(error)) {
         throw error
@@ -70,7 +77,7 @@ async function getAutoResponderParserErrors(
   return []
 }
 
-async function getParserLogs(page: any): Promise<ParserLogEntry[]> {
+async function getParserLogs(page: BrowserPageLike): Promise<ParserLogEntry[]> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return []
   }
@@ -79,7 +86,7 @@ async function getParserLogs(page: any): Promise<ParserLogEntry[]> {
     try {
       await waitForDomContentLoaded(page)
 
-      return await page.evaluate((logsKey: string) => {
+      const rawParserLogs = await page.evaluate((logsKey: string) => {
         try {
           const raw = sessionStorage.getItem(logsKey) || '[]'
           const parsed = JSON.parse(raw)
@@ -89,6 +96,8 @@ async function getParserLogs(page: any): Promise<ParserLogEntry[]> {
           return []
         }
       }, HH_AUTO_RESPONDER_LOGS_KEY)
+
+      return normalizeParserLogs(rawParserLogs)
     } catch (error: any) {
       if (!isExecutionContextDestroyedError(error)) {
         throw error

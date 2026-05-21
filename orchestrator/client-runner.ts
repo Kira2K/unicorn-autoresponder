@@ -48,6 +48,7 @@ const {
   getErrorMessage,
   getErrorStack
 } = require('./runtime-utils.ts')
+const { normalizeParserErrorCode } = require('./scraper-state.ts')
 const {
   AUTOMATION_LOCK_TAG,
   AUTO_RESPONDER_WATCH_MS,
@@ -63,6 +64,8 @@ type ParserErrorEntry = import('./types.ts').ParserErrorEntry
 type ParserLogEntry = import('./types.ts').ParserLogEntry
 type RecentUrlEntry = import('./types.ts').RecentUrlEntry
 type ResponseCounter = import('./types.ts').ResponseCounter
+type RunnableClientAutomationData =
+  import('./types.ts').RunnableClientAutomationData
 
 type AutoResponderCollectedData = {
   manualVacancies: ManualVacancy[]
@@ -96,14 +99,14 @@ function applyManualVacanciesCleanupLifecycle(
 
 async function openClientScenario(
   port: number,
-  clientData: ClientAutomationData,
+  clientData: RunnableClientAutomationData,
   responseCounter: ResponseCounter,
   runStartedAt: number,
   status: OrchestratorStatus
 ): Promise<{ status: OrchestratorStatus; pageResult: OpenScenarioResult }> {
   const pageResult = await openScenarioAndInjectIndex(
     port,
-    clientData.stackScenario!,
+    clientData.stackScenario,
     responseCounter,
     {
       coverText: clientData.coverText,
@@ -219,8 +222,10 @@ async function collectAutoResponderRunData(
     ...new Set([
       ...structuredParserErrors
         .map(entry => entry.code)
-        .filter((code): code is string => Boolean(code)),
+        .filter((code): code is string => Boolean(code))
+        .map(code => normalizeParserErrorCode(code).code),
       ...extractParserErrorCodesFromLogs(parserLogs)
+        .map((code: string) => normalizeParserErrorCode(code).code)
     ])
   ]
   const parserLastErrorCode =
@@ -468,6 +473,10 @@ async function runClientOrchestrator(
   if (!clientData.stackScenario) {
     throw new Error(`Stack scenario for ${clientData.clientName} was not found`)
   }
+  const runnableClientData: RunnableClientAutomationData = {
+    ...clientData,
+    stackScenario: clientData.stackScenario
+  }
 
   const runStartedAt = Date.now()
   let status: OrchestratorStatus = {
@@ -492,7 +501,7 @@ async function runClientOrchestrator(
 
   try {
     const profileLock = await applyAutomationProfileLock(
-      clientData,
+      runnableClientData,
       status,
       runStartedAt
     )
@@ -512,7 +521,7 @@ async function runClientOrchestrator(
     status = addLifecycleEvent(status, runStartedAt, 'opening scenario')
     let scenarioState = await openClientScenario(
       port,
-      clientData,
+      runnableClientData,
       responseCounter,
       runStartedAt,
       status
@@ -570,7 +579,7 @@ async function runClientOrchestrator(
         )
         scenarioState = await openClientScenario(
           port,
-          clientData,
+          runnableClientData,
           responseCounter,
           runStartedAt,
           status
@@ -642,7 +651,7 @@ async function runClientOrchestrator(
         )
         scenarioState = await openClientScenario(
           port,
-          clientData,
+          runnableClientData,
           responseCounter,
           runStartedAt,
           status

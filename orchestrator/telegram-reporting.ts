@@ -3,12 +3,16 @@ const { splitTelegramMessage } = require('./reports.ts')
 const {
   AUTH_CHECK_PARSER_ERROR_CODES,
   LOGS_CHANNEL_ID,
-  NORMAL_AUTO_RESPONDER_STOP_REASONS,
   SUMMARY_LOGS_CHANNEL_ID,
   TELEGRAM_MESSAGE_LIMIT
 } = require('./config.ts')
 const { writeLocalRunLog } = require('./local-run-log.ts')
 const { getErrorMessage, getErrorStack } = require('./runtime-utils.ts')
+const {
+  classifyClientRun,
+  isClientRunSuccessful,
+  isStopReasonNormal
+} = require('./scraper-state.ts')
 
 type HhAuthCheck = import('./types.ts').HhAuthCheck
 type LifecycleEvent = import('./types.ts').LifecycleEvent
@@ -137,25 +141,7 @@ function formatManualVacanciesCleanupForHuman(
 }
 
 function isAutoResponderStopNormal(status: OrchestratorStatus): boolean {
-  if (status.parserErrorCodes?.length) {
-    return false
-  }
-
-  if (status.autoResponderStopReason === 'orchestrator_stop_after_watch') {
-    return Boolean(
-      status.autoResponderWatchTimedOut &&
-      status.profileStopped &&
-      status.profileTagRemoved &&
-      status.profileStatusRestored &&
-      !status.error &&
-      !status.telegramError
-    )
-  }
-
-  return Boolean(
-    status.autoResponderStopReason &&
-    NORMAL_AUTO_RESPONDER_STOP_REASONS.has(status.autoResponderStopReason)
-  )
+  return isStopReasonNormal(status)
 }
 
 function shouldCheckAuthAfterParserStop(status: OrchestratorStatus): boolean {
@@ -495,6 +481,8 @@ async function sendRunErrorLog(error: unknown): Promise<void> {
 }
 
 function formatHumanStopReason(status: OrchestratorStatus): string {
+  const classification = classifyClientRun(status)
+
   if (status.error) {
     return `ошибка: ${status.error}`
   }
@@ -509,6 +497,14 @@ function formatHumanStopReason(status: OrchestratorStatus): string {
 
   if (!status.startButtonClicked) {
     return 'не удалось нажать старт автооткликов'
+  }
+
+  if (classification === 'captcha_detected') {
+    return 'обнаружена капча'
+  }
+
+  if (classification === 'auth_required') {
+    return 'HH запросил авторизацию'
   }
 
   switch (status.autoResponderStopReason) {
@@ -608,37 +604,11 @@ async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
 }
 
 function hasClientFailure(status: OrchestratorStatus): boolean {
-  return Boolean(
-    status.error ||
-    status.telegramError ||
-    !status.opened ||
-    !status.startButtonClicked ||
-    !isAutoResponderStopNormal(status)
-  )
+  return !isClientRunSuccessful(status)
 }
 
 function isClientReportSuccessful(status: OrchestratorStatus): boolean {
-  if (
-    status.error ||
-    status.telegramError ||
-    !status.opened ||
-    !status.startButtonClicked
-  ) {
-    return false
-  }
-
-  if (status.autoResponderStopReason === 'orchestrator_stop_after_watch') {
-    return Boolean(
-      status.autoResponderWatchTimedOut &&
-      !status.error &&
-      !status.telegramError
-    )
-  }
-
-  return Boolean(
-    status.autoResponderStopReason &&
-    NORMAL_AUTO_RESPONDER_STOP_REASONS.has(status.autoResponderStopReason)
-  )
+  return isClientRunSuccessful(status)
 }
 
 function formatManualVacanciesMessage(

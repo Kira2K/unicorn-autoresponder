@@ -13,6 +13,7 @@
     "table:state": "node check-table-state.ts",
     "proxy:check-required": "node dolphin/proxyProvider/checkRequiredProxy/index.ts",
     "proxy:check-required:test": "node dolphin/proxyProvider/checkRequiredProxy/check-required-proxy.test.ts",
+    "orchestrator:test": "node orchestrator/types.test.ts",
     "test:refactor": "node refactor-checks.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"

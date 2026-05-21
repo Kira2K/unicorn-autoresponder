@@ -24,10 +24,11 @@ const { wait, withTimeout } = require('../orchestrator/runtime-utils.ts')
 
 type ClientAutomationData =
   import('../orchestrator/types.ts').ClientAutomationData
+type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
 type HhAuthCheck = import('../orchestrator/types.ts').HhAuthCheck
 type HhAuthState = import('../orchestrator/types.ts').HhAuthState
 
-async function detectHhAuthState(page: any): Promise<HhAuthCheck> {
+async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
   const fallback = {
     checkedAt: new Date().toISOString(),
     url: page.isClosed() ? 'closed-page' : page.url(),
@@ -149,7 +150,7 @@ function shouldRunHHAuthFallback(state: HhAuthState): boolean {
 }
 
 async function waitForScenarioAuthDecision(
-  page: any,
+  page: BrowserPageLike,
   initialCheck: HhAuthCheck
 ): Promise<{ check: HhAuthCheck; recheckCount: number }> {
   if (!isIndecisiveHhAuthState(initialCheck.state)) {
@@ -170,12 +171,13 @@ async function waitForScenarioAuthDecision(
       Date.now() - lastDdosReloadAt >= 15000
     ) {
       lastDdosReloadAt = Date.now()
-      await page
-        .reload({
+      await (page.reload
+        ? page.reload({
           waitUntil: 'domcontentloaded',
           timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
         })
-        .catch(() => undefined)
+        : Promise.resolve(undefined)
+      ).catch(() => undefined)
     }
 
     await wait(HH_SCENARIO_AUTH_UNKNOWN_RECHECK_INTERVAL_MS)
@@ -244,7 +246,7 @@ function getHHAuthLogDir(
 
 async function ensureHHAuthOnCurrentPage(
   clientData: ClientAutomationData,
-  page: any
+  page: BrowserPageLike
 ): Promise<HhAuthCheck> {
   const result = await withTimeout(
     authorizeHHPage(page, {

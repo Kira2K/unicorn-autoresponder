@@ -10,14 +10,20 @@ const {
   waitForDomContentLoaded
 } = require('../browser/page-utils.ts')
 const { wait } = require('../orchestrator/runtime-utils.ts')
+const {
+  normalizeManualVacancies,
+  normalizeRecentUrls,
+  normalizeStopReasonValue
+} = require('../orchestrator/scraper-state.ts')
 
 type AutoResponderStopReason =
   import('../orchestrator/types.ts').AutoResponderStopReason
+type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
 type ManualVacancy = import('../orchestrator/types.ts').ManualVacancy
 type RecentUrlEntry = import('../orchestrator/types.ts').RecentUrlEntry
 
 async function getAutoResponderStopReason(
-  page: any
+  page: BrowserPageLike
 ): Promise<AutoResponderStopReason | undefined> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return undefined
@@ -27,7 +33,7 @@ async function getAutoResponderStopReason(
     try {
       await waitForDomContentLoaded(page)
 
-      return await page.evaluate((stopReasonKey: string) => {
+      const rawStopReason = await page.evaluate((stopReasonKey: string) => {
         const raw = sessionStorage.getItem(stopReasonKey)
 
         if (!raw) {
@@ -44,6 +50,8 @@ async function getAutoResponderStopReason(
           return { reason: String(raw) }
         }
       }, HH_AUTO_RESPONDER_STOP_REASON_KEY)
+
+      return normalizeStopReasonValue(rawStopReason)
     } catch (error: any) {
       if (!isExecutionContextDestroyedError(error)) {
         throw error
@@ -57,7 +65,7 @@ async function getAutoResponderStopReason(
 }
 
 async function getAutoResponderRecentUrls(
-  page: any
+  page: BrowserPageLike
 ): Promise<RecentUrlEntry[]> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return []
@@ -67,7 +75,7 @@ async function getAutoResponderRecentUrls(
     try {
       await waitForDomContentLoaded(page)
 
-      return await page.evaluate((recentUrlsKey: string) => {
+      const rawRecentUrls = await page.evaluate((recentUrlsKey: string) => {
         try {
           const parsed = JSON.parse(
             sessionStorage.getItem(recentUrlsKey) || '[]'
@@ -78,6 +86,8 @@ async function getAutoResponderRecentUrls(
           return []
         }
       }, HH_AUTO_RESPONDER_RECENT_URLS_KEY)
+
+      return normalizeRecentUrls(rawRecentUrls)
     } catch (error: any) {
       if (!isExecutionContextDestroyedError(error)) {
         throw error
@@ -90,7 +100,9 @@ async function getAutoResponderRecentUrls(
   return []
 }
 
-async function getManualVacancies(page: any): Promise<ManualVacancy[]> {
+async function getManualVacancies(
+  page: BrowserPageLike
+): Promise<ManualVacancy[]> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return []
   }
@@ -99,7 +111,7 @@ async function getManualVacancies(page: any): Promise<ManualVacancy[]> {
     try {
       await waitForDomContentLoaded(page)
 
-      return await page.evaluate((manualListKey: string) => {
+      const rawManualVacancies = await page.evaluate((manualListKey: string) => {
         try {
           const raw = localStorage.getItem(manualListKey) || '[]'
           const parsed = JSON.parse(raw)
@@ -109,6 +121,8 @@ async function getManualVacancies(page: any): Promise<ManualVacancy[]> {
           return []
         }
       }, HH_AUTO_RESPONDER_MANUAL_LIST_KEY)
+
+      return normalizeManualVacancies(rawManualVacancies)
     } catch (error: any) {
       if (!isExecutionContextDestroyedError(error)) {
         throw error
@@ -121,7 +135,9 @@ async function getManualVacancies(page: any): Promise<ManualVacancy[]> {
   return []
 }
 
-async function getAutoResponderSuccessCount(page: any): Promise<number> {
+async function getAutoResponderSuccessCount(
+  page: BrowserPageLike
+): Promise<number> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return 0
   }

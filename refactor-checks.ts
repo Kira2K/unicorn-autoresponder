@@ -311,6 +311,9 @@ assert.equal(
     opened: true,
     startButtonClicked: true,
     autoResponderWatchTimedOut: true,
+    profileStopped: true,
+    profileTagRemoved: true,
+    profileStatusRestored: true,
     stopButtonClicked: false,
     autoResponderStopReason: 'orchestrator_stop_after_watch'
   }),

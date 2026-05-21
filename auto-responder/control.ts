@@ -11,7 +11,11 @@ const {
 } = require('../browser/page-utils.ts')
 const { wait } = require('../orchestrator/runtime-utils.ts')
 
-async function isAutoResponderRunning(page: any): Promise<boolean | undefined> {
+type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
+
+async function isAutoResponderRunning(
+  page: BrowserPageLike
+): Promise<boolean | undefined> {
   if (page.isClosed()) {
     return false
   }
@@ -36,7 +40,7 @@ type AutoResponderSettingsPatch = {
 }
 
 async function applyAutoResponderSettings(
-  page: any,
+  page: BrowserPageLike,
   settingsPatch: AutoResponderSettingsPatch
 ): Promise<void> {
   if (
@@ -87,7 +91,7 @@ async function applyAutoResponderSettings(
 }
 
 async function applyAutoResponderCoverText(
-  page: any,
+  page: BrowserPageLike,
   coverText: string | undefined
 ): Promise<void> {
   if (coverText === undefined) {
@@ -98,7 +102,7 @@ async function applyAutoResponderCoverText(
 }
 
 async function waitForAutoResponderToFinish(
-  page: any,
+  page: BrowserPageLike,
   timeoutMs = AUTO_RESPONDER_WATCH_MS,
   isBrowserDisconnected: () => boolean = () => false
 ): Promise<{
@@ -145,7 +149,7 @@ async function waitForAutoResponderToFinish(
   }
 }
 
-async function stopAutoResponder(page: any): Promise<boolean> {
+async function stopAutoResponder(page: BrowserPageLike): Promise<boolean> {
   if (page.isClosed() || !isAutoResponderUrl(page.url())) {
     return false
   }

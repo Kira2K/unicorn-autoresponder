@@ -1,35 +1,104 @@
-export type ClientAutomationData = {
-  clientName: string
-  stack: string
-  market: 'Ru' | 'En'
-  stackSheetName: string
-  stackScenario?: string
-  dolphinProfileId: number
-  commonChatId: string
-  coverText?: string
-  blockedCompanies?: Array<{ id: string; name: string }>
+export type Market = import('../db/types.ts').Market
+export type DbClientAutomationData =
+  import('../db/types.ts').ClientAutomationData
+export type ClientHHAuthCredentials =
+  import('../db/types.ts').ClientHHAuthCredentials
+export type AutomationTargetOptions =
+  import('../db/types.ts').AutomationTargetOptions
+export type BlockedCompany = NonNullable<
+  DbClientAutomationData['blockedCompanies']
+>[number]
+
+export type ClientAutomationData = DbClientAutomationData & {
   hhAuthCredentials?: ClientHHAuthCredentials
 }
 
-export type ClientHHAuthCredentials = {
-  clientName: string
-  market?: 'Ru' | 'En'
-  phone: string
-  rawPhone: string
-  password: string
-  email: string
-  emailPassword?: string
+// Runtime-ready client. Build this only after validating stackScenario exists,
+// so browser startup code never needs a non-null assertion.
+export type RunnableClientAutomationData = ClientAutomationData & {
+  stackScenario: string
 }
 
-export type AutomationTargetOptions = {
-  workWithRuOnly?: boolean
-  market?: 'Ru' | 'En'
+// Structural Playwright page contract. Playwright is loaded dynamically, so keep
+// this local boundary instead of importing Playwright types everywhere.
+export type BrowserPageLike = {
+  isClosed(): boolean
+  url(): string
+  title(): Promise<string>
+  goto(
+    url: string,
+    options?: Record<string, unknown>
+  ): Promise<unknown>
+  waitForLoadState(
+    state?: string,
+    options?: Record<string, unknown>
+  ): Promise<unknown>
+  waitForSelector(
+    selector: string,
+    options?: Record<string, unknown>
+  ): Promise<unknown>
+  reload?(options?: Record<string, unknown>): Promise<unknown>
+  evaluate<T = unknown, A = unknown>(
+    pageFunction: unknown,
+    arg?: A
+  ): Promise<T>
+  mainFrame?(): { url(): string }
+  on?(eventName: string, handler: (...args: unknown[]) => void): void
+  off?(eventName: string, handler: (...args: unknown[]) => void): void
+  close?(): Promise<unknown>
 }
+
+export type KnownAutoResponderStopReason =
+  | 'targets_processed'
+  | 'no_new_targets'
+  | 'limit_reached'
+  | 'manual_targets_only'
+  | 'user_stop'
+  | 'orchestrator_stop_after_watch'
+  | 'hh_response_daily_limit_exceeded'
+  | 'vacancy_processing_error'
+  | 'auth_required'
+  | 'captcha_detected'
+  | 'selector_missing'
+  | 'network_timeout'
+
+export type KnownParserErrorCode =
+  | 'AUTH_REQUIRED'
+  | 'COMPANY_STOP_LIST_SKIPPED'
+  | 'SKIPPED_COMPANY_STOP_LIST'
+  | 'ERROR_NO_MODAL'
+  | 'selector_missing'
+  | 'captcha_detected'
+  | 'network_timeout'
+
+export type NormalizedAutoResponderStopReason = {
+  kind: 'known_stop_reason' | 'unknown_stop_reason'
+  reason: KnownAutoResponderStopReason | string
+  details?: string
+  ts?: number
+  url?: string
+  recentUrls?: RecentUrlEntry[]
+}
+
+export type NormalizedParserErrorCode = {
+  kind: 'known_parser_code' | 'unknown_parser_code'
+  code: KnownParserErrorCode | string
+}
+
+export type ClientRunClassification =
+  | 'success'
+  | 'normal_timeout'
+  | 'manual_required'
+  | 'auth_required'
+  | 'captcha_detected'
+  | 'scraper_error'
+  | 'telegram_error'
+  | 'browser_disconnected'
 
 export type OrchestratorStatus = {
   clientName: string
   stack: string
-  market?: string
+  market?: Market
   dolphinProfileId: number
   commonChatId: string
   stackScenario: string
@@ -112,7 +181,7 @@ export type ParserLogEntry = {
 }
 
 export type AutoResponderStopReason = {
-  reason?: string
+  reason?: KnownAutoResponderStopReason | string
   details?: string
   ts?: number
   url?: string
@@ -120,7 +189,7 @@ export type AutoResponderStopReason = {
 }
 
 export type ParserErrorEntry = {
-  code?: string
+  code?: KnownParserErrorCode | string
   details?: string
   ts?: number
   url?: string
@@ -164,7 +233,7 @@ export type ResponseCounter = {
 }
 
 export type OpenScenarioResult = {
-  page: any
+  page: BrowserPageLike
   disposeWatcher: () => void
   isBrowserDisconnected: () => boolean
   result: {

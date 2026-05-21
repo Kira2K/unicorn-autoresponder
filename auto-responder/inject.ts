@@ -5,7 +5,9 @@ const {
 } = require('../browser/page-utils.ts')
 const { recordVacancyTransition } = require('./counter.ts')
 
+type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
 type ResponseCounter = import('../orchestrator/types.ts').ResponseCounter
+type BrowserFrameLike = { url(): string }
 
 function isWatcherNavigationRaceError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
@@ -20,7 +22,7 @@ function isWatcherNavigationRaceError(error: unknown): boolean {
 }
 
 async function ensureIndexScript(
-  page: any,
+  page: BrowserPageLike,
   indexScript: string,
   reason: string
 ): Promise<boolean> {
@@ -54,7 +56,7 @@ async function ensureIndexScript(
   return true
 }
 
-async function removeAutoResponderUi(page: any): Promise<void> {
+async function removeAutoResponderUi(page: BrowserPageLike): Promise<void> {
   if (page.isClosed()) {
     return
   }
@@ -65,7 +67,7 @@ async function removeAutoResponderUi(page: any): Promise<void> {
 }
 
 function installIndexReinjectWatcher(
-  page: any,
+  page: BrowserPageLike,
   indexScript: string,
   responseCounter: ResponseCounter
 ): () => void {
@@ -90,9 +92,11 @@ function installIndexReinjectWatcher(
       })
   }
 
-  const onFrameNavigated = (frame: any) => {
-    if (frame === page.mainFrame()) {
-      recordVacancyTransition(responseCounter, frame.url())
+  const onFrameNavigated = (frame: unknown) => {
+    const navigatedFrame = frame as BrowserFrameLike
+
+    if (page.mainFrame && frame === page.mainFrame()) {
+      recordVacancyTransition(responseCounter, navigatedFrame.url())
       scheduleInject('navigation')
     }
   }
@@ -101,13 +105,13 @@ function installIndexReinjectWatcher(
     scheduleInject('domcontentloaded')
   }
 
-  page.on('framenavigated', onFrameNavigated)
-  page.on('domcontentloaded', onDomContentLoaded)
+  page.on?.('framenavigated', onFrameNavigated)
+  page.on?.('domcontentloaded', onDomContentLoaded)
 
   return () => {
     disposed = true
-    page.off('framenavigated', onFrameNavigated)
-    page.off('domcontentloaded', onDomContentLoaded)
+    page.off?.('framenavigated', onFrameNavigated)
+    page.off?.('domcontentloaded', onDomContentLoaded)
   }
 }
 

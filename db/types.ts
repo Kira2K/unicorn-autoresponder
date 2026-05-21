@@ -28,6 +28,7 @@ export type ClientAutomationData = {
   dolphinProfileId: number
   commonChatId: string
   coverText?: string
+  blockedCompanies?: Array<{ id: string; name: string }>
 }
 
 export type ClientHHAuthCredentials = {
