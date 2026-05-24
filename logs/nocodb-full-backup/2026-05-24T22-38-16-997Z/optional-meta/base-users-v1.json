@@ -1,0 +1,31 @@
+{
+  "users": {
+    "list": [
+      {
+        "id": "usei8t03hnfsvky1",
+        "email": "unicornveryevil@gmail.com",
+        "display_name": "very evil unicorn",
+        "fk_user_id": "usei8t03hnfsvky1",
+        "invite_token": null,
+        "main_roles": "org-level-viewer",
+        "meta": null,
+        "created_at": "2026-05-18 12:58:23+00:00",
+        "updated_at": "2026-05-18 12:58:23+00:00",
+        "base_id": "pqe5susktrsa9z3",
+        "roles": "owner",
+        "workspace_roles": "workspace-level-owner",
+        "workspace_id": "w9zq4wts",
+        "deleted": false,
+        "workspace_team_roles": null,
+        "base_team_roles": null
+      }
+    ],
+    "pageInfo": {
+      "totalRows": 1,
+      "page": 1,
+      "pageSize": 25,
+      "isFirstPage": true,
+      "isLastPage": true
+    }
+  }
+}

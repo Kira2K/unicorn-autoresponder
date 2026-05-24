@@ -1,0 +1,461 @@
+{
+  "createdAt": "2026-05-24T22:39:02.682Z",
+  "kind": "nocodb-api-full-backup",
+  "baseUrl": "https://app.nocodb.com",
+  "baseId": "pqe5susktrsa9z3",
+  "notes": [
+    "Read-only API backup of current visible NocoDB state.",
+    "Deleted columns/records are not included unless NocoDB returns them through these APIs.",
+    "Attachment binary files are not downloaded; record attachment metadata is preserved as returned by NocoDB.",
+    "Optional permission/settings endpoints are captured only when this token can read them."
+  ],
+  "tables": [
+    {
+      "id": "msr3ihfj0kjue1t",
+      "title": "stacks",
+      "tableName": "stacks",
+      "records": 17,
+      "metaFile": "table-meta\\stacks__msr3ihfj0kjue1t.json",
+      "recordsFile": "records\\stacks__msr3ihfj0kjue1t.jsonl",
+      "recordsSha256": "6be8cc25ff54b11e9126761e1cb597303c55615f3868c0824a3aec0c4eb3eecd"
+    },
+    {
+      "id": "mxza381054ldlza",
+      "title": "clients",
+      "tableName": "clients",
+      "records": 84,
+      "metaFile": "table-meta\\clients__mxza381054ldlza.json",
+      "recordsFile": "records\\clients__mxza381054ldlza.jsonl",
+      "recordsSha256": "924983121d1fb6c1eff7ed8d44987bd5f21c5a8be831fa0bad7b7d2e9400567d"
+    },
+    {
+      "id": "m4thvbutfyb15qz",
+      "title": "dolphin_profiles",
+      "tableName": "dolphin_profiles",
+      "records": 65,
+      "metaFile": "table-meta\\dolphin_profiles__m4thvbutfyb15qz.json",
+      "recordsFile": "records\\dolphin_profiles__m4thvbutfyb15qz.jsonl",
+      "recordsSha256": "021c9160c9f12714041e4080aafe1a9465f477f2b569a8903afcd848646de9d5"
+    },
+    {
+      "id": "m3e611iozk7wnew",
+      "title": "client_outreach_settings",
+      "tableName": "client_outreach_settings",
+      "records": 82,
+      "metaFile": "table-meta\\client_outreach_settings__m3e611iozk7wnew.json",
+      "recordsFile": "records\\client_outreach_settings__m3e611iozk7wnew.jsonl",
+      "recordsSha256": "de153e4fb77fcd21d4a01a274934028bf97d1940bc27a609bf57b4146c06c663"
+    },
+    {
+      "id": "m6jmkkms6o6tkef",
+      "title": "contracts_payments",
+      "tableName": "contracts_payments",
+      "records": 82,
+      "metaFile": "table-meta\\contracts_payments__m6jmkkms6o6tkef.json",
+      "recordsFile": "records\\contracts_payments__m6jmkkms6o6tkef.jsonl",
+      "recordsSha256": "4eb980070c5932bf042e9a9a93618cf2708245ac64cdc6ca5fed5b1e953a3a86"
+    },
+    {
+      "id": "m8zej2vsv4iypl8",
+      "title": "platform_accounts",
+      "tableName": "platform_accounts",
+      "records": 150,
+      "metaFile": "table-meta\\platform_accounts__m8zej2vsv4iypl8.json",
+      "recordsFile": "records\\platform_accounts__m8zej2vsv4iypl8.jsonl",
+      "recordsSha256": "d35a4124be70aba0337dd9df1cbb4a9e29e331fd1d1e665d026ff500afc4c276"
+    },
+    {
+      "id": "mqgr5lv9raft8fm",
+      "title": "applications_from_otkliki",
+      "tableName": "applications_from_otkliki",
+      "records": 28,
+      "metaFile": "table-meta\\applications_from_otkliki__mqgr5lv9raft8fm.json",
+      "recordsFile": "records\\applications_from_otkliki__mqgr5lv9raft8fm.jsonl",
+      "recordsSha256": "be3d02761b3232722af29302aba59997e37a80abb58f7f5156de5c19f2508fcf"
+    },
+    {
+      "id": "m7bhicp99zq1wsg",
+      "title": "client_company_restrictions_from_stop_companies",
+      "tableName": "client_company_restrictions_from_stop_companies",
+      "records": 20,
+      "metaFile": "table-meta\\client_company_restrictions_from_stop_companies__m7bhicp99zq1wsg.json",
+      "recordsFile": "records\\client_company_restrictions_from_stop_companies__m7bhicp99zq1wsg.jsonl",
+      "recordsSha256": "5feb9fa38e62cd984d57b7e3da84d6320d9d83716e5fd954c78525421ad31ad0"
+    },
+    {
+      "id": "mcf5h0mryenmxec",
+      "title": "companies_from_applications",
+      "tableName": "companies_from_applications",
+      "records": 94,
+      "metaFile": "table-meta\\companies_from_applications__mcf5h0mryenmxec.json",
+      "recordsFile": "records\\companies_from_applications__mcf5h0mryenmxec.jsonl",
+      "recordsSha256": "22de1703d3c380341e46487a4fa5fcb0d44a0adaecd8c212be876e82cffdc18d"
+    },
+    {
+      "id": "mvyrro4ko9tqu2b",
+      "title": "data_collection_statuses",
+      "tableName": "data_collection_statuses",
+      "records": 17,
+      "metaFile": "table-meta\\data_collection_statuses__mvyrro4ko9tqu2b.json",
+      "recordsFile": "records\\data_collection_statuses__mvyrro4ko9tqu2b.jsonl",
+      "recordsSha256": "6457d0253a0dc2944df0365a3afe136629705d62223d925bc95bc316676223f4"
+    },
+    {
+      "id": "ms6218eaf2cqqr2",
+      "title": "resume_sheet_profiles",
+      "tableName": "resume_sheet_profiles",
+      "records": 12,
+      "metaFile": "table-meta\\resume_sheet_profiles__ms6218eaf2cqqr2.json",
+      "recordsFile": "records\\resume_sheet_profiles__ms6218eaf2cqqr2.jsonl",
+      "recordsSha256": "8817e90fb5e8fa85492658c95de4849c3fb97c4237518c7e0f242335594a9a70"
+    },
+    {
+      "id": "mes5o0s90zwat1t",
+      "title": "dolphin_main_tracking_raw",
+      "tableName": "dolphin_main_tracking_raw",
+      "records": 18,
+      "metaFile": "table-meta\\dolphin_main_tracking_raw__mes5o0s90zwat1t.json",
+      "recordsFile": "records\\dolphin_main_tracking_raw__mes5o0s90zwat1t.jsonl",
+      "recordsSha256": "59459de786fc5a5806c703ba211e70929c1ccb57eff9815de0f9cfae45d95645"
+    },
+    {
+      "id": "molt1q7vu7peibh",
+      "title": "market",
+      "tableName": "market",
+      "records": 3,
+      "metaFile": "table-meta\\market__molt1q7vu7peibh.json",
+      "recordsFile": "records\\market__molt1q7vu7peibh.jsonl",
+      "recordsSha256": "cdaccb8592ce5c439c7e222ae293b3bdca7ddc627883f91271d0419975da4b38"
+    },
+    {
+      "id": "mp1s5wh87xtdi6k",
+      "title": "mentors",
+      "tableName": "mentors",
+      "records": 12,
+      "metaFile": "table-meta\\mentors__mp1s5wh87xtdi6k.json",
+      "recordsFile": "records\\mentors__mp1s5wh87xtdi6k.jsonl",
+      "recordsSha256": "ed25bcc4df047f3adda18b7ee5de05990135bea0c5900589e052b556a280e0e1"
+    },
+    {
+      "id": "mcht240r9wx4jrb",
+      "title": "migration_trace_archive",
+      "tableName": "migration_trace_archive",
+      "records": 2133,
+      "metaFile": "table-meta\\migration_trace_archive__mcht240r9wx4jrb.json",
+      "recordsFile": "records\\migration_trace_archive__mcht240r9wx4jrb.jsonl",
+      "recordsSha256": "8cad202e70e86d0a9346266b1a94686d8e8b8c6d5ef3152384138ef6fec30906"
+    }
+  ],
+  "optionalEndpoints": [
+    {
+      "key": "app-version",
+      "endpoint": "/api/v1/version",
+      "ok": true,
+      "file": "app-version.json"
+    },
+    {
+      "key": "health",
+      "endpoint": "/api/v1/health",
+      "ok": true,
+      "file": "health.json"
+    },
+    {
+      "key": "app-info",
+      "endpoint": "/api/v1/db/meta/nocodb/info",
+      "ok": true,
+      "file": "app-info.json"
+    },
+    {
+      "key": "aggregated-meta-info",
+      "endpoint": "/api/v1/aggregated-meta-info",
+      "ok": true,
+      "file": "aggregated-meta-info.json"
+    },
+    {
+      "key": "app-settings",
+      "endpoint": "/api/v1/app-settings",
+      "ok": false,
+      "error": {
+        "status": 404,
+        "statusText": "Not Found",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Cannot GET /api/v1/app-settings",
+        "data": {
+          "msg": "Cannot GET /api/v1/app-settings"
+        },
+        "url": "https://app.nocodb.com/api/v1/app-settings",
+        "method": "get"
+      }
+    },
+    {
+      "key": "org-users",
+      "endpoint": "/api/v1/users",
+      "ok": false,
+      "error": {
+        "status": 404,
+        "statusText": "Not Found",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Cannot GET /api/v1/users",
+        "data": {
+          "msg": "Cannot GET /api/v1/users"
+        },
+        "url": "https://app.nocodb.com/api/v1/users",
+        "method": "get"
+      }
+    },
+    {
+      "key": "org-tokens",
+      "endpoint": "/api/v1/tokens",
+      "ok": false,
+      "error": {
+        "status": 401,
+        "statusText": "Unauthorized",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Unauthorized",
+        "data": {
+          "msg": "Unauthorized"
+        },
+        "url": "https://app.nocodb.com/api/v1/tokens",
+        "method": "get"
+      }
+    },
+    {
+      "key": "plugins",
+      "endpoint": "/api/v1/db/meta/plugins",
+      "ok": false,
+      "error": {
+        "status": 403,
+        "statusText": "Forbidden",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Forbidden - You do not have permission to view list of plugins with the roles: .",
+        "data": {
+          "error": "ERR_FORBIDDEN",
+          "message": "Forbidden - You do not have permission to view list of plugins with the roles: ."
+        },
+        "url": "https://app.nocodb.com/api/v1/db/meta/plugins",
+        "method": "get"
+      }
+    },
+    {
+      "key": "projects-v1",
+      "endpoint": "/api/v1/db/meta/projects",
+      "ok": false,
+      "error": {
+        "status": 403,
+        "statusText": "Forbidden",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Forbidden - Unauthorized access",
+        "data": {
+          "error": "ERR_FORBIDDEN",
+          "message": "Forbidden - Unauthorized access"
+        },
+        "url": "https://app.nocodb.com/api/v1/db/meta/projects",
+        "method": "get"
+      }
+    },
+    {
+      "key": "base-meta-v2",
+      "endpoint": "/api/v2/meta/bases/pqe5susktrsa9z3",
+      "ok": true,
+      "file": "base-meta-v2.json"
+    },
+    {
+      "key": "base-read-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3",
+      "ok": true,
+      "file": "base-read-v1.json"
+    },
+    {
+      "key": "base-info-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3/info",
+      "ok": true,
+      "file": "base-info-v1.json"
+    },
+    {
+      "key": "base-shared-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3/shared",
+      "ok": false,
+      "error": {
+        "status": 403,
+        "statusText": "Forbidden",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Forbidden - API token does not have permission to getSharedBaseLink. Required permission not granted.",
+        "data": {
+          "error": "ERR_FORBIDDEN",
+          "message": "Forbidden - API token does not have permission to getSharedBaseLink. Required permission not granted."
+        },
+        "url": "https://app.nocodb.com/api/v1/db/meta/projects/pqe5susktrsa9z3/shared",
+        "method": "get"
+      }
+    },
+    {
+      "key": "base-visibility-rules-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3/visibility-rules",
+      "ok": false,
+      "error": {
+        "status": 403,
+        "statusText": "Forbidden",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Forbidden - API token does not have permission to modelVisibilityList. Required permission not granted.",
+        "data": {
+          "error": "ERR_FORBIDDEN",
+          "message": "Forbidden - API token does not have permission to modelVisibilityList. Required permission not granted."
+        },
+        "url": "https://app.nocodb.com/api/v1/db/meta/projects/pqe5susktrsa9z3/visibility-rules",
+        "method": "get"
+      }
+    },
+    {
+      "key": "base-meta-diff-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3/meta-diff",
+      "ok": false,
+      "error": {
+        "status": 401,
+        "statusText": "Unauthorized",
+        "code": "ERR_BAD_REQUEST",
+        "message": "This request is not allowed with API token",
+        "data": {
+          "error": "ERR_API_TOKEN_NOT_ALLOWED",
+          "message": "This request is not allowed with API token"
+        },
+        "url": "https://app.nocodb.com/api/v1/db/meta/projects/pqe5susktrsa9z3/meta-diff",
+        "method": "get"
+      }
+    },
+    {
+      "key": "base-audits-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3/audits",
+      "ok": false,
+      "error": {
+        "status": 404,
+        "statusText": "Not Found",
+        "code": "ERR_BAD_REQUEST",
+        "message": "Cannot GET /api/v1/db/meta/projects/pqe5susktrsa9z3/audits",
+        "data": {
+          "msg": "Cannot GET /api/v1/db/meta/projects/pqe5susktrsa9z3/audits"
+        },
+        "url": "https://app.nocodb.com/api/v1/db/meta/projects/pqe5susktrsa9z3/audits",
+        "method": "get"
+      }
+    },
+    {
+      "key": "base-users-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3/users",
+      "ok": true,
+      "file": "base-users-v1.json"
+    },
+    {
+      "key": "base-api-tokens-v1",
+      "endpoint": "/api/v1/db/meta/projects/pqe5susktrsa9z3/api-tokens",
+      "ok": false,
+      "error": {
+        "status": 401,
+        "statusText": "Unauthorized",
+        "code": "ERR_BAD_REQUEST",
+        "message": "This request is not allowed with API token",
+        "data": {
+          "error": "ERR_API_TOKEN_NOT_ALLOWED",
+          "message": "This request is not allowed with API token"
+        },
+        "url": "https://app.nocodb.com/api/v1/db/meta/projects/pqe5susktrsa9z3/api-tokens",
+        "method": "get"
+      }
+    },
+    {
+      "key": "table-hooks-stacks-msr3ihfj0kjue1t",
+      "endpoint": "/api/v1/db/meta/tables/msr3ihfj0kjue1t/hooks",
+      "ok": true,
+      "file": "table-hooks-stacks-msr3ihfj0kjue1t.json"
+    },
+    {
+      "key": "table-hooks-clients-mxza381054ldlza",
+      "endpoint": "/api/v1/db/meta/tables/mxza381054ldlza/hooks",
+      "ok": true,
+      "file": "table-hooks-clients-mxza381054ldlza.json"
+    },
+    {
+      "key": "table-hooks-dolphin_profiles-m4thvbutfyb15qz",
+      "endpoint": "/api/v1/db/meta/tables/m4thvbutfyb15qz/hooks",
+      "ok": true,
+      "file": "table-hooks-dolphin_profiles-m4thvbutfyb15qz.json"
+    },
+    {
+      "key": "table-hooks-client_outreach_settings-m3e611iozk7wnew",
+      "endpoint": "/api/v1/db/meta/tables/m3e611iozk7wnew/hooks",
+      "ok": true,
+      "file": "table-hooks-client_outreach_settings-m3e611iozk7wnew.json"
+    },
+    {
+      "key": "table-hooks-contracts_payments-m6jmkkms6o6tkef",
+      "endpoint": "/api/v1/db/meta/tables/m6jmkkms6o6tkef/hooks",
+      "ok": true,
+      "file": "table-hooks-contracts_payments-m6jmkkms6o6tkef.json"
+    },
+    {
+      "key": "table-hooks-platform_accounts-m8zej2vsv4iypl8",
+      "endpoint": "/api/v1/db/meta/tables/m8zej2vsv4iypl8/hooks",
+      "ok": true,
+      "file": "table-hooks-platform_accounts-m8zej2vsv4iypl8.json"
+    },
+    {
+      "key": "table-hooks-applications_from_otkliki-mqgr5lv9raft8fm",
+      "endpoint": "/api/v1/db/meta/tables/mqgr5lv9raft8fm/hooks",
+      "ok": true,
+      "file": "table-hooks-applications_from_otkliki-mqgr5lv9raft8fm.json"
+    },
+    {
+      "key": "table-hooks-client_company_restrictions_from_stop_companies-m7bhicp99zq1wsg",
+      "endpoint": "/api/v1/db/meta/tables/m7bhicp99zq1wsg/hooks",
+      "ok": true,
+      "file": "table-hooks-client_company_restrictions_from_stop_companies-m7bhicp99zq1wsg.json"
+    },
+    {
+      "key": "table-hooks-companies_from_applications-mcf5h0mryenmxec",
+      "endpoint": "/api/v1/db/meta/tables/mcf5h0mryenmxec/hooks",
+      "ok": true,
+      "file": "table-hooks-companies_from_applications-mcf5h0mryenmxec.json"
+    },
+    {
+      "key": "table-hooks-data_collection_statuses-mvyrro4ko9tqu2b",
+      "endpoint": "/api/v1/db/meta/tables/mvyrro4ko9tqu2b/hooks",
+      "ok": true,
+      "file": "table-hooks-data_collection_statuses-mvyrro4ko9tqu2b.json"
+    },
+    {
+      "key": "table-hooks-resume_sheet_profiles-ms6218eaf2cqqr2",
+      "endpoint": "/api/v1/db/meta/tables/ms6218eaf2cqqr2/hooks",
+      "ok": true,
+      "file": "table-hooks-resume_sheet_profiles-ms6218eaf2cqqr2.json"
+    },
+    {
+      "key": "table-hooks-dolphin_main_tracking_raw-mes5o0s90zwat1t",
+      "endpoint": "/api/v1/db/meta/tables/mes5o0s90zwat1t/hooks",
+      "ok": true,
+      "file": "table-hooks-dolphin_main_tracking_raw-mes5o0s90zwat1t.json"
+    },
+    {
+      "key": "table-hooks-market-molt1q7vu7peibh",
+      "endpoint": "/api/v1/db/meta/tables/molt1q7vu7peibh/hooks",
+      "ok": true,
+      "file": "table-hooks-market-molt1q7vu7peibh.json"
+    },
+    {
+      "key": "table-hooks-mentors-mp1s5wh87xtdi6k",
+      "endpoint": "/api/v1/db/meta/tables/mp1s5wh87xtdi6k/hooks",
+      "ok": true,
+      "file": "table-hooks-mentors-mp1s5wh87xtdi6k.json"
+    },
+    {
+      "key": "table-hooks-migration_trace_archive-mcht240r9wx4jrb",
+      "endpoint": "/api/v1/db/meta/tables/mcht240r9wx4jrb/hooks",
+      "ok": true,
+      "file": "table-hooks-migration_trace_archive-mcht240r9wx4jrb.json"
+    }
+  ],
+  "totals": {
+    "tables": 15,
+    "records": 2817,
+    "optionalEndpointsOk": 23,
+    "optionalEndpointsFailed": 10
+  }
+}

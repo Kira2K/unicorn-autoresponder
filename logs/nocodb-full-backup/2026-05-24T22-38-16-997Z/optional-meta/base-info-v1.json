@@ -1,0 +1,8 @@
+{
+  "Node": "v24.14.0",
+  "Arch": "x64",
+  "Platform": "linux",
+  "Docker": true,
+  "RootDB": "pg",
+  "PackageVersion": "0.111.4"
+}
