@@ -160,6 +160,26 @@ async function ensureLoginFormOpen(
   page: any,
   options: AuthorizeHHPageOptions
 ): Promise<void> {
+  const gotoHhAuthPage = async (url: string) => {
+    let navigationError: unknown
+
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: options.timeoutMs
+    }).catch((error: unknown) => {
+      navigationError = error
+    })
+    await page.waitForLoadState('domcontentloaded', {
+      timeout: options.timeoutMs
+    }).catch(() => undefined)
+
+    if (
+      navigationError &&
+      !/^https:\/\/([^/]+\.)?hh\.ru\//i.test(String(page.url?.() ?? ''))
+    ) {
+      throw navigationError
+    }
+  }
   const loginFormVisible = async () =>
     (await selectorExists(page, hhAuthSelectors.loginForm.phone)) ||
     (await selectorExists(page, hhAuthSelectors.loginForm.email)) ||
@@ -182,10 +202,7 @@ async function ensureLoginFormOpen(
       .catch(() => undefined)
 
     if (loginHref) {
-      await page.goto(new URL(loginHref, 'https://hh.ru/').toString(), {
-        waitUntil: 'domcontentloaded',
-        timeout: options.timeoutMs
-      })
+      await gotoHhAuthPage(new URL(loginHref, 'https://hh.ru/').toString())
     } else {
       await loginButton.click({ timeout: options.timeoutMs })
     }
@@ -200,13 +217,7 @@ async function ensureLoginFormOpen(
     return
   }
 
-  await page.goto('https://hh.ru/account/login', {
-    waitUntil: 'domcontentloaded',
-    timeout: options.timeoutMs
-  })
-  await page.waitForLoadState('domcontentloaded', {
-    timeout: options.timeoutMs
-  }).catch(() => undefined)
+  await gotoHhAuthPage('https://hh.ru/account/login')
   await page.waitForTimeout(1500)
 
   if (await loginFormVisible()) {
@@ -398,10 +409,7 @@ async function waitForAuthAfterSubmit(
     })
     latestResult = result
 
-    if (
-      result.state === 'logged_in' ||
-      result.state === 'captcha'
-    ) {
+    if (result.state === 'logged_in') {
       return result
     }
   }

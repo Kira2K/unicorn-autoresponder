@@ -31,6 +31,7 @@
         modalAddCover: '[data-qa="add-cover-letter"]',
         modalTextarea: 'textarea[data-qa="vacancy-response-popup-form-letter-input"], textarea[name="coverLetter"], textarea[name="text"]',
         modalSubmit: '[data-qa="vacancy-response-submit-popup"], button[data-qa="vacancy-response-letter-submit"], button[data-qa="vacancy-response-submit-popup"]',
+        directApplyAdvertising: '[data-wavacancy-response-link-advertising]',
         nativeWrapper: '[data-qa="textarea-native-wrapper"]',
         relocationBtn: '[data-qa="relocation-warning-confirm"]',
         dailyResponseLimitWarning: '[data-qa-popup-error-code="negotiations-limit-exceeded"]',
@@ -707,6 +708,10 @@
         return location.href.includes('/applicant/vacancy_response');
     }
 
+    function isDirectApplyAdvertisingModal() {
+        return Boolean(queryVisible(SELECTORS.directApplyAdvertising));
+    }
+
     function isVacancySearchPage() {
         return location.pathname.startsWith('/search/vacancy') || location.href.includes('/search/vacancy');
     }
@@ -881,6 +886,28 @@
         log(`Сохранена вакансия для ручного отклика: ${entry.vid}`);
 
         return entry;
+    }
+
+    async function saveDirectApplyAdvertisingToManual(vid, returnUrl) {
+        const backUrl = returnUrl || StateManager.getReturnUrl();
+        log('direct-apply advertising modal saved to manual', true);
+
+        try {
+            saveCurrentManualResponse(vid, backUrl);
+        } catch (e) {
+            console.warn('save direct-apply advertising manual entry error', e);
+        }
+
+        if (backUrl && backUrl.includes('/search/vacancy')) {
+            StateManager.rememberUrl(backUrl, 'return-to-list-direct-apply-advertising');
+            window.location.href = backUrl;
+        } else {
+            StateManager.rememberUrl(location.href, 'history-back-direct-apply-advertising');
+            try { history.back(); } catch (e) { window.location.href = '/search/vacancy'; }
+        }
+
+        await wait(800);
+        return 'REDIRECT';
     }
 
     function getManualResponseVacancyId() {
@@ -1091,6 +1118,9 @@
                 log('HH показал дневной лимит откликов. Завершаю работу штатно.');
                 return 'DAILY_RESPONSE_LIMIT';
             }
+            if (isDirectApplyAdvertisingModal()) {
+                return await saveDirectApplyAdvertisingToManual(vid, StateManager.getReturnUrl());
+            }
             if (isResumeVisibilityRequiredResponse()) {
                 markVacancyProcessedAndReturn(
                     vid,
@@ -1119,11 +1149,17 @@
                         await wait(800);
                         return 'SKIPPED_RESUME_VISIBILITY';
                     }
+                    if (isDirectApplyAdvertisingModal()) {
+                        return await saveDirectApplyAdvertisingToManual(vid, StateManager.getReturnUrl());
+                    }
                     submitButton = await waitForElement(SELECTORS.modalSubmit, config.waitForModalMs);
                 }
             }
 
             if (!submitButton) {
+                if (isDirectApplyAdvertisingModal()) {
+                    return await saveDirectApplyAdvertisingToManual(vid, StateManager.getReturnUrl());
+                }
                 if (isAuthRequiredPage()) {
                     markAuthRequired('HH запросил вход вместо формы отклика.');
                     return 'AUTH_REQUIRED';
