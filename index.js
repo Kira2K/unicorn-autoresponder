@@ -67,6 +67,8 @@
         blockedCompanies: []
     };
     const MAX_RESUME_ATTEMPTS_PER_VACANCY = 10;
+    const STUCK_VACANCY_TIMEOUT_MS = 90 * 1000;
+    const STUCK_VACANCY_TIMEOUT_CODE = 'STUCK_ON_VACANCY_TIMEOUT';
 
     // Безопасные и предсказуемые значения конфигурации
     const toNum = (v, fallback) => {
@@ -248,6 +250,17 @@
             const count = Number(sessionStorage.getItem(KEYS.successfulResponses) || '0');
             return Number.isFinite(count) ? count : 0;
         },
+        hasReachedResponseLimit: () => StateManager.getSuccessfulResponses() >= config.limit,
+        stopForResponseLimit: (details = '') => {
+            StateManager.setStopReason(
+                'limit_reached',
+                `Достигнут лимит ${config.limit}${details ? `; ${details}` : ''}`
+            );
+            StateManager.setRunning(false);
+            StateManager.releaseInstanceLock(TAB_ID);
+            setStatus('done');
+            log(`Достигнут общий лимит откликов ${config.limit}. Останавливаю работу.`);
+        },
         incrementSuccessfulResponses: () => {
             const nextCount = StateManager.getSuccessfulResponses() + 1;
             sessionStorage.setItem(KEYS.successfulResponses, String(nextCount));
@@ -306,14 +319,15 @@
         addManualEntry: (entry) => {
             try {
                 const safeUrl = toSafeHhUrl(entry?.url);
-                if (!safeUrl) return;
+                if (!safeUrl) return false;
                 const safeReturnUrl = toSafeHhUrl(entry?.returnUrl);
                 const normalizedEntry = {
                     vid: String(entry?.vid || ('u_' + fnv1a32(safeUrl).toString(36))).slice(0, 120),
                     url: safeUrl,
                     returnUrl: safeReturnUrl || '',
                     ts: Number.isFinite(Number(entry?.ts)) ? Number(entry.ts) : Date.now(),
-                    title: String(entry?.title || '').slice(0, 300)
+                    title: String(entry?.title || '').slice(0, 300),
+                    reason: String(entry?.reason || '').slice(0, 300)
                 };
                 const list = StateManager.getManualList();
                 const exists = list.find(e => e.vid === normalizedEntry.vid || e.url === normalizedEntry.url);
@@ -323,7 +337,11 @@
                     if (list.length > 500) list.length = 500;
                     localStorage.setItem(KEYS.manualList, JSON.stringify(list));
                 }
-            } catch (e) { console.warn('addManualEntry error', e); }
+                return true;
+            } catch (e) {
+                console.warn('addManualEntry error', e);
+                return false;
+            }
         },
         removeManualEntry: (vid) => {
             try {
@@ -337,6 +355,7 @@
     let config = normalizeConfig(StateManager.loadConfig());
     let isLoopActive = false;
     let stopSignal = false;
+    let activeVacancyWatch = null;
     const TAB_ID = Math.random().toString(36).slice(2, 9);
 
     // При авто-возобновлении сразу проверяем lock
@@ -586,6 +605,122 @@
         }
     }
 
+    function getCurrentVacancyWatchState() {
+        if (!location.pathname.startsWith('/vacancy/')) return null;
+
+        const vid = getStableVacancyId(document);
+        const url = toSafeHhUrl(location.href) || location.href;
+
+        return { vid, url };
+    }
+
+    function touchVacancyProgress(reason) {
+        const current = getCurrentVacancyWatchState();
+
+        if (!current) {
+            activeVacancyWatch = null;
+            return;
+        }
+
+        const now = Date.now();
+
+        if (!activeVacancyWatch || activeVacancyWatch.vid !== current.vid || activeVacancyWatch.url !== current.url) {
+            activeVacancyWatch = {
+                ...current,
+                startedAt: now,
+                lastProgressAt: now,
+                lastProgressReason: reason || 'vacancy-progress',
+                handled: false
+            };
+            return;
+        }
+
+        activeVacancyWatch.lastProgressAt = now;
+        activeVacancyWatch.lastProgressReason = reason || 'vacancy-progress';
+    }
+
+    function returnToSearchFromStuckVacancy(returnUrl) {
+        if (returnUrl && returnUrl.includes('/search/vacancy')) {
+            StateManager.rememberUrl(returnUrl, 'return-to-list-stuck-vacancy');
+            window.location.href = returnUrl;
+            return true;
+        }
+
+        StateManager.rememberUrl(location.href, 'history-back-stuck-vacancy');
+        try {
+            history.back();
+            return true;
+        } catch (e) {
+            try {
+                window.location.href = '/search/vacancy';
+                return true;
+            } catch (fallbackError) {
+                console.warn('return to search from stuck vacancy error', fallbackError);
+                return false;
+            }
+        }
+    }
+
+    function handleStuckVacancyTimeout() {
+        const current = getCurrentVacancyWatchState();
+        if (!current) {
+            activeVacancyWatch = null;
+            return false;
+        }
+
+        const now = Date.now();
+
+        if (!activeVacancyWatch || activeVacancyWatch.vid !== current.vid || activeVacancyWatch.url !== current.url) {
+            activeVacancyWatch = {
+                ...current,
+                startedAt: now,
+                lastProgressAt: now,
+                lastProgressReason: 'watch-vacancy-entered',
+                handled: false
+            };
+            return false;
+        }
+
+        if (
+            activeVacancyWatch.handled ||
+            now - activeVacancyWatch.lastProgressAt < STUCK_VACANCY_TIMEOUT_MS
+        ) {
+            return false;
+        }
+
+        activeVacancyWatch.handled = true;
+        const seconds = Math.round((now - activeVacancyWatch.lastProgressAt) / 1000);
+        const reason = `stuck_on_vacancy_timeout: same vacancy had no progress for ${seconds}s; last progress ${activeVacancyWatch.lastProgressReason || 'n/a'}`;
+        const returnUrl = StateManager.getReturnUrl();
+
+        log(`Вакансия зависла больше ${Math.round(STUCK_VACANCY_TIMEOUT_MS / 1000)} сек. Сохраняю в ручной список и возвращаюсь к поиску. ${reason}`, true);
+        let savedManualEntry = false;
+
+        try {
+            saveCurrentManualResponse(current.vid, returnUrl, reason);
+            savedManualEntry = true;
+        } catch (e) {
+            console.warn('save stuck vacancy manual entry error', e);
+            StateManager.addParserError(
+                STUCK_VACANCY_TIMEOUT_CODE,
+                `${reason}; manual save failed: ${e?.message || e}`
+            );
+        }
+
+        const returnAttempted = returnToSearchFromStuckVacancy(returnUrl);
+        if (!returnAttempted) {
+            StateManager.addParserError(
+                STUCK_VACANCY_TIMEOUT_CODE,
+                `${reason}; return to search failed`
+            );
+        }
+        if (savedManualEntry && returnAttempted) {
+            log('Stuck vacancy was saved as manual fallback without parser failure.');
+        }
+        setStatus('running', 'Возврат после stuck timeout...');
+        return true;
+    }
+
     // Watchdog: если попали на страницу с вопросами — пытаемся безопасно вернуться и помечаем вакансию
     function watchTheURL() {
         setInterval(() => {
@@ -597,10 +732,15 @@
 
             // Если оказались на странице вопросов/теста
             if (isManualResponsePage()) {
+                activeVacancyWatch = null;
                 handleManualResponsePage('Попали на вопросы/тест. Инициирую возврат.');
+            }
+            else if (location.pathname.startsWith('/vacancy/')) {
+                handleStuckVacancyTimeout();
             }
             // Если вернулись на список вакансий — снимаем ловушку и при необходимости обновляем страницу
             else if (document.querySelector(SELECTORS.applyBtn) || location.href.includes('/search/vacancy')) {
+                 activeVacancyWatch = null;
                  StateManager.clearTrapLock();
 
                  if (StateManager.isF5Needed()) {
@@ -706,6 +846,69 @@
 
     function isManualResponsePage() {
         return location.href.includes('/applicant/vacancy_response');
+    }
+
+    function detectManualResponsePageKind() {
+        if (!isManualResponsePage()) return '';
+
+        const text = getNormalizedPageText();
+        const formSelectors = [
+            'form[action*="/applicant/vacancy_response"]',
+            'form[id^="cover-letter-"]',
+            'textarea',
+            'input[type="radio"]',
+            'input[type="checkbox"]',
+            '[data-qa*="vacancy-response"]',
+            '[data-qa*="question"]'
+        ];
+        const hasQuestionForm = formSelectors.some(selector => Boolean(queryVisible(selector) || document.querySelector(selector)));
+        const manualTexts = [
+            'ответьте на вопрос',
+            'ответьте на вопросы',
+            'вопросы работодателя',
+            'тестовое задание',
+            'сопроводительное письмо',
+            'выберите резюме',
+            'каким резюме откликнуться',
+            'откликнуться на вакансию'
+        ];
+
+        if (isAlreadyRespondedPage() && !hasAdditionalResumeApplyButton()) return 'already_responded';
+        if (isResumeVisibilityRequiredResponse()) return 'resume_visibility';
+        if (isDirectApplyAdvertisingModal()) return 'direct_apply_advertising';
+        if (document.querySelector(SELECTORS.dailyResponseLimitWarning)) return 'daily_limit';
+        if (isAuthRequiredPage()) return 'auth_required';
+        if (hasQuestionForm || manualTexts.some(item => text.includes(item))) return 'manual_response';
+
+        return 'unknown_response_page';
+    }
+
+    function getNoModalDiagnostics(vid, pageKind) {
+        const checks = {
+            submit: Boolean(queryVisible(SELECTORS.modalSubmit) || document.querySelector(SELECTORS.modalSubmit)),
+            textarea: Boolean(queryVisible(SELECTORS.modalTextarea) || document.querySelector(SELECTORS.modalTextarea)),
+            questionForm: Boolean(
+                document.querySelector('form[action*="/applicant/vacancy_response"]') ||
+                document.querySelector('form[id^="cover-letter-"]') ||
+                document.querySelector('[data-qa*="question"]') ||
+                document.querySelector('input[type="radio"]') ||
+                document.querySelector('input[type="checkbox"]')
+            ),
+            alreadyResponded: isAlreadyRespondedPage(),
+            additionalResumeApply: hasAdditionalResumeApplyButton(),
+            resumeVisibility: isResumeVisibilityRequiredResponse(),
+            dailyLimit: Boolean(document.querySelector(SELECTORS.dailyResponseLimitWarning)),
+            authRequired: isAuthRequiredPage(),
+            manualResponsePage: isManualResponsePage()
+        };
+
+        return [
+            `vid=${vid || getManualResponseVacancyId() || 'unknown'}`,
+            `kind=${pageKind || detectManualResponsePageKind() || 'n/a'}`,
+            `url=${location.href}`,
+            `title=${document.title || ''}`,
+            `checks=${JSON.stringify(checks)}`
+        ].join('; ');
     }
 
     function isDirectApplyAdvertisingModal() {
@@ -864,7 +1067,7 @@
         }
     }
 
-    function saveCurrentManualResponse(vid, returnUrl) {
+    function saveCurrentManualResponse(vid, returnUrl, reason) {
         const manualUrl = toSafeHhUrl(location.href) || location.href;
         const safeReturnUrl = toSafeHhUrl(returnUrl || StateManager.getReturnUrl()) || '';
         const entry = {
@@ -872,10 +1075,18 @@
             url: manualUrl,
             returnUrl: safeReturnUrl,
             ts: Date.now(),
-            title: document.title || ''
+            title: document.title || '',
+            reason: reason || ''
         };
 
-        StateManager.addManualEntry(entry);
+        const saved = StateManager.addManualEntry(entry);
+        const existsInManualList = StateManager
+            .getManualList()
+            .some(item => item.vid === entry.vid || item.url === entry.url);
+
+        if (!saved || !existsInManualList) {
+            throw new Error(`manual entry was not saved: ${entry.vid}`);
+        }
 
         if (entry.vid) {
             StateManager.addProcessedID(entry.vid);
@@ -893,7 +1104,7 @@
         log('direct-apply advertising modal saved to manual', true);
 
         try {
-            saveCurrentManualResponse(vid, backUrl);
+            saveCurrentManualResponse(vid, backUrl, 'direct-apply advertising modal');
         } catch (e) {
             console.warn('save direct-apply advertising manual entry error', e);
         }
@@ -927,23 +1138,11 @@
         return null;
     }
 
-    function handleManualResponsePage(reason, forceSaveBroken) {
-        if (!isManualResponsePage()) return false;
-        if (StateManager.hasTrapLock()) return true;
-
-        StateManager.setTrapLock();
-        log(reason || 'Попали на вопросы/тест. Сохраняю вакансию для ручного отклика.', true);
-
-        const vid = getManualResponseVacancyId();
-        const backUrl = StateManager.getReturnUrl();
-
-        try { saveCurrentManualResponse(vid, backUrl); }
-        catch (e) { console.warn('save manual entry error', e); }
-
-        if (vid) {
-            log(`Пометил вакансию ${vid} как обработанную (чтобы избежать зацикливания).`);
-        } else {
-            log('Не удалось определить ID вакансии на странице с вопросами.', true);
+    function returnToSearchFromManualPage(backUrl, source) {
+        if (backUrl && backUrl.includes('/search/vacancy')) {
+            StateManager.rememberUrl(backUrl, source || 'return-to-list-from-manual');
+            window.location.href = backUrl;
+            return;
         }
 
         try {
@@ -953,6 +1152,33 @@
             StateManager.rememberUrl(location.href, 'history-back-from-manual');
             history.back();
         }
+    }
+
+    function handleManualResponsePage(reason, forceSaveBroken) {
+        if (!isManualResponsePage()) return false;
+        if (StateManager.hasTrapLock()) {
+            const lockedBackUrl = StateManager.getReturnUrl();
+            log('Страница ручного отклика уже обрабатывается. Повторяю возврат к списку.', true);
+            returnToSearchFromManualPage(lockedBackUrl, 'return-to-list-manual-trap-repeat');
+            return true;
+        }
+
+        StateManager.setTrapLock();
+        log(reason || 'Попали на вопросы/тест. Сохраняю вакансию для ручного отклика.', true);
+
+        const vid = getManualResponseVacancyId();
+        const backUrl = StateManager.getReturnUrl();
+
+        try { saveCurrentManualResponse(vid, backUrl, reason || 'manual response page'); }
+        catch (e) { console.warn('save manual entry error', e); }
+
+        if (vid) {
+            log(`Пометил вакансию ${vid} как обработанную (чтобы избежать зацикливания).`);
+        } else {
+            log('Не удалось определить ID вакансии на странице с вопросами.', true);
+        }
+
+        returnToSearchFromManualPage(backUrl, 'return-to-list-manual-response');
 
         setTimeout(() => {
             if (isManualResponsePage()) {
@@ -969,6 +1195,50 @@
         }, 1200);
 
         return true;
+    }
+
+    async function handleNoSubmitResponsePage(vid, reason) {
+        if (!isManualResponsePage()) return '';
+
+        const pageKind = detectManualResponsePageKind();
+
+        if (pageKind === 'direct_apply_advertising') {
+            return await saveDirectApplyAdvertisingToManual(vid, StateManager.getReturnUrl());
+        }
+        if (pageKind === 'auth_required') {
+            markAuthRequired('HH запросил вход вместо формы отклика.');
+            return 'AUTH_REQUIRED';
+        }
+        if (pageKind === 'daily_limit') {
+            log('HH показал дневной лимит откликов. Завершаю работу штатно.');
+            return 'DAILY_RESPONSE_LIMIT';
+        }
+        if (pageKind === 'already_responded') {
+            markVacancyProcessedAndReturn(
+                vid,
+                StateManager.getReturnUrl(),
+                'Страница отклика уже подтверждает существующий отклик. Помечаю обработанной и иду дальше.'
+            );
+            await wait(800);
+            return 'OK';
+        }
+        if (pageKind === 'resume_visibility') {
+            markVacancyProcessedAndReturn(
+                vid,
+                StateManager.getReturnUrl(),
+                'HH не разрешил отклик из-за видимости резюме. Помечаю вакансию обработанной и иду дальше.'
+            );
+            await wait(800);
+            return 'SKIPPED_RESUME_VISIBILITY';
+        }
+        if (pageKind === 'manual_response' || pageKind === 'unknown_response_page') {
+            const details = getNoModalDiagnostics(vid, pageKind);
+            log(`Страница отклика без ожидаемой кнопки submit. Сохраняю в ручной список. ${details}`, true);
+            handleManualResponsePage(reason || 'Страница отклика требует ручной обработки. Сохраняю для ручного отклика.');
+            return 'REDIRECT';
+        }
+
+        return '';
     }
 
     // Открываем вакансию с списка: запоминаем lastAttempt и переходим по ссылке
@@ -1009,6 +1279,7 @@
 
         if (location.pathname.startsWith('/vacancy/')) {
             const vid = getStableVacancyId(btn);
+            touchVacancyProgress('process-vacancy-start');
             StateManager.setReturnUrl(document.referrer || '/search/vacancy');
 
             if (resumeAttempt > MAX_RESUME_ATTEMPTS_PER_VACANCY) {
@@ -1037,12 +1308,15 @@
 
             const viewTime = randomDelay(config.viewMin, config.viewMax);
             log(`Читаю ~${Math.round(viewTime/1000)} сек (имитирую просмотр страницы).`);
+            touchVacancyProgress('reading-vacancy');
             await humanScrollToCompanySectionAndReturn(viewTime);
+            touchVacancyProgress('finished-reading-vacancy');
 
             //await actionPause();
             if (stopSignal) return 'STOPPED';
 
             const companyName = getVacancyCompanyName();
+            touchVacancyProgress('company-check');
             if (companyName) {
                 const blockedCompanyMatch = findBlockedCompanyMatch(companyName);
 
@@ -1055,6 +1329,7 @@
 
             let applyBtn = queryVisible(SELECTORS.topApply) || await waitForVisibleElement(SELECTORS.applyBtn, config.waitForModalMs);
             let apply2DTime = queryVisible(SELECTORS.top2DTimeApply) || await waitForVisibleElement(SELECTORS.top2DTimeApply, config.waitForModalMs);
+            touchVacancyProgress('apply-button-check');
             log(apply2DTime);
             console.log(apply2DTime);
             //alert(apply2DTime.toString())
@@ -1090,6 +1365,7 @@
 
             // Пометим, что сейчас пытаемся откликнуться на эту вакансию
             StateManager.setLastAttemptID(vid);
+            touchVacancyProgress('apply-attempt-start');
 
             window.scrollTo({ top: 0, behavior: 'auto' });
             await actionPause();
@@ -1100,15 +1376,18 @@
                 topBtn.scrollIntoView({ block: 'center', behavior: 'auto' });
                 await actionPause();
                 if (stopSignal) return 'STOPPED';
+                touchVacancyProgress('click-apply-button');
                 topBtn.click();
             } else {
                 applyBtn.scrollIntoView({ block: 'center', behavior: 'auto' });
                 await actionPause();
                 if (stopSignal) return 'STOPPED';
+                touchVacancyProgress('click-apply-button');
                 applyBtn.click();
             }
 
             await actionPause();
+            touchVacancyProgress('after-apply-click');
             if (stopSignal) return 'STOPPED';
             if (isAuthRequiredPage()) {
                 markAuthRequired('HH запросил вход после клика по кнопке отклика.');
@@ -1132,6 +1411,7 @@
             }
 
             let submitButton = await waitForElement(SELECTORS.modalSubmit, config.waitForModalMs);
+            touchVacancyProgress('submit-button-check');
             if (!submitButton) {
                 const relocationBtn = document.querySelector(SELECTORS.relocationBtn);
                 if (relocationBtn) {
@@ -1187,8 +1467,11 @@
                     return 'SKIPPED_RESUME_VISIBILITY';
                 }
                 if (isManualResponsePage()) {
-                    handleManualResponsePage('После клика открылась страница вопросов. Сохраняю для ручного отклика.');
-                    return 'REDIRECT';
+                    const classifiedResult = await handleNoSubmitResponsePage(
+                        vid,
+                        'После клика открылась страница отклика без ожидаемой кнопки. Сохраняю для ручной обработки.'
+                    );
+                    if (classifiedResult) return classifiedResult;
                 }
 
                 const modalRetryId = sessionStorage.getItem(KEYS.modalRetry);
@@ -1199,6 +1482,7 @@
                     return 'RETRYING_NO_MODAL';
                 }
                 sessionStorage.removeItem(KEYS.modalRetry);
+                StateManager.addParserError('ERROR_NO_MODAL', getNoModalDiagnostics(vid, 'not_response_page_after_retry'));
                 return 'ERROR_NO_MODAL';
             }
 
@@ -1251,9 +1535,11 @@
             const wasAlreadyRespondedBeforeSubmit = isAlreadyRespondedPage();
             await actionPause();
             if (stopSignal) return 'STOPPED';
+            touchVacancyProgress('click-submit-button');
             try { submitButton.click(); } catch(e) { try { submitButton.dispatchEvent(new MouseEvent('click', {bubbles:true})); } catch(_){} }
             await actionPause();
             const followUpSubmitSteps = await submitFollowUpResponseModals();
+            touchVacancyProgress('after-submit-click');
             if (followUpSubmitSteps) {
                 log(`Дополнительных шагов формы отклика отправлено: ${followUpSubmitSteps}.`);
             }
@@ -1347,6 +1633,11 @@
             if (confirmationResult === true) {
                 const successfulResponses = StateManager.addSuccessfulResponseID(vid);
                 log(`Отклик подтверждён. Всего подтверждено: ${successfulResponses}`);
+                if (StateManager.hasReachedResponseLimit()) {
+                    StateManager.addProcessedID(vid);
+                    StateManager.clearLastAttemptID();
+                    return 'OK';
+                }
                 let apply2DTime = queryVisible(SELECTORS.top2DTimeApply) || await waitForVisibleElement(SELECTORS.top2DTimeApply, config.waitForModalMs);
                 log(apply2DTime);
                 if(apply2DTime) return processVacancy(btn, true, resumeAttempt + 1)
@@ -1480,7 +1771,13 @@
         }
 
         if (isManualResponsePage()) {
-            handleManualResponsePage('Стартовали сразу на странице вопросов. Сохраняю вакансию для ручного отклика.');
+            const responsePageResult = await handleNoSubmitResponsePage(
+                getManualResponseVacancyId(),
+                'Стартовали сразу на странице отклика без ожидаемой кнопки. Сохраняю для ручной обработки.'
+            );
+            if (!responsePageResult) {
+                handleManualResponsePage('Стартовали сразу на странице вопросов. Сохраняю вакансию для ручного отклика.');
+            }
             isLoopActive = false;
             setStatus('running', 'Ожидание возврата...');
             return;
@@ -1553,7 +1850,7 @@
         let count = 0;
 
         for (const btn of targets) {
-            if (stopSignal || count >= config.limit) break;
+            if (stopSignal || StateManager.hasReachedResponseLimit()) break;
             if (!document.body.contains(btn)) {
                 log('Кнопка исчезла из DOM — перезапускаю поиск.', true);
                 break;
@@ -1610,6 +1907,8 @@
         if (!location.href.includes('/applicant/vacancy_response')) {
              isLoopActive = false;
              const parserErrors = StateManager.getParserErrors();
+             const manualList = StateManager.getManualList();
+             const totalSuccessfulResponses = StateManager.getSuccessfulResponses();
              const parserErrorDetails = parserErrors.length
                  ? `; parser errors: ${parserErrors.map(item => item.code).join(', ')}`
                  : '';
@@ -1618,11 +1917,11 @@
              } else if (isAuthRequiredPage()) {
                  markAuthRequired(`HH показал форму входа после цикла обработки${parserErrorDetails}`);
                  return;
-             } else if (!count && parserErrors.length) {
+             } else if (!totalSuccessfulResponses && !manualList.length && parserErrors.length) {
                  StateManager.setStopReason('parser_errors_only', `Цикл завершился без откликов${parserErrorDetails}`);
-             } else if (count >= config.limit) {
+             } else if (StateManager.hasReachedResponseLimit()) {
                  StateManager.setStopReason('limit_reached', `Достигнут лимит ${config.limit}${parserErrorDetails}`);
-             } else if (!targets.length && StateManager.getManualList().length) {
+             } else if (!targets.length && manualList.length) {
                  StateManager.setStopReason(
                      'manual_targets_only',
                      `Все доступные цели ушли в ручной список. Всего кнопок: ${allBtns.length}, новых: ${targets.length}, ручных: ${StateManager.getManualList().length}${parserErrorDetails}`

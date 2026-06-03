@@ -58,6 +58,57 @@ function getRecommendedExternalTimeoutMs(
   )
 }
 
+function getConfiguredResponseLimit(): number | undefined {
+  const raw = String(process.env.ORCHESTRATOR_RESPONSE_LIMIT ?? '').trim()
+  return raw ? Number(raw) : undefined
+}
+
+function shouldApplyKiraOnlyNocoTestGate(): boolean {
+  return (
+    String(process.env.APP_DB ?? '').trim().toLowerCase() === 'noco' &&
+    String(process.env.ORCHESTRATOR_CLIENT_NAMES ?? '').trim() === 'Кира' &&
+    String(process.env.ORCHESTRATOR_WORK_WITH_MARKET ?? '').trim().toLowerCase() === 'ru' &&
+    String(process.env.ORCHESTRATOR_RESPONSE_LIMIT ?? '').trim() !== ''
+  )
+}
+
+function assertKiraOnlyNocoTestGate(clients: ClientAutomationData[]): void {
+  if (!shouldApplyKiraOnlyNocoTestGate()) {
+    return
+  }
+
+  const responseLimit = getConfiguredResponseLimit()
+  if (responseLimit !== 50 || responseLimit > 100) {
+    throw new Error(
+      `Kira Noco test requires ORCHESTRATOR_RESPONSE_LIMIT=50; got ${String(responseLimit)}`
+    )
+  }
+
+  if (clients.length !== 1) {
+    throw new Error(`Kira Noco test expected exactly one target; got ${clients.length}`)
+  }
+
+  const [client] = clients
+  const problems = [
+    client.clientName === 'Кира' ? '' : `clientName=${client.clientName}`,
+    client.market === 'Ru' ? '' : `market=${client.market}`,
+    client.dolphinProfileId === 770032142 ? '' : `dolphinProfileId=${client.dolphinProfileId}`,
+    client.stack === 'FRONTEND' ? '' : `stack=${client.stack}`,
+    client.commonChatId === '5216637594' ? '' : `commonChatId=${client.commonChatId}`,
+    client.stackScenario ? '' : 'missing stackScenario'
+  ].filter(Boolean)
+
+  console.log(
+    `Kira Noco test target: ${client.clientName}/${client.commonChatId}/${client.market}` +
+      ` stack=${client.stack} dolphin=${client.dolphinProfileId} limit=${responseLimit}` +
+      ` cover=${client.coverText ? 'yes' : 'no'}`
+  )
+
+  if (problems.length) {
+    throw new Error(`Kira Noco test target mismatch: ${problems.join(', ')}`)
+  }
+}
+
 async function runClientsOrchestrator(
   clients: ClientAutomationData[]
 ): Promise<OrchestratorStatus[]> {
@@ -67,6 +118,8 @@ async function runClientsOrchestrator(
   if (!clients.length) {
     throw new Error('No enabled client market targets were found')
   }
+
+  assertKiraOnlyNocoTestGate(clients)
 
   console.log(
     `Starting ${clients.length} clients with ${CLIENT_START_DELAY_MS}ms stagger: ${clients
@@ -245,6 +298,7 @@ module.exports = {
   runAllClientsOrchestrator,
   runClientOrchestrator,
   runConfiguredOrchestrator,
+  assertKiraOnlyNocoTestGate,
   isClientReportSuccessful,
   selectClientsByCommonChatIds,
   selectClientsByUniqueNames,

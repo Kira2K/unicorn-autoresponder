@@ -53,7 +53,8 @@ const {
   AUTOMATION_LOCK_TAG,
   AUTO_RESPONDER_WATCH_MS,
   DOLPHIN_HEADLESS,
-  HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS
+  HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS,
+  ORCHESTRATOR_RESPONSE_LIMIT
 } = require('./config.ts')
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
@@ -75,6 +76,10 @@ type AutoResponderCollectedData = {
   parserErrorLogsCount: number
   parserErrorCodes: string[]
   parserLastErrorCode?: string
+}
+
+type OpenClientScenarioOptions = {
+  skipManualVacanciesCleanup?: boolean
 }
 
 function applyManualVacanciesCleanupLifecycle(
@@ -102,7 +107,8 @@ async function openClientScenario(
   clientData: RunnableClientAutomationData,
   responseCounter: ResponseCounter,
   runStartedAt: number,
-  status: OrchestratorStatus
+  status: OrchestratorStatus,
+  options: OpenClientScenarioOptions = {}
 ): Promise<{ status: OrchestratorStatus; pageResult: OpenScenarioResult }> {
   const pageResult = await openScenarioAndInjectIndex(
     port,
@@ -110,17 +116,24 @@ async function openClientScenario(
     responseCounter,
     {
       coverText: clientData.coverText,
-      blockedCompanies: clientData.blockedCompanies
+      blockedCompanies: clientData.blockedCompanies,
+      responseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+      skipManualVacanciesCleanup: options.skipManualVacanciesCleanup
     }
   )
+  const nextStatus = {
+    ...status,
+    ...pageResult.result,
+    manualVacanciesCleanup:
+      options.skipManualVacanciesCleanup && status.manualVacanciesCleanup
+        ? status.manualVacanciesCleanup
+        : pageResult.result.manualVacanciesCleanup
+  }
 
   return {
     pageResult,
     status: applyManualVacanciesCleanupLifecycle(
-      {
-        ...status,
-        ...pageResult.result
-      },
+      nextStatus,
       runStartedAt
     )
   }
@@ -582,7 +595,8 @@ async function runClientOrchestrator(
           runnableClientData,
           responseCounter,
           runStartedAt,
-          status
+          status,
+          { skipManualVacanciesCleanup: true }
         )
         pageResult = scenarioState.pageResult
         status = scenarioState.status
@@ -654,7 +668,8 @@ async function runClientOrchestrator(
           runnableClientData,
           responseCounter,
           runStartedAt,
-          status
+          status,
+          { skipManualVacanciesCleanup: true }
         )
         pageResult = scenarioState.pageResult
         status = scenarioState.status

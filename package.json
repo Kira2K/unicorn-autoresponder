@@ -69,6 +69,7 @@
     "input": "^1.0.1",
     "openapi-client-axios": "^7.9.0",
     "openapi-typescript": "^7.13.0",
+    "playwright": "^1.60.0",
     "telegram": "^2.26.22"
   },
   "devDependencies": {

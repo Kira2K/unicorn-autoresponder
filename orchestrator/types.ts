@@ -67,6 +67,7 @@ export type KnownParserErrorCode =
   | 'COMPANY_STOP_LIST_SKIPPED'
   | 'SKIPPED_COMPANY_STOP_LIST'
   | 'ERROR_NO_MODAL'
+  | 'STUCK_ON_VACANCY_TIMEOUT'
   | 'selector_missing'
   | 'captcha_detected'
   | 'network_timeout'

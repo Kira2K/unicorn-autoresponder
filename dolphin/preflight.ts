@@ -7,6 +7,79 @@ const {
 } = require('../orchestrator/config.ts')
 const { getErrorMessage } = require('../orchestrator/runtime-utils.ts')
 
+function stringifyPreflightBody(value: unknown): string {
+  if (value === undefined || value === null) {
+    return ''
+  }
+
+  if (typeof value === 'string') {
+    return value
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function getDolphinSessionRepairMessage(): string {
+  return (
+    `Dolphin Anty local API session is invalid or stuck refreshing its token. ` +
+    `Open Dolphin Anty, re-login if needed, wait until browser profiles are visible, ` +
+    `then rerun the orchestrator.`
+  )
+}
+
+function isDolphinSessionError(status: number, responseText: string): boolean {
+  const text = responseText.toLowerCase()
+
+  return (
+    status === 401 ||
+    text.includes('invalid session token') ||
+    text.includes('token refresh timeout') ||
+    text.includes('refresh token') ||
+    text.includes('unauthorized')
+  )
+}
+
+function assertDolphinLocalApiResponseHealthy(
+  response: {
+    ok: boolean
+    status: number
+    statusText?: string
+  },
+  responseBody: unknown,
+  baseUrl = DOLPHIN_LOCAL_API_BASE_URL
+): void {
+  if (response.ok) {
+    return
+  }
+
+  const responseText = stringifyPreflightBody(responseBody)
+
+  if (isDolphinSessionError(response.status, responseText)) {
+    const error = new Error(
+      `${getDolphinSessionRepairMessage()} ` +
+        `Local API ${baseUrl}/browser_profiles returned ` +
+        `${response.status} ${response.statusText || ''}`.trim() +
+        (responseText ? `: ${responseText}` : '')
+    ) as Error & { isDolphinLocalApiHealthError?: boolean }
+    error.isDolphinLocalApiHealthError = true
+
+    throw error
+  }
+
+  const error = new Error(
+    `Dolphin Anty local API is reachable at ${baseUrl}, but the health check failed: ` +
+      `${response.status} ${response.statusText || ''}`.trim() +
+      (responseText ? `: ${responseText}` : '')
+  ) as Error & { isDolphinLocalApiHealthError?: boolean }
+  error.isDolphinLocalApiHealthError = true
+
+  throw error
+}
+
 function getRunningDolphinBrowserProfileIds(): number[] {
   const command = [
     '$ErrorActionPreference = "Stop";',
@@ -61,11 +134,18 @@ async function assertDolphinAppRunning(): Promise<void> {
   )
 
   try {
-    await fetch(`${DOLPHIN_LOCAL_API_BASE_URL}/browser_profiles`, {
+    const response = await fetch(`${DOLPHIN_LOCAL_API_BASE_URL}/browser_profiles`, {
       method: 'GET',
       signal: controller.signal
     })
+    const responseText = await response.text()
+
+    assertDolphinLocalApiResponseHealthy(response, responseText)
   } catch (error: unknown) {
+    if ((error as any)?.isDolphinLocalApiHealthError) {
+      throw error
+    }
+
     throw new Error(
       `Dolphin Anty app is not reachable at ${DOLPHIN_LOCAL_API_BASE_URL}. ` +
         `Open Dolphin Anty and wait until the local API on port 3001 is ready, then rerun. ` +
@@ -81,7 +161,9 @@ async function assertDolphinAppRunning(): Promise<void> {
 }
 
 module.exports = {
+  assertDolphinLocalApiResponseHealthy,
   assertDolphinAppRunning,
   assertPreexistingDolphinProfileLimit,
-  getRunningDolphinBrowserProfileIds
+  getRunningDolphinBrowserProfileIds,
+  isDolphinSessionError
 }

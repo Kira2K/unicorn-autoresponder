@@ -37,6 +37,7 @@ async function isAutoResponderRunning(
 type AutoResponderSettingsPatch = {
   coverText?: string
   blockedCompanies?: Array<{ id: string; name: string }>
+  limit?: number
 }
 
 async function applyAutoResponderSettings(
@@ -79,6 +80,10 @@ async function applyAutoResponderSettings(
             id: String(company.id),
             name: String(company.name)
           }))
+      }
+
+      if (typeof patch.limit === 'number' && Number.isFinite(patch.limit)) {
+        settings.limit = Math.max(1, Math.min(500, Math.round(patch.limit)))
       }
 
       localStorage.setItem(settingsKey, JSON.stringify(settings))

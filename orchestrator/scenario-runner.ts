@@ -19,6 +19,7 @@ const { isAutoResponderUrl } = require('../shared/hh-url.ts')
 const { getErrorMessage, withTimeout } = require('./runtime-utils.ts')
 const {
   CONNECT_OVER_CDP_TIMEOUT_MS,
+  HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSE_IDS_KEY,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
   HH_INITIAL_NAVIGATION_TIMEOUT_MS,
   INDEX_SCRIPT_PATH
@@ -36,6 +37,8 @@ async function openScenarioAndInjectIndex(
   options: {
     coverText?: string
     blockedCompanies?: Array<{ id: string; name: string }>
+    responseLimit?: number
+    skipManualVacanciesCleanup?: boolean
   } = {}
 ): Promise<OpenScenarioResult> {
   const { chromium } = loadPlaywright()
@@ -47,44 +50,58 @@ async function openScenarioAndInjectIndex(
     browserDisconnected = true
   })
   const context = browser.contexts()[0] || (await browser.newContext())
-  const cleanupPage = await context.newPage()
   let manualVacanciesCleanup: ManualVacanciesCleanupResult | undefined
 
-  try {
-    manualVacanciesCleanup = await withTimeout(
-      runManualVacanciesCleanup(cleanupPage, {
-        log: (message: string) =>
-          console.log(`[manual vacancies cleanup] ${message}`)
-      }),
-      HH_INITIAL_NAVIGATION_TIMEOUT_MS,
-      `Manual vacancies cleanup did not finish in ${HH_INITIAL_NAVIGATION_TIMEOUT_MS}ms`,
-      async () => {
-        await closePageQuietly(cleanupPage)
-      }
-    )
-  } catch (error: unknown) {
-    const errorMessage = getErrorMessage(error)
-    console.warn(`[manual vacancies cleanup] ${errorMessage}; continuing standard scenario`)
+  if (options.skipManualVacanciesCleanup) {
     manualVacanciesCleanup = {
-      skipped: false,
-      completed: false,
+      skipped: true,
+      completed: true,
       initialCount: 0,
       checkedCount: 0,
       removedCount: 0,
       remainingCount: 0,
       keptCount: 0,
-      error: errorMessage,
-      items: [
-        {
-          id: 'manual-cleanup-error',
-          url: '',
-          action: 'kept',
-          reason: errorMessage
-        }
-      ]
+      items: []
     }
-  } finally {
-    await closePageQuietly(cleanupPage)
+  } else {
+    const cleanupPage = await context.newPage()
+
+    try {
+      manualVacanciesCleanup = await withTimeout(
+        runManualVacanciesCleanup(cleanupPage, {
+          log: (message: string) =>
+            console.log(`[manual vacancies cleanup] ${message}`)
+        }),
+        HH_INITIAL_NAVIGATION_TIMEOUT_MS,
+        `Manual vacancies cleanup did not finish in ${HH_INITIAL_NAVIGATION_TIMEOUT_MS}ms`,
+        async () => {
+          await closePageQuietly(cleanupPage)
+        }
+      )
+    } catch (error: unknown) {
+      const errorMessage = getErrorMessage(error)
+      console.warn(`[manual vacancies cleanup] ${errorMessage}; continuing standard scenario`)
+      manualVacanciesCleanup = {
+        skipped: false,
+        completed: false,
+        initialCount: 0,
+        checkedCount: 0,
+        removedCount: 0,
+        remainingCount: 0,
+        keptCount: 0,
+        error: errorMessage,
+        items: [
+          {
+            id: 'manual-cleanup-error',
+            url: '',
+            action: 'kept',
+            reason: errorMessage
+          }
+        ]
+      }
+    } finally {
+      await closePageQuietly(cleanupPage)
+    }
   }
 
   if (!manualVacanciesCleanup) {
@@ -162,12 +179,20 @@ async function openScenarioAndInjectIndex(
     }
   }
 
-  await page.evaluate((successfulResponsesKey: string) => {
+  await page.evaluate(({ successfulResponsesKey, successfulResponseIdsKey }: {
+    successfulResponsesKey: string
+    successfulResponseIdsKey: string
+  }) => {
     sessionStorage.setItem(successfulResponsesKey, '0')
-  }, HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY)
+    sessionStorage.removeItem(successfulResponseIdsKey)
+  }, {
+    successfulResponsesKey: HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
+    successfulResponseIdsKey: HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSE_IDS_KEY
+  })
   await applyAutoResponderSettings(page, {
     coverText: options.coverText,
-    blockedCompanies: options.blockedCompanies
+    blockedCompanies: options.blockedCompanies,
+    limit: options.responseLimit
   })
   const indexScriptInjected = await ensureIndexScript(
     page,
