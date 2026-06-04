@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 
 const {
   assertDolphinLocalApiResponseHealthy,
+  assertDolphinAppRunning,
   isDolphinSessionError
 } = require('./preflight.ts')
 
@@ -69,9 +70,52 @@ function testOtherBadResponseFailsAsHealthCheck(): void {
   )
 }
 
+async function testDolphinAppRunningStoresLocalApiToken(): Promise<void> {
+  const previousFetch = global.fetch
+  const previousToken = process.env.dolphin_api_token
+  const calls: Array<{ url: string; body?: string }> = []
+
+  process.env.dolphin_api_token = 'local-token-test'
+  global.fetch = (async (url: string, options: any = {}) => {
+    calls.push({
+      url,
+      body: options.body
+    })
+
+    return new Response('{"success":true}', {
+      status: 200,
+      statusText: 'OK'
+    })
+  }) as typeof fetch
+
+  try {
+    await assertDolphinAppRunning()
+  } finally {
+    global.fetch = previousFetch
+
+    if (previousToken === undefined) {
+      delete process.env.dolphin_api_token
+    } else {
+      process.env.dolphin_api_token = previousToken
+    }
+  }
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, 'http://localhost:3001/v1.0/auth/login-with-token')
+  assert.deepEqual(JSON.parse(calls[0].body || '{}'), {
+    token: 'local-token-test'
+  })
+}
+
 testHealthyResponsePasses()
 testInvalidSessionFailsWithRepairMessage()
 testTokenRefreshTimeoutFailsWithRepairMessage()
 testOtherBadResponseFailsAsHealthCheck()
-
-console.log('dolphin preflight tests passed')
+testDolphinAppRunningStoresLocalApiToken()
+  .then(() => {
+    console.log('dolphin preflight tests passed')
+  })
+  .catch((error: unknown) => {
+    console.error(error instanceof Error ? error.stack : error)
+    process.exitCode = 1
+  })

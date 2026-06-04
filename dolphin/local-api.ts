@@ -1,5 +1,11 @@
 const { DOLPHIN_LOCAL_API_BASE_URL } = require('../orchestrator/config.ts')
 
+type LocalDolphinRequestOptions = {
+  method?: 'GET' | 'POST'
+  body?: unknown
+  retryAuth?: boolean
+}
+
 function stringifyApiMessage(value: unknown): string | undefined {
   if (value === undefined || value === null) {
     return undefined
@@ -16,12 +22,49 @@ function stringifyApiMessage(value: unknown): string | undefined {
   }
 }
 
+function getDolphinApiToken(): string {
+  const token = String(process.env.dolphin_api_token ?? '').trim()
+
+  if (!token) {
+    throw new Error('Missing required environment variable: dolphin_api_token')
+  }
+
+  return token
+}
+
+function isDolphinLocalSessionError(status: number, data: any): boolean {
+  const text = [
+    data?.error,
+    data?.message,
+    typeof data === 'string' ? data : undefined,
+    stringifyApiMessage(data)
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  return (
+    status === 401 ||
+    text.includes('invalid session token') ||
+    text.includes('token refresh timeout') ||
+    text.includes('refresh token') ||
+    text.includes('unauthorized')
+  )
+}
+
+async function loginLocalDolphinWithToken(): Promise<unknown> {
+  return await requestLocalDolphin('/auth/login-with-token', {
+    method: 'POST',
+    body: {
+      token: getDolphinApiToken()
+    },
+    retryAuth: false
+  })
+}
+
 async function requestLocalDolphin<T>(
   endpointPath: string,
-  options: {
-    method?: 'GET' | 'POST'
-    body?: unknown
-  } = {}
+  options: LocalDolphinRequestOptions = {}
 ): Promise<T> {
   const response = await fetch(`${DOLPHIN_LOCAL_API_BASE_URL}${endpointPath}`, {
     method: options.method ?? 'GET',
@@ -38,6 +81,19 @@ async function requestLocalDolphin<T>(
   }
 
   if (!response.ok) {
+    if (
+      options.retryAuth !== false &&
+      endpointPath !== '/auth/login-with-token' &&
+      isDolphinLocalSessionError(response.status, data)
+    ) {
+      await loginLocalDolphinWithToken()
+
+      return await requestLocalDolphin<T>(endpointPath, {
+        ...options,
+        retryAuth: false
+      })
+    }
+
     const message =
       stringifyApiMessage(data?.error) ||
       stringifyApiMessage(data?.message) ||
@@ -54,5 +110,7 @@ async function requestLocalDolphin<T>(
 }
 
 module.exports = {
+  isDolphinLocalSessionError,
+  loginLocalDolphinWithToken,
   requestLocalDolphin
 }

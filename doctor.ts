@@ -8,6 +8,10 @@ type AutomationTarget = {
   stackScenario?: string
 }
 
+type AppDb = import('./db/types.ts').AppDb
+type ClientAutomationData = import('./db/types.ts').ClientAutomationData
+type ClientHHAuthCredentials = import('./db/types.ts').ClientHHAuthCredentials
+
 type SheetValues = {
   title: string
   values: string[][]
@@ -46,12 +50,28 @@ const {
   getConfiguredClientIds(): string[]
   getConfiguredClientNames(): string[]
 }
+const { createAppDb } = require('./db/index.ts') as {
+  createAppDb(): AppDb
+}
+const { assertDolphinAppRunning } = require('./dolphin/index.ts') as {
+  assertDolphinAppRunning(): Promise<void>
+}
 
 type DoctorOptions = {
+  authPreflight: boolean
   client?: string
   env: boolean
   help: boolean
+  stopBeforeHh: boolean
 }
+
+type AuthPreflightDependencies = {
+  assertDolphinAppRunning(): Promise<void>
+  createAppDb(): AppDb
+  log(message: string): void
+}
+
+const DEFAULT_AUTH_PREFLIGHT_CLIENT = '\u041a\u0438\u0440\u0430'
 
 function normalizeKey(value: unknown): string {
   return String(value ?? '')
@@ -74,8 +94,10 @@ function getRequiredSheetValues(
 
 function parseArgs(args: string[]): DoctorOptions {
   const options: DoctorOptions = {
+    authPreflight: false,
     env: false,
-    help: false
+    help: false,
+    stopBeforeHh: false
   }
 
   for (let index = 0; index < args.length; index += 1) {
@@ -88,6 +110,16 @@ function parseArgs(args: string[]): DoctorOptions {
 
     if (arg === '--env') {
       options.env = true
+      continue
+    }
+
+    if (arg === '--auth-preflight') {
+      options.authPreflight = true
+      continue
+    }
+
+    if (arg === '--stop-before-hh') {
+      options.stopBeforeHh = true
       continue
     }
 
@@ -108,6 +140,7 @@ function parseArgs(args: string[]): DoctorOptions {
 function printHelp(): void {
   console.log(`Usage:
   node doctor.ts --env
+  node doctor.ts --auth-preflight --client "Кира" --stop-before-hh
   node doctor.ts --client "Иван"
 
 Doctor is diagnostic-only. It does not start Dolphin profiles or change sheet data.`)
@@ -206,10 +239,114 @@ async function printClientDiagnostics(clientQuery: string): Promise<void> {
   }
 }
 
+function requireNonEmptyField(
+  target: ClientAutomationData,
+  fieldName: keyof Pick<
+    ClientAutomationData,
+    'clientName' | 'market' | 'stack' | 'commonChatId' | 'stackScenario'
+  >
+): void {
+  if (!String(target[fieldName] ?? '').trim()) {
+    throw new Error(`Auth preflight target is missing ${fieldName}`)
+  }
+}
+
+function assertTargetReadyForAuthPreflight(target: ClientAutomationData): void {
+  requireNonEmptyField(target, 'clientName')
+  requireNonEmptyField(target, 'market')
+  requireNonEmptyField(target, 'stack')
+  requireNonEmptyField(target, 'commonChatId')
+  requireNonEmptyField(target, 'stackScenario')
+
+  if (!Number.isFinite(target.dolphinProfileId) || target.dolphinProfileId <= 0) {
+    throw new Error(
+      `Auth preflight target has invalid Dolphin profile id: ${String(target.dolphinProfileId)}`
+    )
+  }
+}
+
+function assertCredentialsRecordPresent(
+  credentials: ClientHHAuthCredentials
+): void {
+  if (!String(credentials.email ?? '').trim()) {
+    throw new Error('Auth preflight HH credentials record is missing email')
+  }
+
+  if (!String(credentials.password ?? '').trim()) {
+    throw new Error('Auth preflight HH credentials record is missing password')
+  }
+}
+
+function assertDolphinCloudTokenPresent(): void {
+  if (!String(process.env.dolphin_api_token ?? '').trim()) {
+    throw new Error('Missing required environment variable: dolphin_api_token')
+  }
+}
+
+async function runAuthPreflight(
+  options: DoctorOptions,
+  dependencies: AuthPreflightDependencies = {
+    assertDolphinAppRunning,
+    createAppDb,
+    log: console.log
+  }
+): Promise<void> {
+  if (!options.stopBeforeHh) {
+    throw new Error(
+      'Auth preflight currently requires --stop-before-hh so no live HH checks are run'
+    )
+  }
+
+  const clientName = options.client || DEFAULT_AUTH_PREFLIGHT_CLIENT
+  const db = dependencies.createAppDb()
+  const targets = await db.getAutomationTargets({
+    market: parseMarketEnv(process.env.ORCHESTRATOR_WORK_WITH_MARKET)
+  })
+  const matches = targets.filter(target => target.clientName === clientName)
+
+  if (!matches.length) {
+    throw new Error(`Auth preflight client was not found or is not enabled: ${clientName}`)
+  }
+
+  if (matches.length > 1) {
+    throw new Error(
+      `Auth preflight client "${clientName}" is ambiguous. Matching chat ids: ${matches
+        .map(target => target.commonChatId)
+        .join(', ')}`
+    )
+  }
+
+  const target = matches[0]
+  assertTargetReadyForAuthPreflight(target)
+
+  const credentials = await db.getHHAuthCredentialsByCommonChatId(
+    target.commonChatId,
+    target.market
+  )
+  assertCredentialsRecordPresent(credentials)
+  assertDolphinCloudTokenPresent()
+
+  await dependencies.assertDolphinAppRunning()
+
+  dependencies.log('Auth preflight passed before HH live checks:')
+  dependencies.log(
+    `  client: ${target.clientName} / ${target.market} / ${target.stack}`
+  )
+  dependencies.log(`  common chat id: ${target.commonChatId}`)
+  dependencies.log(`  Dolphin profile id: ${target.dolphinProfileId}`)
+  dependencies.log(`  scenario URL: ${target.stackScenario}`)
+  dependencies.log('  HH credentials record: present')
+  dependencies.log(
+    '  Dolphin cloud token: present; cloud client uses Authorization: Bearer <dolphin_api_token>'
+  )
+  dependencies.log('  Dolphin local API: healthy desktop session')
+  dependencies.log('  HH live checks: skipped by --stop-before-hh')
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
 
-  if (options.help || (!options.env && !options.client)) {
+  if (options.help || (!options.env && !options.client && !options.authPreflight)) {
     printHelp()
     return
   }
@@ -218,12 +355,28 @@ async function main(): Promise<void> {
     printEnv()
   }
 
-  if (options.client) {
+  if (options.client && !options.authPreflight) {
     await printClientDiagnostics(options.client)
+  }
+
+  if (options.authPreflight) {
+    await runAuthPreflight(options)
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error)
-  process.exitCode = 1
-})
+if (require.main === module) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error)
+    process.exitCode = 1
+  })
+}
+
+module.exports = {
+  DEFAULT_AUTH_PREFLIGHT_CLIENT,
+  assertCredentialsRecordPresent,
+  assertDolphinCloudTokenPresent,
+  assertTargetReadyForAuthPreflight,
+  main,
+  parseArgs,
+  runAuthPreflight
+}

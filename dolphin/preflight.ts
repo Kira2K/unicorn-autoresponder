@@ -6,6 +6,9 @@ const {
   MAX_PREEXISTING_DOLPHIN_PROFILES
 } = require('../orchestrator/config.ts')
 const { getErrorMessage } = require('../orchestrator/runtime-utils.ts')
+const { loginLocalDolphinWithToken } = require('./local-api.ts') as {
+  loginLocalDolphinWithToken(): Promise<unknown>
+}
 
 function stringifyPreflightBody(value: unknown): string {
   if (value === undefined || value === null) {
@@ -127,20 +130,16 @@ async function assertPreexistingDolphinProfileLimit(): Promise<void> {
 }
 
 async function assertDolphinAppRunning(): Promise<void> {
-  const controller = new AbortController()
-  const timeout = setTimeout(
-    () => controller.abort(),
-    DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS
-  )
-
   try {
-    const response = await fetch(`${DOLPHIN_LOCAL_API_BASE_URL}/browser_profiles`, {
-      method: 'GET',
-      signal: controller.signal
-    })
-    const responseText = await response.text()
-
-    assertDolphinLocalApiResponseHealthy(response, responseText)
+    await Promise.race([
+      loginLocalDolphinWithToken(),
+      new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error(`Local API token login timed out after ${DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS}ms`)),
+          DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS
+        )
+      })
+    ])
   } catch (error: unknown) {
     if ((error as any)?.isDolphinLocalApiHealthError) {
       throw error
@@ -149,14 +148,13 @@ async function assertDolphinAppRunning(): Promise<void> {
     throw new Error(
       `Dolphin Anty app is not reachable at ${DOLPHIN_LOCAL_API_BASE_URL}. ` +
         `Open Dolphin Anty and wait until the local API on port 3001 is ready, then rerun. ` +
-        `Original error: ${getErrorMessage(error)}`
+      `Original error: ${getErrorMessage(error)}`
     )
-  } finally {
-    clearTimeout(timeout)
   }
 
   console.log(
-    `Preflight Dolphin app: local API is reachable at ${DOLPHIN_LOCAL_API_BASE_URL}`
+    `Preflight Dolphin app: local API is reachable at ${DOLPHIN_LOCAL_API_BASE_URL}; ` +
+      `token stored with /auth/login-with-token`
   )
 }
 

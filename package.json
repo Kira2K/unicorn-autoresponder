@@ -53,6 +53,7 @@
     "noco:core:test": "node noco/core/core.test.ts",
     "noco:test": "npm run noco:core:test && npm run noco:stop-companies:test && npm run noco:dolphin-profile-audit:test && npm run noco:sync-client-personal-telegram:test && npm run noco:client-stability:test && npm run noco:remove-relation-views:test",
     "orchestrator:test": "node orchestrator/types.test.ts",
+    "doctor:test": "node doctor.test.ts",
     "test:refactor": "node refactor-checks.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
