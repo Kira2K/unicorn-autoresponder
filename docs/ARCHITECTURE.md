@@ -6,6 +6,8 @@ This project is still intentionally script-shaped, but the orchestration code is
 
 - `orchestrator.ts` is the public facade and CLI entry point.
 - `doctor.ts` is for quick local diagnostics without starting Dolphin profiles.
+  Its `--auth-preflight --stop-before-hh` mode validates selected client data
+  and seeds Dolphin Local API auth without starting a profile or touching HH.
 - `check-table-state.ts` inspects Google Sheet mapping and explains client-name lookup issues.
 - `refactor-checks.ts` is the lightweight regression suite for refactor-sensitive behavior.
 
@@ -17,6 +19,8 @@ This project is still intentionally script-shaped, but the orchestration code is
 - `orchestrator/reporting.ts` is the reporting facade over `orchestrator/telegram-reporting.ts`.
 - `orchestrator/config.ts` contains shared environment/config constants.
 - `dolphin/index.ts` is the single Dolphin import surface used by the orchestrator.
+  Cloud API requests use bearer auth. Local API requests seed the JWT through
+  `/v1.0/auth/login-with-token` before profile start/stop calls.
 - `auto-responder/browser.ts` is the single auto-responder browser import surface.
 - `browser/` contains generic Playwright/page helpers that are not HH-specific.
 - `db/` is the new public data boundary. New data access should start from

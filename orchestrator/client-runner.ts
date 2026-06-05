@@ -1,4 +1,3 @@
-const { closePageQuietly } = require('../browser/page-utils.ts')
 const {
   createResponseCounter,
   extractParserErrorCodesFromLogs,
@@ -8,7 +7,6 @@ const {
   getAutoResponderSuccessCount,
   getManualVacancies,
   getParserLogs,
-  removeAutoResponderUi,
   stopAutoResponder,
   waitForAutoResponderToFinish
 } = require('../auto-responder/browser.ts')
@@ -24,11 +22,7 @@ const {
 } = require('../dolphin/index.ts')
 const {
   detectHhAuthState,
-  ensureHHAuthOnCurrentPage,
-  formatAuthCheckBrief,
-  isIndecisiveHhAuthState,
-  shouldRunHHAuthFallback,
-  waitForScenarioAuthDecision
+  formatAuthCheckBrief
 } = require('../hh-auth/orchestrator.ts')
 const {
   addLifecycleEvent,
@@ -45,6 +39,9 @@ const {
 } = require('./reporting.ts')
 const { openScenarioAndInjectIndex } = require('./scenario-runner.ts')
 const {
+  ensureScenarioAuthorizedBeforeStart
+} = require('./auth-workflow.ts')
+const {
   getErrorMessage,
   getErrorStack
 } = require('./runtime-utils.ts')
@@ -53,7 +50,6 @@ const {
   AUTOMATION_LOCK_TAG,
   AUTO_RESPONDER_WATCH_MS,
   DOLPHIN_HEADLESS,
-  HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS,
   ORCHESTRATOR_RESPONSE_LIMIT
 } = require('./config.ts')
 
@@ -542,188 +538,31 @@ async function runClientOrchestrator(
     let pageResult = scenarioState.pageResult
     status = scenarioState.status
     disposeWatcher = pageResult.disposeWatcher
-    let scenarioAuthBeforeStart = status.authBeforeStart
-
-    if (scenarioAuthBeforeStart) {
-      status = addLifecycleEvent(
-        status,
-        runStartedAt,
-        'HH auth checked before start',
-        formatAuthCheckBrief(scenarioAuthBeforeStart)
-      )
-
-      if (isIndecisiveHhAuthState(scenarioAuthBeforeStart.state)) {
-        status = addLifecycleEvent(
-          status,
-          runStartedAt,
-          'HH auth state unclear before start; waiting for stable signal',
-          `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; timeout ${HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS}ms`
-        )
-        const authDecision = await waitForScenarioAuthDecision(
-          pageResult.page,
-          scenarioAuthBeforeStart
-        )
-        scenarioAuthBeforeStart = authDecision.check
-        status = {
-          ...status,
-          authBeforeStart: scenarioAuthBeforeStart
-        }
-        status = addLifecycleEvent(
-          status,
-          runStartedAt,
-          'HH auth rechecked before start',
-          `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; rechecks ${authDecision.recheckCount}`
-        )
-      }
-
-      if (
-        scenarioAuthBeforeStart &&
-        scenarioAuthBeforeStart.state === 'logged_in' &&
-        !pageResult.result.startButtonClicked
-      ) {
-        disposeWatcher?.()
-        disposeWatcher = undefined
-        await closePageQuietly(pageResult.page)
-
-        status = addLifecycleEvent(
-          status,
-          runStartedAt,
-          'reopening scenario after delayed HH auth signal'
-        )
-        scenarioState = await openClientScenario(
+    const authWorkflowState = await ensureScenarioAuthorizedBeforeStart({
+      clientData,
+      runStartedAt,
+      state: {
+        disposeWatcher,
+        pageResult,
+        status
+      },
+      reopenScenario: async (
+        currentStatus: OrchestratorStatus,
+        options?: OpenClientScenarioOptions
+      ) => {
+        return await openClientScenario(
           port,
           runnableClientData,
           responseCounter,
           runStartedAt,
-          status,
-          { skipManualVacanciesCleanup: true }
-        )
-        pageResult = scenarioState.pageResult
-        status = scenarioState.status
-        disposeWatcher = pageResult.disposeWatcher
-        scenarioAuthBeforeStart = status.authBeforeStart
-
-        if (
-          scenarioAuthBeforeStart &&
-          isIndecisiveHhAuthState(scenarioAuthBeforeStart.state)
-        ) {
-          status = addLifecycleEvent(
-            status,
-            runStartedAt,
-            'HH auth state unclear after delayed auth reopen; waiting for stable signal',
-            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; timeout ${HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS}ms`
-          )
-          const authDecision = await waitForScenarioAuthDecision(
-            pageResult.page,
-            scenarioAuthBeforeStart
-          )
-          scenarioAuthBeforeStart = authDecision.check
-          status = {
-            ...status,
-            authBeforeStart: scenarioAuthBeforeStart
-          }
-          status = addLifecycleEvent(
-            status,
-            runStartedAt,
-            'HH auth rechecked before start after delayed auth reopen',
-            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; rechecks ${authDecision.recheckCount}`
-          )
-        }
-      }
-
-      if (!scenarioAuthBeforeStart) {
-        throw new Error('HH auth check before auto responder start is missing')
-      }
-
-      if (shouldRunHHAuthFallback(scenarioAuthBeforeStart.state)) {
-        status = addLifecycleEvent(
-          status,
-          runStartedAt,
-          'HH auth missing on scenario; logging in on current page',
-          formatAuthCheckBrief(scenarioAuthBeforeStart)
-        )
-        disposeWatcher?.()
-        disposeWatcher = undefined
-        await removeAutoResponderUi(pageResult.page)
-
-        const currentPageAuth = await ensureHHAuthOnCurrentPage(
-          clientData,
-          pageResult.page
-        )
-        status = addLifecycleEvent(
-          status,
-          runStartedAt,
-          'HH auth ensured',
-          formatAuthCheckBrief(currentPageAuth)
-        )
-        await closePageQuietly(pageResult.page)
-
-        status = addLifecycleEvent(
-          status,
-          runStartedAt,
-          'reopening scenario after current-page auth'
-        )
-        scenarioState = await openClientScenario(
-          port,
-          runnableClientData,
-          responseCounter,
-          runStartedAt,
-          status,
-          { skipManualVacanciesCleanup: true }
-        )
-        pageResult = scenarioState.pageResult
-        status = scenarioState.status
-        disposeWatcher = pageResult.disposeWatcher
-        scenarioAuthBeforeStart = status.authBeforeStart
-        if (
-          scenarioAuthBeforeStart &&
-          isIndecisiveHhAuthState(scenarioAuthBeforeStart.state)
-        ) {
-          status = addLifecycleEvent(
-            status,
-            runStartedAt,
-            'HH auth state unclear after current-page auth; waiting for stable signal',
-            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; timeout ${HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS}ms`
-          )
-          const authDecision = await waitForScenarioAuthDecision(
-            pageResult.page,
-            scenarioAuthBeforeStart
-          )
-          scenarioAuthBeforeStart = authDecision.check
-          status = {
-            ...status,
-            authBeforeStart: scenarioAuthBeforeStart
-          }
-          status = addLifecycleEvent(
-            status,
-            runStartedAt,
-            'HH auth rechecked before start after current-page auth',
-            `${formatAuthCheckBrief(scenarioAuthBeforeStart)}; rechecks ${authDecision.recheckCount}`
-          )
-        }
-        if (!scenarioAuthBeforeStart || scenarioAuthBeforeStart.state !== 'logged_in') {
-          throw new Error(
-            `HH auth check before auto responder start failed after current-page auth: ${
-              scenarioAuthBeforeStart
-                ? formatAuthCheckBrief(scenarioAuthBeforeStart)
-                : 'missing auth check'
-            }`
-          )
-        }
-        status = addLifecycleEvent(
-          status,
-          runStartedAt,
-          'HH auth checked before start after current-page auth',
-          formatAuthCheckBrief(scenarioAuthBeforeStart)
-        )
-      } else if (scenarioAuthBeforeStart.state !== 'logged_in') {
-        throw new Error(
-          `HH auth state before auto responder start stayed ${scenarioAuthBeforeStart.state}; ` +
-            `not running current-page auth without logged_out/captcha signal: ` +
-            formatAuthCheckBrief(scenarioAuthBeforeStart)
+          currentStatus,
+          options
         )
       }
-    }
+    })
+    pageResult = authWorkflowState.pageResult
+    status = authWorkflowState.status
+    disposeWatcher = authWorkflowState.disposeWatcher
     status = addLifecycleEvent(
       status,
       runStartedAt,

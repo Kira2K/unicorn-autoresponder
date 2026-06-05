@@ -36,6 +36,7 @@ const { splitTelegramMessage } = require('./orchestrator/reports.ts')
 const {
   AUTO_RESPONDER_WATCH_MS,
   CLIENT_START_DELAY_MS,
+  DOLPHIN_LOCAL_API_BASE_URL,
   EXTERNAL_TIMEOUT_MULTIPLIER,
   EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS,
   LOCAL_RUN_LOG_FILE,
@@ -113,6 +114,12 @@ async function runClientsOrchestrator(
   clients: ClientAutomationData[]
 ): Promise<OrchestratorStatus[]> {
   await assertDolphinAppRunning()
+  writeLocalRunLog({
+    kind: 'dolphin-local-api-preflight',
+    baseUrl: DOLPHIN_LOCAL_API_BASE_URL,
+    authEndpoint: '/auth/login-with-token',
+    tokenSeeded: true
+  })
   await assertPreexistingDolphinProfileLimit()
 
   if (!clients.length) {

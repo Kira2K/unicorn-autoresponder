@@ -25,6 +25,45 @@ node doctor.ts --env
 
 This prints the selectors and timing env vars that usually explain why a run picked different clients or markets than expected.
 
+## New PC Setup
+
+Run these checks before starting real HH automation on a fresh machine:
+
+1. Fill `.env`, especially `dolphin_api_token` and the selected DB credentials.
+2. Open Dolphin Anty and wait until the app is fully loaded.
+3. Run the non-HH auth preflight:
+
+```powershell
+node doctor.ts --auth-preflight --client "Кира" --stop-before-hh
+```
+
+This seeds the Dolphin Local API JWT through `/v1.0/auth/login-with-token`,
+checks the selected client metadata, and intentionally skips Dolphin profile
+start, HH navigation, HH login, captcha checks, and auto-responder injection.
+
+4. Verify the selected client:
+
+```powershell
+node doctor.ts --client "Кира"
+```
+
+5. Only after the non-HH checks pass, run an explicit HH/profile smoke if that
+is wanted for the day.
+
+## Dolphin Auth Contract
+
+- Dolphin Cloud API calls use `Authorization: Bearer <dolphin_api_token>`.
+- Dolphin Local API calls do not receive a bearer header on every request.
+  Instead, the Local API stores the remote JWT with:
+
+```text
+POST http://localhost:3001/v1.0/auth/login-with-token
+body: { "token": "<dolphin_api_token>" }
+```
+
+The orchestrator preflight performs this local token seeding before checking
+profile counts or starting any client runs.
+
 ## Table State
 
 ```powershell
@@ -53,5 +92,5 @@ In this Codex environment, `node`/`npm` may not be on `PATH`. The bundled Node p
 ## Runtime Failures
 
 - Auth failures: start from the local run log in `logs/`, then inspect the `authBeforeStart`, `authAfterParserStop`, and parser error code fields.
-- Profile start failures: check Dolphin app health, running profile count, and whether the profile is already locked/tagged.
+- Profile start failures: check Dolphin Local API token seeding, running profile count, and whether the profile is already locked/tagged.
 - Missing scenario failures: run `check-table-state.ts --strict` to catch enabled targets with no stack scenario URL.

@@ -73,6 +73,12 @@ type AuthPreflightDependencies = {
 
 const DEFAULT_AUTH_PREFLIGHT_CLIENT = '\u041a\u0438\u0440\u0430'
 
+function getConfiguredDbBackendLabel(): string {
+  return String(process.env.APP_DB ?? '').trim().toLowerCase() === 'noco'
+    ? 'noco'
+    : 'google_sheets'
+}
+
 function normalizeKey(value: unknown): string {
   return String(value ?? '')
     .trim()
@@ -298,9 +304,10 @@ async function runAuthPreflight(
   }
 
   const clientName = options.client || DEFAULT_AUTH_PREFLIGHT_CLIENT
+  const selectedMarket = parseMarketEnv(process.env.ORCHESTRATOR_WORK_WITH_MARKET)
   const db = dependencies.createAppDb()
   const targets = await db.getAutomationTargets({
-    market: parseMarketEnv(process.env.ORCHESTRATOR_WORK_WITH_MARKET)
+    market: selectedMarket
   })
   const matches = targets.filter(target => target.clientName === clientName)
 
@@ -329,6 +336,8 @@ async function runAuthPreflight(
   await dependencies.assertDolphinAppRunning()
 
   dependencies.log('Auth preflight passed before HH live checks:')
+  dependencies.log(`  DB backend: ${getConfiguredDbBackendLabel()}`)
+  dependencies.log(`  selected market: ${selectedMarket}`)
   dependencies.log(
     `  client: ${target.clientName} / ${target.market} / ${target.stack}`
   )
@@ -340,7 +349,10 @@ async function runAuthPreflight(
     '  Dolphin cloud token: present; cloud client uses Authorization: Bearer <dolphin_api_token>'
   )
   dependencies.log('  Dolphin local API: healthy desktop session')
-  dependencies.log('  HH live checks: skipped by --stop-before-hh')
+  dependencies.log('Not tested by this preflight:')
+  dependencies.log('  Dolphin profile start/connect: skipped')
+  dependencies.log('  HH navigation/auth/captcha checks: skipped by --stop-before-hh')
+  dependencies.log('  auto-responder injection/start: skipped')
 }
 
 async function main(): Promise<void> {
@@ -376,6 +388,7 @@ module.exports = {
   assertCredentialsRecordPresent,
   assertDolphinCloudTokenPresent,
   assertTargetReadyForAuthPreflight,
+  getConfiguredDbBackendLabel,
   main,
   parseArgs,
   runAuthPreflight

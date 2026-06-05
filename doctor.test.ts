@@ -120,9 +120,11 @@ async function testRunAuthPreflightStopsBeforeHh(): Promise<void> {
   assert.equal(credentialsRequested, true)
   assert.equal(dolphinHealthChecked, true)
   assert.equal(
-    logs.some(message => message.includes('HH live checks: skipped by --stop-before-hh')),
+    logs.some(message => message.includes('HH navigation/auth/captcha checks: skipped by --stop-before-hh')),
     true
   )
+  assert.equal(logs.some(message => message.includes('DB backend:')), true)
+  assert.equal(logs.some(message => message.includes('selected market:')), true)
 }
 
 async function testRunAuthPreflightRequiresStopBeforeHh(): Promise<void> {
