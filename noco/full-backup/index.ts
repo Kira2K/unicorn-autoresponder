@@ -145,7 +145,7 @@ async function exportTableRecords(client: any, table: any, filePath: string): Pr
     }
   } finally {
     await new Promise<void>((resolve, reject) => {
-      stream.end(error => error ? reject(error) : resolve())
+      stream.end((error: Error | null | undefined) => error ? reject(error) : resolve())
     })
   }
 

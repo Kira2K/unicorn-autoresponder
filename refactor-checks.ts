@@ -351,6 +351,7 @@ function assertNoNewDirectGoogleSheetsImports(): void {
       'db/google-sheets/sheet-state.ts',
       'db/google-sheets-db.ts',
       'doctor.ts',
+      'noco/integrations/google-sheets.ts',
       'sheets/automation-mapper.ts',
       'sheets/automation-repository.ts',
       'sheets/google-client.ts'

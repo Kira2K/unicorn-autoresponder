@@ -77,16 +77,17 @@ function createNocoClient(options: {
 
   async function fetchRecords(tableId: string, limit = 1000): Promise<NocoRecord[]> {
     const all: NocoRecord[] = []
+    const pageSize = Math.min(Math.max(limit, 1), 100)
 
-    for (let offset = 0; ; offset += limit) {
+    for (let offset = 0; ; offset += pageSize) {
       const data = await request<{ list?: NocoRecord[]; data?: NocoRecord[]; pageInfo?: { isLastPage?: boolean } }>(
         'get',
-        `/api/v2/tables/${tableId}/records?limit=${limit}&offset=${offset}`
+        `/api/v2/tables/${tableId}/records?limit=${pageSize}&offset=${offset}`
       )
       const rows = data.list ?? data.data ?? []
       all.push(...rows)
 
-      if (data.pageInfo?.isLastPage || rows.length < limit) {
+      if (data.pageInfo?.isLastPage || rows.length < pageSize) {
         return all
       }
     }

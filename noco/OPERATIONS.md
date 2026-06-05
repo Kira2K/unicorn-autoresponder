@@ -1,80 +1,96 @@
 # Noco Operations Runbook
 
-Short reference for ongoing migration and data-quality work.
+Short reference for ongoing post-migration data-quality work.
 
-## Relation Health
+## Current Baseline
+
+- Noco native relations and record `Id`s are canonical.
+- Old sheet/workbook imports are archive/read-only history.
+- Current Noco client statuses are authoritative; the old Google status sheet is
+  advisory only.
+- Completed one-shot migration/drop/rename jobs have been removed from source.
+- Historical reports under `logs/` remain the audit trail.
+- Active jobs must not read or write migration refs, `current_status`,
+  `primary_stack`, raw `english_level`, or numbered FK display titles.
+
+## Health Gate
 
 Primary command:
 
 ```bash
-npm run noco:relations:dry-run
+npm run noco:post-migration-health:dry-run
 ```
 
-Read:
+This runs the read-only health gate: relations, Dolphin profile audit,
+advisory client-status comparison, stop companies, sync markets, sync mentors,
+ref readiness, and cleanup audit.
 
-- `summary.json` for counts.
-- `unsafe.json` for remaining manual problems.
-- `warnings.json` for non-fatal missing profile rows.
+Client-status sheet mismatches do not fail the health gate. Known blocking
+buckets are unsafe relation rows, Dolphin conflicts/duplicates or missing
+profile rows, and cleanup review candidates.
 
-Apply only after reviewing the dry-run:
+## Relation Health
 
 ```bash
+npm run noco:relations:dry-run
 npm run noco:relations:apply
-npm run noco:relations:dry-run
 ```
 
-Relation review views are not created by default anymore. To deliberately recreate them:
+Read `summary.json`, `unsafe.json`, and `warnings.json` before apply. Relation
+review views are disabled by default unless `NOCO_RELATIONS_CREATE_REVIEW_VIEWS`
+is explicitly set.
+
+## Current Sync/Audit Jobs
 
 ```bash
-NOCO_RELATIONS_CREATE_REVIEW_VIEWS=true npm run noco:relations:apply
+npm run noco:dolphin-profile-audit:dry-run
+npm run noco:client-status:dry-run
+npm run noco:stop-companies:dry-run
+npm run noco:sync-markets:dry-run
+npm run noco:sync-mentors:dry-run
+npm run noco:hh-response-readiness
 ```
 
-## Generated Relation Views
+Apply only the jobs that expose an apply script and only after reviewing their
+dry-run reports.
 
-The generated views named `Relations - ...` are UI noise now that status fields exist.
-
-```bash
-npm run noco:remove-relation-views:dry-run
-npm run noco:remove-relation-views:apply
-```
-
-This deletes views only. It does not delete records or columns.
-
-## Confirmed Client Identity Overrides
-
-Use `noco/core/client-ref-overrides.ts` for confirmed aliases such as short migration refs that should point to canonical `clients.client_ref` values.
-
-Pattern:
-
-1. Confirm identity with user.
-2. Add mapping to `CLIENT_REF_OVERRIDES`.
-3. Rerun `npm run noco:relations:dry-run`.
-4. If `recordPatches` look right, apply.
-
-Do not add guesses here.
-
-## Current Manual Data Buckets
-
-- `data_collection_statuses` name-only rows are real clients from migration. Keep them and mark as requiring clarification until matched.
-- Missing Dolphin profiles are warnings. Some clients legitimately have no profile.
-- Unlinked Dolphin main rows need profile-id investigation, not deletion.
+`noco:client-status:dry-run` is advisory. The old sheet can be stale, so do not
+apply its patches unless you intentionally run the legacy script and have
+confirmed the sheet should overwrite Noco.
 
 ## Safe Cleanup Rule
-
-For schema cleanup, use:
 
 ```bash
 npm run noco:cleanup-audit:dry-run
 ```
 
-Only delete columns that the audit marks as deterministic `drop_candidate` and that the job explicitly supports in apply mode.
+Only delete columns that the audit marks as deterministic and that the job
+explicitly supports in apply mode. Do not delete operational relation columns or
+manual-review fields because they look visually noisy.
 
 ## Full API Backup
 
-Before destructive schema work, run:
+Before destructive schema work:
 
 ```bash
 npm run noco:full-backup:apply
 ```
 
-The job is read-only. It writes table metadata, visible records, checksums, and best-effort permission/settings/hooks metadata to `logs/nocodb-full-backup/<timestamp>/`.
+The job is read-only against NocoDB. It writes table metadata, visible records,
+checksums, and best-effort permission/settings/hooks metadata to
+`logs/nocodb-full-backup/<timestamp>/`.
+
+## Ref Column Readiness
+
+```bash
+npm run noco:ref-drop-readiness:dry-run
+```
+
+This is now a historical safety report for already-retired ref columns and
+remaining archive-only references. It does not delete anything.
+
+## Replaying Old Migrations
+
+Do not restore or rerun removed one-shot migration jobs. If old import behavior
+is needed again, rebuild a small job against the current schema and native
+relations.
