@@ -6,7 +6,7 @@ require('dotenv').config({ quiet: true })
 const PROFILES_EXPORT_FILE = path.resolve(__dirname, 'dolphin-profiles.json')
 const {
   requestDolphinCloudApi
-} = require('./orchestrator/dolphin-cloud-api.ts') as {
+} = require('./dolphin/cloud-api.ts') as {
   requestDolphinCloudApi<T>(
     endpointPath: string,
     options?: ApiRequestOptions
