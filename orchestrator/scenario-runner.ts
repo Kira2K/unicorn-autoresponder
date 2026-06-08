@@ -19,6 +19,11 @@ const { isAutoResponderUrl } = require('../shared/hh-url.ts')
 const { getErrorMessage, withTimeout } = require('./runtime-utils.ts')
 const {
   CONNECT_OVER_CDP_TIMEOUT_MS,
+  HH_AUTO_RESPONDER_LOGS_KEY,
+  HH_AUTO_RESPONDER_PARSER_ERRORS_KEY,
+  HH_AUTO_RESPONDER_RECENT_URLS_KEY,
+  HH_AUTO_RESPONDER_RUNNING_KEY,
+  HH_AUTO_RESPONDER_STOP_REASON_KEY,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSE_IDS_KEY,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
   HH_INITIAL_NAVIGATION_TIMEOUT_MS,
@@ -179,13 +184,28 @@ async function openScenarioAndInjectIndex(
     }
   }
 
-  await page.evaluate(({ successfulResponsesKey, successfulResponseIdsKey }: {
+  await page.evaluate((keys: {
+    logsKey: string
+    parserErrorsKey: string
+    recentUrlsKey: string
+    runningKey: string
+    stopReasonKey: string
     successfulResponsesKey: string
     successfulResponseIdsKey: string
   }) => {
-    sessionStorage.setItem(successfulResponsesKey, '0')
-    sessionStorage.removeItem(successfulResponseIdsKey)
+    sessionStorage.setItem(keys.successfulResponsesKey, '0')
+    sessionStorage.removeItem(keys.successfulResponseIdsKey)
+    sessionStorage.removeItem(keys.stopReasonKey)
+    sessionStorage.removeItem(keys.logsKey)
+    sessionStorage.removeItem(keys.parserErrorsKey)
+    sessionStorage.removeItem(keys.recentUrlsKey)
+    sessionStorage.removeItem(keys.runningKey)
   }, {
+    logsKey: HH_AUTO_RESPONDER_LOGS_KEY,
+    parserErrorsKey: HH_AUTO_RESPONDER_PARSER_ERRORS_KEY,
+    recentUrlsKey: HH_AUTO_RESPONDER_RECENT_URLS_KEY,
+    runningKey: HH_AUTO_RESPONDER_RUNNING_KEY,
+    stopReasonKey: HH_AUTO_RESPONDER_STOP_REASON_KEY,
     successfulResponsesKey: HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
     successfulResponseIdsKey: HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSE_IDS_KEY
   })
