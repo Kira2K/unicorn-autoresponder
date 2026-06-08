@@ -111,10 +111,10 @@ const TABLES: Record<string, TableConfig> = {
     id: 'ms6218eaf2cqqr2',
     title: 'resume_sheet_profiles'
   },
-  dolphinMainRaw: {
-    key: 'dolphinMainRaw',
+  hhAutoresponses: {
+    key: 'hhAutoresponses',
     id: 'mes5o0s90zwat1t',
-    title: 'dolphin_main_tracking_raw'
+    title: 'hh-autoresponses'
   }
 }
 
@@ -152,7 +152,7 @@ const RELATION_TABLES = [
   'restrictions',
   'dataStatuses',
   'resumeProfiles',
-  'dolphinMainRaw'
+  'hhAutoresponses'
 ]
 
 const RELATION_REVIEW_VIEWS = [
@@ -347,10 +347,6 @@ function buildPlans(records: Record<string, NocoRecord[]>): {
   const dolphinProfiles = records.dolphinProfiles
 
   const companiesByName = keyBy(companies, record => normalizeText(record.company_name))
-  const clientsByChat = keyBy(clients, record => normalizeId(record.telegram_general_chat_id))
-  const dolphinProfilesByProfileId = keyBy(dolphinProfiles, record =>
-    normalizeId(record.dolphin_profile_id)
-  )
   const clientsByName = keyBy(clients, record => normalizeText(record.client_name))
   const clientsByFio = keyBy(clients, record => normalizeText(record.fio))
 
@@ -366,7 +362,7 @@ function buildPlans(records: Record<string, NocoRecord[]>): {
   }
   const warnings: Record<string, unknown[]> = {
     intentionalClientsWithoutPaidProfiles: [],
-    legacyDolphinMainProfileIdsWithoutNocoProfile: []
+    legacyHhAutoresponseProfileIdsWithoutNocoProfile: []
   }
 
   for (const tableKey of CHILD_CLIENT_REF_TABLES) {
@@ -488,77 +484,44 @@ function buildPlans(records: Record<string, NocoRecord[]>): {
     })
   }
 
-  for (const raw of records.dolphinMainRaw) {
-    const client = findSingleByKey(
-      clientsByChat,
-      normalizeId(raw.Id_общего_чата)
-    )
+  for (const row of records.hhAutoresponses) {
+    const linkedClientId = getLinkedRecordId(row.rel_hhAutoresponses_client) ?? Number(row.clients_id)
+    const client = Number.isFinite(linkedClientId)
+      ? clients.find(item => item.Id === linkedClientId)
+      : undefined
+
     if (client) {
       linkPlans.push({
-        name: 'dolphinMainRaw.client',
-        childTable: 'dolphinMainRaw',
+        name: 'hhAutoresponses.client',
+        childTable: 'hhAutoresponses',
         parentTable: 'clients',
-        childRecordId: raw.Id,
+        childRecordId: row.Id,
         parentRecordId: client.Id,
-        childRef: normalizeId(raw.Id_общего_чата),
+        childRef: String(row.Id),
         parentRef: formatLinkedRecordLabel(client),
         status: 'safe_linked',
-        notes: 'Exact normalized Telegram common chat id match.'
+        notes: 'Native rel_hhAutoresponses_client relation is filled.'
       })
       statusUpdates.push({
-        tableKey: 'dolphinMainRaw',
-        recordId: raw.Id,
+        tableKey: 'hhAutoresponses',
+        recordId: row.Id,
         status: 'safe_linked',
         confidence: 'safe',
-        notes: 'Exact normalized Telegram common chat id match.'
+        notes: 'Native rel_hhAutoresponses_client relation is filled.'
       })
     } else {
       unsafe.noNameMatch.push({
-        tableKey: 'dolphinMainRaw',
-        recordId: raw.Id,
-        name: raw.имя,
-        chatId: raw.Id_общего_чата
+        tableKey: 'hhAutoresponses',
+        recordId: row.Id,
+        noRefMode: noMigrationRefsEnabled()
       })
       statusUpdates.push({
-        tableKey: 'dolphinMainRaw',
-        recordId: raw.Id,
+        tableKey: 'hhAutoresponses',
+        recordId: row.Id,
         status: 'unsafe_needs_review',
         confidence: 'unsafe',
-        notes: 'Telegram common chat id did not resolve to one client.'
+        notes: 'Missing native rel_hhAutoresponses_client relation.'
       })
-    }
-
-    for (const [fieldName, locale] of [
-      ['Dolphin_Profile_Ru_Id', 'Ru'],
-      ['Dolphin_Profile_En_Id', 'En']
-    ] as const) {
-      const profileId = normalizeId(raw[fieldName])
-      if (!profileId) {
-        continue
-      }
-
-      const profile = findSingleByKey(dolphinProfilesByProfileId, profileId)
-      if (profile) {
-        linkPlans.push({
-          name: `dolphinMainRaw.dolphin_profile_${locale.toLowerCase()}`,
-          childTable: 'dolphinMainRaw',
-          parentTable: 'dolphinProfiles',
-          childRecordId: raw.Id,
-          parentRecordId: profile.Id,
-          childRef: profileId,
-          parentRef: String(profile.Id),
-          status: 'safe_linked',
-          notes: `Exact normalized Dolphin ${locale} profile id match.`
-        })
-      } else {
-        warnings.legacyDolphinMainProfileIdsWithoutNocoProfile.push({
-          recordId: raw.Id,
-          name: raw.имя,
-          locale,
-          profileId,
-          note: 'Dolphin Main profile ids are legacy/raw tracking data. Missing profile rows are not created from this sheet.'
-        })
-      }
     }
   }
 

@@ -2,10 +2,17 @@ const { createNocoDb } = require('../../db/noco/noco-db.ts') as {
   createNocoDb(): import('../../db/types.ts').AppDb
 }
 const {
+  findClientDolphinProfile,
   findStackScenario,
   normalizeId,
   scenarioLookupStack
 } = require('../../db/noco/noco-db.ts') as {
+  findClientDolphinProfile(
+    profiles: Array<Record<string, unknown> & { Id: number }>,
+    clientId: number,
+    clientName: string,
+    market: Market
+  ): Record<string, unknown> & { Id: number }
   findStackScenario(stacks: Array<Record<string, unknown>>, stack: string, market: Market): string | undefined
   normalizeId(value: unknown): string
   scenarioLookupStack(clientName: string, stack: string): string
@@ -36,7 +43,8 @@ type TargetReadiness = {
   hasCoverText: boolean
   hasStackScenario: boolean
   hasProfileRelation: boolean
-  hasHHAccountRelation: boolean
+  hasCanonicalHHAccount: boolean
+  canonicalHHAccountId: number
   hasHHCredentials: boolean
   problems: string[]
 }
@@ -71,24 +79,17 @@ function linkedRecord(value: unknown): Record<string, unknown> | null {
   return (Array.isArray(value) ? value[0] : value) as Record<string, unknown>
 }
 
+function linkedRecords(value: unknown): Array<Record<string, unknown>> {
+  if (!value || typeof value !== 'object') return []
+  return Array.isArray(value)
+    ? (value as Array<Record<string, unknown>>)
+    : [value as Record<string, unknown>]
+}
+
 function linkedId(value: unknown): number | null {
   const record = linkedRecord(value)
   const id = Number(record?.Id ?? record?.id)
   return Number.isFinite(id) && id > 0 ? id : null
-}
-
-function profileRelationField(market: Market): string {
-  return market === 'Ru'
-    ? 'rel_dolphinMainRaw_dolphin_profile_ru'
-    : 'rel_dolphinMainRaw_dolphin_profile_en'
-}
-
-function profileRelationFkField(market: Market): string {
-  return market === 'Ru' ? 'dolphin_profiles_id' : 'dolphin_profiles_id1'
-}
-
-function profileIdField(market: Market): string {
-  return market === 'Ru' ? 'Dolphin_Profile_Ru_Id' : 'Dolphin_Profile_En_Id'
 }
 
 function coverField(market: Market): string {
@@ -99,19 +100,58 @@ function enabledField(market: Market): string {
   return market === 'Ru' ? 'Делаем_отклики_Ru' : 'Делаем_отклики_En'
 }
 
-function hhAccountRelationField(market: Market): string {
-  return market === 'Ru'
-    ? 'rel_dolphinMainRaw_hh_account_ru'
-    : 'rel_dolphinMainRaw_hh_account_en'
-}
-
-function hhAccountRelationFkField(market: Market): string {
-  return market === 'Ru' ? 'platform_accounts_id' : 'platform_accounts_id1'
-}
-
 function linkedName(value: unknown): string {
   const record = linkedRecord(value)
   return String(record?.name ?? record?.stack ?? '').trim()
+}
+
+function resolveStack(
+  row: Record<string, unknown>,
+  client: Record<string, unknown> | undefined,
+  clientName: string,
+  stacks: Array<Record<string, unknown> & { Id: number }>,
+  problems: string[]
+): string {
+  const overrideStacks = linkedRecords(row[STACK_OVERRIDE_FIELD])
+  if (overrideStacks.length > 1) {
+    problems.push(
+      `ambiguous stack override: ${overrideStacks
+        .map(stack => stack.Id ?? stack.id)
+        .join(', ')}`
+    )
+    return ''
+  }
+
+  const overrideStackId = linkedId(overrideStacks[0])
+  const overrideStack = overrideStackId
+    ? stacks.find(stack => stack.Id === overrideStackId)
+    : undefined
+
+  return linkedName(overrideStacks[0]) || linkedName(overrideStack) || linkedName(client?.rel_clients_primary_stack)
+}
+
+function hhPlatform(market: Market): string {
+  return market === 'Ru' ? 'hh_ru' : 'hh_en'
+}
+
+function isHHPlatformForMarket(value: unknown, market: Market): boolean {
+  return normalizeText(value).replace(/\s+/g, '_') === hhPlatform(market)
+}
+
+function platformAccountClientId(account: Record<string, unknown>): number | null {
+  return linkedId(account.rel_platformAccounts_client) ?? Number(account.clients_id)
+}
+
+function findCanonicalHHAccounts(
+  accounts: Array<Record<string, unknown> & { Id: number }>,
+  clientId: number,
+  market: Market
+): Array<Record<string, unknown> & { Id: number }> {
+  return accounts.filter(
+    account =>
+      platformAccountClientId(account) === clientId &&
+      isHHPlatformForMarket(account.platform, market)
+  )
 }
 
 async function checkTarget(
@@ -146,35 +186,45 @@ async function checkTarget(
 function buildTargets(state: {
   clients: Array<Record<string, unknown> & { Id: number }>
   profiles: Array<Record<string, unknown> & { Id: number }>
-  rawRows: Array<Record<string, unknown> & { Id: number }>
+  autoresponseRows: Array<Record<string, unknown> & { Id: number }>
+  platformAccounts: Array<Record<string, unknown> & { Id: number }>
   stacks: Array<Record<string, unknown> & { Id: number }>
 }, marketFilter?: Market): TargetReadiness[] {
   const clientsById = new Map(state.clients.map(client => [client.Id, client]))
-  const profilesById = new Map(state.profiles.map(profile => [profile.Id, profile]))
   const targets: TargetReadiness[] = []
 
-  for (const row of state.rawRows) {
-    const clientId = linkedId(row.rel_dolphinMainRaw_client) ?? Number(row.clients_id)
+  for (const row of state.autoresponseRows) {
+    const clientId = linkedId(row.rel_hhAutoresponses_client) ?? Number(row.clients_id)
     const client = clientsById.get(clientId)
-    const clientName = String(client?.client_name ?? row['имя'] ?? '').trim()
-    const stack = String(row[STACK_OVERRIDE_FIELD] ?? '').trim() || linkedName(client?.rel_clients_primary_stack)
-    const commonChatId =
-      normalizeId(client?.telegram_general_chat_id) || normalizeId(row.Id_общего_чата)
+    const clientName = String(client?.client_name ?? '').trim()
+    const commonChatId = normalizeId(client?.telegram_general_chat_id)
 
     for (const market of ['Ru', 'En'] as Market[]) {
       if (marketFilter && market !== marketFilter) continue
       if (!isEnabled(row[enabledField(market)])) continue
 
       const problems: string[] = []
-      const rawProfileId = normalizeId(row[profileIdField(market)])
-      const relationProfileId =
-        (linkedId(row[profileRelationField(market)]) ?? Number(row[profileRelationFkField(market)])) || null
-      const profile = relationProfileId ? profilesById.get(relationProfileId) : undefined
-      const dolphinProfileId = Number(rawProfileId || profile?.dolphin_profile_id || 0)
-      const hasProfileRelation = Boolean(relationProfileId)
-      const hasHHAccountRelation = Boolean(
-        (linkedId(row[hhAccountRelationField(market)]) ?? Number(row[hhAccountRelationFkField(market)])) || null
-      )
+      const stack = resolveStack(row, client, clientName, state.stacks, problems)
+      let profile: (Record<string, unknown> & { Id: number }) | undefined
+      if (client) {
+        try {
+          profile = findClientDolphinProfile(
+            state.profiles,
+            client.Id,
+            clientName,
+            market
+          )
+        } catch (error: unknown) {
+          problems.push(error instanceof Error ? error.message : String(error))
+        }
+      }
+      const dolphinProfileId = Number(normalizeId(profile?.dolphin_profile_id))
+      const hasProfileRelation = Boolean(profile)
+      const hhAccounts = client
+        ? findCanonicalHHAccounts(state.platformAccounts, client.Id, market)
+        : []
+      const canonicalHHAccount = hhAccounts.length === 1 ? hhAccounts[0] : undefined
+      const canonicalHHAccountId = Number(canonicalHHAccount?.Id ?? 0)
       const coverText = String(row[coverField(market)] ?? '').trim()
       const stackScenario = findStackScenario(
         state.stacks,
@@ -184,16 +234,16 @@ function buildTargets(state: {
 
       if (!clientName) problems.push('missing client name')
       if (!stack) problems.push('missing stack')
-      if (!rawProfileId && !profile?.dolphin_profile_id) problems.push(`missing ${profileIdField(market)}`)
       if (!Number.isFinite(dolphinProfileId) || dolphinProfileId <= 0) problems.push('missing Dolphin profile id')
       if (!commonChatId) problems.push('missing common chat id')
       if (!coverText) problems.push('missing cover text')
       if (!stackScenario) problems.push('missing scenario URL')
-      if (!hasProfileRelation) problems.push('missing Dolphin profile relation')
-      if (profile && rawProfileId && normalizeId(profile.dolphin_profile_id) !== String(dolphinProfileId)) {
-        problems.push('Dolphin profile relation/id mismatch')
+      if (!hasProfileRelation) problems.push('missing canonical Dolphin profile')
+      if (!hhAccounts.length) {
+        problems.push('missing canonical HH account')
+      } else if (hhAccounts.length > 1) {
+        problems.push(`ambiguous canonical HH account: ${hhAccounts.map(account => account.Id).join(', ')}`)
       }
-      if (!hasHHAccountRelation) problems.push('missing HH account relation')
 
       targets.push({
         clientName,
@@ -204,7 +254,8 @@ function buildTargets(state: {
         hasCoverText: Boolean(coverText),
         hasStackScenario: Boolean(stackScenario),
         hasProfileRelation,
-        hasHHAccountRelation,
+        hasCanonicalHHAccount: Boolean(canonicalHHAccount),
+        canonicalHHAccountId,
         hasHHCredentials: false,
         problems
       })
@@ -239,13 +290,14 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
   const db = createNocoDb()
   const nocoClient = createNocoClient()
-  const [clients, profiles, rawRows, stacks] = await Promise.all([
+  const [clients, profiles, autoresponseRows, platformAccounts, stacks] = await Promise.all([
     nocoClient.fetchRecords(TABLES.clients.id, 1000),
     nocoClient.fetchRecords(TABLES.dolphinProfiles.id, 1000),
-    nocoClient.fetchRecords(TABLES.dolphinMainRaw.id, 1000),
+    nocoClient.fetchRecords(TABLES.hhAutoresponses.id, 1000),
+    nocoClient.fetchRecords(TABLES.platformAccounts.id, 1000),
     nocoClient.fetchRecords(TABLES.stacks.id, 1000)
   ])
-  const targets = buildTargets({ clients, profiles, rawRows, stacks }, options.market)
+  const targets = buildTargets({ clients, profiles, autoresponseRows, platformAccounts, stacks }, options.market)
   const results = await Promise.all(
     targets.map(target => checkTarget(db, target))
   )

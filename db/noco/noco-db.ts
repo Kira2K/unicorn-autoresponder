@@ -43,14 +43,38 @@ function linkedId(value: unknown): number | null {
   return Number.isFinite(id) && id > 0 ? id : null
 }
 
+function linkedRecords(value: unknown): Array<Record<string, unknown>> {
+  if (!value || typeof value !== 'object') return []
+  return Array.isArray(value)
+    ? (value as Array<Record<string, unknown>>)
+    : [value as Record<string, unknown>]
+}
+
 function linkedName(value: unknown): string {
-  if (!value || typeof value !== 'object') return ''
-  const record = Array.isArray(value) ? value[0] : value
+  const record = linkedRecords(value)[0]
   return String(
-    (record as Record<string, unknown>)?.name ??
-      (record as Record<string, unknown>)?.stack ??
+    record?.name ??
+      record?.stack ??
       ''
   ).trim()
+}
+
+function resolveStack(row: NocoRecord, client: NocoRecord, clientName: string, stacks: NocoRecord[]): string {
+  const overrideStacks = linkedRecords(row[STACK_OVERRIDE_FIELD])
+  if (overrideStacks.length > 1) {
+    throw new Error(
+      `Noco Stack Override for "${clientName}" is ambiguous. Matching stack ids: ${overrideStacks
+        .map(stack => stack.Id ?? stack.id)
+        .join(', ')}`
+    )
+  }
+
+  const overrideStackId = linkedId(overrideStacks[0])
+  const overrideStack = overrideStackId
+    ? stacks.find(stack => stack.Id === overrideStackId)
+    : undefined
+
+  return linkedName(overrideStacks[0]) || linkedName(overrideStack) || linkedName(client.rel_clients_primary_stack)
 }
 
 function normalizeMarket(value: unknown): Market | '' {
@@ -60,36 +84,12 @@ function normalizeMarket(value: unknown): Market | '' {
   return ''
 }
 
-function profileIdField(market: Market): string {
-  return market === 'Ru' ? 'Dolphin_Profile_Ru_Id' : 'Dolphin_Profile_En_Id'
-}
-
 function responseField(market: Market): string {
   return market === 'Ru' ? 'Делаем_отклики_Ru' : 'Делаем_отклики_En'
 }
 
 function coverField(market: Market): string {
   return market === 'Ru' ? 'Сопровод_Ru' : 'Сопровод_En'
-}
-
-function profileRelationField(market: Market): string {
-  return market === 'Ru'
-    ? 'rel_dolphinMainRaw_dolphin_profile_ru'
-    : 'rel_dolphinMainRaw_dolphin_profile_en'
-}
-
-function hhAccountRelationField(market: Market): string {
-  return market === 'Ru'
-    ? 'rel_dolphinMainRaw_hh_account_ru'
-    : 'rel_dolphinMainRaw_hh_account_en'
-}
-
-function hhAccountRelationFkField(market: Market): string {
-  return market === 'Ru' ? 'platform_accounts_id' : 'platform_accounts_id1'
-}
-
-function enabledField(market: Market): string {
-  return responseField(market)
 }
 
 function scenarioLookupStack(clientName: string, stack: string): string {
@@ -110,6 +110,44 @@ function isHHPlatformForMarket(value: unknown, market: Market): boolean {
 
 function getPlatformClientId(account: NocoRecord): number | null {
   return linkedId(account.rel_platformAccounts_client) ?? Number(account.clients_id)
+}
+
+function getProfileClientId(profile: NocoRecord): number | null {
+  return linkedId(profile.rel_dolphinProfiles_client) ?? Number(profile.clients_id)
+}
+
+function findClientDolphinProfile(
+  profiles: NocoRecord[],
+  clientId: number,
+  clientName: string,
+  market: Market
+): NocoRecord {
+  const matches = profiles.filter(
+    profile =>
+      getProfileClientId(profile) === clientId &&
+      normalizeMarket(profile.locale) === market
+  )
+
+  if (!matches.length) {
+    throw new Error(`Noco Dolphin ${market} profile for "${clientName}" was not found`)
+  }
+
+  if (matches.length > 1) {
+    throw new Error(
+      `Noco Dolphin ${market} profile for "${clientName}" is ambiguous. Matching profile rows: ${matches
+        .map(profile => profile.Id)
+        .join(', ')}`
+    )
+  }
+
+  const dolphinProfileId = normalizeId(matches[0].dolphin_profile_id)
+  if (!dolphinProfileId || !Number.isFinite(Number(dolphinProfileId)) || Number(dolphinProfileId) <= 0) {
+    throw new Error(
+      `Noco Dolphin ${market} profile for "${clientName}" has invalid dolphin_profile_id: ${dolphinProfileId || 'empty'}`
+    )
+  }
+
+  return matches[0]
 }
 
 function toHHAuthCredentials(
@@ -163,23 +201,23 @@ function findStackScenario(stacks: NocoRecord[], stack: string, market: Market):
 
 async function fetchNocoAutomationState(client: any): Promise<{
   clients: NocoRecord[]
-  rawRows: NocoRecord[]
+  autoresponseRows: NocoRecord[]
   profiles: NocoRecord[]
   stacks: NocoRecord[]
 }> {
-  const [clients, rawRows, profiles, stacks] = await Promise.all([
+  const [clients, autoresponseRows, profiles, stacks] = await Promise.all([
     client.fetchRecords(TABLES.clients.id, 1000),
-    client.fetchRecords(TABLES.dolphinMainRaw.id, 1000),
+    client.fetchRecords(TABLES.hhAutoresponses.id, 1000),
     client.fetchRecords(TABLES.dolphinProfiles.id, 1000),
     client.fetchRecords(TABLES.stacks.id, 1000)
   ])
-  return { clients, rawRows, profiles, stacks }
+  return { clients, autoresponseRows, profiles, stacks }
 }
 
 function buildAutomationTargetsFromNocoState(
   state: {
     clients: NocoRecord[]
-    rawRows: NocoRecord[]
+    autoresponseRows: NocoRecord[]
     profiles: NocoRecord[]
     stacks: NocoRecord[]
   },
@@ -187,34 +225,29 @@ function buildAutomationTargetsFromNocoState(
 ): ClientAutomationData[] {
   const marketFilter = options.market ?? ((options.workWithRuOnly ?? true) ? 'Ru' : undefined)
   const clientsById = new Map(state.clients.map(client => [client.Id, client]))
-  const profilesById = new Map(state.profiles.map(profile => [profile.Id, profile]))
   const targets: ClientAutomationData[] = []
 
-  for (const row of state.rawRows) {
-    const clientId = linkedId(row.rel_dolphinMainRaw_client) ?? Number(row.clients_id)
+  for (const row of state.autoresponseRows) {
+    const clientId = linkedId(row.rel_hhAutoresponses_client) ?? Number(row.clients_id)
     const client = clientsById.get(clientId)
     if (!client) continue
 
-    const clientName = String(client.client_name ?? row['имя'] ?? '').trim()
-    const stack = String(row[STACK_OVERRIDE_FIELD] ?? '').trim() || linkedName(client.rel_clients_primary_stack)
-    const commonChatId = normalizeId(client.telegram_general_chat_id) || normalizeId(row.Id_общего_чата)
+    const clientName = String(client.client_name ?? '').trim()
+    const stack = resolveStack(row, client, clientName, state.stacks)
+    const commonChatId = normalizeId(client.telegram_general_chat_id)
     if (!clientName || !stack || !commonChatId) continue
 
     for (const market of ['Ru', 'En'] as Market[]) {
       if (marketFilter && market !== marketFilter) continue
       if (!isEnabled(row[responseField(market)])) continue
 
-      const rawProfileId = normalizeId(row[profileIdField(market)])
-      const relationProfileId = linkedId(row[profileRelationField(market)])
-      const profile = relationProfileId ? profilesById.get(relationProfileId) : undefined
-      const dolphinProfileId = Number(rawProfileId || profile?.dolphin_profile_id)
-      if (!Number.isFinite(dolphinProfileId)) {
-        throw new Error(`${profileIdField(market)} for client "${clientName}" is invalid: ${rawProfileId || 'empty'}`)
-      }
-
-      if (profile && normalizeId(profile.dolphin_profile_id) !== String(dolphinProfileId)) {
-        throw new Error(`Noco profile relation/id mismatch for ${clientName}/${market}`)
-      }
+      const profile = findClientDolphinProfile(
+        state.profiles,
+        client.Id,
+        clientName,
+        market
+      )
+      const dolphinProfileId = Number(normalizeId(profile.dolphin_profile_id))
 
       const scenario = findStackScenario(
         state.stacks,
@@ -264,45 +297,27 @@ async function findNocoClientForAuth(
 async function getNocoHHAuthCredentials(
   nocoClient: any,
   client: NocoRecord,
-  market: Market,
-  rawRows: NocoRecord[] = []
+  market: Market
 ): Promise<ClientHHAuthCredentials> {
   const accounts: NocoRecord[] = await nocoClient.fetchRecords(
     TABLES.platformAccounts.id,
     1000
   )
-  const accountsById = new Map(accounts.map(account => [account.Id, account]))
-  const relatedAccountIds = rawRows
-    .filter(
-      row =>
-        (linkedId(row.rel_dolphinMainRaw_client) ?? Number(row.clients_id)) ===
-          client.Id && isEnabled(row[enabledField(market)])
-    )
-    .map(row => (
-      linkedId(row[hhAccountRelationField(market)]) ??
-      Number(row[hhAccountRelationFkField(market)])
-    ) || null)
-    .filter((id): id is number => Boolean(id))
-  const relationMatches = [...new Set(relatedAccountIds)]
-    .map(id => accountsById.get(id))
-    .filter((account): account is NocoRecord => Boolean(account))
-  const matches = relationMatches.length
-    ? relationMatches
-    : accounts.filter(
-        account =>
-          getPlatformClientId(account) === client.Id &&
-          isHHPlatformForMarket(account.platform, market)
-      )
+  const matches = accounts.filter(
+    account =>
+      getPlatformClientId(account) === client.Id &&
+      isHHPlatformForMarket(account.platform, market)
+  )
 
   if (!matches.length) {
     throw new Error(
-      `Noco HH ${market} credentials for "${String(client.client_name ?? '').trim()}" were not found`
+      `Noco canonical HH ${market} account for "${String(client.client_name ?? '').trim()}" was not found`
     )
   }
 
   if (matches.length > 1) {
     throw new Error(
-      `Noco HH ${market} credentials for "${String(client.client_name ?? '').trim()}" are ambiguous. Matching account ids: ${matches
+      `Noco canonical HH ${market} account for "${String(client.client_name ?? '').trim()}" is ambiguous. Matching account ids: ${matches
         .map(account => account.Id)
         .join(', ')}`
     )
@@ -315,7 +330,6 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
   const nocoClient = options.nocoClient ?? createNocoClient()
   let cachedClients: Promise<NocoRecord[]> | undefined
   let cachedPlatformAccounts: Promise<NocoRecord[]> | undefined
-  let cachedRawRows: Promise<NocoRecord[]> | undefined
 
   function fetchClients(): Promise<NocoRecord[]> {
     const result = cachedClients ?? nocoClient.fetchRecords(TABLES.clients.id, 1000)
@@ -329,12 +343,6 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
       1000
     )
     cachedPlatformAccounts = result
-    return result
-  }
-
-  function fetchRawRows(): Promise<NocoRecord[]> {
-    const result = cachedRawRows ?? nocoClient.fetchRecords(TABLES.dolphinMainRaw.id, 1000)
-    cachedRawRows = result
     return result
   }
 
@@ -367,8 +375,7 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
       return getNocoHHAuthCredentials(
         { fetchRecords: fetchPlatformAccounts },
         client,
-        market,
-        await fetchRawRows()
+        market
       )
     },
 
@@ -386,8 +393,7 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
       return getNocoHHAuthCredentials(
         { fetchRecords: fetchPlatformAccounts },
         client,
-        market,
-        await fetchRawRows()
+        market
       )
     },
 
@@ -404,9 +410,11 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
 module.exports = {
   buildAutomationTargetsFromNocoState,
   createNocoDb,
+  findClientDolphinProfile,
   findStackScenario,
   getNocoHHAuthCredentials,
   isEnabled,
   normalizeId,
+  responseField,
   scenarioLookupStack
 }

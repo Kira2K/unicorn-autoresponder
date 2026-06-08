@@ -60,10 +60,10 @@ const TABLES = {
     id: 'ms6218eaf2cqqr2',
     title: 'resume_sheet_profiles'
   },
-  dolphinMainRaw: {
-    key: 'dolphinMainRaw',
+  hhAutoresponses: {
+    key: 'hhAutoresponses',
     id: 'mes5o0s90zwat1t',
-    title: 'dolphin_main_tracking_raw'
+    title: 'hh-autoresponses'
   },
   market: {
     key: 'market',
@@ -87,7 +87,7 @@ const RELATION_TABLE_KEYS = [
   'restrictions',
   'dataStatuses',
   'resumeProfiles',
-  'dolphinMainRaw'
+  'hhAutoresponses'
 ] as const
 
 const RELATIONS = {

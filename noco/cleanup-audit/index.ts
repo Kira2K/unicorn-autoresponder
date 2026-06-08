@@ -45,7 +45,21 @@ type ColumnAudit = {
 }
 
 const JOB_NAME = 'nocodb-cleanup-audit'
-const APPROVED_DROP_COLUMNS = new Set(['clients.Students1'])
+const APPROVED_DROP_COLUMNS = new Set([
+  'clients.Students1',
+  'hh-autoresponses.имя',
+  'hh-autoresponses.Id_общего_чата',
+  'hh-autoresponses.Dolphin_Profile_Ru_Id',
+  'hh-autoresponses.Dolphin_Profile_En_Id',
+  'hh-autoresponses.rel_hhAutoresponses_dolphin_profile_ru',
+  'hh-autoresponses.rel_hhAutoresponses_dolphin_profile_en',
+  'hh-autoresponses.rel_hhAutoresponses_hh_account_ru',
+  'hh-autoresponses.rel_hhAutoresponses_hh_account_en',
+  'hh-autoresponses.stack'
+])
+const APPROVED_NON_EMPTY_DROP_COLUMNS = new Set(
+  [...APPROVED_DROP_COLUMNS].filter(key => key.startsWith('hh-autoresponses.'))
+)
 const TODO_TO_FILL_COLUMNS = new Set([
   'clients.actual_country',
   'contracts_payments.prepayment_parts_count',
@@ -338,13 +352,25 @@ async function applyApprovedDrops(
   audit: ColumnAudit[],
   client = createNocoClient()
 ): Promise<Record<string, unknown>> {
-  const dropCandidates = audit.filter(column => column.category === 'drop_candidate')
+  const approvedCandidates = audit.filter(column =>
+    APPROVED_DROP_COLUMNS.has(`${column.tableTitle}.${column.title}`)
+  )
+  const genericDropCandidates = audit.filter(column => column.category === 'drop_candidate')
+  const dropCandidates = [
+    ...new Map(
+      [...approvedCandidates, ...genericDropCandidates].map(column => [
+        `${column.tableTitle}.${column.title}`,
+        column
+      ])
+    ).values()
+  ]
   const results = []
 
   for (const column of dropCandidates) {
     const key = `${column.tableTitle}.${column.title}`
+    const approved = APPROVED_DROP_COLUMNS.has(key)
 
-    if (!APPROVED_DROP_COLUMNS.has(key)) {
+    if (!approved) {
       results.push({
         action: 'delete_column',
         ok: false,
@@ -355,7 +381,7 @@ async function applyApprovedDrops(
       continue
     }
 
-    if (column.nonEmpty !== 0) {
+    if (column.nonEmpty !== 0 && !APPROVED_NON_EMPTY_DROP_COLUMNS.has(key)) {
       results.push({
         action: 'delete_column',
         ok: false,
