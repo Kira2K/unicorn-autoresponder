@@ -13,6 +13,5 @@ npm run noco:client-status:test
 The job reads the shared status spreadsheet as an audit/reference source. It
 does not treat Dolphin profile count as a status signal.
 
-Legacy apply still exists as `npm run noco:client-status:legacy-apply`, but use
-it only when the sheet is explicitly confirmed as the desired source for that
-run.
+Apply mode is intentionally unsupported. The old sheet can be stale, so this
+job must not patch Noco client statuses.

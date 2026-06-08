@@ -32,8 +32,8 @@ npm run noco:full-backup:apply
 ```
 
 `noco:client-status:dry-run` compares Noco with the old status sheet, but its
-patches are advisory. Do not use the legacy apply command unless the sheet is
-explicitly confirmed as the desired source for that run.
+patches are advisory. Apply mode is intentionally unsupported because the sheet
+can be stale.
 
 ## Apply Commands
 

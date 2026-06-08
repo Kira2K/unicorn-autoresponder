@@ -23,7 +23,6 @@
     "noco:dolphin-profile-audit:apply": "node noco/dolphin-profile-audit/index.ts --apply",
     "noco:dolphin-profile-audit:test": "node noco/dolphin-profile-audit/index.ts --test",
     "noco:client-status:dry-run": "node noco/client-status/index.ts --dry-run",
-    "noco:client-status:legacy-apply": "node noco/client-status/index.ts --apply",
     "noco:client-status:test": "node noco/client-status/index.ts --test",
     "noco:stop-companies:dry-run": "node noco/stop-companies/index.ts --dry-run",
     "noco:stop-companies:apply": "node noco/stop-companies/index.ts --apply",

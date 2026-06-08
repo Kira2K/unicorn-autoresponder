@@ -10,25 +10,21 @@ const { parseJobArgs } = require('./job.ts') as {
   parseJobArgs(args?: string[]): { mode: string; apply: boolean; dryRun: boolean; test: boolean }
 }
 const {
-  assertMigrationRefsAllowed,
   buildLinkPayloads,
   formatLinkedRecordLabel,
   formatLinkedRelationLabel,
   getLinkedRecord,
   getLinkedRecordId,
   getLinkedRecords,
-  migrationRefValue,
   noMigrationRefsEnabled,
   uniqueRelatedIds
 } = require('./relations.ts') as {
-  assertMigrationRefsAllowed(context: string): void
   buildLinkPayloads(relatedIds: number[]): unknown[]
   formatLinkedRecordLabel(record: Record<string, unknown> | null | undefined): string
   formatLinkedRelationLabel(value: unknown): string
   getLinkedRecord(value: unknown): Record<string, unknown> | null
   getLinkedRecordId(value: unknown): number | null
   getLinkedRecords(value: unknown): Array<Record<string, unknown>>
-  migrationRefValue<T>(value: T, context: string): T | undefined
   noMigrationRefsEnabled(): boolean
   uniqueRelatedIds(relatedIds: number[]): number[]
 }
@@ -94,8 +90,6 @@ async function runTests(): Promise<void> {
   const previousNoRef = process.env.NOCO_NO_MIGRATION_REFS
   process.env.NOCO_NO_MIGRATION_REFS = 'true'
   assert.equal(noMigrationRefsEnabled(), true)
-  assert.equal(migrationRefValue('legacy_value', 'test.retired_ref'), undefined)
-  assert.throws(() => assertMigrationRefsAllowed('test.retired_ref'), /NOCO_NO_MIGRATION_REFS/)
   if (previousNoRef === undefined) {
     delete process.env.NOCO_NO_MIGRATION_REFS
   } else {

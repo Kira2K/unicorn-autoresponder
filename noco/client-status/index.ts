@@ -83,17 +83,6 @@ const STATUS_VALUES: ClientStatus[] = [
   'unknown'
 ]
 
-const STATUS_COLORS = [
-  '#4f46e5',
-  '#16a34a',
-  '#0ea5e9',
-  '#f59e0b',
-  '#64748b',
-  '#dc2626',
-  '#7f1d1d',
-  '#94a3b8'
-]
-
 function normalizeHeader(value: unknown): string {
   return normalizeLookupText(value).replace(/[._-]+/g, ' ')
 }
@@ -478,86 +467,6 @@ function summarize(proposals: StatusProposal[]): Record<string, unknown> {
   }
 }
 
-function validateStatusColumn(column: any): { ok: boolean; reason: string } {
-  if (!column) {
-    return { ok: false, reason: 'missing' }
-  }
-  if (column.uidt === 'SingleSelect') {
-    const options = column.colOptions?.options ?? column.colOptions?.choices ?? []
-    const titles = Array.isArray(options)
-      ? options.map((option: any) => String(option.title ?? option.value ?? option.name ?? ''))
-      : []
-    const missing = STATUS_VALUES.filter(status => !titles.includes(status))
-    return {
-      ok: missing.length === 0,
-      reason: missing.length ? `missing select options: ${missing.join(', ')}` : 'single_select'
-    }
-  }
-  if (column.uidt === 'SingleLineText') {
-    return { ok: true, reason: 'single_line_text_controlled_by_job' }
-  }
-  return { ok: false, reason: `unexpected uidt: ${column.uidt}` }
-}
-
-async function ensureColumn(client: any, title: string, uidt: string, extra: Record<string, unknown> = {}): Promise<any> {
-  const meta = await client.fetchTableMeta(TABLES.clients.id)
-  const existing = (meta.columns ?? []).find((column: any) => column.title === title)
-  if (existing) {
-    return { ok: true, existing: true, column: existing }
-  }
-
-  const created = await client.request('post', `/api/v2/meta/tables/${TABLES.clients.id}/columns`, {
-    title,
-    column_name: title,
-    uidt,
-    ...extra
-  })
-  const latest = await client.fetchTableMeta(TABLES.clients.id)
-  const column = (latest.columns ?? []).find((item: any) => item.title === title)
-
-  return { ok: Boolean(column), existing: false, column, created }
-}
-
-async function ensureStatusColumns(client: any): Promise<Record<string, unknown>> {
-  let statusColumn: any
-  let statusColumnMode = 'SingleSelect'
-  try {
-    statusColumn = await ensureColumn(client, 'client_status', 'SingleSelect', {
-      colOptions: {
-        options: STATUS_VALUES.map((status, index) => ({
-          title: status,
-          color: STATUS_COLORS[index]
-        }))
-      }
-    })
-  } catch (error: any) {
-    statusColumnMode = 'SingleLineText'
-    statusColumn = await ensureColumn(client, 'client_status', 'SingleLineText')
-    statusColumn.singleSelectError = describeError(error)
-  }
-
-  const noteColumn = await ensureColumn(client, 'client_status_note', 'LongText')
-  const validation = validateStatusColumn(statusColumn.column)
-
-  return {
-    client_status: {
-      ok: validation.ok,
-      reason: validation.reason,
-      mode: statusColumnMode,
-      existing: statusColumn.existing,
-      id: statusColumn.column?.id,
-      uidt: statusColumn.column?.uidt,
-      singleSelectError: statusColumn.singleSelectError
-    },
-    client_status_note: {
-      ok: Boolean(noteColumn.column),
-      existing: noteColumn.existing,
-      id: noteColumn.column?.id,
-      uidt: noteColumn.column?.uidt
-    }
-  }
-}
-
 async function fetchSheetRows(): Promise<{ info: Record<string, unknown>; rows: SheetStatusRow[] }> {
   const previousSheetId = process.env.google_spreadsheet_id
   process.env.google_spreadsheet_id = process.env.CLIENT_STATUS_SPREADSHEET_ID || STATUS_SHEET_ID
@@ -588,6 +497,10 @@ async function fetchSheetRows(): Promise<{ info: Record<string, unknown>; rows: 
 }
 
 async function run(apply: boolean): Promise<void> {
+  if (apply) {
+    throw new Error('noco:client-status is read-only. Apply mode is intentionally unsupported.')
+  }
+
   const client = createNocoClient()
   const dir = createReportDir(JOB_NAME)
   const sheet = await fetchSheetRows()
@@ -603,45 +516,9 @@ async function run(apply: boolean): Promise<void> {
   writeJson(dir, 'patches.json', patches)
   writeJson(dir, 'conflicts.json', conflicts)
 
-  if (!apply) {
-    writeJson(dir, 'apply-result.json', { mode: 'dry-run', applied: false })
-    console.log(`NocoDB client status dry-run written to ${dir}`)
-    console.log(JSON.stringify(summary, null, 2))
-    return
-  }
-
-  const columns = await ensureStatusColumns(client)
-  const results = []
-
-  for (const patch of patches) {
-    try {
-      await client.patchRecord(TABLES.clients.id, patch.recordId, {
-        ...patch.patch
-      })
-      results.push({ ok: true, patch })
-    } catch (error: any) {
-      results.push({ ok: false, patch, error: describeError(error) })
-      break
-    }
-    await client.wait(120)
-  }
-
-  writeJson(dir, 'apply-result.json', {
-    mode: 'apply',
-    applied: true,
-    columns,
-    attempted: results.length,
-    updated: results.filter(item => item.ok).length,
-    failed: results.filter(item => !item.ok).length,
-    results
-  })
-
-  console.log(`NocoDB client status apply written to ${dir}`)
-  console.log(JSON.stringify({ ...summary, updated: results.filter(item => item.ok).length }, null, 2))
-
-  if (results.some(item => !item.ok)) {
-    process.exitCode = 1
-  }
+  writeJson(dir, 'apply-result.json', { mode: 'dry-run', applied: false })
+  console.log(`NocoDB client status dry-run written to ${dir}`)
+  console.log(JSON.stringify(summary, null, 2))
 }
 
 function runTests(): void {

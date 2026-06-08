@@ -55,8 +55,7 @@ Apply only the jobs that expose an apply script and only after reviewing their
 dry-run reports.
 
 `noco:client-status:dry-run` is advisory. The old sheet can be stale, so do not
-apply its patches unless you intentionally run the legacy script and have
-confirmed the sheet should overwrite Noco.
+apply its patches or use it as a source for overwriting Noco.
 
 ## Safe Cleanup Rule
 

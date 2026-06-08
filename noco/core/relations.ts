@@ -19,24 +19,6 @@ function noMigrationRefsEnabled(): boolean {
   return String(process.env.NOCO_NO_MIGRATION_REFS ?? '').trim().toLowerCase() === 'true'
 }
 
-function migrationRefValue<T>(value: T, context: string): T | undefined {
-  if (!noMigrationRefsEnabled()) {
-    return value
-  }
-
-  const hasValue = value !== null && value !== undefined && String(value).trim() !== ''
-  if (hasValue && String(process.env.NOCO_NO_MIGRATION_REFS_VERBOSE ?? '').toLowerCase() === 'true') {
-    console.warn(`NOCO_NO_MIGRATION_REFS ignored ${context}`)
-  }
-  return undefined
-}
-
-function assertMigrationRefsAllowed(context: string): void {
-  if (noMigrationRefsEnabled()) {
-    throw new Error(`NOCO_NO_MIGRATION_REFS blocked migration ref usage: ${context}`)
-  }
-}
-
 function getLinkedRecords(value: unknown): LinkedRecord[] {
   if (!value) {
     return []
@@ -255,7 +237,6 @@ async function linkRecords(
 module.exports = {
   buildLinkPayloads,
   ensureRelationField,
-  assertMigrationRefsAllowed,
   formatLinkedRecordLabel,
   formatLinkedRelationLabel,
   getLinkedRecord,
@@ -263,7 +244,6 @@ module.exports = {
   getLinkedRecords,
   recordDisplayName,
   linkRecords,
-  migrationRefValue,
   renameColumn,
   noMigrationRefsEnabled,
   uniqueRelatedIds
