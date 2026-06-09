@@ -29,7 +29,8 @@ const {
 const {
   getErrorMessage,
   getErrorStack,
-  wait
+  wait,
+  withTimeout
 } = require('./orchestrator/runtime-utils.ts')
 const { openScenarioAndInjectIndex } = require('./orchestrator/scenario-runner.ts')
 const { splitTelegramMessage } = require('./orchestrator/reports.ts')
@@ -45,6 +46,102 @@ const {
 
 type ClientAutomationData = import('./orchestrator/types.ts').ClientAutomationData
 type OrchestratorStatus = import('./orchestrator/types.ts').OrchestratorStatus
+
+const RUN_REPORT_TIMEOUT_MS = Number(
+  process.env.ORCHESTRATOR_FINAL_REPORT_TIMEOUT_MS ?? 30000
+)
+const RUN_CLEANUP_TIMEOUT_MS = Number(
+  process.env.ORCHESTRATOR_FINAL_CLEANUP_TIMEOUT_MS ?? 30000
+)
+let runExitLogged = false
+
+function writeRunExitLog(options: {
+  exitCode: number
+  reason: string
+  resultsCount?: number
+  error?: unknown
+}): void {
+  if (runExitLogged) {
+    return
+  }
+
+  runExitLogged = true
+  writeLocalRunLog({
+    kind: 'run-exit',
+    exitCode: options.exitCode,
+    reason: options.reason,
+    resultsCount: options.resultsCount,
+    startedProfileIds: getStartedProfileIds(),
+    error: options.error ? getErrorMessage(options.error) : undefined,
+    errorStack: options.error ? getErrorStack(options.error) : undefined
+  })
+}
+
+function getRunCompletionReason(results: OrchestratorStatus[]): string {
+  return results.every(isClientReportSuccessful)
+    ? 'success'
+    : 'completed-with-client-errors'
+}
+
+async function sendRunSummaryLogWithTimeout(
+  results: OrchestratorStatus[]
+): Promise<void> {
+  try {
+    await withTimeout(
+      sendRunSummaryLog(results),
+      RUN_REPORT_TIMEOUT_MS,
+      `Run summary Telegram report timed out after ${RUN_REPORT_TIMEOUT_MS}ms`
+    )
+  } catch (error: unknown) {
+    console.error(`Failed to send run summary: ${getErrorMessage(error)}`)
+    writeLocalRunLog({
+      kind: 'run-summary-send-failed',
+      timeoutMs: RUN_REPORT_TIMEOUT_MS,
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+  }
+}
+
+async function sendRunErrorLogWithTimeout(error: unknown): Promise<void> {
+  try {
+    await withTimeout(
+      sendRunErrorLog(error),
+      RUN_REPORT_TIMEOUT_MS,
+      `Run error Telegram report timed out after ${RUN_REPORT_TIMEOUT_MS}ms`
+    )
+  } catch (reportError: unknown) {
+    console.error(`Failed to send run error report: ${getErrorMessage(reportError)}`)
+    writeLocalRunLog({
+      kind: 'run-error-send-failed',
+      timeoutMs: RUN_REPORT_TIMEOUT_MS,
+      error: getErrorMessage(reportError),
+      errorStack: getErrorStack(reportError)
+    })
+  }
+}
+
+async function stopStartedProfilesWithTimeout(reason: string): Promise<void> {
+  try {
+    await withTimeout(
+      stopStartedProfiles(),
+      RUN_CLEANUP_TIMEOUT_MS,
+      `Started Dolphin profile cleanup timed out after ${RUN_CLEANUP_TIMEOUT_MS}ms`
+    )
+  } catch (error: unknown) {
+    console.error(
+      `Failed to stop started Dolphin profiles during ${reason}: ${getErrorMessage(error)}`
+    )
+    writeLocalRunLog({
+      kind: 'run-cleanup-failed',
+      reason,
+      timeoutMs: RUN_CLEANUP_TIMEOUT_MS,
+      startedProfileIds: getStartedProfileIds(),
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+  }
+}
 
 function getRecommendedExternalTimeoutMs(
   clientCount: number,
@@ -125,7 +222,7 @@ async function runClientsOrchestrator(
     kind: 'run-results',
     results
   })
-  await sendRunSummaryLog(results)
+  await sendRunSummaryLogWithTimeout(results)
 
   return results
 }
@@ -193,12 +290,13 @@ async function runConfiguredOrchestrator(): Promise<OrchestratorStatus[]> {
 
 function installProcessShutdownCleanup(): void {
   let cleanupStarted = false
-  const cleanupAndExit = async (signal: string) => {
+  const cleanupAndExit = async (signal: 'SIGINT' | 'SIGTERM') => {
     if (cleanupStarted) {
       return
     }
 
     cleanupStarted = true
+    const exitCode = signal === 'SIGINT' ? 130 : 143
     console.error(
       `Received ${signal}; stopping started Dolphin profiles before exit`
     )
@@ -207,8 +305,12 @@ function installProcessShutdownCleanup(): void {
       signal,
       startedProfileIds: getStartedProfileIds()
     })
-    await stopStartedProfiles()
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    await stopStartedProfilesWithTimeout(signal)
+    writeRunExitLog({
+      exitCode,
+      reason: signal
+    })
+    process.exit(exitCode)
   }
 
   process.once('SIGINT', () => {
@@ -229,7 +331,14 @@ if (require.main === module) {
   installProcessShutdownCleanup()
 
   runConfiguredOrchestrator()
-    .then(() => process.exit(0))
+    .then((results: OrchestratorStatus[]) => {
+      writeRunExitLog({
+        exitCode: 0,
+        reason: getRunCompletionReason(results),
+        resultsCount: results.length
+      })
+      process.exit(0)
+    })
     .catch(async (error: unknown) => {
       console.error(error instanceof Error ? error.stack : error)
       writeLocalRunLog({
@@ -237,7 +346,13 @@ if (require.main === module) {
         error: getErrorMessage(error),
         errorStack: getErrorStack(error)
       })
-      await sendRunErrorLog(error)
+      await sendRunErrorLogWithTimeout(error)
+      await stopStartedProfilesWithTimeout('fatal-error')
+      writeRunExitLog({
+        exitCode: 1,
+        reason: 'fatal-error',
+        error
+      })
       process.exit(1)
     })
 }
