@@ -20,7 +20,8 @@
         stopReason: STORAGE_PREFIX + 'stop_reason',
         parserErrors: STORAGE_PREFIX + 'parser_errors',
         recentUrls: STORAGE_PREFIX + 'recent_urls',
-        modalRetry: STORAGE_PREFIX + 'modal_retry'
+        modalRetry: STORAGE_PREFIX + 'modal_retry',
+        manualReturnState: STORAGE_PREFIX + 'manual_return_state'
     };
 
     // Важные селекторы, используемые в скрипте
@@ -54,7 +55,7 @@
         useCover: true,
         delayMin: 50,
         delayMax: 100,
-        limit: 50,
+        limit: 180,
         skipHidden: true,
         viewMin: 500,
         viewMax: 800,
@@ -67,6 +68,7 @@
         blockedCompanies: []
     };
     const MAX_RESUME_ATTEMPTS_PER_VACANCY = 10;
+    const MANUAL_RETURN_MAX_ATTEMPTS = 8;
     const STUCK_VACANCY_TIMEOUT_MS = 90 * 1000;
     const STUCK_VACANCY_TIMEOUT_CODE = 'STUCK_ON_VACANCY_TIMEOUT';
 
@@ -240,6 +242,18 @@
         },
         clearTrapLock: () => sessionStorage.removeItem(KEYS.trapLock),
         hasTrapLock: () => sessionStorage.getItem(KEYS.trapLock) === '1',
+        clearManualReturnState: () => sessionStorage.removeItem(KEYS.manualReturnState),
+        getManualReturnState: () => {
+            try {
+                const parsed = JSON.parse(sessionStorage.getItem(KEYS.manualReturnState) || '{}');
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch {
+                return {};
+            }
+        },
+        setManualReturnState: (state) => {
+            sessionStorage.setItem(KEYS.manualReturnState, JSON.stringify(state || {}));
+        },
         // Запоминаем последнюю попытку отклика — пригодится при редиректах
         setLastAttemptID: (id) => {
             if (id) sessionStorage.setItem(KEYS.lastAttempt, id);
@@ -723,7 +737,7 @@
 
     // Watchdog: если попали на страницу с вопросами — пытаемся безопасно вернуться и помечаем вакансию
     function watchTheURL() {
-        setInterval(() => {
+        setInterval(async () => {
             if (!StateManager.amIRunning()) return;
             StateManager.rememberUrl(location.href, 'watch');
 
@@ -733,7 +747,19 @@
             // Если оказались на странице вопросов/теста
             if (isManualResponsePage()) {
                 activeVacancyWatch = null;
-                handleManualResponsePage('Попали на вопросы/тест. Инициирую возврат.');
+                try {
+                    const responsePageResult = await handleNoSubmitResponsePage(
+                        getManualResponseVacancyId(),
+                        'Watchdog found a response page without an automated submit path. Saving for manual processing.'
+                    );
+                    if (!responsePageResult) {
+                        handleManualResponsePage('Попали на вопросы/тест. Инициирую возврат.');
+                    }
+                } catch (e) {
+                    const message = e?.message || String(e);
+                    log(`Ошибка watchdog на странице ручного отклика: ${message}`, true);
+                    StateManager.addParserError('MANUAL_RETURN_WATCHDOG_ERROR', message);
+                }
             }
             else if (location.pathname.startsWith('/vacancy/')) {
                 handleStuckVacancyTimeout();
@@ -742,6 +768,7 @@
             else if (document.querySelector(SELECTORS.applyBtn) || location.href.includes('/search/vacancy')) {
                  activeVacancyWatch = null;
                  StateManager.clearTrapLock();
+                 StateManager.clearManualReturnState();
 
                  if (StateManager.isF5Needed()) {
                      log('Возврат выполнен. Перезагружаю страницу, чтобы обновить список вакансий...');
@@ -1232,16 +1259,88 @@
             return 'SKIPPED_RESUME_VISIBILITY';
         }
         if (pageKind === 'manual_response' || pageKind === 'unknown_response_page') {
-            const details = getNoModalDiagnostics(vid, pageKind);
-            log(`Страница отклика без ожидаемой кнопки submit. Сохраняю в ручной список. ${details}`, true);
-            handleManualResponsePage(reason || 'Страница отклика требует ручной обработки. Сохраняю для ручного отклика.');
-            return 'REDIRECT';
+            return await saveNoSubmitVacancyToManual(
+                vid,
+                reason || 'Response page has no expected submit button.',
+                pageKind
+            );
         }
 
         return '';
     }
 
     // Открываем вакансию с списка: запоминаем lastAttempt и переходим по ссылке
+    async function saveNoSubmitVacancyToManual(vid, reason, pageKind) {
+        const backUrl = StateManager.getReturnUrl();
+        const details = getNoModalDiagnostics(vid, pageKind || detectManualResponsePageKind() || 'no_submit_fallback');
+        const manualReason = `${reason || 'No submit modal after response click.'} ${details}`;
+        const returnAttempt = registerManualReturnAttempt(vid);
+
+        log(`No submit modal after response click. Saving vacancy to manual list. ${details}`, true);
+
+        try {
+            saveCurrentManualResponse(vid || getManualResponseVacancyId(), backUrl, manualReason);
+        } catch (e) {
+            console.warn('save no-submit manual fallback entry error', e);
+            StateManager.addParserError('ERROR_NO_MODAL', details);
+            return 'ERROR_NO_MODAL';
+        }
+
+        if (returnAttempt.count > MANUAL_RETURN_MAX_ATTEMPTS) {
+            return stopManualResponseReturnLoop(
+                vid || getManualResponseVacancyId(),
+                returnAttempt.count,
+                details
+            );
+        }
+
+        returnToSearchFromManualPage(backUrl, 'return-to-list-no-submit-manual-fallback');
+        await wait(800);
+        return 'REDIRECT';
+    }
+
+    function getManualReturnKey(vid) {
+        return [
+            vid || getManualResponseVacancyId() || 'unknown',
+            toSafeHhUrl(location.href) || location.href
+        ].join('|');
+    }
+
+    function registerManualReturnAttempt(vid) {
+        const key = getManualReturnKey(vid);
+        const previous = StateManager.getManualReturnState();
+        const count = previous.key === key ? Number(previous.count || 0) + 1 : 1;
+        const state = {
+            key,
+            count,
+            firstAt: previous.key === key ? previous.firstAt : Date.now(),
+            lastAt: Date.now()
+        };
+
+        StateManager.setManualReturnState(state);
+        return state;
+    }
+
+    function stopManualResponseReturnLoop(vid, attempts, details) {
+        const manualCount = StateManager.getManualList().length;
+        const reason = [
+            `Manual response page stayed open after ${attempts} return attempts.`,
+            `Saved vacancy ${vid || getManualResponseVacancyId() || 'unknown'} for manual response.`,
+            `Manual list count: ${manualCount}.`,
+            details || ''
+        ].filter(Boolean).join(' ');
+
+        log(`Stopping cleanly after repeated manual response return loop. ${reason}`, true);
+        StateManager.setStopReason('manual_targets_only', reason, true);
+        StateManager.setRunning(false);
+        StateManager.releaseInstanceLock(TAB_ID);
+        StateManager.clearTrapLock();
+        StateManager.clearManualReturnState();
+        setStatus('done', 'Manual response saved; return loop stopped');
+
+        return 'MANUAL_RETURN_STOPPED';
+    }
+
     async function processVacancyOnListing(vacancyLinkEl, applyBtnOnList) {
         const hrefRaw = vacancyLinkEl?.href || vacancyLinkEl.getAttribute('href');
         const href = toSafeHhUrl(hrefRaw);
@@ -1482,6 +1581,20 @@
                     return 'RETRYING_NO_MODAL';
                 }
                 sessionStorage.removeItem(KEYS.modalRetry);
+                if (isManualResponsePage()) {
+                    const classifiedResult = await handleNoSubmitResponsePage(
+                        vid,
+                        'External response page has no expected submit button after retry.'
+                    );
+                    if (classifiedResult) return classifiedResult;
+                }
+                if (location.pathname.startsWith('/vacancy/')) {
+                    return await saveNoSubmitVacancyToManual(
+                        vid,
+                        'Vacancy page has no response modal after retry.',
+                        'not_response_page_after_retry'
+                    );
+                }
                 StateManager.addParserError('ERROR_NO_MODAL', getNoModalDiagnostics(vid, 'not_response_page_after_retry'));
                 return 'ERROR_NO_MODAL';
             }
@@ -1779,6 +1892,9 @@
                 handleManualResponsePage('Стартовали сразу на странице вопросов. Сохраняю вакансию для ручного отклика.');
             }
             isLoopActive = false;
+            if (responsePageResult === 'MANUAL_RETURN_STOPPED') {
+                return;
+            }
             setStatus('running', 'Ожидание возврата...');
             return;
         }
@@ -1796,6 +1912,9 @@
                 log('Произошёл редирект/вопрос при обработке. Ожидаю возврат через watchdog.', true);
                 isLoopActive = false;
                 setStatus('running', 'Ожидание возврата...');
+                return;
+            } else if (res === 'MANUAL_RETURN_STOPPED') {
+                isLoopActive = false;
                 return;
             } else if (res === 'SKIPPED_RESUME_VISIBILITY') {
                 log('Вакансия пропущена из-за требования изменить видимость резюме. Возвращаюсь к списку.');
@@ -1881,6 +2000,9 @@
                 log('Редирект/внешний тест. Выход из цикла, ожидаю возврат через watchdog.', true);
                 isLoopActive = false;
                 setStatus('running', 'Ожидание возврата...');
+                return;
+            } else if (result === 'MANUAL_RETURN_STOPPED') {
+                isLoopActive = false;
                 return;
             } else if (result === 'SKIPPED_RESUME_VISIBILITY') {
                 log('Вакансия пропущена из-за требования изменить видимость резюме. Выход из цикла, ожидаю возврат через watchdog.');
