@@ -409,7 +409,7 @@ async function waitForAuthAfterSubmit(
     })
     latestResult = result
 
-    if (result.state === 'logged_in') {
+    if (result.state === 'logged_in' || result.state === 'captcha') {
       return result
     }
   }
@@ -728,5 +728,6 @@ module.exports = {
   authorizeHHPage,
   HHAuthError,
   makeHHAuth,
-  takeScreenshot
+  takeScreenshot,
+  waitForAuthAfterSubmit
 }

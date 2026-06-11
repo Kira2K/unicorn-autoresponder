@@ -22,6 +22,8 @@ type ManualVacancy = import('./types.ts').ManualVacancy
 type OrchestratorStatus = import('./types.ts').OrchestratorStatus
 type ParserLogEntry = import('./types.ts').ParserLogEntry
 
+const CAPTCHA_REPAIR_MENTION = '@kiraSamsonova нужно починить капчу'
+
 function truncateText(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
     return value
@@ -315,6 +317,9 @@ function formatClientErrorLog(status: OrchestratorStatus): string {
     status.pageUrl ? `Page: ${formatTelegramLink(status.pageUrl)}` : undefined,
     status.errorStack
       ? `\nStack trace:\n${escapeTelegramHtml(status.errorStack)}`
+      : undefined,
+    classifyClientRun(status) === 'captcha_detected'
+      ? escapeTelegramHtml(CAPTCHA_REPAIR_MENTION)
       : undefined
   ].filter((line): line is string => line !== undefined)
 
@@ -483,6 +488,10 @@ async function sendRunErrorLog(error: unknown): Promise<void> {
 function formatHumanStopReason(status: OrchestratorStatus): string {
   const classification = classifyClientRun(status)
 
+  if (classification === 'captcha_detected') {
+    return `обнаружена капча; ${CAPTCHA_REPAIR_MENTION}`
+  }
+
   if (status.error) {
     return `ошибка: ${status.error}`
   }
@@ -497,10 +506,6 @@ function formatHumanStopReason(status: OrchestratorStatus): string {
 
   if (!status.startButtonClicked) {
     return 'не удалось нажать старт автооткликов'
-  }
-
-  if (classification === 'captcha_detected') {
-    return 'обнаружена капча'
   }
 
   if (classification === 'auth_required') {
@@ -545,9 +550,29 @@ function formatTechnicalRunResult(status: OrchestratorStatus): string {
   return hasClientFailure(status) ? '🔴 ERROR' : '🟢 OK'
 }
 
+function formatCaptchaProfilesSummary(
+  results: OrchestratorStatus[]
+): string | undefined {
+  const captchaProfiles = results
+    .filter(status => classifyClientRun(status) === 'captcha_detected')
+    .map(status => `${status.clientName}${status.market ? ` / ${status.market}` : ''}`)
+
+  if (captchaProfiles.length === 0) {
+    return undefined
+  }
+
+  return [
+    `captcha found for profiles ${captchaProfiles
+      .map(escapeTelegramHtml)
+      .join(', ')}`,
+    escapeTelegramHtml(CAPTCHA_REPAIR_MENTION)
+  ].join('\n')
+}
+
 function formatRunSummaryLog(results: OrchestratorStatus[]): string {
   const successful = results.filter(status => !hasClientFailure(status))
   const failed = results.filter(hasClientFailure)
+  const captchaSummary = formatCaptchaProfilesSummary(results)
   const responseCount = results.reduce(
     (sum, status) => sum + (status.responseCount ?? 0),
     0
@@ -574,11 +599,14 @@ function formatRunSummaryLog(results: OrchestratorStatus[]): string {
       `Профилей: ${results.length}`,
       `🟢 Ок: ${successful.length}`,
       `🔴 Нужно проверить: ${failed.length}`,
+      captchaSummary,
       `Откликов всего: ${responseCount}`,
       `Ручных вакансий всего: ${manualCount}`,
       '',
       ...rows
-    ].join('\n'),
+    ]
+      .filter((line): line is string => line !== undefined)
+      .join('\n'),
     TELEGRAM_MESSAGE_LIMIT
   )
 }
@@ -625,7 +653,7 @@ function formatManualVacanciesMessage(
   )
   const summary = [
     `<b>${resultEmoji} ${escapeTelegramHtml(clientName)}: итоги автооткликов</b>`,
-    `Вакансий для ручного отклика: ${vacancies.length}`,
+    `Вакансий для ручного отклика: ${vacancies.length}. Пожалуйста, откликнись мануально _со всех резюме_ как можно скорее!`,
     manualVacanciesCleanupLine
       ? escapeTelegramHtml(manualVacanciesCleanupLine)
       : undefined,
@@ -687,6 +715,8 @@ async function sendManualVacanciesToTelegram(
 
 module.exports = {
   addLifecycleEvent,
+  formatCaptchaProfilesSummary,
+  formatRunSummaryLog,
   formatAuthCheckBrief,
   formatManualVacanciesCleanupBrief,
   hasClientFailure,

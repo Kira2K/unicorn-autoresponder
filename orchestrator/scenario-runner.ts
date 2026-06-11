@@ -26,6 +26,7 @@ const {
   HH_AUTO_RESPONDER_STOP_REASON_KEY,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSE_IDS_KEY,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
+  HH_SCENARIO_EARLY_AUTH_CHECK_MS,
   HH_INITIAL_NAVIGATION_TIMEOUT_MS,
   INDEX_SCRIPT_PATH
 } = require('./config.ts')
@@ -34,6 +35,37 @@ type ManualVacanciesCleanupResult =
   import('./types.ts').ManualVacanciesCleanupResult
 type OpenScenarioResult = import('./types.ts').OpenScenarioResult
 type ResponseCounter = import('./types.ts').ResponseCounter
+type HhAuthCheck = import('./types.ts').HhAuthCheck
+
+type ScenarioLifecycleLog = (event: string, details?: string) => void
+
+type ScenarioRunnerDependencies = {
+  applyAutoResponderSettings: typeof applyAutoResponderSettings
+  closePageQuietly: typeof closePageQuietly
+  createCompanyStopListBrowserSource: typeof createCompanyStopListBrowserSource
+  detectHhAuthState: typeof detectHhAuthState
+  ensureIndexScript: typeof ensureIndexScript
+  installIndexReinjectWatcher: typeof installIndexReinjectWatcher
+  loadPlaywright: typeof loadPlaywright
+  readFile: typeof fs.readFile
+  recordVacancyTransition: typeof recordVacancyTransition
+  runManualVacanciesCleanup: typeof runManualVacanciesCleanup
+  withTimeout: typeof withTimeout
+}
+
+const defaultDependencies: ScenarioRunnerDependencies = {
+  applyAutoResponderSettings,
+  closePageQuietly,
+  createCompanyStopListBrowserSource,
+  detectHhAuthState,
+  ensureIndexScript,
+  installIndexReinjectWatcher,
+  loadPlaywright,
+  readFile: fs.readFile,
+  recordVacancyTransition,
+  runManualVacanciesCleanup,
+  withTimeout
+}
 
 async function openScenarioAndInjectIndex(
   port: number,
@@ -44,9 +76,11 @@ async function openScenarioAndInjectIndex(
     blockedCompanies?: Array<{ id: string; name: string }>
     responseLimit?: number
     skipManualVacanciesCleanup?: boolean
-  } = {}
+    logLifecycleEvent?: ScenarioLifecycleLog
+  } = {},
+  dependencies: ScenarioRunnerDependencies = defaultDependencies
 ): Promise<OpenScenarioResult> {
-  const { chromium } = loadPlaywright()
+  const { chromium } = dependencies.loadPlaywright()
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {
     timeout: CONNECT_OVER_CDP_TIMEOUT_MS
   })
@@ -72,15 +106,15 @@ async function openScenarioAndInjectIndex(
     const cleanupPage = await context.newPage()
 
     try {
-      manualVacanciesCleanup = await withTimeout(
-        runManualVacanciesCleanup(cleanupPage, {
+      manualVacanciesCleanup = await dependencies.withTimeout(
+        dependencies.runManualVacanciesCleanup(cleanupPage, {
           log: (message: string) =>
             console.log(`[manual vacancies cleanup] ${message}`)
         }),
         HH_INITIAL_NAVIGATION_TIMEOUT_MS,
         `Manual vacancies cleanup did not finish in ${HH_INITIAL_NAVIGATION_TIMEOUT_MS}ms`,
         async () => {
-          await closePageQuietly(cleanupPage)
+          await dependencies.closePageQuietly(cleanupPage)
         }
       )
     } catch (error: unknown) {
@@ -105,7 +139,7 @@ async function openScenarioAndInjectIndex(
         ]
       }
     } finally {
-      await closePageQuietly(cleanupPage)
+      await dependencies.closePageQuietly(cleanupPage)
     }
   }
 
@@ -122,20 +156,64 @@ async function openScenarioAndInjectIndex(
   }
 
   const page = await context.newPage()
-  const indexScript =
-    createCompanyStopListBrowserSource() +
-    '\n' +
-    (await fs.readFile(INDEX_SCRIPT_PATH, 'utf8'))
-  const disposeWatcher = installIndexReinjectWatcher(
-    page,
-    indexScript,
-    responseCounter
-  )
 
+  options.logLifecycleEvent?.('scenario navigation started', stackScenario)
   await page.goto(stackScenario, {
     waitUntil: 'domcontentloaded',
     timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
   })
+  options.logLifecycleEvent?.('scenario navigation domcontentloaded', page.url())
+
+  let earlyAuthBeforeStart: HhAuthCheck | undefined
+
+  try {
+    earlyAuthBeforeStart = await dependencies.withTimeout(
+      dependencies.detectHhAuthState(page),
+      HH_SCENARIO_EARLY_AUTH_CHECK_MS,
+      `HH scenario early auth check did not finish in ${HH_SCENARIO_EARLY_AUTH_CHECK_MS}ms`
+    )
+    options.logLifecycleEvent?.(
+      'early HH auth checked',
+      `${earlyAuthBeforeStart.state}; url ${earlyAuthBeforeStart.url}`
+    )
+  } catch (error: unknown) {
+    options.logLifecycleEvent?.(
+      'early HH auth check timed out',
+      getErrorMessage(error)
+    )
+  }
+
+  const earlyPageTitle = await page.title()
+  const earlyPageUrl = page.url()
+  dependencies.recordVacancyTransition(responseCounter, earlyPageUrl)
+  const earlyOpened = isAutoResponderUrl(earlyPageUrl)
+
+  if (
+    earlyAuthBeforeStart &&
+    ['logged_out', 'captcha'].includes(earlyAuthBeforeStart.state)
+  ) {
+    options.logLifecycleEvent?.(
+      'auto-responder setup skipped because HH auth is missing',
+      earlyAuthBeforeStart.state
+    )
+
+    return {
+      page,
+      disposeWatcher: () => undefined,
+      isBrowserDisconnected: () => browserDisconnected,
+      result: {
+        opened: earlyOpened,
+        indexScriptInjected: false,
+        watcherInstalled: false,
+        startButtonClicked: false,
+        pageTitle: earlyPageTitle,
+        pageUrl: earlyPageUrl,
+        manualVacanciesCleanup,
+        authBeforeStart: earlyAuthBeforeStart
+      }
+    }
+  }
+
   await page
     .waitForLoadState('load', {
       timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
@@ -144,9 +222,21 @@ async function openScenarioAndInjectIndex(
 
   const pageTitle = await page.title()
   const pageUrl = page.url()
-  recordVacancyTransition(responseCounter, pageUrl)
+  dependencies.recordVacancyTransition(responseCounter, pageUrl)
   const opened = isAutoResponderUrl(pageUrl)
-  const authBeforeStart = await detectHhAuthState(page)
+  const authBeforeStart =
+    earlyAuthBeforeStart?.state === 'logged_in'
+      ? earlyAuthBeforeStart
+      : await dependencies.detectHhAuthState(page)
+  const indexScript =
+    dependencies.createCompanyStopListBrowserSource() +
+    '\n' +
+    (await dependencies.readFile(INDEX_SCRIPT_PATH, 'utf8'))
+  const disposeWatcher = dependencies.installIndexReinjectWatcher(
+    page,
+    indexScript,
+    responseCounter
+  )
 
   if (!opened) {
     return {
@@ -209,12 +299,12 @@ async function openScenarioAndInjectIndex(
     successfulResponsesKey: HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY,
     successfulResponseIdsKey: HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSE_IDS_KEY
   })
-  await applyAutoResponderSettings(page, {
+  await dependencies.applyAutoResponderSettings(page, {
     coverText: options.coverText,
     blockedCompanies: options.blockedCompanies,
     limit: options.responseLimit
   })
-  const indexScriptInjected = await ensureIndexScript(
+  const indexScriptInjected = await dependencies.ensureIndexScript(
     page,
     indexScript,
     'initial load'

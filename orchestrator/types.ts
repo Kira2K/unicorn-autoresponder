@@ -132,6 +132,9 @@ export type OrchestratorStatus = {
   profileTagVerifiedAfterRemove?: boolean
   profileStatusApplied?: boolean
   profileStatusRestored?: boolean
+  autoReloadRecoveryAttempted?: boolean
+  autoReloadRecoveryReason?: string
+  autoReloadRecoverySucceeded?: boolean
   profileStopped?: boolean
   pageTitle?: string
   pageUrl?: string

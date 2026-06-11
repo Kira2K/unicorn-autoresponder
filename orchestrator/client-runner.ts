@@ -10,6 +10,7 @@ const {
   stopAutoResponder,
   waitForAutoResponderToFinish
 } = require('../auto-responder/browser.ts')
+const { closePageQuietly } = require('../browser/page-utils.ts')
 const {
   addDolphinProfileTag,
   ensureAutomationLockStatusId,
@@ -47,6 +48,9 @@ const {
 } = require('./runtime-utils.ts')
 const { normalizeParserErrorCode } = require('./scraper-state.ts')
 const {
+  getAutoReloadRecoveryReason
+} = require('./recovery.ts')
+const {
   AUTOMATION_LOCK_TAG,
   AUTO_RESPONDER_WATCH_MS,
   DOLPHIN_HEADLESS,
@@ -54,6 +58,7 @@ const {
 } = require('./config.ts')
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
+type LifecycleEvent = import('./types.ts').LifecycleEvent
 type ManualVacancy = import('./types.ts').ManualVacancy
 type OrchestratorStatus = import('./types.ts').OrchestratorStatus
 type OpenScenarioResult = import('./types.ts').OpenScenarioResult
@@ -106,6 +111,24 @@ async function openClientScenario(
   status: OrchestratorStatus,
   options: OpenClientScenarioOptions = {}
 ): Promise<{ status: OrchestratorStatus; pageResult: OpenScenarioResult }> {
+  const scenarioLifecycleEvents: LifecycleEvent[] = []
+  const logScenarioLifecycleEvent = (event: string, details?: string): void => {
+    const lifecycleEvent = {
+      at: new Date().toISOString(),
+      elapsedMs: Date.now() - runStartedAt,
+      event,
+      details
+    }
+    scenarioLifecycleEvents.push(lifecycleEvent)
+    writeLocalRunLog({
+      kind: 'client-lifecycle',
+      clientName: status.clientName,
+      market: status.market,
+      stack: status.stack,
+      dolphinProfileId: status.dolphinProfileId,
+      event: lifecycleEvent
+    })
+  }
   const pageResult = await openScenarioAndInjectIndex(
     port,
     clientData.stackScenario,
@@ -114,12 +137,17 @@ async function openClientScenario(
       coverText: clientData.coverText,
       blockedCompanies: clientData.blockedCompanies,
       responseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
-      skipManualVacanciesCleanup: options.skipManualVacanciesCleanup
+      skipManualVacanciesCleanup: options.skipManualVacanciesCleanup,
+      logLifecycleEvent: logScenarioLifecycleEvent
     }
   )
   const nextStatus = {
     ...status,
     ...pageResult.result,
+    lifecycleEvents: [
+      ...status.lifecycleEvents,
+      ...scenarioLifecycleEvents
+    ],
     manualVacanciesCleanup:
       options.skipManualVacanciesCleanup && status.manualVacanciesCleanup
         ? status.manualVacanciesCleanup
@@ -291,6 +319,24 @@ async function collectAutoResponderRunData(
       parserErrorCodes,
       parserLastErrorCode
     }
+  }
+}
+
+function shouldAttemptAutoReloadRecovery(
+  status: OrchestratorStatus,
+  error?: unknown
+): string | undefined {
+  return getAutoReloadRecoveryReason({ status, error })
+}
+
+async function disposeScenarioForRecovery(
+  pageResult: OpenScenarioResult | undefined,
+  disposeWatcher: (() => void) | undefined
+): Promise<void> {
+  disposeWatcher?.()
+
+  if (pageResult) {
+    await closePageQuietly(pageResult.page)
   }
 }
 
@@ -502,6 +548,7 @@ async function runClientOrchestrator(
     startButtonClicked: false
   }
   let disposeWatcher: (() => void) | undefined
+  let pageResult: OpenScenarioResult | undefined
   let profileTagAdded = false
   let profileStatusApplied = false
   let previousProfileStatusId: number | null | undefined
@@ -527,65 +574,90 @@ async function runClientOrchestrator(
     status = startedDolphin.status
     const port = startedDolphin.port
 
-    status = addLifecycleEvent(status, runStartedAt, 'opening scenario')
-    let scenarioState = await openClientScenario(
-      port,
-      runnableClientData,
-      responseCounter,
-      runStartedAt,
-      status
-    )
-    let pageResult = scenarioState.pageResult
-    status = scenarioState.status
-    disposeWatcher = pageResult.disposeWatcher
-    const authWorkflowState = await ensureScenarioAuthorizedBeforeStart({
-      clientData,
-      runStartedAt,
-      state: {
-        disposeWatcher,
-        pageResult,
-        status
-      },
-      reopenScenario: async (
-        currentStatus: OrchestratorStatus,
-        options?: OpenClientScenarioOptions
-      ) => {
-        return await openClientScenario(
-          port,
-          runnableClientData,
-          responseCounter,
-          runStartedAt,
-          currentStatus,
-          options
-        )
-      }
-    })
-    pageResult = authWorkflowState.pageResult
-    status = authWorkflowState.status
-    disposeWatcher = authWorkflowState.disposeWatcher
-    status = addLifecycleEvent(
-      status,
-      runStartedAt,
-      status.startButtonClicked
-        ? 'auto responder started'
-        : 'scenario opened without start',
-      pageResult.result.pageUrl
-    )
+    const openAndAuthorizeScenario = async (
+      currentStatus: OrchestratorStatus,
+      skipManualVacanciesCleanup = false
+    ): Promise<OrchestratorStatus> => {
+      let nextStatus = addLifecycleEvent(
+        currentStatus,
+        runStartedAt,
+        skipManualVacanciesCleanup
+          ? 'reopening scenario after auto reload recovery'
+          : 'opening scenario'
+      )
+      const scenarioState = await openClientScenario(
+        port,
+        runnableClientData,
+        responseCounter,
+        runStartedAt,
+        nextStatus,
+        { skipManualVacanciesCleanup }
+      )
 
-    if (status.startButtonClicked) {
+      pageResult = scenarioState.pageResult
+      nextStatus = scenarioState.status
+      disposeWatcher = pageResult.disposeWatcher
+
+      const authWorkflowState = await ensureScenarioAuthorizedBeforeStart({
+        clientData,
+        runStartedAt,
+        state: {
+          disposeWatcher,
+          pageResult,
+          status: nextStatus
+        },
+        reopenScenario: async (
+          currentStatusForReopen: OrchestratorStatus,
+          options?: OpenClientScenarioOptions
+        ) => {
+          return await openClientScenario(
+            port,
+            runnableClientData,
+            responseCounter,
+            runStartedAt,
+            currentStatusForReopen,
+            options
+          )
+        }
+      })
+
+      pageResult = authWorkflowState.pageResult
+      nextStatus = authWorkflowState.status
+      disposeWatcher = authWorkflowState.disposeWatcher
+
+      return addLifecycleEvent(
+        nextStatus,
+        runStartedAt,
+        nextStatus.startButtonClicked
+          ? 'auto responder started'
+          : 'scenario opened without start',
+        pageResult.result.pageUrl
+      )
+    }
+
+    const runAutoResponderCycle = async (
+      currentStatus: OrchestratorStatus
+    ): Promise<{
+      status: OrchestratorStatus
+      data?: AutoResponderCollectedData
+    }> => {
+      if (!pageResult || !currentStatus.startButtonClicked) {
+        return { status: currentStatus }
+      }
+
       const autoResponderResult = await waitForAutoResponderToFinish(
         pageResult.page,
         AUTO_RESPONDER_WATCH_MS,
         pageResult.isBrowserDisconnected
       )
 
-      status = {
-        ...status,
+      let nextStatus = {
+        ...currentStatus,
         autoResponderFinished: autoResponderResult.finished,
         autoResponderWatchTimedOut: autoResponderResult.timedOut
       }
-      status = addLifecycleEvent(
-        status,
+      nextStatus = addLifecycleEvent(
+        nextStatus,
         runStartedAt,
         autoResponderResult.finished
           ? 'auto responder finished itself'
@@ -603,26 +675,139 @@ async function runClientOrchestrator(
         )
       }
 
+      const collected = await collectAutoResponderRunData(
+        pageResult,
+        responseCounter,
+        nextStatus,
+        runStartedAt
+      )
+
+      return {
+        status: collected.status,
+        data: collected.data
+      }
+    }
+
+    try {
+      status = await openAndAuthorizeScenario(status)
+    } catch (error: unknown) {
+      const recoveryReason = shouldAttemptAutoReloadRecovery(status, error)
+
+      if (!recoveryReason) {
+        throw error
+      }
+
+      status = {
+        ...status,
+        autoReloadRecoveryAttempted: true,
+        autoReloadRecoveryReason: recoveryReason
+      }
+      status = addLifecycleEvent(
+        status,
+        runStartedAt,
+        'auto reload recovery attempted',
+        recoveryReason
+      )
+      await disposeScenarioForRecovery(pageResult, disposeWatcher)
+      pageResult = undefined
+      disposeWatcher = undefined
+
       try {
-        const collected = await collectAutoResponderRunData(
-          pageResult,
-          responseCounter,
-          status,
-          runStartedAt
-        )
-        status = collected.status
-        status = await sendClientAutoResponderReports(
-          clientData,
-          status,
-          runStartedAt,
-          collected.data
-        )
-      } catch (error: unknown) {
+        status = await openAndAuthorizeScenario(status, true)
         status = {
           ...status,
-          manualVacanciesSent: false,
-          telegramError: getErrorMessage(error),
-          errorStack: status.errorStack ?? getErrorStack(error)
+          autoReloadRecoverySucceeded: true
+        }
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'auto reload recovery succeeded',
+          recoveryReason
+        )
+      } catch (recoveryError: unknown) {
+        status = {
+          ...status,
+          autoReloadRecoverySucceeded: false
+        }
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'auto reload recovery failed',
+          getErrorMessage(recoveryError)
+        )
+        throw recoveryError
+      }
+    }
+
+    let collectedData: AutoResponderCollectedData | undefined
+
+    if (status.startButtonClicked) {
+      const cycle = await runAutoResponderCycle(status)
+      status = cycle.status
+      collectedData = cycle.data
+
+      const recoveryReason = shouldAttemptAutoReloadRecovery(status)
+
+      if (recoveryReason) {
+        status = {
+          ...status,
+          autoReloadRecoveryAttempted: true,
+          autoReloadRecoveryReason: recoveryReason
+        }
+        status = addLifecycleEvent(
+          status,
+          runStartedAt,
+          'auto reload recovery attempted',
+          recoveryReason
+        )
+        await disposeScenarioForRecovery(pageResult, disposeWatcher)
+        pageResult = undefined
+        disposeWatcher = undefined
+
+        try {
+          status = await openAndAuthorizeScenario(status, true)
+          const retryCycle = await runAutoResponderCycle(status)
+          status = {
+            ...retryCycle.status,
+            autoReloadRecoverySucceeded: true
+          }
+          collectedData = retryCycle.data
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'auto reload recovery succeeded',
+            recoveryReason
+          )
+        } catch (recoveryError: unknown) {
+          status = {
+            ...status,
+            autoReloadRecoverySucceeded: false
+          }
+          status = addLifecycleEvent(
+            status,
+            runStartedAt,
+            'auto reload recovery failed',
+            getErrorMessage(recoveryError)
+          )
+          throw recoveryError
+        }
+      }
+
+      if (collectedData) {
+        try {
+          status = await sendClientAutoResponderReports(
+            clientData,
+            status,
+            runStartedAt,
+            collectedData
+          )
+        } catch (error: unknown) {
+          status = {
+            ...status,
+            manualVacanciesSent: false,
+            telegramError: getErrorMessage(error),
+            errorStack: status.errorStack ?? getErrorStack(error)
+          }
         }
       }
     }
@@ -662,5 +847,6 @@ async function runClientOrchestrator(
 
 
 module.exports = {
-  runClientOrchestrator
+  runClientOrchestrator,
+  shouldAttemptAutoReloadRecovery
 }

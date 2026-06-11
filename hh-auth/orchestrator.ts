@@ -15,6 +15,7 @@ const {
   HH_AUTH_TIMEOUT_MS,
   HH_AUTH_TOTAL_TIMEOUT_MS,
   HH_INITIAL_NAVIGATION_TIMEOUT_MS,
+  HH_SCENARIO_AUTH_MAX_RECHECKS,
   HH_SCENARIO_AUTH_UNKNOWN_RECHECK_INTERVAL_MS,
   HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS,
   LOCAL_RUN_ID,
@@ -86,6 +87,24 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
               /^ddos-guard$/i.test(document.title.trim()) ||
               /\bddos-guard\b/i.test(document.body?.innerText ?? '')
           },
+          hhCaptchaChallenge: {
+            exists: (() => {
+              const normalize = (value: string) => value.replace(/\s+/g, ' ').trim()
+              const bodyText = normalize(document.body?.innerText || '')
+
+              return (
+                /пройдите капчу|текст с картинки|captcha|капч/i.test(bodyText) ||
+                Array.from(document.querySelectorAll('input')).some(input => {
+                  const placeholder = input.getAttribute('placeholder') || ''
+                  const ariaLabel = input.getAttribute('aria-label') || ''
+
+                  return /текст с картинки|captcha|капч/i.test(
+                    `${placeholder} ${ariaLabel}`
+                  )
+                })
+              )
+            })()
+          },
           loginUrl: {
             exists: /^https:\/\/([^/]+\.)?hh\.ru\/account\/login/i.test(location.href)
           },
@@ -105,8 +124,11 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
           signals.vacancyResponsesButton.exists ||
           signals.mainmenuProfileAndResumes.exists ||
           signals.mainmenuVacancyResponses.exists
+        const captchaDetected = signals.hhCaptchaChallenge.exists
         const state =
-          loggedIn && !loggedOut
+          captchaDetected
+            ? 'captcha'
+            : loggedIn && !loggedOut
             ? 'logged_in'
             : loggedOut && !loggedIn
               ? 'logged_out'
@@ -165,7 +187,10 @@ async function waitForScenarioAuthDecision(
   let recheckCount = 0
   let lastDdosReloadAt = 0
 
-  while (Date.now() - startedAt < HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS) {
+  while (
+    Date.now() - startedAt < HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS &&
+    recheckCount < HH_SCENARIO_AUTH_MAX_RECHECKS
+  ) {
     if (
       hasDdosGuardSignal(latestCheck) &&
       Date.now() - lastDdosReloadAt >= 15000

@@ -9,6 +9,9 @@ const {
   normalizeParserErrors,
   normalizeStopReason
 } = require('./scraper-state.ts')
+const {
+  getAutoReloadRecoveryReason
+} = require('./recovery.ts')
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
 type OrchestratorStatus = import('./types.ts').OrchestratorStatus
@@ -172,6 +175,14 @@ function testRunClassification(): void {
     ),
     'captcha_detected'
   )
+  assert.equal(
+    classifyClientRun(
+      makeStatus({
+        error: 'HH captcha detected during auth flow'
+      })
+    ),
+    'captcha_detected'
+  )
 }
 
 function testTimeoutClassificationNeedsHealthyCleanup(): void {
@@ -196,6 +207,72 @@ function testTimeoutClassificationNeedsHealthyCleanup(): void {
   assert.equal(classifyClientRun(unhealthyTimeout), 'scraper_error')
 }
 
+function testAutoReloadRecoveryClassification(): void {
+  assert.equal(
+    getAutoReloadRecoveryReason({
+      status: makeStatus(),
+      error: new Error('page.goto: Timeout 250000ms exceeded.')
+    }),
+    'navigation_timeout'
+  )
+  assert.equal(
+    getAutoReloadRecoveryReason({
+      status: makeStatus(),
+      error: new Error("page.waitForSelector: Timeout 10000ms exceeded. waiting for locator('#ar-main-panel')")
+    }),
+    'start_ui_selector_timeout'
+  )
+  assert.equal(
+    getAutoReloadRecoveryReason({
+      status: makeStatus({
+        autoResponderStopReason: 'auth_required',
+        parserErrorCodes: ['AUTH_REQUIRED'],
+        authAfterParserStop: {
+          state: 'logged_in',
+          checkedAt: new Date().toISOString(),
+          url: 'https://hh.ru',
+          title: 'HH',
+          signals: {}
+        }
+      })
+    }),
+    'auth_required_after_logged_in'
+  )
+  assert.equal(
+    getAutoReloadRecoveryReason({
+      status: makeStatus({
+        autoResponderFinished: false,
+        autoResponderWatchTimedOut: true,
+        parserErrorCodes: []
+      })
+    }),
+    'no_reason_watch_timeout'
+  )
+  assert.equal(
+    getAutoReloadRecoveryReason({
+      status: makeStatus({
+        autoResponderStopReason: 'captcha_detected',
+        parserErrorCodes: ['captcha_detected']
+      })
+    }),
+    undefined
+  )
+  assert.equal(
+    getAutoReloadRecoveryReason({
+      status: makeStatus(),
+      error: new Error('HH login form did not open from the home page or direct login URL')
+    }),
+    undefined
+  )
+  assert.equal(
+    getAutoReloadRecoveryReason({
+      status: makeStatus({ autoReloadRecoveryAttempted: true }),
+      error: new Error('page.goto: Timeout 250000ms exceeded.')
+    }),
+    undefined
+  )
+}
+
 testClientTypeCompatibility()
 testManualVacancyNormalization()
 testParserErrorNormalization()
@@ -203,5 +280,6 @@ testStopReasonNormalization()
 testParserCodeNormalization()
 testRunClassification()
 testTimeoutClassificationNeedsHealthyCleanup()
+testAutoReloadRecoveryClassification()
 
 console.log('orchestrator type/refactor tests passed')

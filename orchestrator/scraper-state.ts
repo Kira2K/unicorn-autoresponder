@@ -300,6 +300,14 @@ function classifyClientRun(status: OrchestratorStatus): ClientRunClassification 
     return 'telegram_error'
   }
 
+  const errorText = [status.error, status.errorStack]
+    .filter(Boolean)
+    .join('\n')
+
+  if (/captcha|капч/i.test(errorText)) {
+    return 'captcha_detected'
+  }
+
   if (
     status.error?.includes('Browser CDP connection was closed') ||
     status.error?.includes('Page was closed while auto responder was running')

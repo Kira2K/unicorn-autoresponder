@@ -206,6 +206,42 @@ async function testCaptchaFailsFast(): Promise<void> {
   assert.equal(ensuredAuth, false)
 }
 
+async function testCaptchaAfterRecheckFailsFast(): Promise<void> {
+  let ensuredAuth = false
+
+  await assert.rejects(
+    () =>
+      ensureScenarioAuthorizedBeforeStart(
+        {
+          clientData: makeStatus('unknown'),
+          runStartedAt: Date.now(),
+          state: {
+            pageResult: makePageResult('unknown'),
+            status: makeStatus('unknown')
+          },
+          async reopenScenario() {
+            throw new Error('should not reopen on captcha')
+          }
+        },
+        makeDependencies({
+          async ensureHHAuthOnCurrentPage() {
+            ensuredAuth = true
+            return authCheck('logged_in')
+          },
+          async waitForScenarioAuthDecision() {
+            return {
+              check: authCheck('captcha'),
+              recheckCount: 1
+            }
+          }
+        })
+      ),
+    /captcha detected/i
+  )
+
+  assert.equal(ensuredAuth, false)
+}
+
 async function testUnknownStaysUnknownFailsBeforeResponder(): Promise<void> {
   await assert.rejects(
     () =>
@@ -238,6 +274,7 @@ async function main(): Promise<void> {
   await testUnknownBecomesLoggedInAfterRecheck()
   await testLoggedOutRunsCurrentPageAuth()
   await testCaptchaFailsFast()
+  await testCaptchaAfterRecheckFailsFast()
   await testUnknownStaysUnknownFailsBeforeResponder()
 
   console.log('orchestrator auth workflow tests passed')
