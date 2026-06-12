@@ -1,7 +1,7 @@
 const {
   fetchNamedSheetValues,
   getRequiredSheet
-} = require('../../../../google-sheets-check.ts') as {
+} = require('../../../integrations/google-sheets/google-sheets-check.ts') as {
   fetchNamedSheetValues(sheetNames: string[]): Promise<SheetState>
   getRequiredSheet(sheets: SheetValues[], expectedTitle: string): string[][]
 }

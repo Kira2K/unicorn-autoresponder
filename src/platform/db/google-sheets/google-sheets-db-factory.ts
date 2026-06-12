@@ -2,7 +2,7 @@ const {
   mapAllClientsAutomationData,
   mapClientHHAuthCredentials,
   mapClientHHAuthCredentialsByCommonChatId
-} = require('../../../../google-sheets-check.ts') as {
+} = require('../../../integrations/google-sheets/google-sheets-check.ts') as {
   mapAllClientsAutomationData(
     personalDataValues: string[][],
     dolphinMainValues: string[][],
@@ -22,7 +22,7 @@ const {
 }
 const {
   parsePersonalDataClients
-} = require('../../../../dolphin/proxyProvider/checkRequiredProxy/logic.ts') as {
+} = require('../../../integrations/dolphin/proxyProvider/checkRequiredProxy/logic.ts') as {
   parsePersonalDataClients(values: string[][], market: Market): ProxyRequiredClient[]
 }
 const {

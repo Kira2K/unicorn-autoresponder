@@ -1,11 +1,1 @@
-const {
-  fetchAllSheetValues,
-  fetchNamedSheetValues,
-  fetchSheetValues
-} = require('../google-sheets-check.ts')
-
-module.exports = {
-  fetchAllSheetValues,
-  fetchNamedSheetValues,
-  fetchSheetValues
-}
+module.exports = require('../src/integrations/google-sheets/google-client.ts')

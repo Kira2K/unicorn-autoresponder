@@ -1,1 +1,1 @@
-module.exports = require('../../../sheets/google-client.ts')
+module.exports = require('./google-client.ts')
