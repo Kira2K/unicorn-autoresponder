@@ -23,7 +23,9 @@ function walk(dir: string): string[] {
 
 function assertNoRawIntegrationImports(): void {
   const forbidden = [
+    /require\(['"](?:\.\.\/)+db\//,
     /require\(['"](?:\.\.\/)+dolphin\//,
+    /require\(['"](?:\.\.\/)+messenger\.ts['"]/,
     /require\(['"](?:\.\.\/)+noco\//,
     /require\(['"](?:\.\.\/)+sheets\//,
     /require\(['"](?:\.\.\/)+google-sheets-check\.ts['"]/
