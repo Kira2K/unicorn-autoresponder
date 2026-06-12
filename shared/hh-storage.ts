@@ -1,1 +1,0 @@
-module.exports = require('../src/features/hh-responses/shared/hh-storage.ts')

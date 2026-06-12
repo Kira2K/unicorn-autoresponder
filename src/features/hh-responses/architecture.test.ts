@@ -43,15 +43,15 @@ function assertNoRawIntegrationImports(): void {
   }
 }
 
-function assertLegacyEntrypointsLoad(): void {
-  assert.ok(require('../../../orchestrator.ts').runConfiguredOrchestrator)
-  assert.ok(require('../../../orchestrator/client-runner.ts').runClientOrchestrator)
-  assert.ok(require('../../../hh-auth/index.ts').validateAuth)
-  assert.ok(require('../../../auto-responder/browser.ts').ensureIndexScript)
-  assert.ok(require('../../../browser/page-utils.ts').closePageQuietly)
+function assertCanonicalEntrypointsLoad(): void {
+  assert.ok(require('./cli/orchestrator.ts').runConfiguredOrchestrator)
+  assert.ok(require('./orchestrator/client-runner.ts').runClientOrchestrator)
+  assert.ok(require('./hh-auth/index.ts').validateAuth)
+  assert.ok(require('./auto-responder/browser.ts').ensureIndexScript)
+  assert.ok(require('../../platform/browser/page-utils.ts').closePageQuietly)
 }
 
-assertLegacyEntrypointsLoad()
+assertCanonicalEntrypointsLoad()
 assertNoRawIntegrationImports()
 
 console.log('hh-responses architecture tests passed')

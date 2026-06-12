@@ -1,7 +1,7 @@
-const { createNocoClient } = require('../../../../noco/core/client.ts') as {
+const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
   createNocoClient(options?: any): any
 }
-const { TABLES } = require('../../../../noco/core/schema.ts') as {
+const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { key: string; id: string; title: string }>
 }
 
