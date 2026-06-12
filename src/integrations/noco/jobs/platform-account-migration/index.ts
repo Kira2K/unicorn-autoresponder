@@ -1,13 +1,13 @@
-const { createNocoClient } = require('../../../../../noco/core/client.ts') as {
+const { createNocoClient } = require('../../core/client.ts') as {
   createNocoClient(): any
 }
-const { describeError } = require('../../../../../noco/core/errors.ts') as {
+const { describeError } = require('../../core/errors.ts') as {
   describeError(error: any): string
 }
-const { parseJobArgs } = require('../../../../../noco/core/job.ts') as {
+const { parseJobArgs } = require('../../core/job.ts') as {
   parseJobArgs(args?: string[]): { apply: boolean; dryRun: boolean; test: boolean; mode: string }
 }
-const { linkRecords } = require('../../../../../noco/core/relations.ts') as {
+const { linkRecords } = require('../../core/relations.ts') as {
   linkRecords(
     client: any,
     sourceTable: any,
@@ -16,18 +16,18 @@ const { linkRecords } = require('../../../../../noco/core/relations.ts') as {
     relatedIds: number[]
   ): Promise<{ ok: boolean; linked?: number; error?: string }>
 }
-const { createReportDir, writeJson, writeText } = require('../../../../../noco/core/reports.ts') as {
+const { createReportDir, writeJson, writeText } = require('../../core/reports.ts') as {
   createReportDir(jobName: string): string
   writeJson(dir: string, fileName: string, data: unknown): void
   writeText(dir: string, fileName: string, content: string): void
 }
-const { TABLES } = require('../../../../../noco/core/schema.ts') as {
+const { TABLES } = require('../../core/schema.ts') as {
   TABLES: Record<string, { id: string; title: string }>
 }
 const {
   fetchSheetValues,
   getRequiredSheet
-} = require('../../../../../noco/integrations/google-sheets.ts') as {
+} = require('../../integrations/google-sheets.ts') as {
   fetchSheetValues(sheetNames: string[]): Promise<{
     sheets: Array<{ title: string; values: string[][] }>
   }>

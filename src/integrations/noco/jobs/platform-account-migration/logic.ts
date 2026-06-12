@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { getLinkedRecordId } = require('../../../../../noco/core/relations.ts') as {
+const { getLinkedRecordId } = require('../../core/relations.ts') as {
   getLinkedRecordId(value: unknown): number | null
 }
 
