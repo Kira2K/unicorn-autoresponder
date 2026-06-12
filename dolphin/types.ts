@@ -1,37 +1,12 @@
-export type DolphinStartResponse = {
-  success?: boolean
-  automation?: {
-    port?: number
-    wsEndpoint?: string
-  }
-  error?: string
-  errorObject?: {
-    code?: string
-    text?: string
-  }
-}
-
-export type DolphinBrowserProfile = {
-  id: number | string
-  tags?: string[]
-  status?: DolphinProfileStatus | null
-}
-
-export type DolphinProfileResponse = {
-  data?: DolphinBrowserProfile
-}
-
-export type DolphinProfileStatus = {
-  id?: number | string
-  name?: string
-  color?: string
-  deleted?: number
-}
-
-export type DolphinProfileStatusResponse = {
-  data?: DolphinProfileStatus
-}
-
-export type DolphinProfileStatusListResponse = {
-  data?: DolphinProfileStatus[]
-}
+export type DolphinStartResponse =
+  import('../src/integrations/dolphin/types.ts').DolphinStartResponse
+export type DolphinProfileStatus =
+  import('../src/integrations/dolphin/types.ts').DolphinProfileStatus
+export type DolphinBrowserProfile =
+  import('../src/integrations/dolphin/types.ts').DolphinBrowserProfile
+export type DolphinProfileResponse =
+  import('../src/integrations/dolphin/types.ts').DolphinProfileResponse
+export type DolphinProfileStatusResponse =
+  import('../src/integrations/dolphin/types.ts').DolphinProfileStatusResponse
+export type DolphinProfileStatusListResponse =
+  import('../src/integrations/dolphin/types.ts').DolphinProfileStatusListResponse
