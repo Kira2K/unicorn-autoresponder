@@ -3,11 +3,13 @@ const childProcess = require('node:child_process')
 const {
   DOLPHIN_LOCAL_API_BASE_URL,
   DOLPHIN_LOCAL_API_HEALTH_TIMEOUT_MS,
+  DOLPHIN_PREFLIGHT_AUTO_CLEANUP,
   MAX_PREEXISTING_DOLPHIN_PROFILES
 } = require('../orchestrator/config.ts')
 const { getErrorMessage } = require('../orchestrator/runtime-utils.ts')
-const { loginLocalDolphinWithToken } = require('./local-api.ts') as {
+const { loginLocalDolphinWithToken, requestLocalDolphin } = require('./local-api.ts') as {
   loginLocalDolphinWithToken(): Promise<unknown>
+  requestLocalDolphin<T>(endpointPath: string): Promise<T>
 }
 
 function stringifyPreflightBody(value: unknown): string {
@@ -112,8 +114,112 @@ function getRunningDolphinBrowserProfileIds(): number[] {
   return ids.map(id => Number(id)).filter(id => Number.isFinite(id))
 }
 
+function parseJsonArrayOutput(stdout: string): any[] {
+  const text = stdout.trim()
+  if (!text) {
+    return []
+  }
+
+  const parsed = JSON.parse(text)
+  if (!parsed) {
+    return []
+  }
+
+  return Array.isArray(parsed) ? parsed : [parsed]
+}
+
+function killDolphinBrowserProfileProcesses(profileIds: number[]): Array<{
+  processId: number
+  parentProcessId: number
+  profileId: number
+}> {
+  const ids = [...new Set(profileIds)]
+    .map(id => Number(id))
+    .filter(id => Number.isFinite(id) && id > 0)
+
+  if (!ids.length) {
+    return []
+  }
+
+  const profilePattern = `browser_profiles\\\\(${ids.join('|')})\\\\data_dir`
+  const command = [
+    '$ErrorActionPreference = "Stop";',
+    `$profilePattern = '${profilePattern}';`,
+    '$targets = @(Get-CimInstance Win32_Process',
+    "| Where-Object { $_.Name -eq 'anty.exe' -and $_.CommandLine -match $profilePattern }",
+    "| ForEach-Object { if ($_.CommandLine -match 'browser_profiles\\\\(\\d+)\\\\data_dir') {",
+    '[pscustomobject]@{ ProcessId = $_.ProcessId; ParentProcessId = $_.ParentProcessId; ProfileId = [int]$Matches[1] }',
+    '} });',
+    '$targets | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };',
+    "if ($targets.Count -eq 0) { '[]' } else { $targets | ConvertTo-Json -Compress }"
+  ].join(' ')
+
+  const stdout = childProcess.execFileSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', command],
+    {
+      encoding: 'utf8'
+    }
+  )
+
+  return parseJsonArrayOutput(stdout)
+    .map(item => ({
+      processId: Number(item.ProcessId),
+      parentProcessId: Number(item.ParentProcessId),
+      profileId: Number(item.ProfileId)
+    }))
+    .filter(
+      item =>
+        Number.isFinite(item.processId) &&
+        Number.isFinite(item.parentProcessId) &&
+        Number.isFinite(item.profileId)
+    )
+}
+
+async function cleanupPreexistingDolphinProfiles(profileIds: number[]): Promise<void> {
+  const uniqueProfileIds = [...new Set(profileIds)]
+
+  if (!uniqueProfileIds.length) {
+    return
+  }
+
+  console.warn(
+    `Preflight Dolphin cleanup: stopping ${uniqueProfileIds.length} blocking profile(s): ` +
+      uniqueProfileIds.join(', ')
+  )
+
+  await Promise.all(
+    uniqueProfileIds.map(async profileId => {
+      try {
+        await requestLocalDolphin(`/browser_profiles/${profileId}/stop`)
+      } catch (error: unknown) {
+        console.warn(
+          `Preflight Dolphin cleanup: local stop for profile ${profileId} failed: ${getErrorMessage(error)}`
+        )
+      }
+    })
+  )
+
+  const killedProcesses = killDolphinBrowserProfileProcesses(uniqueProfileIds)
+  if (killedProcesses.length) {
+    const killedProfileIds = [...new Set(killedProcesses.map(item => item.profileId))]
+    console.warn(
+      `Preflight Dolphin cleanup: terminated ${killedProcesses.length} leftover anty.exe process(es) ` +
+        `for profile(s): ${killedProfileIds.join(', ')}`
+    )
+  }
+}
+
 async function assertPreexistingDolphinProfileLimit(): Promise<void> {
-  const runningProfileIds = getRunningDolphinBrowserProfileIds()
+  let runningProfileIds = getRunningDolphinBrowserProfileIds()
+
+  if (
+    DOLPHIN_PREFLIGHT_AUTO_CLEANUP &&
+    runningProfileIds.length > MAX_PREEXISTING_DOLPHIN_PROFILES
+  ) {
+    await cleanupPreexistingDolphinProfiles(runningProfileIds)
+    runningProfileIds = getRunningDolphinBrowserProfileIds()
+  }
 
   if (runningProfileIds.length > MAX_PREEXISTING_DOLPHIN_PROFILES) {
     throw new Error(
@@ -162,6 +268,8 @@ module.exports = {
   assertDolphinLocalApiResponseHealthy,
   assertDolphinAppRunning,
   assertPreexistingDolphinProfileLimit,
+  cleanupPreexistingDolphinProfiles,
   getRunningDolphinBrowserProfileIds,
+  killDolphinBrowserProfileProcesses,
   isDolphinSessionError
 }
