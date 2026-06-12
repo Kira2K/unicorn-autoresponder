@@ -66,7 +66,7 @@ TODO: add English client name fields to `ПЕРС ДАННЫЕ` later, then rest
 Each run writes to:
 
 ```text
-dolphin/proxyProvider/checkRequiredProxy/reports/<timestamp>/
+src/integrations/dolphin/proxyProvider/checkRequiredProxy/reports/<timestamp>/
 ```
 
 Files:
@@ -85,7 +85,7 @@ Files:
 The latest run directory path is also written to:
 
 ```text
-dolphin/proxyProvider/checkRequiredProxy/reports/latest.txt
+src/integrations/dolphin/proxyProvider/checkRequiredProxy/reports/latest.txt
 ```
 
 `summary.txt` contains a quick count summary for the run, including status

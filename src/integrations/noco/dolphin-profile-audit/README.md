@@ -6,7 +6,7 @@ Inputs:
 
 - NocoDB `clients`
 - NocoDB `dolphin_profiles`
-- Existing Dolphin helpers via `noco/integrations/dolphin.ts`
+- Existing Dolphin helpers via `src/integrations/noco/integrations/dolphin.ts`
 
 Outputs:
 

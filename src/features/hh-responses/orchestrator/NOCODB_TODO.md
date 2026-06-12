@@ -1,8 +1,9 @@
 # NocoDB Migration TODO
 
-The orchestrator is already expected to consume data through `db/` only. When the
-backend moves from Google Sheets to NocoDB, keep the orchestrator API stable and
-replace the implementation behind `createAppDb()`.
+The orchestrator is expected to consume data through `src/platform/db` only.
+NocoDB is now the live backend, and Google Sheets remains available behind the
+same `createAppDb()` port for legacy diagnostics/comparison when explicitly
+needed.
 
 ## Contract To Preserve
 
@@ -31,8 +32,8 @@ HH auth methods must return:
 
 ## Migration Rules
 
-- Do not import NocoDB helpers from `orchestrator/*`.
-- Do not import Google Sheets helpers from `orchestrator/*`.
+- Do not import NocoDB helpers from HH orchestrator modules.
+- Do not import Google Sheets helpers from HH orchestrator modules.
 - Normalize NocoDB records inside the DB layer, not inside client runner logic.
 - Keep `blockedCompanies` loaded once with the client profile, not per vacancy.
 - Keep market/profile selection deterministic before the run starts.
@@ -40,12 +41,10 @@ HH auth methods must return:
 
 ## Acceptance Check
 
-After NocoDB becomes the backend, these commands should still work without
-orchestrator changes:
+These commands should keep working without orchestrator boundary changes:
 
 ```powershell
 npm run orchestrator
 npm run orchestrator:test
 npm run typecheck
 ```
-

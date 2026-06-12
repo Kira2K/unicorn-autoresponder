@@ -69,13 +69,13 @@ npm run tg:chat-id-checker -- --belongings
 Write the report to a custom file:
 
 ```powershell
-npm run tg:chat-id-checker -- --belongings --output tgChatIdChecker/fresh-student-chats.txt
+npm run tg:chat-id-checker -- --belongings --output src/integrations/telegram/tools/chat-id-checker/fresh-student-chats.txt
 ```
 
 Default output file:
 
 ```text
-tgChatIdChecker/fresh-student-chats.txt
+src/integrations/telegram/tools/chat-id-checker/fresh-student-chats.txt
 ```
 
 ## Final Report Meaning

@@ -29,8 +29,8 @@ state, report, and clean up.
 - `auto-responder/*` is the browser-control facade used by the orchestrator.
 - `index.js` is the injected browser-side worker; storage written there must stay
   backward-compatible with the orchestrator readers.
-- `db/` is the only data entrance. The orchestrator must not read Google Sheets or
-  NocoDB directly.
+- `src/platform/db` is the only data entrance. The orchestrator must not read
+  Google Sheets or NocoDB directly.
 
 ## Expected Success Semantics
 
@@ -47,4 +47,3 @@ These are normal successful finishes:
 Stop-list skips are processed skips, not failures. Auth loss, captcha, browser
 disconnect, selector breakage, and unknown parser failures should become typed
 failure states instead of loops or silent success.
-

@@ -18,8 +18,8 @@ NocoDB migration note:
 
 - `client_company_restrictions_from_stop_companies` keeps the raw migrated
   stop-list fields.
-- `noco/stop-companies` parses those raw fields, creates missing company
-  directory rows in `companies_from_applications`, and links restrictions to
-  companies through `rel_restrictions_blocked_companies`.
+- `src/integrations/noco/stop-companies` parses those raw fields, creates
+  missing company directory rows in `companies_from_applications`, and links
+  restrictions to companies through `rel_restrictions_blocked_companies`.
 - Runtime integration is still a separate step: once NocoDB becomes the runtime
   DB, build `blockedCompanies` from the linked company rows once per client run.

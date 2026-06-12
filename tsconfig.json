@@ -13,14 +13,8 @@
   },
   "include": [
     "*.ts",
-    "db/**/*.ts",
-    "dolphin/**/*.ts",
-    "hh-auth/**/*.ts",
-    "noco/**/*.ts",
     "src/**/*.ts",
     "shared/**/*.ts",
-    "telegramResponsesApplication/**/*.ts",
-    "tgChatIdChecker/**/*.ts",
     "types/**/*.d.ts"
   ]
 }

@@ -2,7 +2,8 @@
 
 Documentation-only placeholder for the future service that will create and normalize Dolphin browser profiles.
 
-This service must own profile assignment standards, while low-level Dolphin API access should stay in the shared `dolphin/` helpers.
+This service must own profile assignment standards, while low-level Dolphin API
+access should stay in `src/integrations/dolphin`.
 
 ## Responsibilities
 

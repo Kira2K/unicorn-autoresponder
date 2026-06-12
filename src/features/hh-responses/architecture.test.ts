@@ -43,6 +43,25 @@ function assertNoRawIntegrationImports(): void {
   }
 }
 
+function assertArchitectureDocsAreCurrent(): void {
+  const docs = [
+    'docs/ARCHITECTURE.md',
+    'docs/DEBUGGING.md'
+  ]
+  const forbidden = [
+    /node\s+(?:orchestrator|doctor|check-table-state|google-sheets-check|refactor-checks)\.ts/,
+    /`(?:orchestrator|doctor|check-table-state|google-sheets-check|refactor-checks)\.ts`/,
+    /`(?:db|dolphin|noco|sheets)\/`/
+  ]
+
+  for (const doc of docs) {
+    const source = fs.readFileSync(path.join(ROOT, doc), 'utf8')
+    for (const pattern of forbidden) {
+      assert.equal(pattern.test(source), false, `${doc} contains stale legacy path or command`)
+    }
+  }
+}
+
 function assertCanonicalEntrypointsLoad(): void {
   assert.ok(require('./cli/orchestrator.ts').runConfiguredOrchestrator)
   assert.ok(require('./orchestrator/client-runner.ts').runClientOrchestrator)
@@ -53,5 +72,6 @@ function assertCanonicalEntrypointsLoad(): void {
 
 assertCanonicalEntrypointsLoad()
 assertNoRawIntegrationImports()
+assertArchitectureDocsAreCurrent()
 
 console.log('hh-responses architecture tests passed')

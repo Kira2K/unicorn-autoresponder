@@ -8,23 +8,24 @@ post-migration gates.
 
 - Default mode is always dry-run.
 - Apply mode must write reports before mutating data.
-- Keep business logic in the job folder, not in `noco/core`.
-- Reuse `noco/core` for NocoDB API calls, relation helpers, reports, and CLI parsing.
-- Reuse `noco/integrations` for existing external services.
+- Keep business logic in the job folder, not in `src/integrations/noco/core`.
+- Reuse `src/integrations/noco/core` for NocoDB API calls, relation helpers,
+  reports, and CLI parsing.
+- Reuse `src/integrations/noco/integrations` for existing external services.
 
 ## Active Jobs
 
-- `noco/full-backup`: read-only full Noco metadata/record backup.
-- `noco/relations`: native relation health and repair.
-- `noco/dolphin-profile-audit`: Dolphin profile/Noco binding audit.
-- `noco/stop-companies`: stop-company parsing and relation linking.
-- `noco/sync-markets`: market relation sync.
-- `noco/sync-mentors`: mentor relation sync.
-- `noco/client-status`: advisory comparison against the old status sheet.
-- `noco/cleanup-audit`: schema/data cleanup gate.
-- `noco/ref-drop-readiness`: historical ref-drop safety report.
-- `noco/post-migration-health`: aggregate read-only health gate.
-- `noco/hh-response-readiness`: HH response readiness report.
+- `src/integrations/noco/full-backup`: read-only full Noco metadata/record backup.
+- `src/integrations/noco/relations`: native relation health and repair.
+- `src/integrations/noco/dolphin-profile-audit`: Dolphin profile/Noco binding audit.
+- `src/integrations/noco/stop-companies`: stop-company parsing and relation linking.
+- `src/integrations/noco/sync-markets`: market relation sync.
+- `src/integrations/noco/sync-mentors`: mentor relation sync.
+- `src/integrations/noco/client-status`: advisory comparison against the old status sheet.
+- `src/integrations/noco/cleanup-audit`: schema/data cleanup gate.
+- `src/integrations/noco/ref-drop-readiness`: historical ref-drop safety report.
+- `src/integrations/noco/post-migration-health`: aggregate read-only health gate.
+- `src/integrations/noco/hh-response-readiness`: HH response readiness report.
 
 ## Removed Jobs
 
@@ -53,8 +54,9 @@ of restoring stale job code.
    - `logs/nocodb-ref-drop-readiness/latest.txt`
    - `logs/nocodb-full-backup/latest.txt`
 2. Read `summary.json` first, then only the focused report file.
-3. Prefer confirmed identity facts in `noco/core/client-ref-overrides.ts` over
-   scattered one-off matching logic.
+3. Prefer confirmed identity facts in
+   `src/integrations/noco/core/client-ref-overrides.ts` over scattered one-off
+   matching logic.
 4. Keep apply jobs idempotent: dry-run, apply, dry-run again.
 
 ## Handoff

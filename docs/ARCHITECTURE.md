@@ -1,55 +1,52 @@
 # Architecture
 
-This project is still intentionally script-shaped, but the orchestration code is split by responsibility so future debugging can start in the right file instead of loading the whole runner.
+This project is script-shaped, but the source now has clear feature,
+integration, and platform boundaries. Start from `docs/AGENT_CONTEXT.md` when a
+future session needs the shortest map.
+
+## Current Layout
+
+| Area | Owns |
+| --- | --- |
+| `src/features/hh-responses` | HH automation: client lifecycle, HH auth, scenario opening, browser responder injection, reporting, recovery, and HH-specific helpers. |
+| `src/features/diagnostics` | Read-only diagnostics such as doctor, table-state checks, and refactor safety checks. |
+| `src/platform/db` | The `createAppDb()` application data port plus Noco and Google Sheets adapters. |
+| `src/platform/browser` | Generic Playwright/page helpers that are not HH-specific. |
+| `src/integrations/dolphin` | Dolphin Cloud/Local APIs, profile locks, preflight, runtime start/stop, and Dolphin tools. |
+| `src/integrations/noco` | NocoDB core helpers, operational jobs, backups, relation checks, and migration health gates. |
+| `src/integrations/google-sheets` | Raw Google Sheets access and legacy comparison/mapping helpers. |
+| `src/integrations/telegram` | Telegram messaging and Telegram operational tools. |
+
+Root legacy entrypoints were removed. `index.js` remains at the root because it
+is the browser responder artifact injected into HH pages.
 
 ## Entry Points
 
-- `orchestrator.ts` is the public facade and CLI entry point.
-- `doctor.ts` is for quick local diagnostics without starting Dolphin profiles.
-  Its `--auth-preflight --stop-before-hh` mode validates selected client data
-  and seeds Dolphin Local API auth without starting a profile or touching HH.
-- `check-table-state.ts` inspects Google Sheet mapping and explains client-name lookup issues.
-- `refactor-checks.ts` is the lightweight regression suite for refactor-sensitive behavior.
+- `npm run orchestrator` runs HH responses from `src/features/hh-responses`.
+- `npm run doctor` and `npm run check-table` run diagnostics from
+  `src/features/diagnostics`.
+- `npm run noco:*` jobs run from `src/integrations/noco`.
+- `npm run dolphin:user-credentials:*` and `npm run proxy:check-required` run
+  Dolphin integration tools.
+- `npm run tg:*` runs Telegram tools from `src/integrations/telegram`.
 
-## Main Modules
+## Boundaries
 
-- `orchestrator/client-runner.ts` owns the one-client lifecycle: profile start, browser connection, auth checks, auto-responder run, reporting, cleanup.
-- `orchestrator/clients.ts` owns configured client selection helpers. Name selection is exact by design.
-- `orchestrator/scenario-runner.ts` opens HH scenarios and injects the auto-responder script.
-- `orchestrator/reporting.ts` is the reporting facade over `orchestrator/telegram-reporting.ts`.
-- `orchestrator/config.ts` contains shared environment/config constants.
-- `dolphin/index.ts` is the single Dolphin import surface used by the orchestrator.
-  Cloud API requests use bearer auth. Local API requests seed the JWT through
-  `/v1.0/auth/login-with-token` before profile start/stop calls.
-- `auto-responder/browser.ts` is the single auto-responder browser import surface.
-- `browser/` contains generic Playwright/page helpers that are not HH-specific.
-- `db/` is the new public data boundary. New data access should start from
-  `createAppDb()` instead of importing Google Sheets helpers directly.
-- `sheets/automation-mapper.ts` maps raw Google Sheet rows into enabled automation targets.
-- `google-sheets-check.ts` is the older sheet CLI/API surface kept for compatibility.
+- Features consume platform or integration facades, not raw provider request
+  helpers.
+- HH automation reads live automation data through `createAppDb()`.
+- Noco is the default live automation source. Google Sheets code remains for
+  legacy diagnostics and comparison unless a task explicitly says otherwise.
+- Dolphin profile lifecycle goes through `src/integrations/dolphin/index.ts`.
+- Telegram reporting goes through the Telegram integration, while HH-specific
+  report text stays in the HH feature.
 
-Current DB boundary consumers:
+## Refactor Rules
 
-- `tgChatIdChecker/` reads student Telegram records through `createAppDb()`.
-- `dolphin/proxyProvider/checkRequiredProxy/` reads proxy-required clients through `createAppDb()`.
-- `hh-auth/` fallback credential reads use `createAppDb()`.
-- `orchestrator.ts` reads automation targets and attached HH credentials through
-  `createAppDb()`.
-
-Remaining direct `google-sheets-check.ts` imports are legacy wrappers or
-diagnostic scripts: `sheets/*`, `doctor.ts`, and `check-table-state.ts`.
-
-## Current Boundaries
-
-The biggest remaining file is `orchestrator/client-runner.ts` because it still contains the business workflow. That is deliberate for now: the recent refactors moved infrastructure away from the runner without changing auth, retry, status, logging, or profile lifecycle behavior.
-
-Good next extractions, when business-logic refactoring is allowed:
-
-- Migrate existing Google Sheets consumers to `db/` one by one before adding
-  the NocoDB implementation behind the same interface.
-- Run phases into `orchestrator/phases/`.
-- Auth decision handling into an HH-specific auth workflow module.
-- Telegram report composition into smaller report builders.
-- Client lifecycle events into a small recorder object.
-
-Until then, prefer adding diagnostics and tests around the runner rather than moving its core branches.
+- Put new product workflows under `src/features/<feature-name>`.
+- Put reusable external API code under `src/integrations/<provider>`.
+- Put provider-neutral runtime abstractions under `src/platform`.
+- Keep browser-responder storage keys backward-compatible with HH orchestrator
+  readers.
+- Prefer adding architecture tests when moving boundaries so stale imports and
+  stale docs fail quickly.
