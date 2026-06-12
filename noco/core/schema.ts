@@ -35,6 +35,11 @@ const TABLES = {
     id: 'm8zej2vsv4iypl8',
     title: 'platform_accounts'
   },
+  platforms: {
+    key: 'platforms',
+    id: 'mg3ovkendur1kpo',
+    title: 'platforms'
+  },
   applications: {
     key: 'applications',
     id: 'mqgr5lv9raft8fm',

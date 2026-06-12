@@ -30,6 +30,7 @@ const HEALTH_CHECKS: HealthCheck[] = [
   { key: 'dolphin', script: 'noco:dolphin-profile-audit:dry-run', logName: 'nocodb-dolphin-profile-audit', summaryFile: 'summary.json' },
   { key: 'clientStatus', script: 'noco:client-status:dry-run', logName: 'nocodb-client-status', summaryFile: 'summary.json' },
   { key: 'stopCompanies', script: 'noco:stop-companies:dry-run', logName: 'nocodb-stop-companies', summaryFile: 'summary.json' },
+  { key: 'platformAccounts', script: 'noco:platform-accounts:dry-run', logName: 'nocodb-platform-account-migration', summaryFile: 'summary.json' },
   { key: 'syncMarkets', script: 'noco:sync-markets:dry-run', logName: 'nocodb-sync-markets', summaryFile: 'summary.json' },
   { key: 'syncMentors', script: 'noco:sync-mentors:dry-run', logName: 'nocodb-sync-mentors', summaryFile: 'summary.json' },
   { key: 'refReadiness', script: 'noco:ref-drop-readiness:dry-run', logName: 'nocodb-ref-drop-readiness', summaryFile: 'summary.json' },
@@ -97,6 +98,11 @@ function validateSummary(key: string, summary: any): string[] {
       'duplicateCompanyNames'
     ]) {
       if (Number(summary[field] ?? 0) !== 0) failures.push(`stop-company ${field} is not zero`)
+    }
+  }
+  if (key === 'platformAccounts') {
+    for (const field of ['platformCreatePlans', 'createPlans', 'patchBlankPlans']) {
+      if (Number(summary[field] ?? 0) !== 0) failures.push(`platform-account ${field} is not zero`)
     }
   }
   if (key === 'syncMarkets') {
