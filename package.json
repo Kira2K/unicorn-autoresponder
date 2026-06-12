@@ -42,7 +42,7 @@
     "noco:core:test": "node noco/core/core.test.ts",
     "db:noco:test": "node db/noco/noco-db.test.ts",
     "noco:test": "npm run noco:core:test && npm run db:noco:test && npm run noco:full-backup:test && npm run noco:stop-companies:test && npm run noco:dolphin-profile-audit:test && npm run noco:client-status:test && npm run noco:cleanup-audit:test && npm run noco:post-migration-health:test && npm run noco:ref-drop-readiness:test",
-    "orchestrator:test": "node orchestrator/types.test.ts && node orchestrator/telegram-reporting.test.ts && node hh-auth/orchestrator.test.ts && node hh-auth/make-hh-auth.test.ts && node orchestrator/auth-workflow.test.ts && node orchestrator/scenario-runner.test.ts",
+    "orchestrator:test": "node src/features/hh-responses/architecture.test.ts && node orchestrator/types.test.ts && node orchestrator/telegram-reporting.test.ts && node hh-auth/orchestrator.test.ts && node hh-auth/make-hh-auth.test.ts && node orchestrator/auth-workflow.test.ts && node orchestrator/scenario-runner.test.ts",
     "doctor:test": "node doctor.test.ts",
     "test:refactor": "node refactor-checks.ts",
     "typecheck": "tsc --noEmit",

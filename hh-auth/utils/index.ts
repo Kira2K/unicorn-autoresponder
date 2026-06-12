@@ -1,13 +1,1 @@
-const {
-  closeBrowser,
-  collectDataQa,
-  selectorExists,
-  takeScreenshot
-} = require('./browser.ts')
-
-module.exports = {
-  closeBrowser,
-  collectDataQa,
-  selectorExists,
-  takeScreenshot
-}
+module.exports = require('../../src/features/hh-responses/hh-auth/utils/index.ts')

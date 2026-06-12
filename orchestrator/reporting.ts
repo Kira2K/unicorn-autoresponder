@@ -1,5 +1,1 @@
-// Reporting facade kept so the runner does not need to know the internal
-// Telegram report module layout.
-module.exports = {
-  ...require('./telegram-reporting.ts')
-}
+module.exports = require('../src/features/hh-responses/orchestrator/reporting.ts')
