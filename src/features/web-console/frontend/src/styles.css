@@ -1,0 +1,142 @@
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f4f7fb;
+  color: #172033;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-card {
+  width: min(100%, 420px);
+}
+
+.auth-form,
+.dashboard-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.field .p-inputtext,
+.field .p-password,
+.field .p-password-input {
+  width: 100%;
+}
+
+.dashboard {
+  width: min(1180px, 100%);
+  display: grid;
+  gap: 16px;
+  align-self: start;
+}
+
+.topbar {
+  border-radius: 8px;
+}
+
+.topbar h1,
+.topbar p {
+  margin: 0;
+}
+
+.topbar p {
+  color: #60708a;
+}
+
+.dashboard-grid {
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  align-items: start;
+}
+
+.client-card,
+.action-card,
+.accounts-card,
+.provider-card,
+.lease-card {
+  border-radius: 8px;
+}
+
+.lease-card {
+  border-color: #bae6fd;
+}
+
+.accounts-card,
+.provider-card {
+  grid-column: 1 / -1;
+}
+
+.provider-grid {
+  grid-template-columns: 1fr;
+}
+
+.info-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.info-list div {
+  display: grid;
+  gap: 4px;
+}
+
+.info-list dt {
+  color: #60708a;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.info-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.action-card .p-card-content {
+  display: grid;
+  gap: 16px;
+}
+
+.result-message {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.loading-panel {
+  min-height: 280px;
+  display: grid;
+  place-items: center;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}

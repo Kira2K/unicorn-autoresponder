@@ -1,0 +1,349 @@
+<script setup>
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { api } from './api'
+
+const session = ref(null)
+const loading = ref(true)
+const pageLoading = ref(false)
+const error = ref('')
+const email = ref('')
+const password = ref('')
+const dashboard = ref(null)
+const providerClients = ref([])
+const providerDolphinEmail = ref('')
+const dryRunResult = ref(null)
+const dolphinLease = ref(null)
+const dolphinLeaseError = ref('')
+const dolphinLeaseLoading = ref(false)
+const nowMs = ref(Date.now())
+let countdownTimer = null
+
+const isAdmin = computed(() => session.value?.role === 'admin')
+const isProvider = computed(() => session.value?.role === 'provider')
+const isClient = computed(() => session.value?.role === 'client')
+const accountRows = computed(() => dashboard.value?.platformAccounts || [])
+const dryRunText = computed(() => {
+  if (!dryRunResult.value) return ''
+  return `${dryRunResult.value.message} ${dryRunResult.value.plannedCommand.command}`
+})
+const dolphinLeaseSecondsLeft = computed(() => {
+  if (!dolphinLease.value) return 0
+  return Math.max(0, Math.ceil((Number(dolphinLease.value.expiresAt) - nowMs.value) / 1000))
+})
+
+function setError(value) {
+  error.value = value instanceof Error ? value.message : String(value || '')
+}
+
+async function loadDashboard() {
+  if (!session.value) return
+  pageLoading.value = true
+  error.value = ''
+  dryRunResult.value = null
+  dolphinLeaseError.value = ''
+  try {
+    if (isAdmin.value) {
+      dashboard.value = await api.adminLatestClient()
+      providerClients.value = []
+      providerDolphinEmail.value = ''
+    } else if (isProvider.value) {
+      const result = await api.providerClients()
+      dashboard.value = null
+      providerClients.value = result.clients || []
+      providerDolphinEmail.value = result.providerDolphinEmail || ''
+    } else {
+      dashboard.value = await api.clientDashboard()
+      providerClients.value = []
+      providerDolphinEmail.value = ''
+    }
+  } catch (caught) {
+    setError(caught)
+  } finally {
+    pageLoading.value = false
+  }
+}
+
+async function login() {
+  loading.value = true
+  error.value = ''
+  try {
+    session.value = await api.login(email.value, password.value)
+    await loadDashboard()
+  } catch (caught) {
+    setError(caught)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function logout() {
+  loading.value = true
+  error.value = ''
+  try {
+    await api.logout()
+  } catch {
+    // Local state is still cleared if the server session is already gone.
+  } finally {
+    session.value = null
+    dashboard.value = null
+    providerClients.value = []
+    providerDolphinEmail.value = ''
+    dryRunResult.value = null
+    dolphinLease.value = null
+    dolphinLeaseError.value = ''
+    password.value = ''
+    loading.value = false
+  }
+}
+
+async function startHhResponses() {
+  pageLoading.value = true
+  error.value = ''
+  dryRunResult.value = null
+  try {
+    dryRunResult.value = await api.startHhResponsesDryRun()
+  } catch (caught) {
+    setError(caught)
+  } finally {
+    pageLoading.value = false
+  }
+}
+
+async function openDolphinProfile(clientName, clientId) {
+  dolphinLeaseLoading.value = true
+  dolphinLeaseError.value = ''
+  try {
+    dolphinLease.value = await api.acquireDolphinLease(clientName, clientId)
+    nowMs.value = Date.now()
+  } catch (caught) {
+    dolphinLeaseError.value = caught.status === 409
+      ? 'account in use sorry'
+      : (caught instanceof Error ? caught.message : String(caught || ''))
+  } finally {
+    dolphinLeaseLoading.value = false
+  }
+}
+
+onMounted(async () => {
+  countdownTimer = window.setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+  try {
+    session.value = await api.me()
+    await loadDashboard()
+  } catch {
+    session.value = null
+  } finally {
+    loading.value = false
+  }
+})
+
+onUnmounted(() => {
+  if (countdownTimer) window.clearInterval(countdownTimer)
+})
+</script>
+
+<template>
+  <main class="app-shell">
+    <Card v-if="!session" class="auth-card" data-testid="login-page">
+      <template #title>HH Web Console</template>
+      <template #subtitle>Sign in with your account login</template>
+      <template #content>
+        <form class="auth-form" @submit.prevent="login">
+          <label class="field">
+            <span>Login</span>
+            <InputText v-model="email" type="text" autocomplete="username" data-testid="email-input" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <Password
+              v-model="password"
+              :feedback="false"
+              toggle-mask
+              autocomplete="current-password"
+              input-id="password"
+              data-testid="password-widget"
+              input-class="password-input"
+            />
+          </label>
+          <Message v-if="error" severity="error" :closable="false" :text="error" />
+          <Button
+            type="submit"
+            label="Sign in"
+            icon="pi pi-sign-in"
+            :loading="loading"
+            data-testid="login-button"
+          />
+        </form>
+      </template>
+    </Card>
+
+    <section
+      v-else
+      class="dashboard"
+      :data-testid="isAdmin ? 'admin-dashboard' : isProvider ? 'provider-dashboard' : 'client-dashboard'"
+    >
+      <Toolbar class="topbar">
+        <template #start>
+          <div>
+            <h1>{{ isAdmin ? 'Admin console' : isProvider ? 'Provider console' : 'Client console' }}</h1>
+            <p>{{ session.email }}</p>
+          </div>
+        </template>
+        <template #end>
+          <Button label="Logout" icon="pi pi-sign-out" severity="secondary" data-testid="logout-button" @click="logout" />
+        </template>
+      </Toolbar>
+
+      <Message v-if="error" severity="error" :closable="false" :text="error" />
+      <Message v-if="dolphinLeaseError" severity="error" :closable="false" data-testid="dolphin-lease-error">
+        {{ dolphinLeaseError }}
+      </Message>
+
+      <Card v-if="dolphinLease" class="lease-card" data-testid="dolphin-lease-panel">
+        <template #title>Dolphin access</template>
+        <template #subtitle>{{ dolphinLease.targetClientName }}</template>
+        <template #content>
+          <dl class="info-list">
+            <div>
+              <dt>Email</dt>
+              <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
+            </div>
+            <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
+              <dt>Client email</dt>
+              <dd>{{ dolphinLease.sourceEmail }}</dd>
+            </div>
+            <div>
+              <dt>Password</dt>
+              <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
+            </div>
+            <div>
+              <dt>Profiles</dt>
+              <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
+            </div>
+            <div>
+              <dt>Guaranteed authorization time left</dt>
+              <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
+            </div>
+          </dl>
+        </template>
+      </Card>
+
+      <div v-if="pageLoading" class="loading-panel">
+        <ProgressSpinner aria-label="Loading" />
+      </div>
+
+      <div v-else-if="isProvider" class="dashboard-grid provider-grid">
+        <Card class="provider-card">
+          <template #title>Clients on English market</template>
+          <template #subtitle>{{ providerClients.length }} visible clients. Provider Dolphin login/password for test: {{ providerDolphinEmail || 'empty' }}</template>
+          <template #content>
+            <DataTable :value="providerClients" striped-rows responsive-layout="scroll" data-testid="provider-clients-table">
+              <Column field="clientName" header="Name" />
+              <Column field="primaryStack" header="Stack" />
+              <Column field="linkedInEmail" header="LinkedIn email" />
+              <Column header="Action">
+                <template #body="{ data }">
+                  <Button
+                    label="open Dolphin Profile"
+                    icon="pi pi-external-link"
+                    size="small"
+                    :loading="dolphinLeaseLoading"
+                    data-testid="open-dolphin-provider-button"
+                    @click="openDolphinProfile(data.clientName, data.id)"
+                  />
+                </template>
+              </Column>
+            </DataTable>
+          </template>
+        </Card>
+      </div>
+
+      <div v-else-if="dashboard" class="dashboard-grid">
+        <Card class="client-card">
+          <template #title>{{ dashboard.client.clientName }}</template>
+          <template #subtitle>
+            {{ isAdmin ? 'Latest created client' : 'Your client profile' }}
+          </template>
+          <template #content>
+            <dl class="info-list">
+              <div>
+                <dt>Client Id</dt>
+                <dd>{{ dashboard.client.id }}</dd>
+              </div>
+              <div>
+                <dt>Calendar Email</dt>
+                <dd>{{ dashboard.client.calendarEmail || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Common Chat</dt>
+                <dd>{{ dashboard.client.commonChatId || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Primary Stack</dt>
+                <dd>{{ dashboard.client.primaryStack || 'empty' }}</dd>
+              </div>
+            </dl>
+          </template>
+        </Card>
+
+        <Card v-if="isClient" class="action-card">
+          <template #title>Dolphin profile</template>
+          <template #subtitle>Open the connected automation profile</template>
+          <template #content>
+            <Button
+              label="open Dolphin Profile"
+              icon="pi pi-external-link"
+              severity="info"
+              :loading="dolphinLeaseLoading"
+              data-testid="open-dolphin-client-button"
+              @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id)"
+            />
+          </template>
+        </Card>
+
+        <Card v-if="isAdmin" class="action-card">
+          <template #title>HH responses</template>
+          <template #subtitle>Dry-run action for the latest client</template>
+          <template #content>
+            <Button
+              label="start HH responses"
+              icon="pi pi-play"
+              severity="success"
+              size="large"
+              data-testid="start-hh-button"
+              @click="startHhResponses"
+            />
+            <p
+              v-if="dryRunResult"
+              class="result-message"
+              data-testid="dry-run-result"
+            >
+              {{ dryRunText }}
+            </p>
+          </template>
+        </Card>
+
+        <Card class="accounts-card">
+          <template #title>Platform accounts</template>
+          <template #subtitle>{{ accountRows.length }} connected rows</template>
+          <template #content>
+            <DataTable :value="accountRows" striped-rows responsive-layout="scroll" data-testid="accounts-table">
+              <Column field="platform" header="Platform" />
+              <Column field="accountLabel" header="Label" />
+              <Column field="login" header="Login" />
+              <Column field="phone" header="Phone" />
+              <Column field="email" header="Email" />
+              <Column header="Password">
+                <template #body="{ data }">
+                  <Tag v-if="data.password" :value="data.password" severity="secondary" />
+                  <span v-else>empty</span>
+                </template>
+              </Column>
+            </DataTable>
+          </template>
+        </Card>
+      </div>
+    </section>
+  </main>
+</template>
