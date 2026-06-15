@@ -4,6 +4,7 @@ const { createNocoDb } = require('../../../platform/db/noco/noco-db.ts') as {
 const {
   findClientDolphinProfile,
   findStackScenario,
+  isHHPlatformAccountForMarket,
   normalizeId,
   scenarioLookupStack
 } = require('../../../platform/db/noco/noco-db.ts') as {
@@ -14,6 +15,7 @@ const {
     market: Market
   ): Record<string, unknown> & { Id: number }
   findStackScenario(stacks: Array<Record<string, unknown>>, stack: string, market: Market): string | undefined
+  isHHPlatformAccountForMarket(account: Record<string, unknown> & { Id: number }, market: Market): boolean
   normalizeId(value: unknown): string
   scenarioLookupStack(clientName: string, stack: string): string
 }
@@ -130,14 +132,6 @@ function resolveStack(
   return linkedName(overrideStacks[0]) || linkedName(overrideStack) || linkedName(client?.rel_clients_primary_stack)
 }
 
-function hhPlatform(market: Market): string {
-  return market === 'Ru' ? 'hh_ru' : 'hh_en'
-}
-
-function isHHPlatformForMarket(value: unknown, market: Market): boolean {
-  return normalizeText(value).replace(/\s+/g, '_') === hhPlatform(market)
-}
-
 function platformAccountClientId(account: Record<string, unknown>): number | null {
   return linkedId(account.rel_platformAccounts_client) ?? Number(account.clients_id)
 }
@@ -150,7 +144,7 @@ function findCanonicalHHAccounts(
   return accounts.filter(
     account =>
       platformAccountClientId(account) === clientId &&
-      isHHPlatformForMarket(account.platform, market)
+      isHHPlatformAccountForMarket(account, market)
   )
 }
 

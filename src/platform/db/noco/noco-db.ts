@@ -13,6 +13,10 @@ type Market = import('../types.ts').Market
 type NocoRecord = Record<string, unknown> & { Id: number }
 
 const STACK_OVERRIDE_FIELD = 'Stack Override'
+const HH_PLATFORM_IDS: Record<Market, number> = {
+  Ru: 11,
+  En: 10
+}
 
 function normalizeText(value: unknown): string {
   return String(value ?? '')
@@ -104,8 +108,30 @@ function hhPlatform(market: Market): string {
   return market === 'Ru' ? 'hh_ru' : 'hh_en'
 }
 
-function isHHPlatformForMarket(value: unknown, market: Market): boolean {
-  return normalizeText(value).replace(/\s+/g, '_') === hhPlatform(market)
+function accountPlatformId(account: NocoRecord): number | null {
+  const id = linkedId(account.rel_platformAccounts_platform) ?? Number(account.platforms_id)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function platformLabelFromRelation(account: NocoRecord): string {
+  const record = linkedRecords(account.rel_platformAccounts_platform)[0]
+  return normalizeText(record?.label ?? record?.platform ?? record?.name)
+}
+
+function normalizedPlatformLabel(value: unknown): string {
+  return normalizeText(value).replace(/\s+/g, '_')
+}
+
+function isHHPlatformAccountForMarket(account: NocoRecord, market: Market): boolean {
+  const expectedId = HH_PLATFORM_IDS[market]
+  const platformId = accountPlatformId(account)
+  if (platformId) return platformId === expectedId
+
+  const expectedLabel = hhPlatform(market)
+  return (
+    normalizedPlatformLabel(account.platform) === expectedLabel ||
+    normalizedPlatformLabel(platformLabelFromRelation(account)) === expectedLabel
+  )
 }
 
 function getPlatformClientId(account: NocoRecord): number | null {
@@ -306,7 +332,7 @@ async function getNocoHHAuthCredentials(
   const matches = accounts.filter(
     account =>
       getPlatformClientId(account) === client.Id &&
-      isHHPlatformForMarket(account.platform, market)
+      isHHPlatformAccountForMarket(account, market)
   )
 
   if (!matches.length) {
@@ -413,6 +439,8 @@ module.exports = {
   findClientDolphinProfile,
   findStackScenario,
   getNocoHHAuthCredentials,
+  HH_PLATFORM_IDS,
+  isHHPlatformAccountForMarket,
   isEnabled,
   normalizeId,
   responseField,

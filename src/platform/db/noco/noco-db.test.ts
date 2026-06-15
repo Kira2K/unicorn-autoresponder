@@ -2,6 +2,8 @@ const assert = require('node:assert/strict')
 const {
   buildAutomationTargetsFromNocoState,
   createNocoDb,
+  HH_PLATFORM_IDS,
+  isHHPlatformAccountForMarket,
   isEnabled,
   normalizeId,
   responseField,
@@ -9,6 +11,8 @@ const {
 } = require('./noco-db.ts') as {
   buildAutomationTargetsFromNocoState(state: any, options?: any): any[]
   createNocoDb(options?: any): any
+  HH_PLATFORM_IDS: Record<'Ru' | 'En', number>
+  isHHPlatformAccountForMarket(account: Record<string, unknown> & { Id: number }, market: 'Ru' | 'En'): boolean
   isEnabled(value: unknown): boolean
   normalizeId(value: unknown): string
   responseField(market: 'Ru' | 'En'): string
@@ -19,6 +23,11 @@ async function runTests(): Promise<void> {
   assert.equal(normalizeId('770032142.0'), '770032142')
   assert.equal(isEnabled('TRUE'), true)
   assert.equal(isEnabled('0'), false)
+  assert.deepEqual(HH_PLATFORM_IDS, { Ru: 11, En: 10 })
+  assert.equal(isHHPlatformAccountForMarket({ Id: 1, platforms_id: 11 }, 'Ru'), true)
+  assert.equal(isHHPlatformAccountForMarket({ Id: 1, rel_platformAccounts_platform: { Id: 10, label: 'hh_en' } }, 'En'), true)
+  assert.equal(isHHPlatformAccountForMarket({ Id: 1, rel_platformAccounts_platform: { Id: 16, label: 'hh_ru' } }, 'Ru'), false)
+  assert.equal(isHHPlatformAccountForMarket({ Id: 1, platform: 'hh_ru' }, 'Ru'), true)
   assert.equal(scenarioLookupStack('Кира', 'FRONTEND'), 'КИРА')
   assert.equal(scenarioLookupStack('Антон', 'FRONTEND'), 'React')
 
@@ -213,7 +222,8 @@ async function runTests(): Promise<void> {
       {
         Id: 101,
         client_name: 'Иван Чебыкин',
-        platform: 'hh_ru',
+        platforms_id: 11,
+        rel_platformAccounts_platform: { Id: 11, label: 'hh_ru', name: 'hh' },
         rel_platformAccounts_client: { Id: 36 },
         phone: '+79990001122',
         password: 'canonical-secret',
