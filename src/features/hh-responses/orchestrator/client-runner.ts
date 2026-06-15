@@ -53,7 +53,7 @@ const {
 const {
   AUTOMATION_LOCK_TAG,
   AUTO_RESPONDER_WATCH_MS,
-  DOLPHIN_HEADLESS,
+  DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN,
   ORCHESTRATOR_RESPONSE_LIMIT
 } = require('./config.ts')
 
@@ -431,7 +431,7 @@ async function cleanupClientDolphinProfile(
     previousProfileStatusId: number | null | undefined
   }
 ): Promise<OrchestratorStatus> {
-  if (DOLPHIN_HEADLESS) {
+  if (!DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN) {
     try {
       status = addLifecycleEvent(
         status,
@@ -456,6 +456,12 @@ async function cleanupClientDolphinProfile(
         errorStack: status.errorStack ?? getErrorStack(error)
       }
     }
+  } else {
+    status = addLifecycleEvent(
+      status,
+      runStartedAt,
+      'Dolphin profile left open by DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN'
+    )
   }
 
   if (options.profileTagAdded) {

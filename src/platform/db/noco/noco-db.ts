@@ -11,6 +11,13 @@ type ClientAutomationData = import('../types.ts').ClientAutomationData
 type ClientHHAuthCredentials = import('../types.ts').ClientHHAuthCredentials
 type Market = import('../types.ts').Market
 type NocoRecord = Record<string, unknown> & { Id: number }
+type StackSource = 'override' | 'primary'
+type ResolvedStack = {
+  id: number | null
+  name: string
+  source: StackSource
+  row?: NocoRecord
+}
 
 const STACK_OVERRIDE_FIELD = 'Stack Override'
 const HH_PLATFORM_IDS: Record<Market, number> = {
@@ -63,7 +70,19 @@ function linkedName(value: unknown): string {
   ).trim()
 }
 
-function resolveStack(row: NocoRecord, client: NocoRecord, clientName: string, stacks: NocoRecord[]): string {
+function findStackById(stacks: NocoRecord[], stackId: number | null): NocoRecord | undefined {
+  return stackId ? stacks.find(stack => Number(stack.Id) === stackId) : undefined
+}
+
+function findStackByText(stacks: NocoRecord[], stackName: string): NocoRecord | undefined {
+  const normalized = normalizeText(stackName)
+  if (!normalized) return undefined
+  return stacks.find(stack =>
+    [stack.name, stack.slug, stack.hh_scenario_alias].some(value => normalizeText(value) === normalized)
+  )
+}
+
+function resolveStack(row: NocoRecord, client: NocoRecord, clientName: string, stacks: NocoRecord[]): ResolvedStack {
   const overrideStacks = linkedRecords(row[STACK_OVERRIDE_FIELD])
   if (overrideStacks.length > 1) {
     throw new Error(
@@ -74,11 +93,26 @@ function resolveStack(row: NocoRecord, client: NocoRecord, clientName: string, s
   }
 
   const overrideStackId = linkedId(overrideStacks[0])
-  const overrideStack = overrideStackId
-    ? stacks.find(stack => stack.Id === overrideStackId)
-    : undefined
+  const overrideName = linkedName(overrideStacks[0])
+  if (overrideStackId || overrideName) {
+    const overrideStack = findStackById(stacks, overrideStackId) ?? findStackByText(stacks, overrideName)
+    return {
+      id: (overrideStackId ?? Number(overrideStack?.Id ?? 0)) || null,
+      name: linkedName(overrideStack) || overrideName,
+      source: 'override',
+      row: overrideStack
+    }
+  }
 
-  return linkedName(overrideStacks[0]) || linkedName(overrideStack) || linkedName(client.rel_clients_primary_stack)
+  const primaryStackId = linkedId(client.rel_clients_primary_stack)
+  const primaryName = linkedName(client.rel_clients_primary_stack)
+  const primaryStack = findStackById(stacks, primaryStackId) ?? findStackByText(stacks, primaryName)
+  return {
+    id: (primaryStackId ?? Number(primaryStack?.Id ?? 0)) || null,
+    name: linkedName(primaryStack) || primaryName,
+    source: 'primary',
+    row: primaryStack
+  }
 }
 
 function normalizeMarket(value: unknown): Market | '' {
@@ -94,14 +128,6 @@ function responseField(market: Market): string {
 
 function coverField(market: Market): string {
   return market === 'Ru' ? 'Сопровод_Ru' : 'Сопровод_En'
-}
-
-function scenarioLookupStack(clientName: string, stack: string): string {
-  if (normalizeText(stack) === 'frontend') {
-    return normalizeText(clientName) === 'кира' ? 'КИРА' : 'React'
-  }
-
-  return stack
 }
 
 function hhPlatform(market: Market): string {
@@ -217,11 +243,8 @@ function scenarioField(market: Market): string {
   return market === 'Ru' ? 'hh_scenario_url_ru' : 'hh_scenario_url_en'
 }
 
-function findStackScenario(stacks: NocoRecord[], stack: string, market: Market): string | undefined {
-  const normalized = normalizeText(stack)
-  const row = stacks.find(item =>
-    [item.hh_scenario_alias, item.name, item.slug].some(value => normalizeText(value) === normalized)
-  )
+function stackScenario(stack: ResolvedStack | NocoRecord | undefined, market: Market): string | undefined {
+  const row = (stack && 'row' in stack ? stack.row : stack) as NocoRecord | undefined
   return String(row?.[scenarioField(market)] ?? '').trim() || undefined
 }
 
@@ -259,7 +282,8 @@ function buildAutomationTargetsFromNocoState(
     if (!client) continue
 
     const clientName = String(client.client_name ?? '').trim()
-    const stack = resolveStack(row, client, clientName, state.stacks)
+    const resolvedStack = resolveStack(row, client, clientName, state.stacks)
+    const stack = resolvedStack.name
     const commonChatId = normalizeId(client.telegram_general_chat_id)
     if (!clientName || !stack || !commonChatId) continue
 
@@ -275,11 +299,7 @@ function buildAutomationTargetsFromNocoState(
       )
       const dolphinProfileId = Number(normalizeId(profile.dolphin_profile_id))
 
-      const scenario = findStackScenario(
-        state.stacks,
-        scenarioLookupStack(clientName, stack),
-        market
-      )
+      const scenario = stackScenario(resolvedStack, market)
 
       targets.push({
         clientName,
@@ -437,12 +457,12 @@ module.exports = {
   buildAutomationTargetsFromNocoState,
   createNocoDb,
   findClientDolphinProfile,
-  findStackScenario,
   getNocoHHAuthCredentials,
   HH_PLATFORM_IDS,
   isHHPlatformAccountForMarket,
   isEnabled,
   normalizeId,
+  resolveStack,
   responseField,
-  scenarioLookupStack
+  stackScenario
 }

@@ -1,9 +1,22 @@
 const {
   DOLPHIN_HEADLESS,
+  DOLPHIN_PROFILE_STOP_VERIFY_INTERVAL_MS,
+  DOLPHIN_PROFILE_STOP_VERIFY_MS,
   DOLPHIN_PROFILE_START_MAX_ATTEMPTS,
   DOLPHIN_PROFILE_START_RETRY_BASE_MS
 } = require('../../features/hh-responses/orchestrator/config.ts')
 const { getErrorMessage, wait } = require('../../features/hh-responses/orchestrator/runtime-utils.ts')
+const {
+  getRunningDolphinBrowserProfileIds,
+  killDolphinBrowserProfileProcesses
+} = require('./preflight.ts') as {
+  getRunningDolphinBrowserProfileIds(): number[]
+  killDolphinBrowserProfileProcesses(profileIds: number[]): Array<{
+    processId: number
+    parentProcessId: number
+    profileId: number
+  }>
+}
 const { requestLocalDolphin } = require('./local-api.ts') as {
   requestLocalDolphin<T>(
     endpointPath: string,
@@ -15,15 +28,73 @@ const { requestLocalDolphin } = require('./local-api.ts') as {
 }
 
 type DolphinStartResponse = import('./types.ts').DolphinStartResponse
+type DolphinRuntimeDependencies = {
+  getRunningDolphinBrowserProfileIds: () => number[]
+  killDolphinBrowserProfileProcesses: typeof killDolphinBrowserProfileProcesses
+  requestLocalDolphin: typeof requestLocalDolphin
+  wait: typeof wait
+}
 
 const startedProfileIds = new Set<number>()
+const defaultDependencies: DolphinRuntimeDependencies = {
+  getRunningDolphinBrowserProfileIds,
+  killDolphinBrowserProfileProcesses,
+  requestLocalDolphin,
+  wait
+}
+let dependencies = defaultDependencies
 
 function getStartedProfileIds(): number[] {
   return [...startedProfileIds]
 }
 
+function isDolphinProfileRunning(profileId: number): boolean {
+  return dependencies.getRunningDolphinBrowserProfileIds().includes(profileId)
+}
+
+async function waitForDolphinProfileToStop(profileId: number): Promise<boolean> {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt <= DOLPHIN_PROFILE_STOP_VERIFY_MS) {
+    if (!isDolphinProfileRunning(profileId)) {
+      return true
+    }
+
+    await dependencies.wait(DOLPHIN_PROFILE_STOP_VERIFY_INTERVAL_MS)
+  }
+
+  return !isDolphinProfileRunning(profileId)
+}
+
 async function stopDolphinProfile(profileId: number): Promise<void> {
-  await requestLocalDolphin(`/browser_profiles/${profileId}/stop`)
+  let stopError: unknown
+
+  try {
+    await dependencies.requestLocalDolphin(`/browser_profiles/${profileId}/stop`)
+  } catch (error: unknown) {
+    stopError = error
+    console.warn(
+      `Dolphin local stop failed for profile ${profileId}: ${getErrorMessage(error)}`
+    )
+  }
+
+  if (!(await waitForDolphinProfileToStop(profileId))) {
+    const killedProcesses = dependencies.killDolphinBrowserProfileProcesses([profileId])
+    if (killedProcesses.length) {
+      console.warn(
+        `Dolphin stop fallback terminated ${killedProcesses.length} leftover anty.exe process(es) ` +
+          `for profile ${profileId}`
+      )
+    }
+  }
+
+  if (!(await waitForDolphinProfileToStop(profileId))) {
+    throw new Error(
+      `Dolphin profile ${profileId} is still running after local stop` +
+        (stopError ? `: ${getErrorMessage(stopError)}` : '')
+    )
+  }
+
   startedProfileIds.delete(profileId)
 }
 
@@ -92,7 +163,7 @@ async function requestDolphinProfileStart(
     headless: boolean
   }
 ): Promise<DolphinStartResponse> {
-  const response = await requestLocalDolphin<DolphinStartResponse>(
+  const response = await dependencies.requestLocalDolphin<DolphinStartResponse>(
     `/browser_profiles/${profileId}/start`,
     {
       method: 'POST',
@@ -143,7 +214,7 @@ async function startDolphinProfileWithHeadless(
           `${attempt + 1}/${maxAttempts}; stopping and waiting ${retryDelayMs}ms`
       )
       await stopDolphinProfile(profileId).catch(() => undefined)
-      await wait(retryDelayMs)
+      await dependencies.wait(retryDelayMs)
     }
   }
 
@@ -158,7 +229,23 @@ async function startDolphinProfile(
   return await startDolphinProfileWithHeadless(profileId, DOLPHIN_HEADLESS)
 }
 
+function __setDolphinRuntimeTestDependencies(
+  overrides: Partial<DolphinRuntimeDependencies>
+): void {
+  dependencies = {
+    ...defaultDependencies,
+    ...overrides
+  }
+}
+
+function __resetDolphinRuntimeForTests(): void {
+  dependencies = defaultDependencies
+  startedProfileIds.clear()
+}
+
 module.exports = {
+  __resetDolphinRuntimeForTests,
+  __setDolphinRuntimeTestDependencies,
   getStartedProfileIds,
   startDolphinProfile,
   stopDolphinProfile,

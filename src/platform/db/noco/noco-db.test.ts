@@ -6,8 +6,7 @@ const {
   isHHPlatformAccountForMarket,
   isEnabled,
   normalizeId,
-  responseField,
-  scenarioLookupStack
+  responseField
 } = require('./noco-db.ts') as {
   buildAutomationTargetsFromNocoState(state: any, options?: any): any[]
   createNocoDb(options?: any): any
@@ -16,7 +15,6 @@ const {
   isEnabled(value: unknown): boolean
   normalizeId(value: unknown): string
   responseField(market: 'Ru' | 'En'): string
-  scenarioLookupStack(clientName: string, stack: string): string
 }
 
 async function runTests(): Promise<void> {
@@ -28,9 +26,6 @@ async function runTests(): Promise<void> {
   assert.equal(isHHPlatformAccountForMarket({ Id: 1, rel_platformAccounts_platform: { Id: 10, label: 'hh_en' } }, 'En'), true)
   assert.equal(isHHPlatformAccountForMarket({ Id: 1, rel_platformAccounts_platform: { Id: 16, label: 'hh_ru' } }, 'Ru'), false)
   assert.equal(isHHPlatformAccountForMarket({ Id: 1, platform: 'hh_ru' }, 'Ru'), true)
-  assert.equal(scenarioLookupStack('Кира', 'FRONTEND'), 'КИРА')
-  assert.equal(scenarioLookupStack('Антон', 'FRONTEND'), 'React')
-
   const targets = buildAutomationTargetsFromNocoState(
     {
       clients: [
@@ -38,7 +33,7 @@ async function runTests(): Promise<void> {
           Id: 1,
           client_name: 'Кира',
           telegram_general_chat_id: '5216637594',
-          rel_clients_primary_stack: { Id: 4, name: 'FRONTEND' }
+          rel_clients_primary_stack: { Id: 1, name: 'КИРА' }
         },
         {
           Id: 2,
@@ -110,7 +105,7 @@ async function runTests(): Promise<void> {
 
   assert.equal(targets.length, 2)
   assert.equal(targets[0].clientName, 'Кира')
-  assert.equal(targets[0].stack, 'FRONTEND')
+  assert.equal(targets[0].stack, 'КИРА')
   assert.equal(targets[0].market, 'Ru')
   assert.equal(targets[0].dolphinProfileId, 770032142)
   assert.equal(targets[0].commonChatId, '5216637594')
@@ -122,6 +117,56 @@ async function runTests(): Promise<void> {
   assert.equal(targets[1].commonChatId, '-1001')
   assert.equal(targets[1].coverText, 'Добрый день!')
   assert.equal(targets[1].stackScenario, 'https://hh.ru/applicant/vacancy_response?front')
+
+  const kiraOverrideTargets = buildAutomationTargetsFromNocoState(
+    {
+      clients: [
+        {
+          Id: 1,
+          client_name: 'Кира',
+          telegram_general_chat_id: '5216637594',
+          rel_clients_primary_stack: { Id: 1, name: 'КИРА' }
+        }
+      ],
+      autoresponseRows: [
+        {
+          Id: 3,
+          rel_hhAutoresponses_client: { Id: 1, client_name: 'Кира' },
+          'Stack Override': { Id: 2, name: 'FRONTEND' },
+          Сопровод_Ru: 'Здравствуйте!',
+          Делаем_отклики_Ru: 'TRUE'
+        }
+      ],
+      profiles: [
+        {
+          Id: 1,
+          locale: 'ru',
+          dolphin_profile_id: '770032142',
+          rel_dolphinProfiles_client: { Id: 1 }
+        }
+      ],
+      stacks: [
+        {
+          Id: 1,
+          name: 'КИРА',
+          slug: 'kira',
+          hh_scenario_alias: 'КИРА',
+          hh_scenario_url_ru: 'https://hh.ru/applicant/vacancy_response?kira'
+        },
+        {
+          Id: 2,
+          name: 'FRONTEND',
+          slug: 'frontend',
+          hh_scenario_alias: 'React',
+          hh_scenario_url_ru: 'https://hh.ru/applicant/vacancy_response?front'
+        }
+      ]
+    },
+    { market: 'Ru' }
+  )
+  assert.equal(kiraOverrideTargets[0].clientName, 'Кира')
+  assert.equal(kiraOverrideTargets[0].stack, 'FRONTEND')
+  assert.equal(kiraOverrideTargets[0].stackScenario, 'https://hh.ru/applicant/vacancy_response?front')
 
   assert.throws(
     () =>

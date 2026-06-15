@@ -3,10 +3,10 @@ const { createNocoDb } = require('../../../platform/db/noco/noco-db.ts') as {
 }
 const {
   findClientDolphinProfile,
-  findStackScenario,
   isHHPlatformAccountForMarket,
   normalizeId,
-  scenarioLookupStack
+  resolveStack: resolveNocoStack,
+  stackScenario
 } = require('../../../platform/db/noco/noco-db.ts') as {
   findClientDolphinProfile(
     profiles: Array<Record<string, unknown> & { Id: number }>,
@@ -14,10 +14,15 @@ const {
     clientName: string,
     market: Market
   ): Record<string, unknown> & { Id: number }
-  findStackScenario(stacks: Array<Record<string, unknown>>, stack: string, market: Market): string | undefined
   isHHPlatformAccountForMarket(account: Record<string, unknown> & { Id: number }, market: Market): boolean
   normalizeId(value: unknown): string
-  scenarioLookupStack(clientName: string, stack: string): string
+  resolveStack(row: Record<string, unknown> & { Id: number }, client: Record<string, unknown> & { Id: number }, clientName: string, stacks: Array<Record<string, unknown> & { Id: number }>): {
+    id: number | null
+    name: string
+    source: 'override' | 'primary'
+    row?: Record<string, unknown> & { Id: number }
+  }
+  stackScenario(stack: { row?: Record<string, unknown> } | Record<string, unknown> | undefined, market: Market): string | undefined
 }
 const { createNocoClient } = require('../core/client.ts') as {
   createNocoClient(options?: any): any
@@ -27,8 +32,6 @@ const { TABLES } = require('../core/schema.ts') as {
 }
 
 type Market = import('../../../platform/db/types.ts').Market
-
-const STACK_OVERRIDE_FIELD = 'Stack Override'
 
 type CliOptions = {
   json: boolean
@@ -40,6 +43,8 @@ type TargetReadiness = {
   clientName: string
   market: Market
   stack: string
+  stackId: number
+  stackSource: string
   dolphinProfileId: number
   commonChatId: string
   hasCoverText: boolean
@@ -81,13 +86,6 @@ function linkedRecord(value: unknown): Record<string, unknown> | null {
   return (Array.isArray(value) ? value[0] : value) as Record<string, unknown>
 }
 
-function linkedRecords(value: unknown): Array<Record<string, unknown>> {
-  if (!value || typeof value !== 'object') return []
-  return Array.isArray(value)
-    ? (value as Array<Record<string, unknown>>)
-    : [value as Record<string, unknown>]
-}
-
 function linkedId(value: unknown): number | null {
   const record = linkedRecord(value)
   const id = Number(record?.Id ?? record?.id)
@@ -100,36 +98,6 @@ function coverField(market: Market): string {
 
 function enabledField(market: Market): string {
   return market === 'Ru' ? 'Делаем_отклики_Ru' : 'Делаем_отклики_En'
-}
-
-function linkedName(value: unknown): string {
-  const record = linkedRecord(value)
-  return String(record?.name ?? record?.stack ?? '').trim()
-}
-
-function resolveStack(
-  row: Record<string, unknown>,
-  client: Record<string, unknown> | undefined,
-  clientName: string,
-  stacks: Array<Record<string, unknown> & { Id: number }>,
-  problems: string[]
-): string {
-  const overrideStacks = linkedRecords(row[STACK_OVERRIDE_FIELD])
-  if (overrideStacks.length > 1) {
-    problems.push(
-      `ambiguous stack override: ${overrideStacks
-        .map(stack => stack.Id ?? stack.id)
-        .join(', ')}`
-    )
-    return ''
-  }
-
-  const overrideStackId = linkedId(overrideStacks[0])
-  const overrideStack = overrideStackId
-    ? stacks.find(stack => stack.Id === overrideStackId)
-    : undefined
-
-  return linkedName(overrideStacks[0]) || linkedName(overrideStack) || linkedName(client?.rel_clients_primary_stack)
 }
 
 function platformAccountClientId(account: Record<string, unknown>): number | null {
@@ -198,7 +166,21 @@ function buildTargets(state: {
       if (!isEnabled(row[enabledField(market)])) continue
 
       const problems: string[] = []
-      const stack = resolveStack(row, client, clientName, state.stacks, problems)
+      let stack = ''
+      let stackId = 0
+      let stackSource = ''
+      let scenarioUrl: string | undefined
+      if (client) {
+        try {
+          const resolvedStack = resolveNocoStack(row, client, clientName, state.stacks)
+          stack = resolvedStack.name
+          stackId = Number(resolvedStack.id ?? 0)
+          stackSource = resolvedStack.source
+          scenarioUrl = stackScenario(resolvedStack, market)
+        } catch (error: unknown) {
+          problems.push(error instanceof Error ? error.message : String(error))
+        }
+      }
       let profile: (Record<string, unknown> & { Id: number }) | undefined
       if (client) {
         try {
@@ -220,18 +202,12 @@ function buildTargets(state: {
       const canonicalHHAccount = hhAccounts.length === 1 ? hhAccounts[0] : undefined
       const canonicalHHAccountId = Number(canonicalHHAccount?.Id ?? 0)
       const coverText = String(row[coverField(market)] ?? '').trim()
-      const stackScenario = findStackScenario(
-        state.stacks,
-        scenarioLookupStack(clientName, stack),
-        market
-      )
-
       if (!clientName) problems.push('missing client name')
       if (!stack) problems.push('missing stack')
       if (!Number.isFinite(dolphinProfileId) || dolphinProfileId <= 0) problems.push('missing Dolphin profile id')
       if (!commonChatId) problems.push('missing common chat id')
       if (!coverText) problems.push('missing cover text')
-      if (!stackScenario) problems.push('missing scenario URL')
+      if (!scenarioUrl) problems.push('missing scenario URL')
       if (!hasProfileRelation) problems.push('missing canonical Dolphin profile')
       if (!hhAccounts.length) {
         problems.push('missing canonical HH account')
@@ -243,10 +219,12 @@ function buildTargets(state: {
         clientName,
         market,
         stack,
+        stackId,
+        stackSource,
         dolphinProfileId: Number.isFinite(dolphinProfileId) ? dolphinProfileId : 0,
         commonChatId,
         hasCoverText: Boolean(coverText),
-        hasStackScenario: Boolean(stackScenario),
+        hasStackScenario: Boolean(scenarioUrl),
         hasProfileRelation,
         hasCanonicalHHAccount: Boolean(canonicalHHAccount),
         canonicalHHAccountId,
@@ -267,7 +245,7 @@ function printText(results: TargetReadiness[]): void {
     console.log(
       [
         `- ${result.clientName} / ${result.market}`,
-        result.stack,
+        `${result.stack || 'missing stack'} (${result.stackSource || 'no source'}${result.stackId ? ` #${result.stackId}` : ''})`,
         `profile ${result.dolphinProfileId}`,
         `chat ${result.commonChatId}`,
         status
