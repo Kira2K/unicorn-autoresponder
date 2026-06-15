@@ -57,6 +57,8 @@
     "web:test": "node src/features/web-console/dev-launcher.test.ts && node src/features/web-console/backend/dolphin-lease.test.ts && node src/features/web-console/backend/app.test.ts",
     "web:e2e": "node src/features/web-console/e2e/web-console.e2e.ts",
     "web:build": "vite build --config src/features/web-console/frontend/vite.config.js",
+    "web:deploy-build": "npm run web:build",
+    "web:start": "node src/features/web-console/backend/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
