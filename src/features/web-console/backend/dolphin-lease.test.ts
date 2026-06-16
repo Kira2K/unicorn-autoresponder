@@ -13,7 +13,7 @@ const {
 
 async function runTests(): Promise<void> {
   assert.equal(DEFAULT_DOLPHIN_SHARED_USER_ID, 5166733)
-  assert.equal(PROVIDER_DOLPHIN_EMAIL, 'kitsunewebdeveloper@gmail.com')
+  assert.equal(PROVIDER_DOLPHIN_EMAIL, 'nospanov9@gmail.com')
   assert.throws(
     () => validateDolphinTargetUser([{ id: 1, username: 'admin@example.com', role: 'admin' }], 1),
     /Refusing to rotate admin/

@@ -36,7 +36,7 @@ const DEFAULT_RESTORE_EMAIL = 'neurocorn.theveryevil@gmail.com'
 const DEFAULT_INTERVAL_MS = 60_000
 const DEFAULT_ROTATION_STEPS: RotationStep[] = [
   { email: 'judoshark@gmail.com', password: 'aaaaaaaa' },
-  { email: 'kitsunewebdeveloper@gmail.com', password: 'bbbbbbbb' },
+  { email: 'nospanov9@gmail.com', password: 'bbbbbbbb' },
   { email: 'charlie2kfox@gmail.com', password: 'cccccccc' }
 ]
 
@@ -149,7 +149,7 @@ async function runTests(): Promise<void> {
     calls.map(call => [call.username, call.password]),
     [
       ['judoshark@gmail.com', 'aaaaaaaa'],
-      ['kitsunewebdeveloper@gmail.com', 'bbbbbbbb'],
+      ['nospanov9@gmail.com', 'bbbbbbbb'],
       ['charlie2kfox@gmail.com', 'cccccccc'],
       [DEFAULT_RESTORE_EMAIL, 'restorepass']
     ]
@@ -158,7 +158,7 @@ async function runTests(): Promise<void> {
   assert.equal(prompts.length, 2)
   assert.match(prompts[1], /Enter password to restore neurocorn\.theveryevil@gmail\.com/)
   assert(logs.includes("It's time for email judoshark@gmail.com and the pass is aaaaaaaa"))
-  assert(logs.includes("It's time for email kitsunewebdeveloper@gmail.com and the pass is bbbbbbbb"))
+  assert(logs.includes("It's time for email nospanov9@gmail.com and the pass is bbbbbbbb"))
   assert(logs.includes("It's time for email charlie2kfox@gmail.com and the pass is cccccccc"))
 
   assert.throws(

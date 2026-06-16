@@ -71,7 +71,7 @@ type DolphinLeaseServiceOptions = {
 
 const DEFAULT_DOLPHIN_SHARED_USER_ID = 5166733
 const DEFAULT_DOLPHIN_SHARED_USER_LEASE_MS = 120_000
-const PROVIDER_DOLPHIN_EMAIL = 'kitsunewebdeveloper@gmail.com'
+const PROVIDER_DOLPHIN_EMAIL = 'nospanov9@gmail.com'
 
 function publicLease(lease: DolphinLease): PublicDolphinLease {
   return {
