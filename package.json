@@ -13,8 +13,6 @@
     "table:state": "node src/features/diagnostics/check-table-state.ts",
     "proxy:check-required": "node src/integrations/dolphin/proxyProvider/checkRequiredProxy/index.ts",
     "proxy:check-required:test": "node src/integrations/dolphin/proxyProvider/checkRequiredProxy/check-required-proxy.test.ts",
-    "dolphin:user-credentials:run": "node src/integrations/dolphin/team-user-credential-rotation/index.ts",
-    "dolphin:user-credentials:test": "node src/integrations/dolphin/team-user-credential-rotation/logic.test.ts",
     "noco:relations:dry-run": "node src/integrations/noco/relations/index.ts --dry-run",
     "noco:relations:apply": "node src/integrations/noco/relations/index.ts --apply",
     "noco:sync-markets:dry-run": "node src/integrations/noco/sync-markets/index.ts --dry-run",

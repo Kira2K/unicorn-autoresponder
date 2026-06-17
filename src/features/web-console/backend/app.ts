@@ -8,11 +8,15 @@ const { createMockNocoClient } = require('./mock-data.ts') as {
   createMockNocoClient(): any
 }
 const {
-  PROVIDER_DOLPHIN_EMAIL,
-  createDefaultDolphinLeaseService
+  createDefaultDolphinLeaseService,
+  normalizeDolphinErrorDetails,
+  resolveDolphinSharedUserEmail,
+  resolveDolphinSharedUserId
 } = require('./dolphin-lease.ts') as {
-  PROVIDER_DOLPHIN_EMAIL: string
   createDefaultDolphinLeaseService(): DolphinLeaseService
+  normalizeDolphinErrorDetails(error: unknown): any
+  resolveDolphinSharedUserEmail(): string
+  resolveDolphinSharedUserId(): number
 }
 
 type Request = import('express').Request
@@ -75,19 +79,14 @@ function publicSession(session: WebSession) {
 function resolveClientDolphinCredentials(client: { calendarEmail: string }) {
   const calendarEmail = String(client.calendarEmail ?? '').trim().toLowerCase()
   return {
-    username: calendarEmail,
-    password: calendarEmail,
+    username: resolveDolphinSharedUserEmail(),
+    password: createDolphinLeasePassword(),
     sourceEmail: calendarEmail
   }
 }
 
-function parseDolphinError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error)
-  try {
-    return JSON.parse(message)
-  } catch {
-    return null
-  }
+function createDolphinLeasePassword(): string {
+  return crypto.randomBytes(9).toString('base64url')
 }
 
 async function buildProfileAccessInput(repository: WebConsoleRepository, clientId: number) {
@@ -226,7 +225,7 @@ function createWebConsoleApp(options: {
     try {
       res.json({
         clients: await repository.getProviderClientsForStatus(PROVIDER_STATUS_LABEL),
-        providerDolphinEmail: PROVIDER_DOLPHIN_EMAIL
+        providerDolphinEmail: resolveDolphinSharedUserEmail()
       })
     } catch (error) {
       next(error)
@@ -234,6 +233,9 @@ function createWebConsoleApp(options: {
   })
 
   app.post('/api/dolphin/lease/acquire', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    let attemptedUsername = ''
+    let targetClientId: number | undefined
+    let targetClientName = ''
     try {
       const session = req.webSession!
       if (session.role === 'admin') {
@@ -249,6 +251,9 @@ function createWebConsoleApp(options: {
         }
         const credential = resolveClientDolphinCredentials(dashboard.client)
         const profileAccess = await buildProfileAccessInput(repository, dashboard.client.id)
+        attemptedUsername = credential.username
+        targetClientId = dashboard.client.id
+        targetClientName = dashboard.client.clientName
         res.json(await dolphinLeaseService.acquire({
           ownerKey: `client:${dashboard.client.id}`,
           ownerLabel: dashboard.client.clientName,
@@ -264,25 +269,28 @@ function createWebConsoleApp(options: {
         return
       }
 
-      const targetClientId = Number(req.body?.targetClientId)
-      if (!Number.isFinite(targetClientId) || targetClientId <= 0) {
+      const providerTargetClientId = Number(req.body?.targetClientId)
+      if (!Number.isFinite(providerTargetClientId) || providerTargetClientId <= 0) {
         res.status(400).json({ error: 'missing_target_client', message: 'Provider target client id is required.' })
         return
       }
-      const targetClient = await repository.getProviderClientByIdForStatus(targetClientId, PROVIDER_STATUS_LABEL)
+      const targetClient = await repository.getProviderClientByIdForStatus(providerTargetClientId, PROVIDER_STATUS_LABEL)
       if (!targetClient) {
         res.status(404).json({ error: 'target_client_not_found', message: 'Provider target client is not visible.' })
         return
       }
       const profileAccess = await buildProfileAccessInput(repository, targetClient.id)
+      attemptedUsername = resolveDolphinSharedUserEmail()
+      targetClientId = targetClient.id
+      targetClientName = targetClient.clientName
       res.json(await dolphinLeaseService.acquire({
         ownerKey: 'provider:Nariman',
         ownerLabel: 'Nariman',
         role: 'provider',
         targetClientId: targetClient.id,
         targetClientName: targetClient.clientName,
-        username: PROVIDER_DOLPHIN_EMAIL,
-        password: PROVIDER_DOLPHIN_EMAIL,
+        username: resolveDolphinSharedUserEmail(),
+        password: createDolphinLeasePassword(),
         profileIds: profileAccess.profileIds,
         knownProfileIds: profileAccess.knownProfileIds
       }))
@@ -303,11 +311,27 @@ function createWebConsoleApp(options: {
         })
         return
       }
-      const dolphinError = parseDolphinError(error)
+      if (error?.code === 'stable_dolphin_email_unavailable') {
+        res.status(422).json({
+          error: 'stable_dolphin_email_unavailable',
+          message: `Stable Dolphin login ${error.stableUsername} is not available in Dolphin. Choose another stable email or free this email in Dolphin.`,
+          attemptedUsername: error.stableUsername || attemptedUsername,
+          sharedUserId: error.targetUserId || resolveDolphinSharedUserId(),
+          targetClientId,
+          targetClientName,
+          dolphin: error.dolphinError
+        })
+        return
+      }
+      const dolphinError = normalizeDolphinErrorDetails(error)
       if (dolphinError?.code === 'E_TEAM_USERNAME') {
         res.status(422).json({
           error: 'dolphin_email_rejected',
-          message: 'Dolphin rejected this client email as a team-user login.',
+          message: `Dolphin rejected ${attemptedUsername || 'this email'} as a team-user login.`,
+          attemptedUsername,
+          sharedUserId: resolveDolphinSharedUserId(),
+          targetClientId,
+          targetClientName,
           dolphin: dolphinError
         })
         return

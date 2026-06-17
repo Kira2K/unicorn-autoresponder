@@ -116,9 +116,12 @@ async function openDolphinProfile(clientName, clientId) {
     dolphinLease.value = await api.acquireDolphinLease(clientName, clientId)
     nowMs.value = Date.now()
   } catch (caught) {
+    const body = caught?.body || {}
+    const dolphinCode = body.dolphin?.code ? ` (${body.dolphin.code})` : ''
+    const attempted = body.attemptedUsername ? ` Tried: ${body.attemptedUsername}.` : ''
     dolphinLeaseError.value = caught.status === 409
       ? 'account in use sorry'
-      : (caught instanceof Error ? caught.message : String(caught || ''))
+      : `${caught instanceof Error ? caught.message : String(caught || '')}${dolphinCode}${attempted}`
   } finally {
     dolphinLeaseLoading.value = false
   }
@@ -206,7 +209,7 @@ onUnmounted(() => {
         <template #content>
           <dl class="info-list">
             <div>
-              <dt>Email</dt>
+              <dt>Dolphin login</dt>
               <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
             </div>
             <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
@@ -236,7 +239,7 @@ onUnmounted(() => {
       <div v-else-if="isProvider" class="dashboard-grid provider-grid">
         <Card class="provider-card">
           <template #title>Clients on English market</template>
-          <template #subtitle>{{ providerClients.length }} visible clients. Provider Dolphin login/password for test: {{ providerDolphinEmail || 'empty' }}</template>
+          <template #subtitle>{{ providerClients.length }} visible clients. Shared Dolphin login: {{ providerDolphinEmail || 'empty' }}</template>
           <template #content>
             <DataTable :value="providerClients" striped-rows responsive-layout="scroll" data-testid="provider-clients-table">
               <Column field="clientName" header="Name" />

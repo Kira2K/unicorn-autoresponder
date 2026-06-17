@@ -11,6 +11,7 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const error = new Error(body.message || body.error || `Request failed: ${response.status}`)
     error.status = response.status
+    error.body = body
     throw error
   }
   return body

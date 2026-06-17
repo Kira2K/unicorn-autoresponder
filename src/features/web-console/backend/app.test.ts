@@ -31,6 +31,9 @@ const {
 const { linkedStatusMatches } = require('./repository.ts') as {
   linkedStatusMatches(value: unknown, expectedLabel: string, options?: Array<Record<string, unknown>>): boolean
 }
+const { DEFAULT_DOLPHIN_SHARED_USER_EMAIL } = require('./dolphin-lease.ts') as {
+  DEFAULT_DOLPHIN_SHARED_USER_EMAIL: string
+}
 
 function createFixtureNocoClient() {
   const calls: string[] = []
@@ -77,6 +80,15 @@ function createFixtureNocoClient() {
       calendar_email: 'no-profile@example.com',
       telegram_general_chat_id: '1006',
       rel_clients_primary_stack: { Id: 13, name: 'QA' },
+      market: 'Ru',
+      client_status: { Id: 1, title: 'studying' }
+    },
+    {
+      Id: 6,
+      client_name: 'Numeric Email Client',
+      calendar_email: '6186914@gmail.com',
+      telegram_general_chat_id: '1007',
+      rel_clients_primary_stack: { Id: 14, name: 'FRONTEND' },
       market: 'Ru',
       client_status: { Id: 1, title: 'studying' }
     }
@@ -164,6 +176,18 @@ function createFixtureNocoClient() {
       locale: 'ru',
       dolphin_profile_id: '444444444',
       clients_id: 4
+    },
+    {
+      Id: 60,
+      locale: 'ru',
+      dolphin_profile_id: '618691401',
+      clients_id: 6
+    },
+    {
+      Id: 70,
+      locale: 'en',
+      dolphin_profile_id: '618691402',
+      clients_id: 6
     }
   ]
 
@@ -223,11 +247,17 @@ async function request(baseUrl: string, path: string, options: any = {}, cookie 
 }
 
 async function runTests(): Promise<void> {
-  assert.deepEqual(resolveClientDolphinCredentials({ id: 28, calendarEmail: 'NPotokin@gmail.com' }), {
-    username: 'npotokin@gmail.com',
-    password: 'npotokin@gmail.com',
+  const normalizedCredential = resolveClientDolphinCredentials({ id: 28, calendarEmail: 'NPotokin@gmail.com' })
+  assert.deepEqual(normalizedCredential, {
+    username: DEFAULT_DOLPHIN_SHARED_USER_EMAIL,
+    password: normalizedCredential.password,
     sourceEmail: 'npotokin@gmail.com'
   })
+  const firstGeneratedPassword = normalizedCredential.password
+  const secondGeneratedPassword = resolveClientDolphinCredentials({ id: 28, calendarEmail: 'NPotokin@gmail.com' }).password
+  assert.match(firstGeneratedPassword, /^[A-Za-z0-9_-]{12}$/)
+  assert.notEqual(firstGeneratedPassword, 'npotokin@gmail.com')
+  assert.notEqual(firstGeneratedPassword, secondGeneratedPassword)
 
   const statusOptions = [
     { id: 'status-study', title: 'studying' },
@@ -259,7 +289,7 @@ async function runTests(): Promise<void> {
   const repository = createWebConsoleRepository({ nocoClient: noco })
   assert.deepEqual(await buildProfileAccessInput(repository, 1), {
     profileIds: [111111111, 111111112],
-    knownProfileIds: [111111111, 101010101, 444444444, 111111112, 333333333]
+    knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
   })
   await assert.rejects(
     () => buildProfileAccessInput(repository, 5),
@@ -271,6 +301,8 @@ async function runTests(): Promise<void> {
   )
   const leaseCalls: any[] = []
   let leaseConflict = false
+  let rejectDolphinEmail = false
+  let stableDolphinEmailUnavailable = false
   const app = createWebConsoleApp({
     repository,
     dolphinLeaseService: {
@@ -281,6 +313,36 @@ async function runTests(): Promise<void> {
           error.code = 'account_in_use'
           error.activeUntil = 123456
           error.ownerLabel = 'Other User'
+          throw error
+        }
+        if (rejectDolphinEmail) {
+          const error = new Error(JSON.stringify({
+            text: 'You have problem in field email',
+            type: 'E_TEAM',
+            code: 'E_TEAM_USERNAME'
+          })) as Error & { details?: any }
+          error.details = {
+            text: 'You have problem in field email',
+            type: 'E_TEAM',
+            code: 'E_TEAM_USERNAME'
+          }
+          throw error
+        }
+        if (stableDolphinEmailUnavailable) {
+          const error = new Error(`Stable Dolphin login ${request.username} is not available in Dolphin.`) as Error & {
+            code?: string
+            stableUsername?: string
+            targetUserId?: number
+            dolphinError?: any
+          }
+          error.code = 'stable_dolphin_email_unavailable'
+          error.stableUsername = request.username
+          error.targetUserId = 5166733
+          error.dolphinError = {
+            text: 'You have problem in field email',
+            type: 'E_TEAM',
+            code: 'E_TEAM_USERNAME'
+          }
           throw error
         }
         return {
@@ -328,7 +390,7 @@ async function runTests(): Promise<void> {
     assert.equal(clientLogin.body.clientId, 1)
 
     result = await request(server.baseUrl, '/api/client/me', {}, clientLogin.cookie)
-    assert.equal(result.response.status, 200)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.client.clientName, 'Client One')
     assert.equal(result.body.linkedInEmail, 'client-one.linkedin@example.com')
     assert.equal(result.body.platformAccounts[0].password, '***')
@@ -339,9 +401,10 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 403)
 
     result = await request(server.baseUrl, '/api/dolphin/lease/acquire', { method: 'POST' }, clientLogin.cookie)
-    assert.equal(result.response.status, 200)
-    assert.equal(result.body.username, 'client@example.com')
-    assert.equal(result.body.password, 'client@example.com')
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.username, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
+    assert.match(result.body.password, /^[A-Za-z0-9_-]{12}$/)
+    assert.notEqual(result.body.password, 'client@example.com')
     assert.equal(result.body.sourceEmail, 'client@example.com')
     assert.equal(result.body.targetClientName, 'Client One')
     assert.deepEqual(result.body.profileIds, [111111111, 111111112])
@@ -351,17 +414,71 @@ async function runTests(): Promise<void> {
       role: 'client',
       targetClientId: 1,
       targetClientName: 'Client One',
-      username: 'client@example.com',
-      password: 'client@example.com',
+      username: DEFAULT_DOLPHIN_SHARED_USER_EMAIL,
+      password: result.body.password,
       sourceEmail: 'client@example.com',
       profileIds: [111111111, 111111112],
-      knownProfileIds: [111111111, 101010101, 444444444, 111111112, 333333333]
+      knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
     })
 
     result = await request(server.baseUrl, '/api/auth/logout', { method: 'POST' }, clientLogin.cookie)
     assert.equal(result.response.status, 200)
     result = await request(server.baseUrl, '/api/client/me', {}, clientLogin.cookie)
     assert.equal(result.response.status, 401)
+
+    const numericEmailLogin = await request(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: '6186914@gmail.com', password: '1234' })
+    })
+    assert.equal(numericEmailLogin.response.status, 200)
+    result = await request(server.baseUrl, '/api/dolphin/lease/acquire', { method: 'POST' }, numericEmailLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.equal(result.body.username, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
+    assert.match(result.body.password, /^[A-Za-z0-9_-]{12}$/)
+    assert.notEqual(result.body.password, '6186914@gmail.com')
+    assert.deepEqual(result.body.profileIds, [618691401, 618691402])
+    assert.deepEqual(leaseCalls.at(-1), {
+      ownerKey: 'client:6',
+      ownerLabel: 'Numeric Email Client',
+      role: 'client',
+      targetClientId: 6,
+      targetClientName: 'Numeric Email Client',
+      username: DEFAULT_DOLPHIN_SHARED_USER_EMAIL,
+      password: result.body.password,
+      sourceEmail: '6186914@gmail.com',
+      profileIds: [618691401, 618691402],
+      knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
+    })
+
+    rejectDolphinEmail = true
+    result = await request(server.baseUrl, '/api/dolphin/lease/acquire', { method: 'POST' }, numericEmailLogin.cookie)
+    assert.equal(result.response.status, 422)
+    assert.equal(result.body.error, 'dolphin_email_rejected')
+    assert.equal(result.body.attemptedUsername, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
+    assert.equal(result.body.sharedUserId, 5166733)
+    assert.equal(result.body.targetClientId, 6)
+    assert.equal(result.body.targetClientName, 'Numeric Email Client')
+    assert.equal(result.body.dolphin.code, 'E_TEAM_USERNAME')
+    rejectDolphinEmail = false
+
+    stableDolphinEmailUnavailable = true
+    result = await request(server.baseUrl, '/api/dolphin/lease/acquire', { method: 'POST' }, numericEmailLogin.cookie)
+    assert.equal(result.response.status, 422)
+    assert.equal(result.body.error, 'stable_dolphin_email_unavailable')
+    assert.equal(
+      result.body.message,
+      `Stable Dolphin login ${DEFAULT_DOLPHIN_SHARED_USER_EMAIL} is not available in Dolphin. Choose another stable email or free this email in Dolphin.`
+    )
+    assert.equal(result.body.attemptedUsername, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
+    assert.equal(result.body.sharedUserId, 5166733)
+    assert.equal(result.body.targetClientId, 6)
+    assert.equal(result.body.targetClientName, 'Numeric Email Client')
+    assert.equal(result.body.dolphin.code, 'E_TEAM_USERNAME')
+    stableDolphinEmailUnavailable = false
+
+    result = await request(server.baseUrl, '/api/auth/logout', { method: 'POST' }, numericEmailLogin.cookie)
+    assert.equal(result.response.status, 200)
 
     const noProfileLogin = await request(server.baseUrl, '/api/auth/login', {
       method: 'POST',
@@ -392,7 +509,7 @@ async function runTests(): Promise<void> {
 
     result = await request(server.baseUrl, '/api/provider/clients', {}, providerLogin.cookie)
     assert.equal(result.response.status, 200)
-    assert.equal(result.body.providerDolphinEmail, 'nospanov9@gmail.com')
+    assert.equal(result.body.providerDolphinEmail, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
     assert.deepEqual(result.body.clients.map((client: any) => client.clientName), ['Provider Match', 'Newest Client'])
     assert.equal(result.body.clients.some((client: any) => client.clientName === 'Unknown Raw String Should Not Match'), false)
     assert.equal(result.body.clients[0].linkedInEmail, 'provider-match.linkedin@example.com')
@@ -406,8 +523,9 @@ async function runTests(): Promise<void> {
       body: JSON.stringify({ targetClientId: 3, targetClientName: 'Provider Match' })
     }, providerLogin.cookie)
     assert.equal(result.response.status, 200)
-    assert.equal(result.body.username, 'nospanov9@gmail.com')
-    assert.equal(result.body.password, 'nospanov9@gmail.com')
+    assert.equal(result.body.username, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
+    assert.match(result.body.password, /^[A-Za-z0-9_-]{12}$/)
+    assert.notEqual(result.body.password, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
     assert.deepEqual(result.body.profileIds, [333333333])
     assert.equal(leaseCalls.at(-1).targetClientName, result.body.targetClientName)
     assert.equal(leaseCalls.at(-1).targetClientId, 3)
