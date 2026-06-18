@@ -154,7 +154,7 @@ async function getDolphinVerificationCode() {
 
 async function copyVerificationCode() {
   if (!verificationCode.value?.code) return
-  await navigator.clipboard?.writeText(verificationCode.value.code)
+  await navigator.clipboard?.writeText(String(verificationCode.value.code).replace(/\s+/g, ''))
 }
 
 onMounted(async () => {

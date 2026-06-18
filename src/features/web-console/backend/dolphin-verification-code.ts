@@ -104,7 +104,7 @@ function extractVerificationCode(body: string): string | null {
   const labeled = body.match(/(?:code|код)[^\d]{0,40}(\d{3})\s?(\d{3})/i)
   const generic = body.match(/\b(\d{3})\s?(\d{3})\b/)
   const match = labeled ?? generic
-  return match ? `${match[1]} ${match[2]}` : null
+  return match ? `${match[1]}${match[2]}` : null
 }
 
 function createCodeNotFoundError(): VerificationCodeNotFound {
@@ -213,7 +213,7 @@ function createMockVerificationCodeService() {
     async getLatestCode(): Promise<VerificationCodeResult> {
       return {
         ok: true,
-        code: '123 456',
+        code: '123456',
         receivedAt: new Date(Date.now() - 30_000).toISOString(),
         ageMs: 30_000
       }

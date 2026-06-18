@@ -375,7 +375,7 @@ async function runTests(): Promise<void> {
         }
         return {
           ok: true,
-          code: '123 456',
+          code: '123456',
           receivedAt: '2026-06-17T09:39:00.000Z',
           ageMs: 30_000
         }
@@ -448,7 +448,7 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 200)
     assert.deepEqual(result.body, {
       ok: true,
-      code: '123 456',
+      code: '123456',
       receivedAt: '2026-06-17T09:39:00.000Z',
       ageMs: 30_000
     })
@@ -561,7 +561,7 @@ async function runTests(): Promise<void> {
 
     result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, providerLogin.cookie)
     assert.equal(result.response.status, 200)
-    assert.equal(result.body.code, '123 456')
+    assert.equal(result.body.code, '123456')
 
     result = await request(server.baseUrl, '/api/dolphin/lease/acquire', {
       method: 'POST',
@@ -637,7 +637,7 @@ async function runTests(): Promise<void> {
 
     result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, adminLogin.cookie)
     assert.equal(result.response.status, 200)
-    assert.equal(result.body.code, '123 456')
+    assert.equal(result.body.code, '123456')
 
     result = await request(server.baseUrl, '/api/admin/hh-responses/start', { method: 'POST' }, adminLogin.cookie)
     assert.equal(result.response.status, 200)

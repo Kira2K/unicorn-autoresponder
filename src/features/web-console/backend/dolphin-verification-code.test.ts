@@ -38,9 +38,9 @@ function runTests(): void {
   assert.equal(isDolphinVerificationEmail(email({ subject: 'Welcome to Dolphin' })), false)
   assert.equal(isDolphinVerificationEmail(email({ body: 'Your code is 123456' })), false)
 
-  assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\nEnter code from the email: 123 456`), '123 456')
-  assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\nCode: 123456`), '123 456')
-  assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\n<div>Enter code from the email: <b>654 321</b></div>`), '654 321')
+  assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\nEnter code from the email: 123 456`), '123456')
+  assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\nCode: 123456`), '123456')
+  assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\n<div>Enter code from the email: <b>654 321</b></div>`), '654321')
   assert.equal(extractVerificationCode('no six digit code here'), null)
 
   const now = Date.UTC(2026, 5, 17, 10, 0, 0)
@@ -50,7 +50,7 @@ function runTests(): void {
     email({ body: `${DOLPHIN_VERIFICATION_SUBJECT}\nCode: 333333`, receivedAt: now - 700_000 })
   ], { now, maxAgeMs: 600_000 }), {
     ok: true,
-    code: '222 222',
+    code: '222222',
     receivedAt: new Date(now - 10_000).toISOString(),
     ageMs: 10_000
   })
@@ -82,7 +82,7 @@ function runTests(): void {
   assert.equal(parsed.subject, DOLPHIN_VERIFICATION_SUBJECT)
   assert.equal(parsed.receivedAt, now - 5_000)
   assert.equal(isDolphinVerificationEmail(parsed), true)
-  assert.equal(extractVerificationCode(parsed.body), '987 654')
+  assert.equal(extractVerificationCode(parsed.body), '987654')
 
   const authUrl = createGmailOAuthUrl({
     clientId: 'client-id',

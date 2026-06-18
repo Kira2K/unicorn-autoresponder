@@ -96,7 +96,7 @@ async function runTests(): Promise<void> {
     await assertText(page, 'Password')
     await page.getByTestId('dolphin-lease-profiles').getByText('770032142, 770032143', { exact: false }).waitFor()
     await page.getByTestId('get-verification-code-button').click()
-    await page.getByTestId('verification-code-value').getByText('Code: 123 456', { exact: false }).waitFor()
+    await page.getByTestId('verification-code-value').getByText('Code: 123456', { exact: false }).waitFor()
     await page.getByTestId('copy-verification-code-button').waitFor()
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '02-client-dashboard.png'), fullPage: true })
     await page.getByTestId('logout-button').click()
