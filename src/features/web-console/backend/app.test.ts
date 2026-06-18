@@ -303,6 +303,7 @@ async function runTests(): Promise<void> {
   let leaseConflict = false
   let rejectDolphinEmail = false
   let stableDolphinEmailUnavailable = false
+  let verificationCodeMode: 'ok' | 'not_found' | 'setup_error' = 'ok'
   const app = createWebConsoleApp({
     repository,
     dolphinLeaseService: {
@@ -359,6 +360,26 @@ async function runTests(): Promise<void> {
           targetClientName: request.targetClientName
         }
       }
+    },
+    verificationCodeService: {
+      async getLatestCode() {
+        if (verificationCodeMode === 'not_found') {
+          const error = new Error('No fresh Dolphin verification code was found.') as Error & { code?: string }
+          error.code = 'code_not_found'
+          throw error
+        }
+        if (verificationCodeMode === 'setup_error') {
+          const error = new Error('Dolphin verification Gmail credentials are not configured.') as Error & { code?: string }
+          error.code = 'mailbox_setup_error'
+          throw error
+        }
+        return {
+          ok: true,
+          code: '123 456',
+          receivedAt: '2026-06-17T09:39:00.000Z',
+          ageMs: 30_000
+        }
+      }
     }
   })
   const server = await listen(app)
@@ -371,6 +392,8 @@ async function runTests(): Promise<void> {
     result = await request(server.baseUrl, '/api/admin/latest-client')
     assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/provider/clients')
+    assert.equal(result.response.status, 401)
+    result = await request(server.baseUrl, '/api/dolphin/verification-code/latest')
     assert.equal(result.response.status, 401)
 
     result = await request(server.baseUrl, '/api/auth/login', {
@@ -420,6 +443,25 @@ async function runTests(): Promise<void> {
       profileIds: [111111111, 111111112],
       knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
     })
+
+    result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.deepEqual(result.body, {
+      ok: true,
+      code: '123 456',
+      receivedAt: '2026-06-17T09:39:00.000Z',
+      ageMs: 30_000
+    })
+
+    verificationCodeMode = 'not_found'
+    result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 404)
+    assert.equal(result.body.error, 'code_not_found')
+    verificationCodeMode = 'setup_error'
+    result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 503)
+    assert.equal(result.body.error, 'mailbox_setup_error')
+    verificationCodeMode = 'ok'
 
     result = await request(server.baseUrl, '/api/auth/logout', { method: 'POST' }, clientLogin.cookie)
     assert.equal(result.response.status, 200)
@@ -517,6 +559,10 @@ async function runTests(): Promise<void> {
     assert.deepEqual(Object.keys(result.body.clients[0]).sort(), ['clientName', 'id', 'linkedInEmail', 'primaryStack'])
     assert.equal(JSON.stringify(result.body).includes('clientStatus'), false)
 
+    result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, providerLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.equal(result.body.code, '123 456')
+
     result = await request(server.baseUrl, '/api/dolphin/lease/acquire', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -588,6 +634,10 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.platformAccounts[0].password, 'mail-secret')
     result = await request(server.baseUrl, '/api/provider/clients', {}, adminLogin.cookie)
     assert.equal(result.response.status, 403)
+
+    result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, adminLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.equal(result.body.code, '123 456')
 
     result = await request(server.baseUrl, '/api/admin/hh-responses/start', { method: 'POST' }, adminLogin.cookie)
     assert.equal(result.response.status, 200)

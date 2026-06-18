@@ -15,6 +15,9 @@ const dryRunResult = ref(null)
 const dolphinLease = ref(null)
 const dolphinLeaseError = ref('')
 const dolphinLeaseLoading = ref(false)
+const verificationCode = ref(null)
+const verificationCodeError = ref('')
+const verificationCodeLoading = ref(false)
 const nowMs = ref(Date.now())
 let countdownTimer = null
 
@@ -41,6 +44,8 @@ async function loadDashboard() {
   error.value = ''
   dryRunResult.value = null
   dolphinLeaseError.value = ''
+  verificationCode.value = null
+  verificationCodeError.value = ''
   try {
     if (isAdmin.value) {
       dashboard.value = await api.adminLatestClient()
@@ -91,6 +96,8 @@ async function logout() {
     dryRunResult.value = null
     dolphinLease.value = null
     dolphinLeaseError.value = ''
+    verificationCode.value = null
+    verificationCodeError.value = ''
     password.value = ''
     loading.value = false
   }
@@ -112,6 +119,8 @@ async function startHhResponses() {
 async function openDolphinProfile(clientName, clientId) {
   dolphinLeaseLoading.value = true
   dolphinLeaseError.value = ''
+  verificationCode.value = null
+  verificationCodeError.value = ''
   try {
     dolphinLease.value = await api.acquireDolphinLease(clientName, clientId)
     nowMs.value = Date.now()
@@ -125,6 +134,27 @@ async function openDolphinProfile(clientName, clientId) {
   } finally {
     dolphinLeaseLoading.value = false
   }
+}
+
+async function getDolphinVerificationCode() {
+  verificationCodeLoading.value = true
+  verificationCodeError.value = ''
+  try {
+    verificationCode.value = await api.latestDolphinVerificationCode()
+  } catch (caught) {
+    const body = caught?.body || {}
+    verificationCode.value = null
+    verificationCodeError.value = body.error === 'code_not_found'
+      ? 'No fresh Dolphin verification code was found.'
+      : caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    verificationCodeLoading.value = false
+  }
+}
+
+async function copyVerificationCode() {
+  if (!verificationCode.value?.code) return
+  await navigator.clipboard?.writeText(verificationCode.value.code)
 }
 
 onMounted(async () => {
@@ -232,6 +262,37 @@ onUnmounted(() => {
         </template>
       </Card>
 
+      <Card v-if="isAdmin" class="verification-card">
+        <template #title>Dolphin verification code</template>
+        <template #subtitle>Use this when Dolphin asks for the email code</template>
+        <template #content>
+          <div class="verification-panel">
+            <Button
+              label="Get verification code"
+              icon="pi pi-envelope"
+              size="small"
+              :loading="verificationCodeLoading"
+              data-testid="get-verification-code-button"
+              @click="getDolphinVerificationCode"
+            />
+            <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
+              {{ verificationCodeError }}
+            </Message>
+            <div v-if="verificationCode" class="verification-code-row">
+              <span data-testid="verification-code-value">Code: {{ verificationCode.code }}</span>
+              <Button
+                label="Copy"
+                icon="pi pi-copy"
+                size="small"
+                severity="secondary"
+                data-testid="copy-verification-code-button"
+                @click="copyVerificationCode"
+              />
+            </div>
+          </div>
+        </template>
+      </Card>
+
       <div v-if="pageLoading" class="loading-panel">
         <ProgressSpinner aria-label="Loading" />
       </div>
@@ -241,6 +302,36 @@ onUnmounted(() => {
           <template #title>Clients on English market</template>
           <template #subtitle>{{ providerClients.length }} visible clients. Shared Dolphin login: {{ providerDolphinEmail || 'empty' }}</template>
           <template #content>
+            <div class="dolphin-action-panel">
+              <div>
+                <h2>Dolphin profile access</h2>
+                <p>Use the code button if Dolphin asks for email verification.</p>
+              </div>
+              <div class="verification-panel">
+                <Button
+                  label="Get verification code"
+                  icon="pi pi-envelope"
+                  size="small"
+                  :loading="verificationCodeLoading"
+                  data-testid="get-verification-code-button"
+                  @click="getDolphinVerificationCode"
+                />
+                <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
+                  {{ verificationCodeError }}
+                </Message>
+                <div v-if="verificationCode" class="verification-code-row">
+                  <span data-testid="verification-code-value">Code: {{ verificationCode.code }}</span>
+                  <Button
+                    label="Copy"
+                    icon="pi pi-copy"
+                    size="small"
+                    severity="secondary"
+                    data-testid="copy-verification-code-button"
+                    @click="copyVerificationCode"
+                  />
+                </div>
+              </div>
+            </div>
             <DataTable :value="providerClients" striped-rows responsive-layout="scroll" data-testid="provider-clients-table">
               <Column field="clientName" header="Name" />
               <Column field="primaryStack" header="Stack" />
@@ -302,6 +393,31 @@ onUnmounted(() => {
               data-testid="open-dolphin-client-button"
               @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id)"
             />
+            <div class="verification-panel">
+              <Button
+                label="Get verification code"
+                icon="pi pi-envelope"
+                size="small"
+                severity="secondary"
+                :loading="verificationCodeLoading"
+                data-testid="get-verification-code-button"
+                @click="getDolphinVerificationCode"
+              />
+              <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
+                {{ verificationCodeError }}
+              </Message>
+              <div v-if="verificationCode" class="verification-code-row">
+                <span data-testid="verification-code-value">Code: {{ verificationCode.code }}</span>
+                <Button
+                  label="Copy"
+                  icon="pi pi-copy"
+                  size="small"
+                  severity="secondary"
+                  data-testid="copy-verification-code-button"
+                  @click="copyVerificationCode"
+                />
+              </div>
+            </div>
           </template>
         </Card>
 

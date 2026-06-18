@@ -70,11 +70,13 @@ body {
 .action-card,
 .accounts-card,
 .provider-card,
-.lease-card {
+.lease-card,
+.verification-card {
   border-radius: 8px;
 }
 
-.lease-card {
+.lease-card,
+.verification-card {
   border-color: #bae6fd;
 }
 
@@ -114,6 +116,48 @@ body {
   gap: 16px;
 }
 
+.verification-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.verification-code-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.verification-code-row span {
+  font-weight: 700;
+}
+
+.dolphin-action-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #d7e3f5;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.dolphin-action-panel h2,
+.dolphin-action-panel p {
+  margin: 0;
+}
+
+.dolphin-action-panel h2 {
+  font-size: 1rem;
+}
+
+.dolphin-action-panel p {
+  color: #60708a;
+  margin-top: 4px;
+}
+
 .result-message {
   margin: 0;
   padding: 12px 14px;
@@ -137,6 +181,10 @@ body {
   }
 
   .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dolphin-action-panel {
     grid-template-columns: 1fr;
   }
 }

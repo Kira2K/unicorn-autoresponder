@@ -18,6 +18,9 @@ const {
   resolveDolphinSharedUserEmail(): string
   resolveDolphinSharedUserId(): number
 }
+const { createDefaultVerificationCodeService } = require('./dolphin-verification-code.ts') as {
+  createDefaultVerificationCodeService(): VerificationCodeService
+}
 
 type Request = import('express').Request
 type Response = import('express').Response
@@ -38,6 +41,9 @@ type DolphinLeaseService = {
     profileIds: number[]
     knownProfileIds: number[]
   }): Promise<unknown>
+}
+type VerificationCodeService = {
+  getLatestCode(): Promise<unknown>
 }
 
 const SESSION_COOKIE = 'web_console_session'
@@ -105,6 +111,7 @@ async function buildProfileAccessInput(repository: WebConsoleRepository, clientI
 function createWebConsoleApp(options: {
   repository?: WebConsoleRepository
   dolphinLeaseService?: DolphinLeaseService
+  verificationCodeService?: VerificationCodeService
   useMockData?: boolean
 } = {}) {
   const repository =
@@ -115,6 +122,7 @@ function createWebConsoleApp(options: {
         : undefined
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
+  const verificationCodeService = options.verificationCodeService ?? createDefaultVerificationCodeService()
   const sessions = createSessionStore()
   const app = express()
 
@@ -163,6 +171,28 @@ function createWebConsoleApp(options: {
   }
 
   app.use(attachSession)
+
+  app.get('/oauth2callback', (req: Request, res: Response) => {
+    const code = String(req.query?.code ?? '').trim()
+    const error = String(req.query?.error ?? '').trim()
+    res.type('text/plain')
+    if (error) {
+      res.send(`Google OAuth returned an error: ${error}`)
+      return
+    }
+    if (!code) {
+      res.send('Google OAuth callback opened, but no code query parameter was found.')
+      return
+    }
+    res.send([
+      'Google OAuth code received.',
+      '',
+      'Run this in PowerShell:',
+      `npm run web:gmail:token -- --code="${code}"`,
+      '',
+      'Then add the printed DOLPHIN_VERIFICATION_GMAIL_REFRESH_TOKEN to .env.'
+    ].join('\n'))
+  })
 
   app.post('/api/auth/login', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -333,6 +363,28 @@ function createWebConsoleApp(options: {
           targetClientId,
           targetClientName,
           dolphin: dolphinError
+        })
+        return
+      }
+      next(error)
+    }
+  })
+
+  app.get('/api/dolphin/verification-code/latest', requireAuth, async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json(await verificationCodeService.getLatestCode())
+    } catch (error: any) {
+      if (error?.code === 'code_not_found') {
+        res.status(404).json({
+          error: 'code_not_found',
+          message: error.message
+        })
+        return
+      }
+      if (error?.code === 'mailbox_setup_error') {
+        res.status(503).json({
+          error: 'mailbox_setup_error',
+          message: error.message
         })
         return
       }

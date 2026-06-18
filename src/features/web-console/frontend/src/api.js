@@ -42,6 +42,9 @@ export const api = {
       body: JSON.stringify({ targetClientId })
     })
   },
+  latestDolphinVerificationCode() {
+    return request('/api/dolphin/verification-code/latest')
+  },
   adminLatestClient() {
     return request('/api/admin/latest-client')
   },
