@@ -44,7 +44,8 @@ const {
 } = require('./auth-workflow.ts')
 const {
   getErrorMessage,
-  getErrorStack
+  getErrorStack,
+  withTimeout
 } = require('./runtime-utils.ts')
 const { normalizeParserErrorCode } = require('./scraper-state.ts')
 const {
@@ -54,6 +55,7 @@ const {
   AUTOMATION_LOCK_TAG,
   AUTO_RESPONDER_WATCH_MS,
   DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN,
+  ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
   ORCHESTRATOR_RESPONSE_LIMIT
 } = require('./config.ts')
 
@@ -351,14 +353,18 @@ async function sendClientAutoResponderReports(
     runStartedAt,
     'sending client Telegram report'
   )
-  await sendManualVacanciesToTelegram(
-    clientData.commonChatId,
-    `${clientData.clientName} / ${clientData.market}`,
-    data.manualVacancies,
-    data.responseCount,
-    data.vacancyTransitionCount,
-    isClientReportSuccessful(status),
-    status.manualVacanciesCleanup
+  await withTimeout(
+    sendManualVacanciesToTelegram(
+      clientData.commonChatId,
+      `${clientData.clientName} / ${clientData.market}`,
+      data.manualVacancies,
+      data.responseCount,
+      data.vacancyTransitionCount,
+      isClientReportSuccessful(status),
+      status.manualVacanciesCleanup
+    ),
+    ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
+    `Client Telegram report timed out after ${ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS}ms`
   )
 
   status = {
@@ -378,7 +384,11 @@ async function sendClientAutoResponderReports(
         runStartedAt,
         'sending parser logs to logs chat'
       )
-      await sendParserLogsToTelegram(status, data.parserLogs)
+      await withTimeout(
+        sendParserLogsToTelegram(status, data.parserLogs),
+        ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
+        `Parser logs Telegram report timed out after ${ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS}ms`
+      )
       status = {
         ...status,
         parserLogsSent: true
@@ -419,6 +429,50 @@ async function sendClientAutoResponderReports(
   }
 
   return status
+}
+
+async function sendClientFinalTelegramLogsWithTimeout(
+  status: OrchestratorStatus
+): Promise<void> {
+  try {
+    await withTimeout(
+      sendClientLifecycleLog(status),
+      ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
+      `Client lifecycle Telegram log timed out after ${ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS}ms`
+    )
+  } catch (error: unknown) {
+    console.error(
+      `Failed to send client lifecycle log: ${getErrorMessage(error)}`
+    )
+    writeLocalRunLog({
+      kind: 'client-lifecycle-send-failed',
+      clientName: status.clientName,
+      market: status.market,
+      dolphinProfileId: status.dolphinProfileId,
+      timeoutMs: ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+  }
+
+  try {
+    await withTimeout(
+      sendClientErrorLog(status),
+      ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
+      `Client error Telegram log timed out after ${ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS}ms`
+    )
+  } catch (error: unknown) {
+    console.error(`Failed to send client error log: ${getErrorMessage(error)}`)
+    writeLocalRunLog({
+      kind: 'client-error-send-failed',
+      clientName: status.clientName,
+      market: status.market,
+      dolphinProfileId: status.dolphinProfileId,
+      timeoutMs: ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+  }
 }
 
 async function cleanupClientDolphinProfile(
@@ -849,8 +903,7 @@ async function runClientOrchestrator(
     kind: 'client-final-status',
     status
   })
-  await sendClientLifecycleLog(status)
-  await sendClientErrorLog(status)
+  await sendClientFinalTelegramLogsWithTimeout(status)
 
   console.log(status)
 
