@@ -16,13 +16,19 @@ const { createWebConsoleRepository } = require('./repository.ts') as {
   createWebConsoleRepository(options?: any): any
 }
 const {
+  buildAccountPatch,
+  buildChangedClientPatch,
   buildLinkedInEmailByClientId,
+  buildClientPatch,
   isLinkedInPlatformAccount,
   LINKEDIN_PLATFORM_ID,
   profileClientId,
   profileId
 } = require('./repository.ts') as {
+  buildAccountPatch(input: any, options: { includeBlankSecrets: boolean }): Record<string, unknown>
+  buildChangedClientPatch(current: any, input: any): Record<string, unknown>
   buildLinkedInEmailByClientId(accounts: Array<Record<string, unknown> & { Id: number }>): Map<number, string>
+  buildClientPatch(input: any): Record<string, unknown>
   isLinkedInPlatformAccount(account: Record<string, unknown> & { Id: number }): boolean
   LINKEDIN_PLATFORM_ID: number
   profileClientId(profile: Record<string, unknown> & { Id: number }): number | null
@@ -37,14 +43,22 @@ const { DEFAULT_DOLPHIN_SHARED_USER_EMAIL } = require('./dolphin-lease.ts') as {
 
 function createFixtureNocoClient() {
   const calls: string[] = []
-  const clients = [
+  const clients: Array<Record<string, any> & { Id: number }> = [
     {
       Id: 1,
       client_name: 'Client One',
+      first_name: 'Client',
+      last_name: 'One',
+      fio: 'Client One Legal',
+      birth_date: '2000-01-01',
+      education: 'Old school',
       calendar_email: 'client@example.com',
+      telegram_personal_chat_id: '@client_one',
       telegram_general_chat_id: '1001',
       rel_clients_primary_stack: { Id: 9, name: 'FRONTEND' },
       market: 'Ru',
+      english_levels_id: 3,
+      'English level': { Id: 3, level: 'B1' },
       client_status: { Id: 1, title: 'studying' }
     },
     {
@@ -93,7 +107,7 @@ function createFixtureNocoClient() {
       client_status: { Id: 1, title: 'studying' }
     }
   ]
-  const platformAccounts = [
+  const platformAccounts: Array<Record<string, any> & { Id: number }> = [
     {
       Id: 10,
       platform: 'hh_ru',
@@ -145,6 +159,16 @@ function createFixtureNocoClient() {
       clients_id: 3,
       rel_platformAccounts_platform: { Id: 99, name: 'linkedin', label: 'linkedin' }
     }
+  ]
+  const platforms: Array<Record<string, any> & { Id: number }> = [
+    { Id: 1, label: 'hh_ru', name: 'hh' },
+    { Id: 2, label: 'telegram_ru', name: 'telegram' },
+    { Id: 16, label: 'linkedin', name: 'linkedin' }
+  ]
+  const englishLevels: Array<Record<string, any> & { Id: number }> = [
+    { Id: 3, level: 'B1', rank: 3 },
+    { Id: 4, level: 'B2', rank: 4 },
+    { Id: 5, level: 'C1', rank: 5 }
   ]
   const dolphinProfiles = [
     {
@@ -216,8 +240,50 @@ function createFixtureNocoClient() {
       calls.push(tableId)
       if (tableId === 'mxza381054ldlza') return clients
       if (tableId === 'm8zej2vsv4iypl8') return platformAccounts
+      if (tableId === 'mg3ovkendur1kpo') return platforms
+      if (tableId === 'mpteejwqy2kvmvm') return englishLevels
       if (tableId === 'm4thvbutfyb15qz') return dolphinProfiles
       return []
+    },
+    async createRecord(tableId: string, record: Record<string, any>) {
+      calls.push(`create:${tableId}`)
+      assert.equal(tableId, 'm8zej2vsv4iypl8')
+      const created: Record<string, any> & { Id: number } = {
+        Id: Math.max(...platformAccounts.map(account => Number(account.Id))) + 1,
+        ...record
+      }
+      if (created.platforms_id) {
+        const platform = platforms.find(candidate => Number(candidate.Id) === Number(created.platforms_id))
+        if (platform) {
+          created.platform = created.platform || platform.label
+          created.rel_platformAccounts_platform = { Id: platform.Id, name: platform.name, label: platform.label }
+        }
+      }
+      platformAccounts.push(created)
+      return created
+    },
+    async patchRecord(tableId: string, recordId: number, patch: Record<string, any>) {
+      calls.push(`patch:${tableId}:${recordId}`)
+      const records = tableId === 'mxza381054ldlza' ? clients : tableId === 'm8zej2vsv4iypl8' ? platformAccounts : []
+      const record = records.find(candidate => Number(candidate.Id) === Number(recordId))
+      if (!record) throw new Error(`Record ${recordId} not found`)
+      Object.assign(record, patch)
+      if (tableId === 'mxza381054ldlza') {
+        const englishLevel = englishLevels.find(level => Number(level.Id) === Number(record.english_levels_id))
+        record['English level'] = englishLevel ? { Id: englishLevel.Id, level: englishLevel.level } : null
+      }
+      if (tableId === 'm8zej2vsv4iypl8' && record.platforms_id) {
+        const platform = platforms.find(candidate => Number(candidate.Id) === Number(record.platforms_id))
+        if (platform) record.rel_platformAccounts_platform = { Id: platform.Id, name: platform.name, label: platform.label }
+      }
+      return record
+    },
+    async deleteRecord(tableId: string, recordId: number) {
+      calls.push(`delete:${tableId}:${recordId}`)
+      assert.equal(tableId, 'm8zej2vsv4iypl8')
+      const index = platformAccounts.findIndex(account => Number(account.Id) === Number(recordId))
+      if (index !== -1) platformAccounts.splice(index, 1)
+      return { ok: true }
     }
   }
 }
@@ -276,6 +342,62 @@ async function runTests(): Promise<void> {
   assert.equal(profileClientId({ Id: 1, clients_id: 30 }), 30)
   assert.equal(profileClientId({ Id: 1, rel_dolphinProfiles_client: { Id: 31 }, clients_id: 30 }), 31)
   assert.equal(profileId({ Id: 1, dolphin_profile_id: '762000802.0' }), 762000802)
+  assert.deepEqual(buildClientPatch({
+    firstName: 'New',
+    lastName: 'Name',
+    fio: 'New Name',
+    birthDate: '2001-02-03',
+    education: 'University',
+    englishLevelId: 4,
+    telegramPersonalChatId: '@new',
+    calendarEmail: 'new@example.com',
+    client_status: 'forbidden'
+  }), {
+    first_name: 'New',
+    last_name: 'Name',
+    fio: 'New Name',
+    birth_date: '2001-02-03',
+    education: 'University',
+    english_levels_id: 4,
+    telegram_personal_chat_id: '@new',
+    calendar_email: 'new@example.com'
+  })
+  assert.deepEqual(buildAccountPatch({
+    platformId: 16,
+    platform: 'linkedin',
+    accountLabel: 'LinkedIn',
+    login: 'new-login',
+    password: '',
+    emailPassword: 'new-mail-secret',
+    ignored: 'nope'
+  }, { includeBlankSecrets: false }), {
+    platform: 'linkedin',
+    account_label: 'LinkedIn',
+    login: 'new-login',
+    platforms_id: 16,
+    email_password: 'new-mail-secret'
+  })
+  assert.deepEqual(buildChangedClientPatch({
+    firstName: 'Client',
+    lastName: 'One',
+    fio: 'Client One Legal',
+    birthDate: '2000-01-01',
+    education: 'Old school',
+    englishLevelId: 3,
+    telegramPersonalChatId: '@client_one',
+    calendarEmail: 'client@example.com'
+  }, {
+    firstName: 'Client',
+    lastName: 'One',
+    fio: 'Client One Legal',
+    birthDate: '2000-01-01',
+    education: 'New school',
+    englishLevelId: 3,
+    telegramPersonalChatId: '@client_one',
+    calendarEmail: 'client@example.com'
+  }), {
+    education: 'New school'
+  })
   const linkedInMap = buildLinkedInEmailByClientId([
     { Id: 30, clients_id: 8, platforms_id: 16, login: 'second@example.com' },
     { Id: 20, clients_id: 8, platforms_id: 16, login: 'first@example.com' },
@@ -389,6 +511,10 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/client/me')
     assert.equal(result.response.status, 401)
+    result = await request(server.baseUrl, '/api/client/profile-options')
+    assert.equal(result.response.status, 401)
+    result = await request(server.baseUrl, '/api/client/platform-accounts', { method: 'POST' })
+    assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/admin/latest-client')
     assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/provider/clients')
@@ -415,8 +541,99 @@ async function runTests(): Promise<void> {
     result = await request(server.baseUrl, '/api/client/me', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.client.clientName, 'Client One')
+    assert.equal(result.body.client.firstName, 'Client')
+    assert.equal(result.body.client.education, 'Old school')
+    assert.equal(result.body.client.englishLevel, 'B1')
     assert.equal(result.body.linkedInEmail, 'client-one.linkedin@example.com')
     assert.equal(result.body.platformAccounts[0].password, '***')
+
+    result = await request(server.baseUrl, '/api/client/profile-options', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.deepEqual(result.body.englishLevels.map((level: any) => level.label), ['B1', 'B2', 'C1'])
+    assert(result.body.platforms.some((platform: any) => platform.label === 'linkedin'))
+
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstName: 'Updated',
+        lastName: 'Client',
+        fio: 'Updated Client Legal',
+        birthDate: '2001-02-03',
+        education: 'Updated university',
+        englishLevelId: 4,
+        telegramPersonalChatId: '@updated_client',
+        calendarEmail: 'updated-client@example.com',
+        clientStatus: 'should not write'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.client.firstName, 'Updated')
+    assert.equal(result.body.client.lastName, 'Client')
+    assert.equal(result.body.client.fio, 'Updated Client Legal')
+    assert.equal(result.body.client.birthDate, '2001-02-03')
+    assert.equal(result.body.client.education, 'Updated university')
+    assert.equal(result.body.client.englishLevelId, 4)
+    assert.equal(result.body.client.englishLevel, 'B2')
+    assert.equal(result.body.client.telegramPersonalChatId, '@updated_client')
+    assert.equal(result.body.client.calendarEmail, 'updated-client@example.com')
+    assert.equal(result.body.client.clientStatus, 'studying')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platformId: 16,
+        platform: 'linkedin',
+        accountLabel: 'Updated LinkedIn',
+        login: 'updated.linkedin@example.com',
+        phone: '+1000',
+        email: 'updated.linkedin@example.com',
+        nickname: 'updated-li',
+        linkedInUrl: 'https://linkedin.com/in/updated',
+        foreignNumber: '+15550001111',
+        recoveryCodes: 'code-1',
+        password: 'new-secret',
+        emailPassword: 'new-email-secret'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 201, JSON.stringify(result.body))
+    const createdAccount = result.body.platformAccounts.find((account: any) => account.accountLabel === 'Updated LinkedIn')
+    assert(createdAccount)
+    assert.equal(createdAccount.platform, 'linkedin')
+    assert.equal(createdAccount.password, '***')
+    assert.equal(createdAccount.emailPassword, '***')
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${createdAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountLabel: 'Updated LinkedIn Edited',
+        login: 'edited.linkedin@example.com',
+        phone: '+2000',
+        password: '',
+        emailPassword: 'replacement-email-secret'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    const editedAccount = result.body.platformAccounts.find((account: any) => account.id === createdAccount.id)
+    assert.equal(editedAccount.accountLabel, 'Updated LinkedIn Edited')
+    assert.equal(editedAccount.login, 'edited.linkedin@example.com')
+    assert.equal(editedAccount.password, '***')
+    assert.equal(editedAccount.emailPassword, '***')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/15', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountLabel: 'Not mine' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 404)
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${createdAccount.id}`, {
+      method: 'DELETE'
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.platformAccounts.some((account: any) => account.id === createdAccount.id), false)
 
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, clientLogin.cookie)
     assert.equal(result.response.status, 403)
@@ -428,7 +645,7 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.username, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
     assert.match(result.body.password, /^[A-Za-z0-9_-]{12}$/)
     assert.notEqual(result.body.password, 'client@example.com')
-    assert.equal(result.body.sourceEmail, 'client@example.com')
+    assert.equal(result.body.sourceEmail, 'updated-client@example.com')
     assert.equal(result.body.targetClientName, 'Client One')
     assert.deepEqual(result.body.profileIds, [111111111, 111111112])
     assert.deepEqual(leaseCalls[0], {
@@ -439,7 +656,7 @@ async function runTests(): Promise<void> {
       targetClientName: 'Client One',
       username: DEFAULT_DOLPHIN_SHARED_USER_EMAIL,
       password: result.body.password,
-      sourceEmail: 'client@example.com',
+      sourceEmail: 'updated-client@example.com',
       profileIds: [111111111, 111111112],
       knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
     })
@@ -611,6 +828,20 @@ async function runTests(): Promise<void> {
 
     result = await request(server.baseUrl, '/api/client/me', {}, providerLogin.cookie)
     assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/client/profile-options', {}, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firstName: 'Provider' })
+    }, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platform: 'linkedin' })
+    }, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, providerLogin.cookie)
     assert.equal(result.response.status, 403)
 
@@ -633,6 +864,14 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.linkedInEmail, 'newest.linkedin.one@example.com, newest.linkedin.two@example.com')
     assert.equal(result.body.platformAccounts[0].password, 'mail-secret')
     result = await request(server.baseUrl, '/api/provider/clients', {}, adminLogin.cookie)
+    assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/client/profile-options', {}, adminLogin.cookie)
+    assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firstName: 'Admin' })
+    }, adminLogin.cookie)
     assert.equal(result.response.status, 403)
 
     result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, adminLogin.cookie)

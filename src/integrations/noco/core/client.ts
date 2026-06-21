@@ -75,14 +75,17 @@ function createNocoClient(options: {
     return request('get', `/api/v2/meta/tables/${tableId}`)
   }
 
-  async function fetchRecords(tableId: string, limit = 1000): Promise<NocoRecord[]> {
+  async function fetchRecords(tableId: string, limit = 1000, query: Record<string, string | number> = {}): Promise<NocoRecord[]> {
     const all: NocoRecord[] = []
     const pageSize = Math.min(Math.max(limit, 1), 100)
+    const queryString = Object.entries(query)
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+      .join('&')
 
     for (let offset = 0; ; offset += pageSize) {
       const data = await request<{ list?: NocoRecord[]; data?: NocoRecord[]; pageInfo?: { isLastPage?: boolean } }>(
         'get',
-        `/api/v2/tables/${tableId}/records?limit=${pageSize}&offset=${offset}`
+        `/api/v2/tables/${tableId}/records?limit=${pageSize}&offset=${offset}${queryString ? `&${queryString}` : ''}`
       )
       const rows = data.list ?? data.data ?? []
       all.push(...rows)
@@ -143,9 +146,36 @@ function createNocoClient(options: {
     throw lastError ?? new Error(`Failed to patch record ${recordId} in table ${tableId}.`)
   }
 
+  async function deleteRecord(tableId: string, recordId: number): Promise<unknown> {
+    const attempts = [
+      { endpoint: `/api/v2/tables/${tableId}/records`, body: { Id: recordId } },
+      { endpoint: `/api/v2/tables/${tableId}/records`, body: [{ Id: recordId }] }
+    ]
+    let lastError: any
+
+    for (const attempt of attempts) {
+      try {
+        return await request('delete', attempt.endpoint, attempt.body)
+      } catch (error: any) {
+        lastError = error
+        const status = error?.response?.status
+        const message = String(error?.response?.data?.message ?? error?.response?.data?.msg ?? '')
+        if (status === 404 && /not found/i.test(message)) {
+          return { ok: true, alreadyDeleted: true }
+        }
+        if (status !== 400 && status !== 404 && status !== 405 && status !== 422) {
+          throw error
+        }
+      }
+    }
+
+    throw lastError ?? new Error(`Failed to delete record ${recordId} in table ${tableId}.`)
+  }
+
   return {
     config,
     createRecord,
+    deleteRecord,
     fetchRecords,
     fetchTableMeta,
     patchRecord,

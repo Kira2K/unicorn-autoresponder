@@ -1,6 +1,10 @@
 import { createApp } from 'vue'
 import PrimeVue from 'primevue/config'
 import Aura from '@primeuix/themes/aura'
+import Accordion from 'primevue/accordion'
+import AccordionContent from 'primevue/accordioncontent'
+import AccordionHeader from 'primevue/accordionheader'
+import AccordionPanel from 'primevue/accordionpanel'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Column from 'primevue/column'
@@ -24,6 +28,10 @@ createApp(App)
       }
     }
   })
+  .component('Accordion', Accordion)
+  .component('AccordionContent', AccordionContent)
+  .component('AccordionHeader', AccordionHeader)
+  .component('AccordionPanel', AccordionPanel)
   .component('Button', Button)
   .component('Card', Card)
   .component('Column', Column)

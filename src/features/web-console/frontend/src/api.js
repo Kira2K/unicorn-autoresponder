@@ -33,6 +33,30 @@ export const api = {
   clientDashboard() {
     return request('/api/client/me')
   },
+  updateClientProfile(profile) {
+    return request('/api/client/me', {
+      method: 'PATCH',
+      body: JSON.stringify(profile)
+    })
+  },
+  clientProfileOptions() {
+    return request('/api/client/profile-options')
+  },
+  createPlatformAccount(account) {
+    return request('/api/client/platform-accounts', {
+      method: 'POST',
+      body: JSON.stringify(account)
+    })
+  },
+  updatePlatformAccount(accountId, account) {
+    return request(`/api/client/platform-accounts/${accountId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(account)
+    })
+  },
+  deletePlatformAccount(accountId) {
+    return request(`/api/client/platform-accounts/${accountId}`, { method: 'DELETE' })
+  },
   providerClients() {
     return request('/api/provider/clients')
   },

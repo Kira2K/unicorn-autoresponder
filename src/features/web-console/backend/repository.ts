@@ -6,8 +6,11 @@ const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
 }
 
 type ClientDashboard = import('./types.ts').ClientDashboard
+type ClientProfilePatch = import('./types.ts').ClientProfilePatch
+type PlatformAccountInput = import('./types.ts').PlatformAccountInput
 type WebClient = import('./types.ts').WebClient
 type WebConsoleRepository = import('./types.ts').WebConsoleRepository
+type WebOption = import('./types.ts').WebOption
 type WebPlatformAccount = import('./types.ts').WebPlatformAccount
 type ProviderClientRow = import('./types.ts').ProviderClientRow
 
@@ -52,7 +55,20 @@ function linkedId(value: unknown): number | null {
 
 function linkedName(value: unknown): string {
   const record = linkedRecords(value)[0]
-  return normalizeText(record?.name ?? record?.stack ?? record?.label)
+  return normalizeText(record?.name ?? record?.stack ?? record?.label ?? record?.market ?? record?.level)
+}
+
+function linkedNames(value: unknown): string[] {
+  return linkedRecords(value)
+    .map(record => normalizeText(record.Name ?? record.name ?? record.label ?? record.title))
+    .filter(Boolean)
+}
+
+function displayText(value: unknown): string {
+  if (value && typeof value === 'object') {
+    return optionTitle(linkedRecords(value)[0] ?? {})
+  }
+  return normalizeText(value)
 }
 
 function optionId(value: unknown): string {
@@ -146,10 +162,23 @@ function toClient(record: NocoRecord): WebClient {
   return {
     id: Number(record.Id),
     clientName: normalizeText(record.client_name),
+    firstName: normalizeText(record.first_name),
+    lastName: normalizeText(record.last_name),
+    fio: normalizeText(record.fio),
+    birthDate: normalizeText(record.birth_date),
+    education: normalizeText(record.education),
     calendarEmail: normalizeText(record.calendar_email),
+    telegramPersonalChatId: normalizeText(record.telegram_personal_chat_id),
     commonChatId: normalizeText(record.telegram_general_chat_id),
     primaryStack: linkedName(record.rel_clients_primary_stack) || undefined,
-    market: normalizeText(record.market) || undefined
+    market: linkedName(record.market) || normalizeText(record.market) || undefined,
+    clientStatus: displayText(record.client_status) || undefined,
+    clientStatusNote: normalizeText(record.client_status_note) || undefined,
+    resumeStatus: normalizeText(record.resume_status) || undefined,
+    linkedInStatus: normalizeText(record.linkedin_status) || undefined,
+    englishLevelId: (linkedId(record['English level']) ?? Number(record.english_levels_id)) || undefined,
+    englishLevel: linkedName(record['English level']) || undefined,
+    mentors: linkedNames(record.Mentors)
   }
 }
 
@@ -172,10 +201,15 @@ function toPlatformAccount(record: NocoRecord, fullAccess: boolean): WebPlatform
   return {
     id: Number(record.Id),
     platform: normalizeText(record.platform || linkedName(record.rel_platformAccounts_platform)),
+    platformId: accountPlatformId(record) || undefined,
     accountLabel: normalizeText(record.account_label || record.label || record.platform),
     login: normalizeText(record.login),
     phone: normalizeText(record.phone),
     email: normalizeText(record.email),
+    nickname: normalizeText(record.nickname) || undefined,
+    linkedInUrl: normalizeText(record.linkedin_url) || undefined,
+    foreignNumber: normalizeText(record.foreign_number) || undefined,
+    recoveryCodes: normalizeText(record.recovery_codes) || undefined,
     password: maskSecret(record.password, fullAccess),
     emailPassword: maskSecret(record.email_password, fullAccess)
   }
@@ -183,6 +217,120 @@ function toPlatformAccount(record: NocoRecord, fullAccess: boolean): WebPlatform
 
 function sortByIdDesc(a: NocoRecord, b: NocoRecord): number {
   return Number(b.Id) - Number(a.Id)
+}
+
+function optionLabel(record: NocoRecord, fields: string[]): string {
+  for (const field of fields) {
+    const value = normalizeText(record[field])
+    if (value) return value
+  }
+  return String(record.Id)
+}
+
+function toOption(record: NocoRecord, fields: string[]): WebOption {
+  return {
+    id: Number(record.Id),
+    label: optionLabel(record, fields)
+  }
+}
+
+function cleanOptionalText(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  return normalizeText(value)
+}
+
+function cleanNullableId(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null || value === '') return null
+  const id = Number(value)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  const textFields: Array<[keyof ClientProfilePatch, string]> = [
+    ['firstName', 'first_name'],
+    ['lastName', 'last_name'],
+    ['fio', 'fio'],
+    ['birthDate', 'birth_date'],
+    ['education', 'education'],
+    ['telegramPersonalChatId', 'telegram_personal_chat_id'],
+    ['calendarEmail', 'calendar_email']
+  ]
+  for (const [inputField, nocoField] of textFields) {
+    const value = cleanOptionalText(input[inputField])
+    if (value !== undefined) patch[nocoField] = value
+  }
+  const englishLevelId = cleanNullableId(input.englishLevelId)
+  if (englishLevelId !== undefined) patch.english_levels_id = englishLevelId
+  return patch
+}
+
+function buildChangedClientPatch(current: WebClient, input: ClientProfilePatch): Record<string, unknown> {
+  const patch = buildClientPatch(input)
+  const currentByNocoField: Record<string, unknown> = {
+    first_name: current.firstName,
+    last_name: current.lastName,
+    fio: current.fio,
+    birth_date: current.birthDate,
+    education: current.education,
+    telegram_personal_chat_id: current.telegramPersonalChatId,
+    calendar_email: current.calendarEmail,
+    english_levels_id: current.englishLevelId ?? null
+  }
+
+  for (const [field, value] of Object.entries(patch)) {
+    const currentValue = currentByNocoField[field]
+    if (field === 'english_levels_id') {
+      if ((Number(value) || null) === (Number(currentValue) || null)) {
+        delete patch[field]
+      }
+      continue
+    }
+    if (normalizeText(value) === normalizeText(currentValue)) {
+      delete patch[field]
+    }
+  }
+
+  return patch
+}
+
+function buildAccountPatch(input: PlatformAccountInput, options: { includeBlankSecrets: boolean }): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  const textFields: Array<[keyof PlatformAccountInput, string]> = [
+    ['platform', 'platform'],
+    ['accountLabel', 'account_label'],
+    ['login', 'login'],
+    ['phone', 'phone'],
+    ['email', 'email'],
+    ['nickname', 'nickname'],
+    ['linkedInUrl', 'linkedin_url'],
+    ['foreignNumber', 'foreign_number'],
+    ['recoveryCodes', 'recovery_codes']
+  ]
+  for (const [inputField, nocoField] of textFields) {
+    const value = cleanOptionalText(input[inputField])
+    if (value !== undefined) patch[nocoField] = value
+  }
+  const platformId = cleanNullableId(input.platformId)
+  if (platformId !== undefined) patch.platforms_id = platformId
+
+  const secretFields: Array<[keyof PlatformAccountInput, string]> = [
+    ['password', 'password'],
+    ['emailPassword', 'email_password']
+  ]
+  for (const [inputField, nocoField] of secretFields) {
+    const value = cleanOptionalText(input[inputField])
+    if (value === undefined) continue
+    if (value || options.includeBlankSecrets) patch[nocoField] = value
+  }
+  return patch
+}
+
+function notFoundError(message: string): Error & { code?: string } {
+  const error = new Error(message) as Error & { code?: string }
+  error.code = 'not_found'
+  return error
 }
 
 function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebConsoleRepository {
@@ -196,8 +344,26 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     return await nocoClient.fetchRecords(TABLES.platformAccounts.id, 1000)
   }
 
+  async function fetchPlatformAccountsForClient(clientId: number): Promise<NocoRecord[]> {
+    if (typeof nocoClient.fetchRecords === 'function') {
+      const records = await nocoClient.fetchRecords(TABLES.platformAccounts.id, 1000, {
+        where: `(clients_id,eq,${Number(clientId)})`
+      }) as NocoRecord[]
+      return records.filter(account => accountClientId(account) === Number(clientId))
+    }
+    return (await fetchPlatformAccounts()).filter(account => accountClientId(account) === Number(clientId))
+  }
+
   async function fetchDolphinProfiles(): Promise<NocoRecord[]> {
     return await nocoClient.fetchRecords(TABLES.dolphinProfiles.id, 1000)
+  }
+
+  async function fetchEnglishLevels(): Promise<NocoRecord[]> {
+    return await nocoClient.fetchRecords(TABLES.englishLevels.id, 1000)
+  }
+
+  async function fetchPlatforms(): Promise<NocoRecord[]> {
+    return await nocoClient.fetchRecords(TABLES.platforms.id, 1000)
   }
 
   async function fetchClientStatusOptions(): Promise<NocoSelectOption[]> {
@@ -208,9 +374,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
   }
 
   async function dashboardForClient(client: NocoRecord, fullAccess = false): Promise<ClientDashboard> {
-    const allPlatformAccounts = await fetchPlatformAccounts()
-    const clientPlatformAccounts = allPlatformAccounts
-      .filter(account => accountClientId(account) === Number(client.Id))
+    const clientPlatformAccounts = (await fetchPlatformAccountsForClient(Number(client.Id)))
       .sort((a, b) => Number(a.Id) - Number(b.Id))
     const linkedInEmailByClientId = buildLinkedInEmailByClientId(clientPlatformAccounts)
     const platformAccounts = clientPlatformAccounts
@@ -221,6 +385,20 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       platformAccounts,
       linkedInEmail: linkedInEmailByClientId.get(Number(client.Id)) ?? ''
     }
+  }
+
+  async function getOwnedPlatformAccount(clientId: number, accountId: number): Promise<NocoRecord> {
+    const account = (await fetchPlatformAccountsForClient(clientId))
+      .find(candidate => Number(candidate.Id) === Number(accountId) && accountClientId(candidate) === Number(clientId))
+    if (!account) throw notFoundError(`Platform account ${accountId} was not found for client ${clientId}.`)
+    return account
+  }
+
+  async function refetchDashboard(clientId: number, fullAccess = false): Promise<ClientDashboard> {
+    const clients = await fetchClients()
+    const client = clients.find(candidate => Number(candidate.Id) === Number(clientId))
+    if (!client) throw notFoundError(`Client ${clientId} was not found`)
+    return await dashboardForClient(client, fullAccess)
   }
 
   return {
@@ -274,6 +452,52 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         .filter(client => linkedStatusMatches(client.client_status, statusLabel, statusOptions))
         .sort((a, b) => Number(a.Id) - Number(b.Id))
         .map(client => toProviderClientRow(client, linkedInEmailByClientId.get(Number(client.Id)) ?? ''))
+    },
+
+    async listEnglishLevels(): Promise<WebOption[]> {
+      return (await fetchEnglishLevels())
+        .sort((a, b) => Number(a.rank ?? a.Id) - Number(b.rank ?? b.Id))
+        .map(record => toOption(record, ['level', 'name', 'label']))
+    },
+
+    async listPlatforms(): Promise<WebOption[]> {
+      return (await fetchPlatforms())
+        .sort((a, b) => optionLabel(a, ['label', 'platform', 'name']).localeCompare(optionLabel(b, ['label', 'platform', 'name'])))
+        .map(record => toOption(record, ['label', 'platform', 'name']))
+    },
+
+    async updateClientProfile(clientId: number, input: ClientProfilePatch): Promise<ClientDashboard> {
+      const current = await refetchDashboard(clientId)
+      const patch = buildChangedClientPatch(current.client, input)
+      if (Object.keys(patch).length) {
+        await nocoClient.patchRecord(TABLES.clients.id, Number(clientId), patch)
+      }
+      return await refetchDashboard(clientId)
+    },
+
+    async createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard> {
+      const record = buildAccountPatch(input, { includeBlankSecrets: true })
+      if (!record.account_label) record.account_label = String(record.platform || 'Platform account')
+      await nocoClient.createRecord(TABLES.platformAccounts.id, {
+        ...record,
+        clients_id: Number(clientId)
+      })
+      return await refetchDashboard(clientId)
+    },
+
+    async updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard> {
+      await getOwnedPlatformAccount(clientId, accountId)
+      const patch = buildAccountPatch(input, { includeBlankSecrets: false })
+      if (Object.keys(patch).length) {
+        await nocoClient.patchRecord(TABLES.platformAccounts.id, Number(accountId), patch)
+      }
+      return await refetchDashboard(clientId)
+    },
+
+    async deletePlatformAccount(clientId: number, accountId: number): Promise<ClientDashboard> {
+      await getOwnedPlatformAccount(clientId, accountId)
+      await nocoClient.deleteRecord(TABLES.platformAccounts.id, Number(accountId))
+      return await refetchDashboard(clientId)
     }
   }
 }
@@ -290,6 +514,9 @@ module.exports = {
   linkedStatusMatches,
   normalizeId,
   normalizeEmail,
+  buildAccountPatch,
+  buildChangedClientPatch,
+  buildClientPatch,
   toClient,
   toPlatformAccount,
   toProviderClientRow

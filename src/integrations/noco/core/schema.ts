@@ -60,6 +60,11 @@ const TABLES = {
     id: 'mvyrro4ko9tqu2b',
     title: 'data_collection_statuses'
   },
+  englishLevels: {
+    key: 'englishLevels',
+    id: 'mpteejwqy2kvmvm',
+    title: 'english_levels'
+  },
   resumeProfiles: {
     key: 'resumeProfiles',
     id: 'ms6218eaf2cqqr2',

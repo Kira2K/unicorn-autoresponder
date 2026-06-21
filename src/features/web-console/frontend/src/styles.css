@@ -24,7 +24,9 @@ body {
 }
 
 .auth-form,
-.dashboard-grid {
+.dashboard-grid,
+.profile-form,
+.account-form {
   display: grid;
   gap: 16px;
 }
@@ -37,8 +39,24 @@ body {
 
 .field .p-inputtext,
 .field .p-password,
-.field .p-password-input {
+.field .p-password-input,
+.native-select {
   width: 100%;
+}
+
+.native-select {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #172033;
+  font: inherit;
+}
+
+.native-select:focus {
+  outline: 2px solid #bfdbfe;
+  border-color: #3b82f6;
 }
 
 .dashboard {
@@ -67,6 +85,7 @@ body {
 }
 
 .client-card,
+.profile-card,
 .action-card,
 .accounts-card,
 .provider-card,
@@ -80,6 +99,7 @@ body {
   border-color: #bae6fd;
 }
 
+.profile-card,
 .accounts-card,
 .provider-card {
   grid-column: 1 / -1;
@@ -114,6 +134,93 @@ body {
 .action-card .p-card-content {
   display: grid;
   gap: 16px;
+}
+
+.profile-form,
+.account-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.account-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.feature-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.profile-accordion {
+  margin-bottom: 16px;
+}
+
+.profile-accordion .p-accordionpanel {
+  border: 1px solid #d7e3f5;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.profile-accordion .p-accordionheader {
+  padding: 12px 14px;
+  background: #f8fbff;
+}
+
+.profile-accordion .p-accordioncontent-content {
+  padding: 16px;
+}
+
+.accordion-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.profile-status {
+  display: inline-block;
+  margin-bottom: 12px;
+}
+
+.compact-info {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-top: 2px;
+}
+
+.success-text,
+.error-text {
+  font-weight: 700;
+}
+
+.success-text {
+  color: #166534;
+}
+
+.error-text {
+  color: #b91c1c;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .verification-panel {
@@ -181,6 +288,12 @@ body {
   }
 
   .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-form,
+  .account-form,
+  .compact-info {
     grid-template-columns: 1fr;
   }
 

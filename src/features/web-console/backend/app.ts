@@ -251,6 +251,68 @@ function createWebConsoleApp(options: {
     }
   })
 
+  app.patch('/api/client/me', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json(await repository.updateClientProfile(Number(req.webSession!.clientId), req.body ?? {}))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/client/profile-options', requireRole('client'), async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const [englishLevels, platforms] = await Promise.all([
+        repository.listEnglishLevels(),
+        repository.listPlatforms()
+      ])
+      res.json({ englishLevels, platforms })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/platforms', requireRole('client'), async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json({ platforms: await repository.listPlatforms() })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/client/platform-accounts', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.status(201).json(await repository.createPlatformAccount(Number(req.webSession!.clientId), req.body ?? {}))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.patch('/api/client/platform-accounts/:id', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const accountId = Number(req.params.id)
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        res.status(400).json({ error: 'invalid_account_id' })
+        return
+      }
+      res.json(await repository.updatePlatformAccount(Number(req.webSession!.clientId), accountId, req.body ?? {}))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.delete('/api/client/platform-accounts/:id', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const accountId = Number(req.params.id)
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        res.status(400).json({ error: 'invalid_account_id' })
+        return
+      }
+      res.json(await repository.deletePlatformAccount(Number(req.webSession!.clientId), accountId))
+    } catch (error) {
+      next(error)
+    }
+  })
+
   app.get('/api/provider/clients', requireRole('provider'), async (_req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       res.json({
@@ -423,6 +485,10 @@ function createWebConsoleApp(options: {
   })
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if ((error as any)?.code === 'not_found') {
+      res.status(404).json({ error: 'not_found', message: error instanceof Error ? error.message : String(error) })
+      return
+    }
     const message = error instanceof Error ? error.message : String(error)
     res.status(500).json({ error: 'internal_error', message })
   })

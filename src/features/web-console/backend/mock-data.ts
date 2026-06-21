@@ -1,11 +1,19 @@
 const mockClients = [
   {
     Id: 1,
-    client_name: 'Kira Test',
+    client_name: 'Test',
+    first_name: 'Test',
+    last_name: 'Client',
+    fio: 'Test Client',
+    birth_date: '2000-01-01',
+    education: 'Initial school',
     calendar_email: 'client@example.com',
+    telegram_personal_chat_id: '@test_client',
     telegram_general_chat_id: '5216637594',
     rel_clients_primary_stack: { Id: 10, name: 'FRONTEND' },
     market: 'Ru',
+    english_levels_id: 3,
+    'English level': { Id: 3, level: 'B1' },
     client_status: { Id: 1, title: 'studying' }
   },
   {
@@ -118,6 +126,14 @@ const mockPlatforms = [
   { Id: 16, label: 'linkedin', name: 'linkedin' }
 ]
 
+const mockEnglishLevels = [
+  { Id: 1, level: 'A1', rank: 1 },
+  { Id: 2, level: 'A2', rank: 2 },
+  { Id: 3, level: 'B1', rank: 3 },
+  { Id: 4, level: 'B2', rank: 4 },
+  { Id: 5, level: 'C1', rank: 5 }
+]
+
 const mockDolphinProfiles = [
   {
     Id: 301,
@@ -157,6 +173,39 @@ const mockDolphinProfiles = [
 ]
 
 function createMockNocoClient() {
+  const clients: Array<Record<string, any> & { Id: number }> = mockClients.map(record => ({ ...record }))
+  const platformAccounts: Array<Record<string, any> & { Id: number }> = mockPlatformAccounts.map(record => ({ ...record }))
+  const platforms: Array<Record<string, any> & { Id: number }> = mockPlatforms.map(record => ({ ...record }))
+  const englishLevels: Array<Record<string, any> & { Id: number }> = mockEnglishLevels.map(record => ({ ...record }))
+  const dolphinProfiles: Array<Record<string, any> & { Id: number }> = mockDolphinProfiles.map(record => ({ ...record }))
+
+  function nextId(records: Array<{ Id: number }>): number {
+    return Math.max(0, ...records.map(record => Number(record.Id))) + 1
+  }
+
+  function syncClientRelations(record: Record<string, any>): void {
+    if (record.english_levels_id === null) {
+      record['English level'] = null
+      return
+    }
+    const englishLevelId = Number(record.english_levels_id)
+    if (Number.isFinite(englishLevelId) && englishLevelId > 0) {
+      const englishLevel = englishLevels.find(level => Number(level.Id) === englishLevelId)
+      record['English level'] = englishLevel ? { Id: englishLevel.Id, level: englishLevel.level } : null
+    }
+  }
+
+  function syncPlatformRelation(record: Record<string, any>): void {
+    const platformId = Number(record.platforms_id)
+    if (Number.isFinite(platformId) && platformId > 0) {
+      const platform = platforms.find(candidate => Number(candidate.Id) === platformId)
+      record.rel_platformAccounts_platform = platform
+        ? { Id: platform.Id, name: platform.name, label: platform.label }
+        : undefined
+      if (!record.platform && platform?.label) record.platform = platform.label
+    }
+  }
+
   return {
     async fetchTableMeta(tableId: string) {
       if (tableId !== 'mxza381054ldlza') return { columns: [] }
@@ -177,11 +226,41 @@ function createMockNocoClient() {
       }
     },
     async fetchRecords(tableId: string) {
-      if (tableId === 'mxza381054ldlza') return mockClients
-      if (tableId === 'm8zej2vsv4iypl8') return mockPlatformAccounts
-      if (tableId === 'mg3ovkendur1kpo') return mockPlatforms
-      if (tableId === 'm4thvbutfyb15qz') return mockDolphinProfiles
+      if (tableId === 'mxza381054ldlza') return clients
+      if (tableId === 'm8zej2vsv4iypl8') return platformAccounts
+      if (tableId === 'mg3ovkendur1kpo') return platforms
+      if (tableId === 'mpteejwqy2kvmvm') return englishLevels
+      if (tableId === 'm4thvbutfyb15qz') return dolphinProfiles
       return []
+    },
+    async createRecord(tableId: string, record: Record<string, any>) {
+      if (tableId !== 'm8zej2vsv4iypl8') return {}
+      const created = {
+        Id: nextId(platformAccounts),
+        ...record
+      }
+      syncPlatformRelation(created)
+      platformAccounts.push(created)
+      return created
+    },
+    async patchRecord(tableId: string, recordId: number, patch: Record<string, any>) {
+      const records = tableId === 'mxza381054ldlza'
+        ? clients
+        : tableId === 'm8zej2vsv4iypl8'
+          ? platformAccounts
+          : []
+      const record = records.find(candidate => Number(candidate.Id) === Number(recordId))
+      if (!record) throw new Error(`Record ${recordId} not found`)
+      Object.assign(record, patch)
+      if (tableId === 'mxza381054ldlza') syncClientRelations(record)
+      if (tableId === 'm8zej2vsv4iypl8') syncPlatformRelation(record)
+      return record
+    },
+    async deleteRecord(tableId: string, recordId: number) {
+      if (tableId !== 'm8zej2vsv4iypl8') return {}
+      const index = platformAccounts.findIndex(record => Number(record.Id) === Number(recordId))
+      if (index !== -1) platformAccounts.splice(index, 1)
+      return { ok: true }
     }
   }
 }
@@ -190,6 +269,7 @@ module.exports = {
   createMockNocoClient,
   mockClients,
   mockDolphinProfiles,
+  mockEnglishLevels,
   mockPlatformAccounts,
   mockPlatforms
 }
