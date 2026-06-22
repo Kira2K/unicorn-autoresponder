@@ -41,6 +41,9 @@ const dryRunResult = ref(null)
 const dolphinLease = ref(null)
 const dolphinLeaseError = ref('')
 const dolphinLeaseLoading = ref(false)
+const dolphinProvisionMessage = ref('')
+const secureDnsWarningVisible = ref(false)
+const pendingDolphinLease = ref(null)
 const verificationCode = ref(null)
 const verificationCodeError = ref('')
 const verificationCodeLoading = ref(false)
@@ -57,6 +60,7 @@ const accountError = ref('')
 const profileEditorOpen = ref('')
 const accountEditorOpen = ref(false)
 let countdownTimer = null
+const SECURE_DNS_WARNING_KEY = 'webConsole.secureDnsWarningAccepted'
 
 const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
@@ -310,10 +314,17 @@ async function startHhResponses() {
 async function openDolphinProfile(clientName, clientId) {
   dolphinLeaseLoading.value = true
   dolphinLeaseError.value = ''
+  dolphinProvisionMessage.value = 'Creating new Dolphin profiles. This can take a few minutes.'
   verificationCode.value = null
   verificationCodeError.value = ''
   try {
-    dolphinLease.value = await api.acquireDolphinLease(clientName, clientId)
+    const lease = await api.acquireDolphinLease(clientName, clientId)
+    if (window.localStorage?.getItem(SECURE_DNS_WARNING_KEY) === 'true') {
+      dolphinLease.value = lease
+    } else {
+      pendingDolphinLease.value = lease
+      secureDnsWarningVisible.value = true
+    }
     nowMs.value = Date.now()
   } catch (caught) {
     const body = caught?.body || {}
@@ -324,7 +335,15 @@ async function openDolphinProfile(clientName, clientId) {
       : `${caught instanceof Error ? caught.message : String(caught || '')}${dolphinCode}${attempted}`
   } finally {
     dolphinLeaseLoading.value = false
+    dolphinProvisionMessage.value = ''
   }
+}
+
+function confirmSecureDnsWarning() {
+  window.localStorage?.setItem(SECURE_DNS_WARNING_KEY, 'true')
+  dolphinLease.value = pendingDolphinLease.value
+  pendingDolphinLease.value = null
+  secureDnsWarningVisible.value = false
 }
 
 async function getDolphinVerificationCode() {
@@ -417,35 +436,15 @@ onUnmounted(() => {
       <Message v-if="dolphinLeaseError" severity="error" :closable="false" data-testid="dolphin-lease-error">
         {{ dolphinLeaseError }}
       </Message>
-
-      <Card v-if="dolphinLease" class="lease-card" data-testid="dolphin-lease-panel">
-        <template #title>Dolphin access</template>
-        <template #subtitle>{{ dolphinLease.targetClientName }}</template>
-        <template #content>
-          <dl class="info-list">
-            <div>
-              <dt>Dolphin login</dt>
-              <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
-            </div>
-            <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
-              <dt>Client email</dt>
-              <dd>{{ dolphinLease.sourceEmail }}</dd>
-            </div>
-            <div>
-              <dt>Password</dt>
-              <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
-            </div>
-            <div>
-              <dt>Profiles</dt>
-              <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
-            </div>
-            <div>
-              <dt>Guaranteed authorization time left</dt>
-              <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
-            </div>
-          </dl>
+      <Message v-if="dolphinProvisionMessage" severity="info" :closable="false" data-testid="dolphin-provision-message">
+        {{ dolphinProvisionMessage }}
+      </Message>
+      <Dialog v-model:visible="secureDnsWarningVisible" modal header="Before opening LinkedIn" data-testid="secure-dns-warning">
+        <p class="dialog-text">Are you sure you have switched secure DNS off before opening LinkedIn?</p>
+        <template #footer>
+          <Button label="Confirm" icon="pi pi-check" data-testid="confirm-secure-dns-warning-button" @click="confirmSecureDnsWarning" />
         </template>
-      </Card>
+      </Dialog>
 
       <Card v-if="isAdmin" class="verification-card">
         <template #title>Dolphin verification code</template>
@@ -489,6 +488,32 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+            <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
+              <h3>Dolphin access</h3>
+              <p>{{ dolphinLease.targetClientName }}</p>
+              <dl class="info-list lease-info-list">
+                <div>
+                  <dt>Dolphin login</dt>
+                  <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
+                </div>
+                <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
+                  <dt>Client email</dt>
+                  <dd>{{ dolphinLease.sourceEmail }}</dd>
+                </div>
+                <div>
+                  <dt>Password</dt>
+                  <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
+                </div>
+                <div>
+                  <dt>Profiles</dt>
+                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
+                </div>
+                <div>
+                  <dt>Guaranteed authorization time left</dt>
+                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
+                </div>
+              </dl>
+            </section>
             <DataTable :value="providerClients" striped-rows responsive-layout="scroll" data-testid="provider-clients-table">
               <Column field="clientName" header="Name" />
               <Column field="primaryStack" header="Stack" />
@@ -622,6 +647,32 @@ onUnmounted(() => {
           <template #subtitle>Open the connected automation profile</template>
           <template #content>
             <Button label="open Dolphin Profile" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id)" />
+            <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
+              <h3>Dolphin access</h3>
+              <p>{{ dolphinLease.targetClientName }}</p>
+              <dl class="info-list lease-info-list">
+                <div>
+                  <dt>Dolphin login</dt>
+                  <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
+                </div>
+                <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
+                  <dt>Client email</dt>
+                  <dd>{{ dolphinLease.sourceEmail }}</dd>
+                </div>
+                <div>
+                  <dt>Password</dt>
+                  <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
+                </div>
+                <div>
+                  <dt>Profiles</dt>
+                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
+                </div>
+                <div>
+                  <dt>Guaranteed authorization time left</dt>
+                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
+                </div>
+              </dl>
+            </section>
             <div class="verification-panel">
               <Button label="Get verification code" icon="pi pi-envelope" size="small" severity="secondary" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
               <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
@@ -632,6 +683,40 @@ onUnmounted(() => {
                 <Button label="Copy" icon="pi pi-copy" size="small" severity="secondary" data-testid="copy-verification-code-button" @click="copyVerificationCode" />
               </div>
             </div>
+          </template>
+        </Card>
+
+        <Card v-if="isAdmin" class="action-card">
+          <template #title>Dolphin profile</template>
+          <template #subtitle>Create or open profiles for the latest client</template>
+          <template #content>
+            <Button label="open Dolphin Profile" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-admin-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id)" />
+            <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
+              <h3>Dolphin access</h3>
+              <p>{{ dolphinLease.targetClientName }}</p>
+              <dl class="info-list lease-info-list">
+                <div>
+                  <dt>Dolphin login</dt>
+                  <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
+                </div>
+                <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
+                  <dt>Client email</dt>
+                  <dd>{{ dolphinLease.sourceEmail }}</dd>
+                </div>
+                <div>
+                  <dt>Password</dt>
+                  <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
+                </div>
+                <div>
+                  <dt>Profiles</dt>
+                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
+                </div>
+                <div>
+                  <dt>Guaranteed authorization time left</dt>
+                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
+                </div>
+              </dl>
+            </section>
           </template>
         </Card>
 

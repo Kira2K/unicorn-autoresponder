@@ -11,7 +11,7 @@ type DolphinCredentialMode = 'stable_shared_email'
 type LeaseRequest = {
   ownerKey: string
   ownerLabel: string
-  role: Exclude<UserRole, 'admin'>
+  role: UserRole
   targetClientId: number
   targetClientName: string
   username: string
@@ -24,7 +24,7 @@ type LeaseRequest = {
 type DolphinLease = {
   ownerKey: string
   ownerLabel: string
-  role: Exclude<UserRole, 'admin'>
+  role: UserRole
   targetClientName: string
   dolphinUserId: number
   credentialMode: DolphinCredentialMode
@@ -61,7 +61,7 @@ type LeaseAttemptContext = {
   credentialMode: DolphinCredentialMode
   ownerKey: string
   ownerLabel: string
-  role: Exclude<UserRole, 'admin'>
+  role: UserRole
   targetClientId: number
   targetClientName: string
   attemptedUsername: string

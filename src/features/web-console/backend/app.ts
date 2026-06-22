@@ -21,6 +21,17 @@ const {
 const { createDefaultVerificationCodeService } = require('./dolphin-verification-code.ts') as {
   createDefaultVerificationCodeService(): VerificationCodeService
 }
+const {
+  createDolphinProfileProvisioner,
+  prepareJudosharkClientIfNeeded
+} = require('./dolphin-profile-provisioning.ts') as {
+  createDolphinProfileProvisioner(options: {
+    repository: WebConsoleRepository
+    api?: any
+    templateProfileId?: number
+  }): DolphinProfileProvisioner
+  prepareJudosharkClientIfNeeded(repository: WebConsoleRepository, client: any): Promise<any>
+}
 
 type Request = import('express').Request
 type Response = import('express').Response
@@ -32,7 +43,7 @@ type DolphinLeaseService = {
   acquire(request: {
     ownerKey: string
     ownerLabel: string
-    role: 'client' | 'provider'
+    role: 'client' | 'provider' | 'admin'
     targetClientId: number
     targetClientName: string
     username: string
@@ -40,6 +51,13 @@ type DolphinLeaseService = {
     sourceEmail?: string
     profileIds: number[]
     knownProfileIds: number[]
+  }): Promise<unknown>
+}
+type DolphinProfileProvisioner = {
+  ensureClientProfiles(request: {
+    client: any
+    existingProfiles: Array<{ id: number; locale: string }>
+    actorRole: 'client' | 'admin'
   }): Promise<unknown>
 }
 type VerificationCodeService = {
@@ -95,6 +113,40 @@ function createDolphinLeasePassword(): string {
   return crypto.randomBytes(9).toString('base64url')
 }
 
+function createMockDolphinProvisioningApi() {
+  let nextProfileId = 880000001
+  const proxies = [
+    { id: 7101, name: 'Mock Person prepared proxy', browser_profiles_count: 0 },
+    { id: 7102, name: 'Ready 1', browser_profiles_count: 0 }
+  ]
+  return {
+    async getProfile() {
+      return {
+        name: 'Test of DNS',
+        platform: 'windows',
+        browserType: 'anty',
+        platformVersion: '11',
+        fingerprint: { mock: true },
+        proxy: { id: 999 }
+      }
+    },
+    async listProxies() {
+      return proxies
+    },
+    async createProfile() {
+      return { data: { id: nextProfileId++ } }
+    },
+    async updateProxy(proxyId: number, patch: Record<string, unknown>) {
+      const proxy = proxies.find(item => Number(item.id) === Number(proxyId))
+      if (proxy && typeof patch.name === 'string') proxy.name = patch.name
+      return { ok: true }
+    },
+    async updateProfileTags() {
+      return { ok: true }
+    }
+  }
+}
+
 async function buildProfileAccessInput(repository: WebConsoleRepository, clientId: number) {
   const [profileIds, knownProfileIds] = await Promise.all([
     repository.getDolphinProfileIdsForClient(clientId),
@@ -108,9 +160,35 @@ async function buildProfileAccessInput(repository: WebConsoleRepository, clientI
   return { profileIds, knownProfileIds }
 }
 
+async function ensureProfileAccessInput(options: {
+  repository: WebConsoleRepository
+  provisioner: DolphinProfileProvisioner
+  client: any
+  actorRole: 'client' | 'admin' | 'provider'
+}) {
+  const existingProfiles = await options.repository.getDolphinProfilesForClient(options.client.id)
+  if (!existingProfiles.length && options.actorRole === 'provider') {
+    const error = new Error(`No Dolphin profiles are linked to client ${options.client.id}.`) as Error & { code?: string }
+    error.code = 'missing_dolphin_profiles'
+    throw error
+  }
+  if (options.actorRole === 'client' || options.actorRole === 'admin') {
+    const preparedClient = await prepareJudosharkClientIfNeeded(options.repository, options.client)
+    await options.provisioner.ensureClientProfiles({
+      client: preparedClient,
+      existingProfiles,
+      actorRole: options.actorRole
+    })
+  }
+  return await buildProfileAccessInput(options.repository, options.client.id)
+}
+
 function createWebConsoleApp(options: {
   repository?: WebConsoleRepository
   dolphinLeaseService?: DolphinLeaseService
+  dolphinProfileProvisioner?: DolphinProfileProvisioner
+  dolphinProvisioningApi?: any
+  dolphinTemplateProfileId?: number
   verificationCodeService?: VerificationCodeService
   useMockData?: boolean
 } = {}) {
@@ -122,6 +200,12 @@ function createWebConsoleApp(options: {
         : undefined
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
+  const useMockData = options.useMockData || process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
+  const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
+    repository,
+    api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
+    templateProfileId: options.dolphinTemplateProfileId ?? (useMockData ? 1 : undefined)
+  })
   const verificationCodeService = options.verificationCodeService ?? createDefaultVerificationCodeService()
   const sessions = createSessionStore()
   const app = express()
@@ -330,11 +414,6 @@ function createWebConsoleApp(options: {
     let targetClientName = ''
     try {
       const session = req.webSession!
-      if (session.role === 'admin') {
-        res.status(403).json({ error: 'forbidden' })
-        return
-      }
-
       if (session.role === 'client') {
         const dashboard = await repository.getClientDashboard(Number(session.clientId), { fullAccess: false })
         if (!dashboard.client.calendarEmail) {
@@ -342,7 +421,12 @@ function createWebConsoleApp(options: {
           return
         }
         const credential = resolveClientDolphinCredentials(dashboard.client)
-        const profileAccess = await buildProfileAccessInput(repository, dashboard.client.id)
+        const profileAccess = await ensureProfileAccessInput({
+          repository,
+          provisioner: dolphinProfileProvisioner,
+          client: dashboard.client,
+          actorRole: 'client'
+        })
         attemptedUsername = credential.username
         targetClientId = dashboard.client.id
         targetClientName = dashboard.client.clientName
@@ -361,6 +445,34 @@ function createWebConsoleApp(options: {
         return
       }
 
+      if (session.role === 'admin') {
+        const requestedClientId = Number(req.body?.targetClientId)
+        const dashboard = Number.isFinite(requestedClientId) && requestedClientId > 0
+          ? await repository.getClientDashboard(requestedClientId, { fullAccess: true })
+          : await repository.getLatestClientDashboard({ fullAccess: true })
+        const profileAccess = await ensureProfileAccessInput({
+          repository,
+          provisioner: dolphinProfileProvisioner,
+          client: dashboard.client,
+          actorRole: 'admin'
+        })
+        attemptedUsername = resolveDolphinSharedUserEmail()
+        targetClientId = dashboard.client.id
+        targetClientName = dashboard.client.clientName
+        res.json(await dolphinLeaseService.acquire({
+          ownerKey: `admin:${session.email}`,
+          ownerLabel: 'Admin',
+          role: 'admin',
+          targetClientId: dashboard.client.id,
+          targetClientName: dashboard.client.clientName,
+          username: resolveDolphinSharedUserEmail(),
+          password: createDolphinLeasePassword(),
+          profileIds: profileAccess.profileIds,
+          knownProfileIds: profileAccess.knownProfileIds
+        }))
+        return
+      }
+
       const providerTargetClientId = Number(req.body?.targetClientId)
       if (!Number.isFinite(providerTargetClientId) || providerTargetClientId <= 0) {
         res.status(400).json({ error: 'missing_target_client', message: 'Provider target client id is required.' })
@@ -371,7 +483,12 @@ function createWebConsoleApp(options: {
         res.status(404).json({ error: 'target_client_not_found', message: 'Provider target client is not visible.' })
         return
       }
-      const profileAccess = await buildProfileAccessInput(repository, targetClient.id)
+      const profileAccess = await ensureProfileAccessInput({
+        repository,
+        provisioner: dolphinProfileProvisioner,
+        client: targetClient,
+        actorRole: 'provider'
+      })
       attemptedUsername = resolveDolphinSharedUserEmail()
       targetClientId = targetClient.id
       targetClientName = targetClient.clientName
@@ -399,6 +516,17 @@ function createWebConsoleApp(options: {
       if (error?.code === 'missing_dolphin_profiles') {
         res.status(404).json({
           error: 'missing_dolphin_profiles',
+          message: error.message
+        })
+        return
+      }
+      if (
+        error?.code === 'missing_dolphin_profile_personal_data' ||
+        error?.code === 'dolphin_profile_provisioning_blocked' ||
+        error?.code === 'dolphin_profile_proxy_unavailable'
+      ) {
+        res.status(422).json({
+          error: error.code,
           message: error.message
         })
         return
@@ -506,6 +634,7 @@ module.exports = {
   createSessionStore,
   createWebConsoleApp,
   buildProfileAccessInput,
+  ensureProfileAccessInput,
   publicSession,
   resolveClientDolphinCredentials
 }

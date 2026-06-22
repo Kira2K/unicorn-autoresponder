@@ -99,6 +99,32 @@ body {
   border-color: #bae6fd;
 }
 
+.lease-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.lease-panel h3,
+.lease-panel p {
+  margin: 0;
+}
+
+.lease-panel h3 {
+  font-size: 1rem;
+}
+
+.lease-panel p {
+  color: #60708a;
+}
+
+.lease-info-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .profile-card,
 .accounts-card,
 .provider-card {
@@ -276,6 +302,12 @@ body {
   overflow-wrap: anywhere;
 }
 
+.dialog-text {
+  margin: 0;
+  max-width: 460px;
+  line-height: 1.5;
+}
+
 .loading-panel {
   min-height: 280px;
   display: grid;
@@ -293,7 +325,8 @@ body {
 
   .profile-form,
   .account-form,
-  .compact-info {
+  .compact-info,
+  .lease-info-list {
     grid-template-columns: 1fr;
   }
 

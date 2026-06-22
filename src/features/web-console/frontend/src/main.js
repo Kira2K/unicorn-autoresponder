@@ -9,6 +9,7 @@ import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
+import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Password from 'primevue/password'
@@ -36,6 +37,7 @@ createApp(App)
   .component('Card', Card)
   .component('Column', Column)
   .component('DataTable', DataTable)
+  .component('Dialog', Dialog)
   .component('InputText', InputText)
   .component('Message', Message)
   .component('Password', Password)

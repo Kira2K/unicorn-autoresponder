@@ -4,6 +4,9 @@ const { createNocoClient } = require('../../../integrations/noco/core/client.ts'
 const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { id: string }>
 }
+const { RELATIONS } = require('../../../integrations/noco/core/schema.ts') as {
+  RELATIONS: Record<string, string>
+}
 
 type ClientDashboard = import('./types.ts').ClientDashboard
 type ClientProfilePatch = import('./types.ts').ClientProfilePatch
@@ -126,6 +129,10 @@ function profileClientId(profile: NocoRecord): number | null {
 function profileId(profile: NocoRecord): number | null {
   const id = Number(normalizeId(profile.dolphin_profile_id))
   return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function profileLocale(profile: NocoRecord): string {
+  return normalizeText(profile.locale).toLowerCase()
 }
 
 function profileLocaleSortValue(profile: NocoRecord): number {
@@ -333,6 +340,14 @@ function notFoundError(message: string): Error & { code?: string } {
   return error
 }
 
+function extractCreatedRecordId(value: any): number | null {
+  if (typeof value?.Id === 'number') return value.Id
+  if (typeof value?.id === 'number') return value.id
+  if (Array.isArray(value) && value[0]) return extractCreatedRecordId(value[0])
+  if (Array.isArray(value?.list) && value.list[0]) return extractCreatedRecordId(value.list[0])
+  return null
+}
+
 function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebConsoleRepository {
   const nocoClient = options.nocoClient ?? createNocoClient()
 
@@ -401,6 +416,50 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     return await dashboardForClient(client, fullAccess)
   }
 
+  async function findDolphinProfileClientRelationFieldId(): Promise<string | null> {
+    if (typeof nocoClient.fetchTableMeta !== 'function') return null
+    const meta = await nocoClient.fetchTableMeta(TABLES.dolphinProfiles.id)
+    const columns = meta.columns ?? []
+    const byTitle = columns.find((column: any) => column.title === RELATIONS.dolphinProfilesClient)
+    if (byTitle?.id) return byTitle.id
+    const byRelatedClient = columns.find((column: any) => {
+      const options = column.colOptions ?? {}
+      return (
+        (column.uidt === 'LinkToAnotherRecord' || column.uidt === 'Links') &&
+        (options.fk_related_model_id === TABLES.clients.id ||
+          options.fk_parent_model_id === TABLES.clients.id)
+      )
+    })
+    return byRelatedClient?.id ?? null
+  }
+
+  async function linkDolphinProfileToClient(profileRecordId: number, clientId: number): Promise<void> {
+    if (typeof nocoClient.request !== 'function') return
+    const relationFieldId = await findDolphinProfileClientRelationFieldId()
+    if (!relationFieldId) return
+    const bodies = [
+      [{ Id: clientId }],
+      { Id: clientId },
+      { data: [{ Id: clientId }] }
+    ]
+    let lastError: any
+    for (const body of bodies) {
+      try {
+        await nocoClient.request(
+          'post',
+          `/api/v2/tables/${TABLES.dolphinProfiles.id}/links/${relationFieldId}/records/${profileRecordId}`,
+          body
+        )
+        return
+      } catch (error: any) {
+        lastError = error
+        const status = error?.response?.status
+        if (status !== 400 && status !== 404 && status !== 422) throw error
+      }
+    }
+    throw lastError ?? new Error('NocoDB rejected all known Dolphin profile relation payloads.')
+  }
+
   return {
     async findClientByCalendarEmail(email: string): Promise<WebClient | null> {
       const normalized = normalizeEmail(email)
@@ -420,9 +479,25 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       return await dashboardForClient(client, Boolean(options.fullAccess))
     },
 
+    async getClientById(clientId: number): Promise<WebClient> {
+      const clients = await fetchClients()
+      const client = clients.find(candidate => Number(candidate.Id) === Number(clientId))
+      if (!client) throw notFoundError(`Client ${clientId} was not found`)
+      return toClient(client)
+    },
+
     async getDolphinProfileIdsForClient(clientId: number): Promise<number[]> {
       const profiles = await fetchDolphinProfiles()
       return uniqueSortedProfileIds(profiles.filter(profile => profileClientId(profile) === Number(clientId)))
+    },
+
+    async getDolphinProfilesForClient(clientId: number): Promise<Array<{ id: number; locale: string }>> {
+      const profiles = await fetchDolphinProfiles()
+      return profiles
+        .filter(profile => profileClientId(profile) === Number(clientId))
+        .map(profile => ({ id: profileId(profile), locale: profileLocale(profile) }))
+        .filter((profile): profile is { id: number; locale: string } => Boolean(profile.id))
+        .sort((a, b) => (a.locale === 'ru' ? 0 : a.locale === 'en' ? 1 : 2) - (b.locale === 'ru' ? 0 : b.locale === 'en' ? 1 : 2) || a.id - b.id)
     },
 
     async getLatestClientDashboard(options: { fullAccess?: boolean } = {}): Promise<ClientDashboard> {
@@ -498,6 +573,25 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       await getOwnedPlatformAccount(clientId, accountId)
       await nocoClient.deleteRecord(TABLES.platformAccounts.id, Number(accountId))
       return await refetchDashboard(clientId)
+    },
+
+    async createDolphinProfileBinding(input: {
+      clientId: number
+      clientName: string
+      locale: 'ru' | 'en'
+      dolphinProfileId: number
+    }): Promise<unknown> {
+      const created = await nocoClient.createRecord(TABLES.dolphinProfiles.id, {
+        client_name: input.clientName,
+        locale: input.locale,
+        dolphin_profile_id: input.dolphinProfileId,
+        clients_id: Number(input.clientId)
+      })
+      const profileRecordId = extractCreatedRecordId(created)
+      if (profileRecordId) {
+        await linkDolphinProfileToClient(profileRecordId, Number(input.clientId))
+      }
+      return created
     }
   }
 }
@@ -509,6 +603,7 @@ module.exports = {
   createWebConsoleRepository,
   profileClientId,
   profileId,
+  profileLocale,
   isLinkedInPlatformAccount,
   LINKEDIN_PLATFORM_ID,
   linkedStatusMatches,

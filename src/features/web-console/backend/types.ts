@@ -93,7 +93,9 @@ export type WebConsoleRepository = {
   findClientByCalendarEmail(email: string): Promise<WebClient | null>
   getAllDolphinProfileIds(): Promise<number[]>
   getClientDashboard(clientId: number, options?: { fullAccess?: boolean }): Promise<ClientDashboard>
+  getClientById(clientId: number): Promise<WebClient>
   getDolphinProfileIdsForClient(clientId: number): Promise<number[]>
+  getDolphinProfilesForClient(clientId: number): Promise<Array<{ id: number; locale: string }>>
   getLatestClientDashboard(options?: { fullAccess?: boolean }): Promise<ClientDashboard>
   getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null>
   getProviderClientsForStatus(statusLabel: string): Promise<ProviderClientRow[]>
@@ -103,4 +105,10 @@ export type WebConsoleRepository = {
   createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard>
   updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard>
   deletePlatformAccount(clientId: number, accountId: number): Promise<ClientDashboard>
+  createDolphinProfileBinding(input: {
+    clientId: number
+    clientName: string
+    locale: 'ru' | 'en'
+    dolphinProfileId: number
+  }): Promise<unknown>
 }

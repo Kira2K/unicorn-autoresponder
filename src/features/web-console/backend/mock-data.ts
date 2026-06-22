@@ -19,6 +19,9 @@ const mockClients = [
   {
     Id: 10,
     client_name: 'Latest Admin Client',
+    first_name: 'Latest',
+    last_name: 'Client',
+    fio: 'Latest Client',
     calendar_email: 'latest@example.com',
     telegram_general_chat_id: '-100200300',
     rel_clients_primary_stack: { Id: 11, name: 'PYTHON' },
@@ -42,6 +45,30 @@ const mockClients = [
     rel_clients_primary_stack: { Id: 13, name: 'GO' },
     market: 'En',
     client_status: { Id: 4, title: 'paused' }
+  },
+  {
+    Id: 4,
+    client_name: 'Mock Missing Profiles',
+    first_name: 'Mock',
+    last_name: 'Person',
+    fio: 'Mock Person',
+    calendar_email: 'missing-profiles@example.com',
+    telegram_general_chat_id: '-100777001',
+    rel_clients_primary_stack: { Id: 14, name: 'REACT' },
+    market: 'both',
+    client_status: { Id: 1, title: 'studying' }
+  },
+  {
+    Id: 5,
+    client_name: 'Mock Missing Name',
+    first_name: 'Solo',
+    last_name: '',
+    fio: 'Solo',
+    calendar_email: 'missing-name@example.com',
+    telegram_general_chat_id: '-100777002',
+    rel_clients_primary_stack: { Id: 15, name: 'PYTHON' },
+    market: 'ru',
+    client_status: { Id: 1, title: 'studying' }
   }
 ]
 
@@ -234,13 +261,22 @@ function createMockNocoClient() {
       return []
     },
     async createRecord(tableId: string, record: Record<string, any>) {
-      if (tableId !== 'm8zej2vsv4iypl8') return {}
-      const created = {
-        Id: nextId(platformAccounts),
+      const target: Array<Record<string, any> & { Id: number }> | null = tableId === 'm8zej2vsv4iypl8'
+        ? platformAccounts
+        : tableId === 'm4thvbutfyb15qz'
+          ? dolphinProfiles
+          : null
+      if (!target) return {}
+      const created: Record<string, any> & { Id: number } = {
+        Id: nextId(target),
         ...record
       }
-      syncPlatformRelation(created)
-      platformAccounts.push(created)
+      if (tableId === 'm8zej2vsv4iypl8') syncPlatformRelation(created)
+      if (tableId === 'm4thvbutfyb15qz') {
+        const client = clients.find(candidate => Number(candidate.Id) === Number(created.clients_id))
+        if (client) created.rel_dolphinProfiles_client = { Id: client.Id, client_name: client.client_name }
+      }
+      target.push(created)
       return created
     },
     async patchRecord(tableId: string, recordId: number, patch: Record<string, any>) {
