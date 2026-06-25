@@ -199,6 +199,14 @@ body {
   margin-bottom: 16px;
 }
 
+.profile-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
 .profile-accordion .p-accordionpanel {
   border: 1px solid #d7e3f5;
   border-radius: 8px;

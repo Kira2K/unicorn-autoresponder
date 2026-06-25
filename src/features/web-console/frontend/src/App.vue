@@ -64,6 +64,7 @@ const accountSaving = ref(false)
 const accountMessage = ref('')
 const accountError = ref('')
 const profileEditorOpen = ref('')
+const profileEditing = ref(false)
 const accountEditorOpen = ref(false)
 let countdownTimer = null
 const SECURE_DNS_WARNING_KEY = 'webConsole.secureDnsWarningAccepted'
@@ -153,7 +154,18 @@ function resetAccountForm() {
 
 function closeProfileEditor() {
   resetProfileForm()
+  profileEditing.value = false
   profileEditorOpen.value = ''
+}
+
+function toggleProfileEditor() {
+  if (profileEditing.value) {
+    closeProfileEditor()
+    return
+  }
+  resetProfileForm()
+  profileEditing.value = true
+  profileEditorOpen.value = 'details'
 }
 
 function openNewAccountForm() {
@@ -231,6 +243,7 @@ async function loadDashboard() {
       await loadDolphinStatus(dashboard.value?.client?.id)
       resetProfileForm()
       resetAccountForm()
+      profileEditing.value = false
       profileEditorOpen.value = ''
       accountEditorOpen.value = false
       providerClients.value = []
@@ -280,6 +293,7 @@ async function logout() {
     englishLevels.value = []
     platforms.value = []
     resetAccountForm()
+    profileEditing.value = false
     profileEditorOpen.value = ''
     accountEditorOpen.value = false
     password.value = ''
@@ -297,6 +311,7 @@ async function saveProfile() {
       englishLevelId: profileForm.value.englishLevelId ? Number(profileForm.value.englishLevelId) : null
     })
     resetProfileForm()
+    profileEditing.value = false
     profileEditorOpen.value = ''
     profileMessage.value = 'Profile saved'
   } catch (caught) {
@@ -640,19 +655,32 @@ onUnmounted(() => {
 
       <div v-else-if="dashboard" class="dashboard-grid">
         <Card class="profile-card">
-          <template #title>{{ dashboard.client.clientName }}</template>
-          <template #subtitle>{{ isAdmin ? 'Latest created client' : 'Your editable profile' }}</template>
+          <template #title>
+            <div class="profile-card-title-row">
+              <span>{{ dashboard.client.clientName }}</span>
+              <Button
+                v-if="isClient"
+                :label="profileEditing ? 'View' : 'Edit'"
+                :icon="profileEditing ? 'pi pi-eye' : 'pi pi-pencil'"
+                severity="secondary"
+                size="small"
+                data-testid="open-profile-editor-button"
+                @click="toggleProfileEditor"
+              />
+            </div>
+          </template>
+          <template #subtitle>{{ isAdmin ? 'Latest created client' : 'Your profile' }}</template>
           <template #content>
             <Accordion v-if="isClient" v-model:value="profileEditorOpen" class="profile-accordion" data-testid="profile-accordion">
-              <AccordionPanel value="profile">
-                <AccordionHeader data-testid="profile-accordion-header">
+              <AccordionPanel value="details">
+                <AccordionHeader data-testid="profile-details-accordion-header">
                   <span class="accordion-title">
-                    <i class="pi pi-user-edit" aria-hidden="true"></i>
-                    Editable personal details
+                    <i :class="profileEditing ? 'pi pi-user-edit' : 'pi pi-id-card'" aria-hidden="true"></i>
+                    {{ profileEditing ? 'Editable personal details' : 'Personal data' }}
                   </span>
                 </AccordionHeader>
                 <AccordionContent>
-                  <form class="profile-form" data-testid="profile-form" @submit.prevent="saveProfile">
+                  <form v-if="profileEditing" class="profile-form" data-testid="profile-form" @submit.prevent="saveProfile">
                     <label class="field">
                       <span>First name</span>
                       <InputText v-model="profileForm.firstName" data-testid="profile-first-name" />
@@ -695,11 +723,61 @@ onUnmounted(() => {
                       <Button type="button" label="Cancel" icon="pi pi-times" severity="secondary" data-testid="close-profile-editor-button" @click="closeProfileEditor" />
                     </div>
                   </form>
+                  <dl v-else class="info-list compact-info">
+                    <div>
+                      <dt>First name</dt>
+                      <dd>{{ dashboard.client.firstName || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Last name</dt>
+                      <dd>{{ dashboard.client.lastName || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Education</dt>
+                      <dd>{{ dashboard.client.education || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>English level</dt>
+                      <dd>{{ dashboard.client.englishLevel || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Client Id</dt>
+                      <dd>{{ dashboard.client.id }}</dd>
+                    </div>
+                    <div>
+                      <dt>Stack</dt>
+                      <dd>{{ dashboard.client.primaryStack || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Market</dt>
+                      <dd>{{ dashboard.client.market || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{{ dashboard.client.clientStatus || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Common Chat</dt>
+                      <dd>{{ dashboard.client.commonChatId || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Mentors</dt>
+                      <dd>{{ (dashboard.client.mentors || []).join(', ') || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Resume status</dt>
+                      <dd>{{ dashboard.client.resumeStatus || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>LinkedIn status</dt>
+                      <dd>{{ dashboard.client.linkedInStatus || 'empty' }}</dd>
+                    </div>
+                  </dl>
                 </AccordionContent>
               </AccordionPanel>
             </Accordion>
             <span v-if="profileMessage" class="success-text profile-status" data-testid="profile-save-message">{{ profileMessage }}</span>
-            <dl class="info-list compact-info">
+            <dl v-if="!isClient" class="info-list compact-info">
               <div>
                 <dt>First name</dt>
                 <dd>{{ dashboard.client.firstName || 'empty' }}</dd>
