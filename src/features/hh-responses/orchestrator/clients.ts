@@ -7,6 +7,16 @@ type AutomationTargetOptions = import('./types.ts').AutomationTargetOptions
 type ClientAutomationData = import('./types.ts').ClientAutomationData
 type ClientHHAuthCredentials = import('./types.ts').ClientHHAuthCredentials
 
+type CredentialAttachFailure = {
+  client: ClientAutomationData
+  error: unknown
+}
+
+type BestEffortCredentialAttachResult = {
+  clients: ClientAutomationData[]
+  skipped: CredentialAttachFailure[]
+}
+
 function getConfiguredClientNames(): string[] {
   return parseCommaSeparatedEnv(process.env.ORCHESTRATOR_CLIENT_NAMES)
 }
@@ -46,6 +56,45 @@ async function attachHHAuthCredentials(
       )
     }))
   )
+}
+
+async function attachHHAuthCredentialsBestEffort(
+  clients: ClientAutomationData[],
+  repository: {
+    getHHAuthCredentialsByCommonChatId(
+      commonChatId: string,
+      market?: 'Ru' | 'En'
+    ): Promise<ClientHHAuthCredentials>
+  }
+): Promise<BestEffortCredentialAttachResult> {
+  const settled = await Promise.allSettled(
+    clients.map(async client => ({
+      ...client,
+      hhAuthCredentials: await repository.getHHAuthCredentialsByCommonChatId(
+        client.commonChatId,
+        client.market
+      )
+    }))
+  )
+  const attachedClients: ClientAutomationData[] = []
+  const skipped: CredentialAttachFailure[] = []
+
+  settled.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      attachedClients.push(result.value)
+      return
+    }
+
+    skipped.push({
+      client: clients[index],
+      error: result.reason
+    })
+  })
+
+  return {
+    clients: attachedClients,
+    skipped
+  }
 }
 
 function selectClientsByCommonChatIds(
@@ -100,6 +149,7 @@ function selectClientsByUniqueNames(
 
 module.exports = {
   attachHHAuthCredentials,
+  attachHHAuthCredentialsBestEffort,
   getConfiguredAutomationTargetOptions,
   getConfiguredClientIds,
   getConfiguredClientNames,

@@ -12,6 +12,7 @@ const {
 } = require('../../../integrations/dolphin/index.ts')
 const {
   attachHHAuthCredentials,
+  attachHHAuthCredentialsBestEffort,
   attachBlockedCompanies,
   getConfiguredAutomationTargetOptions,
   getConfiguredClientIds,
@@ -157,7 +158,10 @@ function getRecommendedExternalTimeoutMs(
 }
 
 async function runClientsOrchestrator(
-  clients: ClientAutomationData[]
+  clients: ClientAutomationData[],
+  options: {
+    extraSummaryStatuses?: OrchestratorStatus[]
+  } = {}
 ): Promise<OrchestratorStatus[]> {
   await assertDolphinAppRunning()
   writeLocalRunLog({
@@ -213,18 +217,61 @@ async function runClientsOrchestrator(
         await wait(delayMs)
       }
 
-      return runClientOrchestrator(client)
+      return runClientOrchestrator(client).catch((error: unknown) => {
+        const status = makeClientPreparationErrorStatus(
+          client,
+          error,
+          'client run failed before final status'
+        )
+        writeLocalRunLog({
+          kind: 'client-final-status',
+          status
+        })
+
+        return status
+      })
     })
   )
 
-  console.log(results)
+  const summaryResults = [...(options.extraSummaryStatuses ?? []), ...results]
+
+  console.log(summaryResults)
   writeLocalRunLog({
     kind: 'run-results',
-    results
+    results: summaryResults
   })
-  await sendRunSummaryLogWithTimeout(results)
+  await sendRunSummaryLogWithTimeout(summaryResults)
 
-  return results
+  return summaryResults
+}
+
+function makeClientPreparationErrorStatus(
+  client: ClientAutomationData,
+  error: unknown,
+  event: string
+): OrchestratorStatus {
+  return {
+    clientName: client.clientName,
+    stack: client.stack,
+    market: client.market,
+    dolphinProfileId: client.dolphinProfileId,
+    commonChatId: client.commonChatId,
+    stackScenario: client.stackScenario ?? '',
+    lifecycleEvents: [
+      {
+        at: new Date().toISOString(),
+        elapsedMs: 0,
+        event,
+        details: getErrorMessage(error)
+      }
+    ],
+    opened: false,
+    indexScriptInjected: false,
+    watcherInstalled: false,
+    startButtonClicked: false,
+    error: getErrorMessage(error),
+    errorStack: getErrorStack(error)
+  }
 }
 
 async function runSelectedClientsOrchestrator(
@@ -257,14 +304,51 @@ async function runSelectedClientIdsOrchestrator(
 
 async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
   const db = createAppDb()
-  const clients: ClientAutomationData[] = await attachHHAuthCredentials(
+  const credentialAttachResult = await attachHHAuthCredentialsBestEffort(
     attachBlockedCompanies(
       await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
     ),
     db
   )
+  const skippedStatuses = credentialAttachResult.skipped.map(
+    (skip: { client: ClientAutomationData; error: unknown }) => {
+      const { client, error } = skip
+      const status = makeClientPreparationErrorStatus(
+        client,
+        error,
+        'client skipped before run: HH credentials were not matched'
+      )
 
-  return runClientsOrchestrator(clients)
+      console.warn(
+        `Skipping ${client.clientName}/${client.commonChatId}/${client.market}: ${getErrorMessage(error)}`
+      )
+      writeLocalRunLog({
+        kind: 'client-skipped-before-run',
+        status
+      })
+
+      return status
+    }
+  )
+
+  if (!credentialAttachResult.clients.length) {
+    if (!skippedStatuses.length) {
+      return runClientsOrchestrator(credentialAttachResult.clients)
+    }
+
+    console.warn('No runnable clients remained after credential preflight.')
+    writeLocalRunLog({
+      kind: 'run-results',
+      results: skippedStatuses
+    })
+    await sendRunSummaryLogWithTimeout(skippedStatuses)
+
+    return skippedStatuses
+  }
+
+  return runClientsOrchestrator(credentialAttachResult.clients, {
+    extraSummaryStatuses: skippedStatuses
+  })
 }
 
 async function runConfiguredOrchestrator(): Promise<OrchestratorStatus[]> {
