@@ -126,6 +126,7 @@ body {
 }
 
 .profile-card,
+.action-card,
 .accounts-card,
 .provider-card {
   grid-column: 1 / -1;
@@ -306,6 +307,38 @@ body {
   margin: 0;
   max-width: 460px;
   line-height: 1.5;
+}
+
+.required-data-dialog-text {
+  margin: 0;
+  max-width: 560px;
+  font-size: 1.8rem;
+  line-height: 1.25;
+  font-weight: 800;
+  color: #991b1b;
+}
+
+.proxy-choice-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #facc15;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.helper-text {
+  margin: 0;
+  color: #713f12;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .loading-panel {

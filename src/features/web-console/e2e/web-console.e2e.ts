@@ -162,6 +162,8 @@ async function runTests(): Promise<void> {
     }
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '02-client-all-platform-accounts.png'), fullPage: true })
 
+    await page.getByTestId('open-dolphin-client-button').getByText('Open Dolphin profiles', { exact: false }).waitFor()
+    assert.equal(await page.getByTestId('own-proxy-panel').count(), 0)
     await page.getByTestId('open-dolphin-client-button').click()
     await page.getByTestId('secure-dns-warning').waitFor()
     await page.getByTestId('secure-dns-warning').getByText('Are you sure you have switched secure DNS off before opening LinkedIn?', { exact: false }).waitFor()
@@ -169,6 +171,7 @@ async function runTests(): Promise<void> {
     await page.getByTestId('dolphin-lease-panel').waitFor()
     await page.getByTestId('dolphin-lease-panel').getByText('Test', { exact: false }).waitFor()
     await assertText(page, 'Dolphin access')
+    await assertText(page, 'Open Dolphin Anty and enter the credentials below.')
     await assertText(page, 'kind.cute.unicorn@gmail.com')
     await assertText(page, 'Client email')
     await assertText(page, 'client@example.com')
@@ -189,6 +192,9 @@ async function runTests(): Promise<void> {
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
     await assertText(page, 'Mock Missing Profiles')
+    await page.getByTestId('open-dolphin-client-button').getByText('Create new profiles', { exact: false }).waitFor()
+    await page.getByTestId('own-proxy-panel').waitFor()
+    assert.equal(await page.getByTestId('expected-proxy-name').count(), 0)
     await page.getByTestId('open-dolphin-client-button').click()
     await page.getByTestId('dolphin-lease-panel').waitFor()
     await page.getByTestId('dolphin-lease-profiles').getByText('880000001, 880000002', { exact: false }).waitFor()
@@ -233,9 +239,10 @@ async function runTests(): Promise<void> {
     await page.locator('input[type="password"]').fill('1234')
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
+    await dismissRequiredDataDialogIfVisible(page)
     await page.getByTestId('open-dolphin-client-button').click()
     await page.getByTestId('dolphin-lease-error').waitFor()
-    assert.match(await page.getByTestId('dolphin-lease-error').textContent(), /account in use sorry/)
+    assert.match(await page.getByTestId('dolphin-lease-error').textContent(), /come back in 5 mins/)
     await page.getByTestId('logout-button').click()
     await page.getByTestId('login-page').waitFor()
 
@@ -244,8 +251,9 @@ async function runTests(): Promise<void> {
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
     await page.getByTestId('open-dolphin-client-button').click()
-    await page.getByTestId('dolphin-lease-error').waitFor()
-    assert.match(await page.getByTestId('dolphin-lease-error').textContent(), /Fill first name and second name/)
+    await page.getByTestId('required-data-dialog').waitFor()
+    assert.match(await page.getByTestId('required-data-dialog-text').textContent(), /pls contact your mentor to add last name/i)
+    await page.getByTestId('confirm-required-data-dialog-button').click()
     await page.getByTestId('logout-button').click()
     await page.getByTestId('login-page').waitFor()
 
@@ -278,6 +286,12 @@ async function runTests(): Promise<void> {
 
 async function assertText(page: any, text: string): Promise<void> {
   await page.getByText(text, { exact: false }).first().waitFor({ timeout: 10000 })
+}
+
+async function dismissRequiredDataDialogIfVisible(page: any): Promise<void> {
+  if (await page.getByTestId('required-data-dialog').count()) {
+    await page.getByTestId('confirm-required-data-dialog-button').click()
+  }
 }
 
 runTests()

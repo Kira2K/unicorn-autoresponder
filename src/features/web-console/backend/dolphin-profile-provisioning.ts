@@ -44,6 +44,7 @@ type DolphinProvisioner = {
     client: WebClient
     existingProfiles: DolphinProfileRecord[]
     actorRole: 'client' | 'admin'
+    ownProxy?: boolean
   }): Promise<DolphinProvisionResult>
 }
 
@@ -133,6 +134,14 @@ function normalizeKey(value: unknown): string {
   return normalizeText(value).toLowerCase()
 }
 
+function createProvisioningError(
+  message: string,
+  code: string,
+  details: Record<string, unknown> = {}
+): Error & { code?: string; field?: string; fieldLabel?: string; requiredFields?: RequiredClientDataField[] } {
+  return Object.assign(new Error(message), { code, ...details })
+}
+
 function profileIdFromCreateResponse(value: any): number {
   const id = Number(value?.data?.id ?? value?.id ?? value?.Id)
   if (!Number.isFinite(id) || id <= 0) {
@@ -145,37 +154,108 @@ function requiredLocalesForMarket(market: unknown): Locale[] {
   const normalized = normalizeKey(market)
   if (normalized === 'ru') return ['ru']
   if (normalized === 'en' || normalized === 'both') return ['ru', 'en']
-  const error = new Error(`Unsupported client market for Dolphin profile creation: ${String(market || 'empty')}`) as Error & { code?: string }
-  error.code = 'dolphin_profile_provisioning_blocked'
-  throw error
+  throw createProvisioningError(
+    `Unsupported client market for Dolphin profile creation: ${String(market || 'empty')}`,
+    'dolphin_profile_provisioning_blocked',
+    { field: 'market', fieldLabel: 'market' }
+  )
 }
 
-function nameParts(client: WebClient): { firstName: string; secondName: string } {
+type RequiredClientDataField = {
+  field: string
+  fieldLabel: string
+  message: string
+}
+
+function maybeNameParts(client: WebClient): { firstName: string; secondName: string } {
   const firstName = normalizeText(client.firstName || client.clientName.split(/\s+/)[0])
   const fioTokens = normalizeText(client.fio).split(/\s+/).filter(Boolean)
   const lastName = normalizeText(client.lastName)
   const secondName = lastName || fioTokens.find(token => normalizeKey(token) !== normalizeKey(firstName)) || ''
+  return { firstName, secondName }
+}
+
+function nameParts(client: WebClient): { firstName: string; secondName: string } {
+  const { firstName, secondName } = maybeNameParts(client)
   if (!firstName || !secondName) {
-    const error = new Error('Fill first name and second name before creating Dolphin profiles.') as Error & { code?: string }
-    error.code = 'missing_dolphin_profile_personal_data'
-    throw error
+    throw createProvisioningError(
+      'Fill first name and second name before using Dolphin profiles.',
+      'missing_dolphin_profile_personal_data',
+      {
+        field: firstName ? 'lastName' : 'firstName',
+        fieldLabel: firstName ? 'last name' : 'first name'
+      }
+    )
   }
   return { firstName, secondName }
 }
 
-function assertRequiredClientData(client: WebClient): void {
-  nameParts(client)
+function getRequiredClientDataIssues(client: WebClient, options: { requireCalendarEmail?: boolean } = {}): RequiredClientDataField[] {
+  const issues: RequiredClientDataField[] = []
+  const { firstName, secondName } = maybeNameParts(client)
+  if (!firstName) {
+    issues.push({
+      field: 'firstName',
+      fieldLabel: 'first name',
+      message: 'Fill first name before using Dolphin profiles.'
+    })
+  }
+  if (!secondName) {
+    issues.push({
+      field: 'lastName',
+      fieldLabel: 'last name',
+      message: 'Fill last name before using Dolphin profiles.'
+    })
+  }
   if (!normalizeText(client.primaryStack)) {
-    const error = new Error('Fill client stack before creating Dolphin profiles.') as Error & { code?: string }
-    error.code = 'missing_dolphin_profile_personal_data'
-    throw error
+    issues.push({
+      field: 'primaryStack',
+      fieldLabel: 'stack',
+      message: 'Fill client stack before using Dolphin profiles.'
+    })
   }
   if (!normalizeText(client.commonChatId)) {
-    const error = new Error('Fill common chat id before creating Dolphin profiles.') as Error & { code?: string }
-    error.code = 'missing_dolphin_profile_personal_data'
-    throw error
+    issues.push({
+      field: 'commonChatId',
+      fieldLabel: 'common chat id',
+      message: 'Fill common chat id before using Dolphin profiles.'
+    })
   }
-  requiredLocalesForMarket(client.market)
+  if (!normalizeText(client.market)) {
+    issues.push({
+      field: 'market',
+      fieldLabel: 'market',
+      message: 'Fill client market before using Dolphin profiles.'
+    })
+  } else {
+    try {
+      requiredLocalesForMarket(client.market)
+    } catch (error: any) {
+      issues.push({
+        field: 'market',
+        fieldLabel: 'market',
+        message: error instanceof Error ? error.message : 'Fill a supported market before using Dolphin profiles.'
+      })
+    }
+  }
+  if (options.requireCalendarEmail && !normalizeText(client.calendarEmail)) {
+    issues.push({
+      field: 'calendarEmail',
+      fieldLabel: 'calendar email',
+      message: 'Fill calendar email before using Dolphin profiles.'
+    })
+  }
+  return issues
+}
+
+function assertRequiredClientData(client: WebClient, options: { requireCalendarEmail?: boolean } = {}): void {
+  const issues = getRequiredClientDataIssues(client, options)
+  if (!issues.length) return
+  throw createProvisioningError(issues[0].message, 'missing_dolphin_profile_personal_data', {
+    field: issues[0].field,
+    fieldLabel: issues[0].fieldLabel,
+    requiredFields: issues
+  })
 }
 
 function marketLabel(locale: Locale): 'Ru' | 'En' {
@@ -202,11 +282,17 @@ function buildProxyName(client: WebClient, enProfileId: number): string {
   const latinFirst = transliterate(firstName)
   const latinSecond = transliterate(secondName)
   if (!latinFirst || !latinSecond) {
-    const error = new Error('Client first and second names must be transliteratable for proxy naming.') as Error & { code?: string }
-    error.code = 'missing_dolphin_profile_personal_data'
-    throw error
+    throw createProvisioningError(
+      'Client first and second names must be transliteratable for proxy naming.',
+      'missing_dolphin_profile_personal_data',
+      { field: 'lastName', fieldLabel: 'last name' }
+    )
   }
   return `${latinFirst} | ${enProfileId} | ${latinSecond} | ${normalizeText(client.commonChatId)} | ${normalizeText(client.primaryStack)} En`
+}
+
+function buildProxyNameExample(client: WebClient): string {
+  return buildProxyName(client, '{profileId}' as any)
 }
 
 function buildProxyRenamePatch(proxy: DolphinProxySnapshot, name: string): Record<string, unknown> {
@@ -347,6 +433,7 @@ function createDolphinProfileProvisioner(options: {
       client: WebClient
       existingProfiles: DolphinProfileRecord[]
       actorRole: 'client' | 'admin'
+      ownProxy?: boolean
     }): Promise<DolphinProvisionResult> {
       const requiredLocales = requiredLocalesForMarket(input.client.market)
       const existingLocales = new Set(input.existingProfiles.map(profile => normalizeKey(profile.locale)))
@@ -354,7 +441,7 @@ function createDolphinProfileProvisioner(options: {
       if (!missingLocales.length) {
         return { created: [], skippedSuspiciousProxies: [], extraNamedProxies: [] }
       }
-      assertRequiredClientData(input.client)
+      assertRequiredClientData(input.client, { requireCalendarEmail: input.actorRole === 'client' })
       const templateProfileId = Number(options.templateProfileId ?? process.env.DOLPHIN_TEMPLATE_PROFILE_ID)
       if (!Number.isFinite(templateProfileId) || templateProfileId <= 0) {
         const error = new Error('Missing required environment variable: DOLPHIN_TEMPLATE_PROFILE_ID') as Error & { code?: string }
@@ -363,7 +450,7 @@ function createDolphinProfileProvisioner(options: {
       }
 
       const template = await api.getProfile(templateProfileId)
-      const proxies = missingLocales.includes('en') ? await api.listProxies() : []
+      const proxies = missingLocales.includes('en') && !input.ownProxy ? await api.listProxies() : []
       const dolphinProfiles = typeof api.listProfiles === 'function'
         ? await api.listProfiles()
         : []
@@ -404,7 +491,7 @@ function createDolphinProfileProvisioner(options: {
         }
 
         let selectedProxy: DolphinProxySnapshot | null = null
-        if (locale === 'en') {
+        if (locale === 'en' && !input.ownProxy) {
           const selection = selectProxyForClient(input.client, proxies)
           selectedProxy = selection.proxy
           skippedSuspiciousProxies = selection.skippedSuspiciousProxies
@@ -460,11 +547,13 @@ async function prepareJudosharkClientIfNeeded(
 
 module.exports = {
   buildProfileName,
+  buildProxyNameExample,
   buildProxyRenamePatch,
   buildProxyName,
   cloneTemplatePayload,
   createDefaultDolphinProvisioningApi,
   createDolphinProfileProvisioner,
+  getRequiredClientDataIssues,
   prepareJudosharkClientIfNeeded,
   requiredLocalesForMarket,
   selectProxyForClient,

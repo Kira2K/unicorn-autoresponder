@@ -60,11 +60,15 @@ export const api = {
   providerClients() {
     return request('/api/provider/clients')
   },
-  acquireDolphinLease(_targetClientName, targetClientId) {
+  acquireDolphinLease(_targetClientName, targetClientId, options = {}) {
     return request('/api/dolphin/lease/acquire', {
       method: 'POST',
-      body: JSON.stringify({ targetClientId })
+      body: JSON.stringify({ targetClientId, ...options })
     })
+  },
+  dolphinProfileStatus(targetClientId) {
+    const query = targetClientId ? `?targetClientId=${encodeURIComponent(targetClientId)}` : ''
+    return request(`/api/dolphin/profiles/status${query}`)
   },
   latestDolphinVerificationCode() {
     return request('/api/dolphin/verification-code/latest')

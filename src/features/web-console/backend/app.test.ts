@@ -79,6 +79,9 @@ function createFixtureNocoClient() {
     {
       Id: 10,
       client_name: 'Newest Client',
+      first_name: 'Newest',
+      last_name: 'Client',
+      fio: 'Newest Client',
       calendar_email: 'newest@example.com',
       telegram_general_chat_id: '1003',
       rel_clients_primary_stack: { Id: 10, name: 'PYTHON' },
@@ -88,6 +91,9 @@ function createFixtureNocoClient() {
     {
       Id: 3,
       client_name: 'Provider Match',
+      first_name: 'Provider',
+      last_name: 'Match',
+      fio: 'Provider Match',
       calendar_email: 'provider-match@example.com',
       telegram_general_chat_id: '1004',
       rel_clients_primary_stack: { Id: 11, name: 'DATA' },
@@ -151,6 +157,9 @@ function createFixtureNocoClient() {
     {
       Id: 6,
       client_name: 'Numeric Email Client',
+      first_name: 'Numeric',
+      last_name: 'Client',
+      fio: 'Numeric Client',
       calendar_email: '6186914@gmail.com',
       telegram_general_chat_id: '1007',
       rel_clients_primary_stack: { Id: 14, name: 'FRONTEND' },
@@ -238,6 +247,12 @@ function createFixtureNocoClient() {
       Id: 30,
       locale: 'en',
       dolphin_profile_id: '333333333',
+      rel_dolphinProfiles_client: { Id: 3 }
+    },
+    {
+      Id: 35,
+      locale: 'ru',
+      dolphin_profile_id: '333333332',
       rel_dolphinProfiles_client: { Id: 3 }
     },
     {
@@ -525,7 +540,7 @@ async function runTests(): Promise<void> {
   assert.equal(preparedJudoshark.fio, 'Test User')
   assert.deepEqual(await buildProfileAccessInput(repository, 1), {
     profileIds: [111111111, 111111112],
-    knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
+    knownProfileIds: [111111111, 333333332, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
   })
   await assert.rejects(
     () => buildProfileAccessInput(repository, 5),
@@ -793,6 +808,13 @@ async function runTests(): Promise<void> {
     result = await request(server.baseUrl, '/api/provider/clients', {}, clientLogin.cookie)
     assert.equal(result.response.status, 403)
 
+    result = await request(server.baseUrl, '/api/dolphin/profiles/status', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.equal(result.body.action, 'open_existing')
+    assert.deepEqual(result.body.requiredLocales, ['ru'])
+    assert.deepEqual(result.body.missingLocales, [])
+    assert.deepEqual(result.body.existingProfiles.map((profile: any) => profile.id), [111111111, 111111112])
+
     result = await request(server.baseUrl, '/api/dolphin/lease/acquire', { method: 'POST' }, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.username, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
@@ -811,7 +833,7 @@ async function runTests(): Promise<void> {
       password: result.body.password,
       sourceEmail: 'updated-client@example.com',
       profileIds: [111111111, 111111112],
-      knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
+      knownProfileIds: [111111111, 333333332, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
     })
 
     result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, clientLogin.cookie)
@@ -860,7 +882,7 @@ async function runTests(): Promise<void> {
       password: result.body.password,
       sourceEmail: '6186914@gmail.com',
       profileIds: [618691401, 618691402],
-      knownProfileIds: [111111111, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
+      knownProfileIds: [111111111, 333333332, 101010101, 444444444, 618691401, 111111112, 333333333, 618691402]
     })
 
     rejectDolphinEmail = true
@@ -937,6 +959,11 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 200)
     assert.equal(result.body.code, '123456')
 
+    result = await request(server.baseUrl, '/api/dolphin/profiles/status?targetClientId=3', {}, providerLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.equal(result.body.action, 'open_existing')
+    assert.deepEqual(result.body.missingLocales, [])
+
     result = await request(server.baseUrl, '/api/dolphin/lease/acquire', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -946,10 +973,10 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.username, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
     assert.match(result.body.password, /^[A-Za-z0-9_-]{12}$/)
     assert.notEqual(result.body.password, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
-    assert.deepEqual(result.body.profileIds, [333333333])
+    assert.deepEqual(result.body.profileIds, [333333332, 333333333])
     assert.equal(leaseCalls.at(-1).targetClientName, result.body.targetClientName)
     assert.equal(leaseCalls.at(-1).targetClientId, 3)
-    assert.deepEqual(leaseCalls.at(-1).profileIds, [333333333])
+    assert.deepEqual(leaseCalls.at(-1).profileIds, [333333332, 333333333])
     assert.notEqual(leaseCalls.at(-1).targetClientName, 'Newest Client')
     assert.notEqual(leaseCalls.at(-1).targetClientName, 'Unknown Raw String Should Not Match')
     assert.equal(result.body.targetClientName, 'Provider Match')
@@ -969,7 +996,7 @@ async function runTests(): Promise<void> {
     }, providerLogin.cookie)
     assert.equal(result.response.status, 400)
     assert.equal(result.body.error, 'missing_target_client')
-    assert.deepEqual(leaseCalls.at(-1).profileIds, [333333333])
+    assert.deepEqual(leaseCalls.at(-1).profileIds, [333333332, 333333333])
 
     result = await request(server.baseUrl, '/api/dolphin/lease/acquire', {
       method: 'POST',
@@ -978,7 +1005,7 @@ async function runTests(): Promise<void> {
     }, providerLogin.cookie)
     assert.equal(result.response.status, 404)
     assert.equal(result.body.error, 'target_client_not_found')
-    assert.deepEqual(leaseCalls.at(-1).profileIds, [333333333])
+    assert.deepEqual(leaseCalls.at(-1).profileIds, [333333332, 333333333])
 
     leaseConflict = true
     result = await request(server.baseUrl, '/api/dolphin/lease/acquire', {
@@ -1028,6 +1055,23 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.client.id, 10)
     assert.equal(result.body.linkedInEmail, 'newest.linkedin.one@example.com, newest.linkedin.two@example.com')
     assert.equal(result.body.platformAccounts[0].password, 'mail-secret')
+    result = await request(server.baseUrl, '/api/dolphin/profiles/status?targetClientId=7', {}, adminLogin.cookie)
+    assert.equal(result.response.status, 200)
+    assert.equal(result.body.action, 'create_new')
+    assert.deepEqual(result.body.requiredLocales, ['ru', 'en'])
+    assert.deepEqual(result.body.missingLocales, ['ru', 'en'])
+    assert.equal(result.body.expectedProfileNames[0].name, 'Auto Person REACT Ru')
+    assert.equal(result.body.expectedProxyName, 'Auto | {profileId} | Person | 1008 | REACT En')
+    result = await request(server.baseUrl, '/api/dolphin/lease/acquire', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetClientId: 7, mode: 'open_existing' })
+    }, adminLogin.cookie)
+    assert.equal(result.response.status, 404)
+    assert.equal(result.body.error, 'missing_dolphin_profiles')
+    assert.deepEqual(result.body.missingLocales, ['ru', 'en'])
+    assert.equal(createdDolphinProfiles.length, 0)
+
     result = await request(server.baseUrl, '/api/provider/clients', {}, adminLogin.cookie)
     assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/client/profile-options', {}, adminLogin.cookie)
@@ -1074,6 +1118,22 @@ async function runTests(): Promise<void> {
     }, adminLogin.cookie)
     assert.equal(result.response.status, 422)
     assert.equal(result.body.error, 'missing_dolphin_profile_personal_data')
+    assert.equal(result.body.field, 'lastName')
+    assert.equal(result.body.fieldLabel, 'last name')
+    assert.equal(result.body.requiredFields[0].field, 'lastName')
+
+    const updatedProxyCountBeforeOwnProxy = updatedProxies.length
+    result = await request(server.baseUrl, '/api/dolphin/lease/acquire', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetClientId: 10, mode: 'create_new', ownProxy: true })
+    }, adminLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.deepEqual(result.body.profileIds, [101010101, 900100003])
+    assert.equal(result.body.ownProxyName, 'Newest | 900100003 | Client | 1003 | PYTHON En')
+    assert.equal(createdDolphinProfiles[4].name, 'Newest Client PYTHON En')
+    assert.equal(createdDolphinProfiles[4].proxy, undefined)
+    assert.equal(updatedProxies.length, updatedProxyCountBeforeOwnProxy)
 
     result = await request(server.baseUrl, '/api/auth/logout', { method: 'POST' }, adminLogin.cookie)
     assert.equal(result.response.status, 200)

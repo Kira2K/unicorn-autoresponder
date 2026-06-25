@@ -42,6 +42,12 @@ const dolphinLease = ref(null)
 const dolphinLeaseError = ref('')
 const dolphinLeaseLoading = ref(false)
 const dolphinProvisionMessage = ref('')
+const dolphinProfileStatus = ref(null)
+const providerDolphinProfileStatuses = ref({})
+const ownProxy = ref(false)
+const requiredDataDialogVisible = ref(false)
+const requiredDataDialogField = ref(null)
+const requiredDataDialogClientId = ref(null)
 const secureDnsWarningVisible = ref(false)
 const pendingDolphinLease = ref(null)
 const verificationCode = ref(null)
@@ -61,6 +67,7 @@ const profileEditorOpen = ref('')
 const accountEditorOpen = ref(false)
 let countdownTimer = null
 const SECURE_DNS_WARNING_KEY = 'webConsole.secureDnsWarningAccepted'
+const REQUIRED_DATA_WARNING_PREFIX = 'webConsole.requiredDolphinDataWarning'
 
 const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
@@ -75,9 +82,54 @@ const dolphinLeaseSecondsLeft = computed(() => {
   if (!dolphinLease.value) return 0
   return Math.max(0, Math.ceil((Number(dolphinLease.value.expiresAt) - nowMs.value) / 1000))
 })
+const dolphinActionMode = computed(() => {
+  const status = dolphinProfileStatus.value
+  if (!status) return 'open_existing'
+  if (status.action === 'create_new') return 'create_new'
+  if (status.action === 'blocked' && !(status.existingProfiles || []).length) return 'create_new'
+  return 'open_existing'
+})
+const dolphinActionLabel = computed(() =>
+  dolphinActionMode.value === 'create_new' ? 'Create new profiles' : 'Open Dolphin profiles'
+)
+const hasActiveDolphinLease = computed(() => dolphinLeaseSecondsLeft.value > 0)
 
 function setError(value) {
   error.value = value instanceof Error ? value.message : String(value || '')
+}
+
+function requiredDataStorageKey(clientId, field) {
+  return `${REQUIRED_DATA_WARNING_PREFIX}.${clientId}.${field}`
+}
+
+function firstRequiredDataField(status) {
+  return (status?.requiredFields || [])[0] || null
+}
+
+function showRequiredDataDialog(field, clientId = null) {
+  if (!field) return
+  requiredDataDialogField.value = field
+  requiredDataDialogClientId.value = clientId
+  requiredDataDialogVisible.value = true
+}
+
+function confirmRequiredDataDialog() {
+  const field = requiredDataDialogField.value
+  const clientId = requiredDataDialogClientId.value || dolphinProfileStatus.value?.targetClientId
+  if (field && clientId) {
+    window.localStorage?.setItem(requiredDataStorageKey(clientId, field.field), 'true')
+  }
+  requiredDataDialogVisible.value = false
+}
+
+function blockRequiredDataAction(field, clientId) {
+  if (!field) return
+  const key = clientId ? requiredDataStorageKey(clientId, field.field) : ''
+  if (key && window.localStorage?.getItem(key) === 'true') {
+    dolphinLeaseError.value = `pls contact your mentor to add ${field.fieldLabel || 'required data'}.`
+    return
+  }
+  showRequiredDataDialog(field, clientId)
 }
 
 function resetProfileForm() {
@@ -127,6 +179,30 @@ async function loadClientOptions() {
   platforms.value = result.platforms || []
 }
 
+async function loadDolphinStatus(targetClientId = null) {
+  const status = await api.dolphinProfileStatus(targetClientId)
+  if (isProvider.value && targetClientId) {
+    providerDolphinProfileStatuses.value = {
+      ...providerDolphinProfileStatuses.value,
+      [targetClientId]: status
+    }
+  } else {
+    dolphinProfileStatus.value = status
+  }
+  return status
+}
+
+async function loadProviderDolphinStatuses(clients) {
+  providerDolphinProfileStatuses.value = {}
+  await Promise.all((clients || []).map(async client => {
+    try {
+      await loadDolphinStatus(client.id)
+    } catch {
+      // Row-level status is best-effort; the action itself still validates server-side.
+    }
+  }))
+}
+
 async function loadDashboard() {
   if (!session.value) return
   pageLoading.value = true
@@ -140,6 +216,7 @@ async function loadDashboard() {
   try {
     if (isAdmin.value) {
       dashboard.value = await api.adminLatestClient()
+      await loadDolphinStatus(dashboard.value?.client?.id)
       providerClients.value = []
       providerDolphinEmail.value = ''
     } else if (isProvider.value) {
@@ -147,15 +224,18 @@ async function loadDashboard() {
       dashboard.value = null
       providerClients.value = result.clients || []
       providerDolphinEmail.value = result.providerDolphinEmail || ''
+      await loadProviderDolphinStatuses(providerClients.value)
     } else {
       await loadClientOptions()
       dashboard.value = await api.clientDashboard()
+      await loadDolphinStatus(dashboard.value?.client?.id)
       resetProfileForm()
       resetAccountForm()
       profileEditorOpen.value = ''
       accountEditorOpen.value = false
       providerClients.value = []
       providerDolphinEmail.value = ''
+      ownProxy.value = false
     }
   } catch (caught) {
     setError(caught)
@@ -189,6 +269,9 @@ async function logout() {
     dashboard.value = null
     providerClients.value = []
     providerDolphinEmail.value = ''
+    dolphinProfileStatus.value = null
+    providerDolphinProfileStatuses.value = {}
+    ownProxy.value = false
     dryRunResult.value = null
     dolphinLease.value = null
     dolphinLeaseError.value = ''
@@ -311,14 +394,27 @@ async function startHhResponses() {
   }
 }
 
-async function openDolphinProfile(clientName, clientId) {
+async function openDolphinProfile(clientName, clientId, mode = 'open_existing') {
   dolphinLeaseLoading.value = true
   dolphinLeaseError.value = ''
-  dolphinProvisionMessage.value = 'Creating new Dolphin profiles. This can take a few minutes.'
+  dolphinProvisionMessage.value = mode === 'create_new'
+    ? 'Creating new Dolphin profiles. This can take a few minutes.'
+    : 'Opening Dolphin profiles.'
   verificationCode.value = null
   verificationCodeError.value = ''
   try {
-    const lease = await api.acquireDolphinLease(clientName, clientId)
+    const status = isProvider.value
+      ? providerDolphinProfileStatuses.value[clientId] || await loadDolphinStatus(clientId)
+      : dolphinProfileStatus.value || await loadDolphinStatus(clientId)
+    const blocker = firstRequiredDataField(status)
+    if (blocker) {
+      blockRequiredDataAction(blocker, status?.targetClientId || clientId)
+      return
+    }
+    const lease = await api.acquireDolphinLease(clientName, clientId, {
+      mode,
+      ownProxy: mode === 'create_new' && ownProxy.value
+    })
     if (window.localStorage?.getItem(SECURE_DNS_WARNING_KEY) === 'true') {
       dolphinLease.value = lease
     } else {
@@ -326,12 +422,17 @@ async function openDolphinProfile(clientName, clientId) {
       secureDnsWarningVisible.value = true
     }
     nowMs.value = Date.now()
+    await loadDolphinStatus(clientId)
   } catch (caught) {
     const body = caught?.body || {}
     const dolphinCode = body.dolphin?.code ? ` (${body.dolphin.code})` : ''
     const attempted = body.attemptedUsername ? ` Tried: ${body.attemptedUsername}.` : ''
+    if (body.requiredFields?.length) {
+      blockRequiredDataAction(body.requiredFields[0], body.targetClientId || clientId)
+      return
+    }
     dolphinLeaseError.value = caught.status === 409
-      ? 'account in use sorry'
+      ? 'Account is busy now. Please come back in 5 mins.'
       : `${caught instanceof Error ? caught.message : String(caught || '')}${dolphinCode}${attempted}`
   } finally {
     dolphinLeaseLoading.value = false
@@ -445,6 +546,14 @@ onUnmounted(() => {
           <Button label="Confirm" icon="pi pi-check" data-testid="confirm-secure-dns-warning-button" @click="confirmSecureDnsWarning" />
         </template>
       </Dialog>
+      <Dialog v-model:visible="requiredDataDialogVisible" modal header="Required profile data" class="required-data-dialog" data-testid="required-data-dialog">
+        <p class="required-data-dialog-text" data-testid="required-data-dialog-text">
+          pls contact your mentor to add {{ requiredDataDialogField?.fieldLabel || 'required data' }}.
+        </p>
+        <template #footer>
+          <Button label="OK" icon="pi pi-check" data-testid="confirm-required-data-dialog-button" @click="confirmRequiredDataDialog" />
+        </template>
+      </Dialog>
 
       <Card v-if="isAdmin" class="verification-card">
         <template #title>Dolphin verification code</template>
@@ -490,6 +599,7 @@ onUnmounted(() => {
             </div>
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
               <h3>Dolphin access</h3>
+              <p>Open Dolphin Anty and enter the credentials below.</p>
               <p>{{ dolphinLease.targetClientName }}</p>
               <dl class="info-list lease-info-list">
                 <div>
@@ -520,7 +630,7 @@ onUnmounted(() => {
               <Column field="linkedInEmail" header="LinkedIn email" />
               <Column header="Action">
                 <template #body="{ data }">
-                  <Button label="open Dolphin Profile" icon="pi pi-external-link" size="small" :loading="dolphinLeaseLoading" data-testid="open-dolphin-provider-button" @click="openDolphinProfile(data.clientName, data.id)" />
+                  <Button v-if="!hasActiveDolphinLease" label="Open Dolphin profiles" icon="pi pi-external-link" size="small" :loading="dolphinLeaseLoading" data-testid="open-dolphin-provider-button" @click="openDolphinProfile(data.clientName, data.id, 'open_existing')" />
                 </template>
               </Column>
             </DataTable>
@@ -644,12 +754,22 @@ onUnmounted(() => {
 
         <Card v-if="isClient" class="action-card">
           <template #title>Dolphin profile</template>
-          <template #subtitle>Open the connected automation profile</template>
+          <template #subtitle>{{ dolphinActionMode === 'create_new' ? 'Create the missing automation profiles' : 'Open the connected automation profiles' }}</template>
           <template #content>
-            <Button label="open Dolphin Profile" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id)" />
+            <div v-if="dolphinActionMode === 'create_new'" class="proxy-choice-panel" data-testid="own-proxy-panel">
+              <label class="checkbox-field">
+                <input v-model="ownProxy" type="checkbox" data-testid="own-proxy-checkbox" />
+                <span>I have my own proxy</span>
+              </label>
+            </div>
+            <Button v-if="!hasActiveDolphinLease" :label="dolphinActionLabel" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, dolphinActionMode)" />
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
               <h3>Dolphin access</h3>
+              <p>Open Dolphin Anty and enter the credentials below.</p>
               <p>{{ dolphinLease.targetClientName }}</p>
+              <p v-if="dolphinLease.ownProxyName" class="helper-text" data-testid="actual-proxy-name">
+                Please name your proxy exactly: {{ dolphinLease.ownProxyName }}
+              </p>
               <dl class="info-list lease-info-list">
                 <div>
                   <dt>Dolphin login</dt>
@@ -688,12 +808,22 @@ onUnmounted(() => {
 
         <Card v-if="isAdmin" class="action-card">
           <template #title>Dolphin profile</template>
-          <template #subtitle>Create or open profiles for the latest client</template>
+          <template #subtitle>{{ dolphinActionMode === 'create_new' ? 'Create missing profiles for the latest client' : 'Open profiles for the latest client' }}</template>
           <template #content>
-            <Button label="open Dolphin Profile" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-admin-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id)" />
+            <div v-if="dolphinActionMode === 'create_new'" class="proxy-choice-panel" data-testid="own-proxy-panel">
+              <label class="checkbox-field">
+                <input v-model="ownProxy" type="checkbox" data-testid="own-proxy-checkbox" />
+                <span>I have my own proxy</span>
+              </label>
+            </div>
+            <Button v-if="!hasActiveDolphinLease" :label="dolphinActionLabel" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-admin-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, dolphinActionMode)" />
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
               <h3>Dolphin access</h3>
+              <p>Open Dolphin Anty and enter the credentials below.</p>
               <p>{{ dolphinLease.targetClientName }}</p>
+              <p v-if="dolphinLease.ownProxyName" class="helper-text" data-testid="actual-proxy-name">
+                Please name your proxy exactly: {{ dolphinLease.ownProxyName }}
+              </p>
               <dl class="info-list lease-info-list">
                 <div>
                   <dt>Dolphin login</dt>

@@ -31,6 +31,9 @@ const mockClients = [
   {
     Id: 2,
     client_name: 'Ильяс Тохтаран',
+    first_name: 'Ilyas',
+    last_name: 'Tokhtaran',
+    fio: 'Ilyas Tokhtaran',
     calendar_email: 'provider-visible@example.com',
     telegram_general_chat_id: '-100200301',
     rel_clients_primary_stack: { Id: 12, name: 'DATA' },
