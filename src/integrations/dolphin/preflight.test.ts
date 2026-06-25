@@ -3,7 +3,10 @@ const assert = require('node:assert/strict')
 const {
   assertDolphinLocalApiResponseHealthy,
   assertDolphinAppRunning,
-  isDolphinSessionError
+  assertPreexistingDolphinProfileLimit,
+  isDolphinSessionError,
+  resetPreflightDependenciesForTests,
+  setPreflightDependenciesForTests
 } = require('./preflight.ts')
 
 function makeResponse(patch: Partial<{
@@ -107,11 +110,35 @@ async function testDolphinAppRunningStoresLocalApiToken(): Promise<void> {
   })
 }
 
+async function testPreflightCleansAnyPreexistingProfiles(): Promise<void> {
+  const calls: number[][] = []
+  let probeCount = 0
+
+  setPreflightDependenciesForTests({
+    getRunningDolphinBrowserProfileIds: () => {
+      probeCount += 1
+      return probeCount === 1 ? [101] : []
+    },
+    cleanupPreexistingDolphinProfiles: async (profileIds: number[]) => {
+      calls.push(profileIds)
+    }
+  })
+
+  try {
+    await assertPreexistingDolphinProfileLimit()
+  } finally {
+    resetPreflightDependenciesForTests()
+  }
+
+  assert.deepEqual(calls, [[101]])
+}
+
 testHealthyResponsePasses()
 testInvalidSessionFailsWithRepairMessage()
 testTokenRefreshTimeoutFailsWithRepairMessage()
 testOtherBadResponseFailsAsHealthCheck()
 testDolphinAppRunningStoresLocalApiToken()
+  .then(testPreflightCleansAnyPreexistingProfiles)
   .then(() => {
     console.log('dolphin preflight tests passed')
   })

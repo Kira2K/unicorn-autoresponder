@@ -12,6 +12,24 @@ const { loginLocalDolphinWithToken, requestLocalDolphin } = require('./local-api
   requestLocalDolphin<T>(endpointPath: string): Promise<T>
 }
 
+function createDefaultPreflightDependencies() {
+  return {
+    getRunningDolphinBrowserProfileIds: () => getRunningDolphinBrowserProfileIds(),
+    cleanupPreexistingDolphinProfiles: (profileIds: number[]) =>
+      cleanupPreexistingDolphinProfiles(profileIds)
+  }
+}
+
+const dependencies = createDefaultPreflightDependencies()
+
+function resetPreflightDependenciesForTests(): void {
+  Object.assign(dependencies, createDefaultPreflightDependencies())
+}
+
+function setPreflightDependenciesForTests(patch: Partial<typeof dependencies>): void {
+  Object.assign(dependencies, patch)
+}
+
 function stringifyPreflightBody(value: unknown): string {
   if (value === undefined || value === null) {
     return ''
@@ -211,14 +229,14 @@ async function cleanupPreexistingDolphinProfiles(profileIds: number[]): Promise<
 }
 
 async function assertPreexistingDolphinProfileLimit(): Promise<void> {
-  let runningProfileIds = getRunningDolphinBrowserProfileIds()
+  let runningProfileIds = dependencies.getRunningDolphinBrowserProfileIds()
 
   if (
     DOLPHIN_PREFLIGHT_AUTO_CLEANUP &&
-    runningProfileIds.length > MAX_PREEXISTING_DOLPHIN_PROFILES
+    runningProfileIds.length
   ) {
-    await cleanupPreexistingDolphinProfiles(runningProfileIds)
-    runningProfileIds = getRunningDolphinBrowserProfileIds()
+    await dependencies.cleanupPreexistingDolphinProfiles(runningProfileIds)
+    runningProfileIds = dependencies.getRunningDolphinBrowserProfileIds()
   }
 
   if (runningProfileIds.length > MAX_PREEXISTING_DOLPHIN_PROFILES) {
@@ -271,5 +289,7 @@ module.exports = {
   cleanupPreexistingDolphinProfiles,
   getRunningDolphinBrowserProfileIds,
   killDolphinBrowserProfileProcesses,
-  isDolphinSessionError
+  isDolphinSessionError,
+  resetPreflightDependenciesForTests,
+  setPreflightDependenciesForTests
 }
