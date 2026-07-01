@@ -183,6 +183,7 @@ async function ensureLoginFormOpen(
   const loginFormVisible = async () =>
     (await selectorExists(page, hhAuthSelectors.loginForm.phone)) ||
     (await selectorExists(page, hhAuthSelectors.loginForm.email)) ||
+    (await selectorExists(page, hhAuthSelectors.loginForm.password)) ||
     (await selectorExists(page, hhAuthSelectors.loginForm.emailCredentialType)) ||
     (await selectorExists(page, hhAuthSelectors.loginForm.accountTypeCards))
 

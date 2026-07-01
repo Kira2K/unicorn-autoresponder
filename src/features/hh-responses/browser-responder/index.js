@@ -792,6 +792,59 @@
         return null;
     }
 
+    function getPageNumberFromUrl(rawUrl) {
+        try {
+            const url = new URL(rawUrl, location.href);
+            const value = Number(url.searchParams.get('page') || 0);
+            return Number.isFinite(value) && value >= 0 ? value : 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    function isDisabledPagerLink(link) {
+        if (!link) return true;
+        const ariaDisabled = String(link.getAttribute('aria-disabled') || '').toLowerCase();
+        const className = String(link.className || '').toLowerCase();
+        return (
+            ariaDisabled === 'true' ||
+            link.hasAttribute('disabled') ||
+            className.includes('disabled')
+        );
+    }
+
+    function getNextSearchPageUrl() {
+        if (!location.href.includes('/search/vacancy')) return '';
+
+        const currentUrl = toSafeHhUrl(location.href) || location.href;
+        const directNextLinks = Array.from(document.querySelectorAll([
+            'a[data-qa="pager-next"]',
+            'a[rel="next"]',
+            'a[aria-label*="След"]',
+            'a[aria-label*="след"]',
+            'a[aria-label*="Next"]',
+            'a[aria-label*="next"]'
+        ].join(',')));
+
+        for (const link of directNextLinks) {
+            if (isDisabledPagerLink(link)) continue;
+            const href = toSafeHhUrl(link.href || link.getAttribute('href'));
+            if (href && href !== currentUrl && href.includes('/search/vacancy')) {
+                return href;
+            }
+        }
+
+        const currentPage = getPageNumberFromUrl(currentUrl);
+        const pageLinks = Array.from(document.querySelectorAll('a[href*="page="]'))
+            .map(link => toSafeHhUrl(link.href || link.getAttribute('href')))
+            .filter(href => href && href !== currentUrl && href.includes('/search/vacancy'))
+            .map(href => ({ href, page: getPageNumberFromUrl(href) }))
+            .filter(item => item.page > currentPage)
+            .sort((a, b) => a.page - b.page);
+
+        return pageLinks[0]?.href || '';
+    }
+
     function getVacancyCard(node) {
         if (!node || !node.closest) return null;
         return node.closest(SELECTORS.vacancyCard)
@@ -1330,15 +1383,22 @@
             details || ''
         ].filter(Boolean).join(' ');
 
-        log(`Stopping cleanly after repeated manual response return loop. ${reason}`, true);
-        StateManager.setStopReason('manual_targets_only', reason, true);
-        StateManager.setRunning(false);
-        StateManager.releaseInstanceLock(TAB_ID);
+        log(`Manual response return loop reached ${attempts} attempts. Forcing return to search and continuing. ${reason}`, true);
+        StateManager.addParserError('MANUAL_RETURN_FORCED', reason);
         StateManager.clearTrapLock();
         StateManager.clearManualReturnState();
-        setStatus('done', 'Manual response saved; return loop stopped');
+        setStatus('running', 'Manual response saved; forcing return to search');
 
-        return 'MANUAL_RETURN_STOPPED';
+        const backUrl = StateManager.getReturnUrl();
+        if (backUrl && backUrl.includes('/search/vacancy')) {
+            StateManager.rememberUrl(backUrl, 'force-return-after-manual-loop');
+            window.location.replace(backUrl);
+        } else {
+            StateManager.rememberUrl('/search/vacancy', 'force-return-default-after-manual-loop');
+            window.location.replace('/search/vacancy');
+        }
+
+        return 'REDIRECT';
     }
 
     async function processVacancyOnListing(vacancyLinkEl, applyBtnOnList) {
@@ -2034,10 +2094,19 @@
              const parserErrorDetails = parserErrors.length
                  ? `; parser errors: ${parserErrors.map(item => item.code).join(', ')}`
                  : '';
+             const nextSearchPageUrl = !StateManager.hasReachedResponseLimit() && !targets.length
+                 ? getNextSearchPageUrl()
+                 : '';
              if (stopSignal) {
                  StateManager.setStopReason('user_stop', `Получен stopSignal${parserErrorDetails}`);
              } else if (isAuthRequiredPage()) {
                  markAuthRequired(`HH показал форму входа после цикла обработки${parserErrorDetails}`);
+                 return;
+             } else if (nextSearchPageUrl) {
+                 log(`No new targets on this search page. Moving to next page to continue response limit: ${nextSearchPageUrl}`, true);
+                 StateManager.rememberUrl(nextSearchPageUrl, 'next-search-page');
+                 setStatus('running', 'Moving to next search page...');
+                 window.location.assign(nextSearchPageUrl);
                  return;
              } else if (!totalSuccessfulResponses && !manualList.length && parserErrors.length) {
                  StateManager.setStopReason('parser_errors_only', `Цикл завершился без откликов${parserErrorDetails}`);

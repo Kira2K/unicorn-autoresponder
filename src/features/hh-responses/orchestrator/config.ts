@@ -33,9 +33,17 @@ function parseMarketEnv(value: string | undefined): 'Ru' | 'En' {
 }
 
 const DEFAULT_WATCH_MS = 15 * 60 * 1000
-const AUTO_RESPONDER_WATCH_MS = Number(
-  process.env.ORCHESTRATOR_WATCH_MS ?? DEFAULT_WATCH_MS
-)
+const hasExplicitOrchestratorWatchMs =
+  process.env.ORCHESTRATOR_WATCH_MS !== undefined &&
+  String(process.env.ORCHESTRATOR_WATCH_MS).trim() !== ''
+const hasExplicitOrchestratorResponseLimit =
+  process.env.ORCHESTRATOR_RESPONSE_LIMIT !== undefined &&
+  String(process.env.ORCHESTRATOR_RESPONSE_LIMIT).trim() !== ''
+const AUTO_RESPONDER_WATCH_MS = hasExplicitOrchestratorWatchMs
+  ? Number(process.env.ORCHESTRATOR_WATCH_MS)
+  : hasExplicitOrchestratorResponseLimit
+    ? undefined
+    : DEFAULT_WATCH_MS
 const DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT = 180
 const ORCHESTRATOR_RESPONSE_LIMIT =
   process.env.ORCHESTRATOR_RESPONSE_LIMIT === undefined ||
@@ -81,6 +89,8 @@ module.exports = {
   DEFAULT_CLIENT_START_DELAY_MS,
   DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT,
   DEFAULT_WATCH_MS,
+  HAS_EXPLICIT_ORCHESTRATOR_RESPONSE_LIMIT: hasExplicitOrchestratorResponseLimit,
+  HAS_EXPLICIT_ORCHESTRATOR_WATCH_MS: hasExplicitOrchestratorWatchMs,
   DOLPHIN_HEADLESS: parseBooleanEnv(process.env.DOLPHIN_HEADLESS, true),
   DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN: parseBooleanEnv(
     process.env.DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN,

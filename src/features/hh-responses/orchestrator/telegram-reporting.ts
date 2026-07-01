@@ -307,7 +307,13 @@ function formatClientErrorLog(status: OrchestratorStatus): string {
     formatStatusFlag('profileStatusApplied', status.profileStatusApplied),
     formatStatusFlag('profileStatusRestored', status.profileStatusRestored),
     formatStatusFlag('manualVacanciesSent', status.manualVacanciesSent),
+    `Requirement limit: ${status.requiredResponseLimit ?? 'n/a'}`,
+    `Met response limit: ${status.metResponseLimit === undefined ? 'n/a' : String(status.metResponseLimit)}`,
+    status.completionGap
+      ? `Completion gap: ${escapeTelegramHtml(status.completionGap)}`
+      : undefined,
     `Confirmed responses: ${status.responseCount ?? 'n/a'}`,
+    `Responses remaining: ${status.responsesRemaining ?? 'n/a'}`,
     `Viewed vacancies: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual vacancies: ${status.manualVacanciesCount ?? 'n/a'}`,
     formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup),
@@ -340,6 +346,10 @@ function formatClientLifecycleLog(status: OrchestratorStatus): string {
     `Dolphin profile: ${escapeTelegramHtml(status.dolphinProfileId)}`,
     `Result: ${formatTechnicalRunResult(status)}`,
     `Stop reason: ${escapeTelegramHtml(status.autoResponderStopReason ?? 'n/a')}`,
+    `Requirement: ${status.metResponseLimit ? 'met' : 'not met'} (${status.responseCount ?? 0}/${status.requiredResponseLimit ?? 'n/a'})`,
+    status.completionGap
+      ? `Gap: ${escapeTelegramHtml(status.completionGap)}`
+      : undefined,
     `Responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual: ${status.manualVacanciesCount ?? 'n/a'}`,
@@ -632,6 +642,13 @@ async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
 }
 
 function hasClientFailure(status: OrchestratorStatus): boolean {
+  if (
+    status.autoResponderStopReason === 'orchestrator_stop_after_watch' &&
+    isAutoResponderStopNormal(status)
+  ) {
+    return false
+  }
+
   return !isClientRunSuccessful(status)
 }
 

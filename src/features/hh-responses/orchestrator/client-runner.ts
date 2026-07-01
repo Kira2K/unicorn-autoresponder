@@ -47,7 +47,11 @@ const {
   getErrorStack,
   withTimeout
 } = require('./runtime-utils.ts')
-const { normalizeParserErrorCode } = require('./scraper-state.ts')
+const {
+  applyResponseRequirementStatus,
+  normalizeParserErrorCode,
+  summarizeManualBlockers
+} = require('./scraper-state.ts')
 const {
   getAutoReloadRecoveryReason
 } = require('./recovery.ts')
@@ -282,6 +286,11 @@ async function collectAutoResponderRunData(
     responseCount,
     vacancyTransitionCount,
     manualVacanciesCount: manualVacancies.length,
+    manualBlockerSummary: summarizeManualBlockers({
+      manualVacancies,
+      manualVacanciesCount: manualVacancies.length,
+      stopReasonDetails: stopReason?.details
+    }),
     parserLogsCount: parserLogs.length,
     parserErrorLogsCount,
     parserErrorCodes,
@@ -605,7 +614,12 @@ async function runClientOrchestrator(
     opened: false,
     indexScriptInjected: false,
     watcherInstalled: false,
-    startButtonClicked: false
+    startButtonClicked: false,
+    requiredResponseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+    metResponseLimit: false,
+    completionGap: 'not_finished',
+    responsesRemaining: ORCHESTRATOR_RESPONSE_LIMIT,
+    responseLimitWatchMs: AUTO_RESPONDER_WATCH_MS
   }
   let disposeWatcher: (() => void) | undefined
   let pageResult: OpenScenarioResult | undefined
@@ -899,6 +913,14 @@ async function runClientOrchestrator(
   }
 
   status = addLifecycleEvent(status, runStartedAt, 'client run finished')
+  status = applyResponseRequirementStatus({
+    ...status,
+    responseLimitElapsedMs: Date.now() - runStartedAt,
+    responseLimitTimeLeftMs:
+      AUTO_RESPONDER_WATCH_MS === undefined
+        ? undefined
+        : Math.max(AUTO_RESPONDER_WATCH_MS - (Date.now() - runStartedAt), 0)
+  })
   writeLocalRunLog({
     kind: 'client-final-status',
     status

@@ -1,6 +1,7 @@
 const { isAutoResponderUrl } = require('../shared/hh-url.ts')
 const {
   AUTO_RESPONDER_WATCH_MS,
+  HH_AUTO_RESPONDER_RECENT_URLS_KEY,
   HH_AUTO_RESPONDER_RUNNING_KEY,
   HH_AUTO_RESPONDER_SETTINGS_KEY,
   HH_AUTO_RESPONDER_STOP_REASON_KEY
@@ -12,6 +13,33 @@ const {
 const { wait } = require('../orchestrator/runtime-utils.ts')
 
 type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
+const RESUME_LOOP_STALL_MS = 90 * 1000
+
+type ResumeLoopProbe = {
+  latestKey: string
+  latestReason: string
+  currentUrl: string
+}
+
+function normalizeResumeLoopProbe(value: any): ResumeLoopProbe | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined
+  }
+
+  const latestKey = String(value.latestKey ?? '').trim()
+  const latestReason = String(value.latestReason ?? '').trim()
+  const currentUrl = String(value.currentUrl ?? '').trim()
+
+  if (!latestKey || latestReason !== 'resume-loop') {
+    return undefined
+  }
+
+  return {
+    latestKey,
+    latestReason,
+    currentUrl
+  }
+}
 
 async function isAutoResponderRunning(
   page: BrowserPageLike
@@ -31,6 +59,99 @@ async function isAutoResponderRunning(
     )
   } catch {
     return undefined
+  }
+}
+
+async function getResumeLoopProbe(
+  page: BrowserPageLike
+): Promise<ResumeLoopProbe | undefined> {
+  if (page.isClosed() || !isAutoResponderUrl(page.url())) {
+    return undefined
+  }
+
+  try {
+    const rawProbe = await page.evaluate((recentUrlsKey: string) => {
+      let recentUrls: any[] = []
+
+      try {
+        const parsed = JSON.parse(sessionStorage.getItem(recentUrlsKey) || '[]')
+        recentUrls = Array.isArray(parsed) ? parsed : []
+      } catch {
+        recentUrls = []
+      }
+
+      const latest = recentUrls[recentUrls.length - 1]
+      if (!latest || latest.reason !== 'resume-loop') {
+        return undefined
+      }
+
+      return {
+        currentUrl: location.href,
+        latestKey: [
+          latest.reason || '',
+          latest.url || '',
+          latest.title || ''
+        ].join('|'),
+        latestReason: latest.reason
+      }
+    }, HH_AUTO_RESPONDER_RECENT_URLS_KEY)
+
+    return normalizeResumeLoopProbe(rawProbe)
+  } catch {
+    return undefined
+  }
+}
+
+async function stopAutoResponderForResumeLoop(
+  page: BrowserPageLike,
+  probe: ResumeLoopProbe
+): Promise<boolean> {
+  if (page.isClosed() || !isAutoResponderUrl(page.url())) {
+    return false
+  }
+
+  try {
+    return await page.evaluate(
+      ({
+        runningKey,
+        stopReasonKey,
+        details
+      }: {
+        runningKey: string
+        stopReasonKey: string
+        details: string
+      }) => {
+        sessionStorage.setItem(
+          stopReasonKey,
+          JSON.stringify({
+            reason: 'resume_loop_detected',
+            details,
+            ts: Date.now(),
+            url: location.href
+          })
+        )
+        sessionStorage.removeItem(runningKey)
+
+        const stopButton = document.getElementById(
+          'ar-stop-btn'
+        ) as HTMLButtonElement | null
+
+        if (stopButton) {
+          stopButton.click()
+        }
+
+        return true
+      },
+      {
+        runningKey: HH_AUTO_RESPONDER_RUNNING_KEY,
+        stopReasonKey: HH_AUTO_RESPONDER_STOP_REASON_KEY,
+        details:
+          `Orchestrator stopped a stale resume-loop after ${RESUME_LOOP_STALL_MS}ms. ` +
+          `Current URL: ${probe.currentUrl}`
+      }
+    )
+  } catch {
+    return false
   }
 }
 
@@ -119,13 +240,41 @@ async function waitForAutoResponderToFinish(
   const startedAt = Date.now()
   let sawRunning = false
   let idleSince: number | undefined
+  let resumeLoopProbeKey: string | undefined
+  let resumeLoopSince: number | undefined
+  const hasWatchTimeout =
+    typeof timeoutMs === 'number' &&
+    Number.isFinite(timeoutMs) &&
+    timeoutMs > 0
 
   while (
     !page.isClosed() &&
     !isBrowserDisconnected() &&
-    Date.now() - startedAt < timeoutMs
+    (!hasWatchTimeout || Date.now() - startedAt < timeoutMs)
   ) {
     const running = await isAutoResponderRunning(page)
+    const resumeLoopProbe = await getResumeLoopProbe(page)
+
+    if (running === true && resumeLoopProbe) {
+      if (resumeLoopProbe.latestKey !== resumeLoopProbeKey) {
+        resumeLoopProbeKey = resumeLoopProbe.latestKey
+        resumeLoopSince = Date.now()
+      } else if (
+        resumeLoopSince &&
+        Date.now() - resumeLoopSince >= RESUME_LOOP_STALL_MS
+      ) {
+        await stopAutoResponderForResumeLoop(page, resumeLoopProbe)
+        return {
+          finished: true,
+          timedOut: false,
+          pageClosed: false,
+          browserDisconnected: false
+        }
+      }
+    } else {
+      resumeLoopProbeKey = undefined
+      resumeLoopSince = undefined
+    }
 
     if (running === true) {
       sawRunning = true
@@ -148,7 +297,7 @@ async function waitForAutoResponderToFinish(
 
   return {
     finished: false,
-    timedOut: !page.isClosed() && !isBrowserDisconnected(),
+    timedOut: hasWatchTimeout && !page.isClosed() && !isBrowserDisconnected(),
     pageClosed: page.isClosed(),
     browserDisconnected: isBrowserDisconnected()
   }

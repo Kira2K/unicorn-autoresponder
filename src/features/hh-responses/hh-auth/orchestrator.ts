@@ -64,8 +64,30 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
             text: (element.textContent || '').trim().slice(0, 120)
           }
         }
+        const readAnySignal = (selectors: string[]) => {
+          for (const selector of selectors) {
+            const signal = readSignal(selector)
+
+            if (signal.exists) {
+              return {
+                ...signal,
+                selector
+              }
+            }
+          }
+
+          return { exists: false }
+        }
+        const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim()
+        const bodyText = normalizeText(document.body?.innerText || '')
+        const hasBodyText = (patterns: RegExp[]) =>
+          patterns.some(pattern => pattern.test(bodyText))
         const signals = {
-          login: readSignal('[data-qa="login"]'),
+          login: readAnySignal([
+            '[data-qa="login"]',
+            '[data-qa="mainmenu_login"]',
+            '[href*="/account/login"]'
+          ]),
           signup: readSignal('[data-qa="signup"]'),
           anonymousProfileLink: readSignal(
             '[data-qa="mainmenu_profile-link"][href*="/account/login"]'
@@ -82,6 +104,40 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
           mainmenuVacancyResponses: readSignal(
             '[data-qa="mainmenu_vacancyResponses"]'
           ),
+          applicantResumesLink: readSignal('[href*="/applicant/resumes"]'),
+          applicantNegotiationsLink: readSignal(
+            '[href*="/applicant/negotiations"]'
+          ),
+          loggedInText: {
+            exists: hasBodyText([
+              /Резюме и профиль/i,
+              /Мои резюме/i,
+              /Отклики/i,
+              /Responses/i,
+              /My resumes/i
+            ])
+          },
+          loggedInEscapedText: {
+            exists: hasBodyText([
+              /\u0420\u0435\u0437\u044e\u043c\u0435 \u0438 \u043f\u0440\u043e\u0444\u0438\u043b\u044c/i,
+              /\u041c\u043e\u0438 \u0440\u0435\u0437\u044e\u043c\u0435/i,
+              /\u041e\u0442\u043a\u043b\u0438\u043a\u0438/i
+            ])
+          },
+          loggedOutText: {
+            exists: hasBodyText([
+              /Войти/i,
+              /Зарегистрироваться/i,
+              /Login/i,
+              /Sign up/i
+            ])
+          },
+          loggedOutEscapedText: {
+            exists: hasBodyText([
+              /\u0412\u043e\u0439\u0442\u0438/i,
+              /\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u0442\u044c\u0441\u044f/i
+            ])
+          },
           ddosGuard: {
             exists:
               /^ddos-guard$/i.test(document.title.trim()) ||
@@ -94,6 +150,7 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
 
               return (
                 /пройдите капчу|текст с картинки|captcha|капч/i.test(bodyText) ||
+                /\u043f\u0440\u043e\u0439\u0434\u0438\u0442\u0435 \u043a\u0430\u043f\u0447\u0443|\u0442\u0435\u043a\u0441\u0442 \u0441 \u043a\u0430\u0440\u0442\u0438\u043d\u043a\u0438|captcha|\u043a\u0430\u043f\u0447/i.test(bodyText) ||
                 Array.from(document.querySelectorAll('input')).some(input => {
                   const placeholder = input.getAttribute('placeholder') || ''
                   const ariaLabel = input.getAttribute('aria-label') || ''
@@ -114,27 +171,32 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
               /[?&]backUrl=/i.test(location.href)
           }
         }
-        const loggedOut =
+        const strongLoggedOut =
           signals.login.exists ||
           signals.signup.exists ||
           signals.anonymousProfileLink.exists ||
           signals.loginUrl.exists
+        const weakLoggedOut =
+          signals.loggedOutText.exists ||
+          signals.loggedOutEscapedText.exists
         const loggedIn =
           signals.profileAndResumesButton.exists ||
           signals.vacancyResponsesButton.exists ||
           signals.mainmenuProfileAndResumes.exists ||
-          signals.mainmenuVacancyResponses.exists
+          signals.mainmenuVacancyResponses.exists ||
+          signals.applicantResumesLink.exists ||
+          signals.applicantNegotiationsLink.exists ||
+          signals.loggedInText.exists ||
+          signals.loggedInEscapedText.exists
         const captchaDetected = signals.hhCaptchaChallenge.exists
         const state =
           captchaDetected
             ? 'captcha'
-            : loggedIn && !loggedOut
+            : loggedIn && !signals.loginUrl.exists
             ? 'logged_in'
-            : loggedOut && !loggedIn
+            : strongLoggedOut || weakLoggedOut
               ? 'logged_out'
-              : loggedIn && loggedOut
-                ? 'conflict'
-                : 'unknown'
+              : 'unknown'
 
         return {
           state,

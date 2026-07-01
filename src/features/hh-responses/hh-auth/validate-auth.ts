@@ -39,6 +39,19 @@ async function hasVisibleText(page: any, text: string): Promise<boolean> {
   }
 }
 
+async function hasBodyTextMatch(page: any, patterns: RegExp[]): Promise<boolean> {
+  try {
+    return await page.evaluate((sources: string[]) => {
+      const normalize = (value: string) => value.replace(/\s+/g, ' ').trim()
+      const bodyText = normalize(document.body?.innerText || '')
+
+      return sources.some(source => new RegExp(source, 'i').test(bodyText))
+    }, patterns.map(pattern => pattern.source))
+  } catch {
+    return false
+  }
+}
+
 async function hasHhCaptchaChallenge(page: any): Promise<boolean> {
   try {
     return await page.evaluate(() => {
@@ -150,8 +163,14 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
         vacancyResponsesButton: false,
         mainmenuProfileAndResumes: false,
         mainmenuVacancyResponses: false,
+        applicantResumesLink: false,
+        applicantNegotiationsLink: false,
         resumesAndProfileText: false,
         vacancyResponsesText: false,
+        loggedInBodyText: false,
+        loggedOutBodyText: false,
+        loggedInEscapedBodyText: false,
+        loggedOutEscapedBodyText: false,
         ...fastCaptchaSignals,
         loginUrl: isLoginUrl,
         loginUrlHasBackUrl
@@ -173,8 +192,14 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     vacancyResponsesButton,
     mainmenuProfileAndResumes,
     mainmenuVacancyResponses,
+    applicantResumesLink,
+    applicantNegotiationsLink,
     resumesAndProfileText,
     vacancyResponsesText,
+    loggedInBodyText,
+    loggedOutBodyText,
+    loggedInEscapedBodyText,
+    loggedOutEscapedBodyText,
     ddosGuard,
     hhCaptchaChallenge,
     captchaContainer,
@@ -189,8 +214,32 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     isAttached(page, '[data-qa="vacancyResponses-button"]', signalTimeoutMs),
     isAttached(page, '[data-qa="mainmenu_profileAndResumes"]', signalTimeoutMs),
     isAttached(page, '[data-qa="mainmenu_vacancyResponses"]', signalTimeoutMs),
+    isAttached(page, '[href*="/applicant/resumes"]', signalTimeoutMs),
+    isAttached(page, '[href*="/applicant/negotiations"]', signalTimeoutMs),
     hasVisibleText(page, 'Резюме и профиль'),
     hasVisibleText(page, 'Отклики'),
+    hasBodyTextMatch(page, [
+      /Резюме и профиль/,
+      /Мои резюме/,
+      /Отклики/,
+      /Responses/,
+      /My resumes/
+    ]),
+    hasBodyTextMatch(page, [
+      /Войти/,
+      /Зарегистрироваться/,
+      /Login/,
+      /Sign up/
+    ]),
+    hasBodyTextMatch(page, [
+      /\u0420\u0435\u0437\u044e\u043c\u0435 \u0438 \u043f\u0440\u043e\u0444\u0438\u043b\u044c/,
+      /\u041c\u043e\u0438 \u0440\u0435\u0437\u044e\u043c\u0435/,
+      /\u041e\u0442\u043a\u043b\u0438\u043a\u0438/
+    ]),
+    hasBodyTextMatch(page, [
+      /\u0412\u043e\u0439\u0442\u0438/,
+      /\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u0442\u044c\u0441\u044f/
+    ]),
     page.evaluate(() => {
       return (
         /^ddos-guard$/i.test(document.title.trim()) ||
@@ -212,8 +261,14 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     vacancyResponsesButton,
     mainmenuProfileAndResumes,
     mainmenuVacancyResponses,
+    applicantResumesLink,
+    applicantNegotiationsLink,
     resumesAndProfileText,
     vacancyResponsesText,
+    loggedInBodyText,
+    loggedOutBodyText,
+    loggedInEscapedBodyText,
+    loggedOutEscapedBodyText,
     ddosGuard,
     hhCaptchaChallenge,
     captchaContainer,
@@ -235,8 +290,12 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     signals.vacancyResponsesButton ||
     signals.mainmenuProfileAndResumes ||
     signals.mainmenuVacancyResponses ||
+    signals.applicantResumesLink ||
+    signals.applicantNegotiationsLink ||
     signals.resumesAndProfileText ||
-    signals.vacancyResponsesText
+    signals.vacancyResponsesText ||
+    signals.loggedInBodyText ||
+    signals.loggedInEscapedBodyText
   ) {
     state = 'logged_in'
   } else if (
@@ -245,7 +304,9 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     signals.phoneInput ||
     signals.emailInput ||
     signals.passwordInput ||
-    signals.loginUrl
+    signals.loginUrl ||
+    signals.loggedOutBodyText ||
+    signals.loggedOutEscapedBodyText
   ) {
     state = 'logged_out'
   }

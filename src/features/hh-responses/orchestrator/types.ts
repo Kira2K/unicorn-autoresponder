@@ -61,6 +61,7 @@ export type KnownAutoResponderStopReason =
   | 'captcha_detected'
   | 'selector_missing'
   | 'network_timeout'
+  | 'resume_loop_detected'
 
 export type KnownParserErrorCode =
   | 'AUTH_REQUIRED'
@@ -68,6 +69,7 @@ export type KnownParserErrorCode =
   | 'SKIPPED_COMPANY_STOP_LIST'
   | 'ERROR_NO_MODAL'
   | 'STUCK_ON_VACANCY_TIMEOUT'
+  | 'RESUME_LOOP_DETECTED'
   | 'selector_missing'
   | 'captcha_detected'
   | 'network_timeout'
@@ -113,9 +115,17 @@ export type OrchestratorStatus = {
   autoResponderWatchTimedOut?: boolean
   autoResponderStopReason?: string
   autoResponderStopReasonDetails?: string
+  requiredResponseLimit?: number
+  metResponseLimit?: boolean
+  completionGap?: string
+  responsesRemaining?: number
+  responseLimitWatchMs?: number
+  responseLimitElapsedMs?: number
+  responseLimitTimeLeftMs?: number
   responseCount?: number
   vacancyTransitionCount?: number
   manualVacanciesCount?: number
+  manualBlockerSummary?: ManualBlockerSummary
   parserLogsCount?: number
   parserErrorLogsCount?: number
   parserErrorCodes?: string[]
@@ -174,6 +184,13 @@ export type ManualVacancy = {
   returnUrl?: string
   ts?: number
   title?: string
+}
+
+export type ManualBlockerSummary = {
+  manualCount: number
+  firstManualVacancy?: ManualVacancy
+  checks?: Record<string, boolean>
+  topBlockers: string[]
 }
 
 export type ParserLogEntry = {

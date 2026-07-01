@@ -2,7 +2,8 @@ const assert = require('node:assert/strict')
 
 const {
   formatCaptchaProfilesSummary,
-  formatRunSummaryLog
+  formatRunSummaryLog,
+  hasClientFailure
 } = require('./telegram-reporting.ts')
 
 type OrchestratorStatus = import('./types.ts').OrchestratorStatus
@@ -73,9 +74,30 @@ function testRunSummaryIncludesCaptchaBlock(): void {
   assert.match(summary, /@kiraSamsonova нужно починить капчу/)
 }
 
+function testTimerReachedIsOkEvenWhenResponseLimitNotMet(): void {
+  const status = makeStatus({
+    autoResponderStopReason: 'orchestrator_stop_after_watch',
+    autoResponderWatchTimedOut: true,
+    profileStopped: true,
+    profileTagRemoved: true,
+    profileStatusRestored: true,
+    requiredResponseLimit: 180,
+    metResponseLimit: false,
+    completionGap: 'orchestrator_stop_after_watch:missing_178_responses',
+    responseCount: 2,
+    manualVacanciesCount: 7
+  })
+  const summary = formatRunSummaryLog([status])
+
+  assert.equal(hasClientFailure(status), false)
+  assert.match(summary, /Ок: 1/)
+  assert.match(summary, /Нужно проверить: 0/)
+}
+
 testNoCaptchaSummary()
 testSingleThrownCaptchaSummary()
 testMultipleCaptchaSummary()
 testRunSummaryIncludesCaptchaBlock()
+testTimerReachedIsOkEvenWhenResponseLimitNotMet()
 
 console.log('orchestrator telegram reporting tests passed')

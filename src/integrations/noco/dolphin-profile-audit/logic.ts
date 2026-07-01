@@ -265,6 +265,24 @@ function safeDolphinProfile(profile: DolphinProfileSnapshot): DolphinProfileSnap
   }
 }
 
+function dolphinProfileNameMatchesSlot(
+  profile: DolphinProfileSnapshot,
+  slot: ExpectedSlot
+): boolean {
+  const profileName = normalizeText(profile.name)
+  if (!profileName) {
+    return false
+  }
+
+  if (slot.candidates.some(candidate => normalizeText(candidate) === profileName)) {
+    return true
+  }
+
+  const clientName = normalizeText(slot.clientName)
+  const marketSuffix = slot.market === 'ru' ? ' ru' : ' en'
+  return Boolean(clientName) && profileName.includes(clientName) && profileName.endsWith(marketSuffix)
+}
+
 function ignoredDolphinProfileReason(profileId: string): string | undefined {
   return INTENTIONALLY_IGNORED_DOLPHIN_PROFILES[profileId]
 }
@@ -388,8 +406,15 @@ function buildAuditReport(input: {
         }
 
         item.dolphinProfile = safeDolphinProfile(dolphinProfile)
-        safeBindings.push(item)
-        usedDolphinIds.set(dolphinId, [...(usedDolphinIds.get(dolphinId) ?? []), slot])
+        if (dolphinProfileNameMatchesSlot(dolphinProfile, slot)) {
+          safeBindings.push(item)
+          usedDolphinIds.set(dolphinId, [...(usedDolphinIds.get(dolphinId) ?? []), slot])
+        } else {
+          item.category = 'conflict_or_duplicate'
+          item.reason = 'existing_noco_binding_name_or_market_mismatch'
+          item.notes.push('NocoDB profile id exists in Dolphin, but profile name does not match expected client/market slot.')
+          conflictsAndDuplicates.push(item)
+        }
       } else {
         nocoProfileMissingInDolphin.push(item)
       }
@@ -671,6 +696,36 @@ function runTests(): void {
   assert.equal(damirReport.safeBindings.length, 2)
   assert.equal(damirReport.conflictsAndDuplicates.length, 0)
   assert.equal(damirReport.skippedClients.length, 0)
+
+  const mismatchedExistingBindingReport = buildAuditReport({
+    clients: [
+      {
+        Id: 14,
+        client_name: 'Руслан Исхаков',
+        market: 'en',
+        rel_clients_primary_stack: { Id: 3, name: 'Python' }
+      }
+    ],
+    nocoProfiles: [
+      {
+        Id: 62,
+        client_name: 'Руслан Исхаков',
+        locale: 'ru',
+        dolphin_profile_id: '769499246',
+        rel_dolphinProfiles_client: { Id: 14, client_name: 'Руслан Исхаков' }
+      }
+    ],
+    dolphinProfiles: [
+      { id: '769499246', name: 'Руслан Хакуринов React Ru' }
+    ],
+    checkedAt: '2026-06-27T00:00:00.000Z'
+  })
+  assert.equal(
+    mismatchedExistingBindingReport.conflictsAndDuplicates.some(
+      item => item.reason === 'existing_noco_binding_name_or_market_mismatch'
+    ),
+    true
+  )
 
   const report = buildAuditReport({
     clients,

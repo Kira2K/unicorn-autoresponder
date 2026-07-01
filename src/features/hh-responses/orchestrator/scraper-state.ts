@@ -6,6 +6,7 @@ type KnownAutoResponderStopReason =
   import('./types.ts').KnownAutoResponderStopReason
 type KnownParserErrorCode = import('./types.ts').KnownParserErrorCode
 type ManualVacancy = import('./types.ts').ManualVacancy
+type ManualBlockerSummary = import('./types.ts').ManualBlockerSummary
 type NormalizedAutoResponderStopReason =
   import('./types.ts').NormalizedAutoResponderStopReason
 type NormalizedParserErrorCode =
@@ -27,7 +28,8 @@ const KNOWN_STOP_REASONS = new Set<KnownAutoResponderStopReason>([
   'auth_required',
   'captcha_detected',
   'selector_missing',
-  'network_timeout'
+  'network_timeout',
+  'resume_loop_detected'
 ])
 
 const KNOWN_PARSER_CODES = new Set<KnownParserErrorCode>([
@@ -36,6 +38,7 @@ const KNOWN_PARSER_CODES = new Set<KnownParserErrorCode>([
   'SKIPPED_COMPANY_STOP_LIST',
   'ERROR_NO_MODAL',
   'STUCK_ON_VACANCY_TIMEOUT',
+  'RESUME_LOOP_DETECTED',
   'selector_missing',
   'captcha_detected',
   'network_timeout'
@@ -67,6 +70,16 @@ function normalizeOptionalNumber(value: unknown): number | undefined {
   const numberValue = Number(value)
 
   return Number.isFinite(numberValue) ? numberValue : undefined
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  const numberValue = Number(value)
+
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    return undefined
+  }
+
+  return Math.floor(numberValue)
 }
 
 function normalizeRecentUrlEntry(value: unknown): RecentUrlEntry | undefined {
@@ -133,6 +146,158 @@ function normalizeManualVacancies(value: unknown): ManualVacancy[] {
   return value
     .map(normalizeManualVacancy)
     .filter((item): item is ManualVacancy => Boolean(item))
+}
+
+function extractManualChecksFromDetails(
+  details: string | undefined
+): Record<string, boolean> | undefined {
+  if (!details) {
+    return undefined
+  }
+
+  const match = details.match(/checks=(\{.*\})/)
+  if (!match) {
+    return undefined
+  }
+
+  try {
+    const parsed = JSON.parse(match[1])
+    if (!isObject(parsed)) {
+      return undefined
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')
+    )
+  } catch {
+    return undefined
+  }
+}
+
+function getTopManualBlockers(
+  checks: Record<string, boolean> | undefined
+): string[] {
+  if (!checks) {
+    return []
+  }
+
+  const preferredOrder = [
+    'manualResponsePage',
+    'questionForm',
+    'textarea',
+    'resumeVisibility',
+    'additionalResumeApply',
+    'dailyLimit',
+    'authRequired',
+    'alreadyResponded',
+    'submit'
+  ]
+  const active = new Set(
+    Object.entries(checks)
+      .filter(([, value]) => value)
+      .map(([key]) => key)
+  )
+
+  return [
+    ...preferredOrder.filter(key => active.has(key)),
+    ...[...active].filter(key => !preferredOrder.includes(key))
+  ]
+}
+
+function summarizeManualBlockers(input: {
+  manualVacancies?: ManualVacancy[]
+  manualVacanciesCount?: number
+  stopReasonDetails?: string
+}): ManualBlockerSummary | undefined {
+  const manualVacancies = input.manualVacancies ?? []
+  const manualCount = input.manualVacanciesCount ?? manualVacancies.length
+  const checks = extractManualChecksFromDetails(input.stopReasonDetails)
+  const topBlockers = getTopManualBlockers(checks)
+
+  if (!manualCount && !topBlockers.length) {
+    return undefined
+  }
+
+  return {
+    manualCount,
+    ...(manualVacancies[0] ? { firstManualVacancy: manualVacancies[0] } : {}),
+    ...(checks ? { checks } : {}),
+    topBlockers
+  }
+}
+
+function evaluateResponseRequirement(status: OrchestratorStatus): {
+  requiredResponseLimit?: number
+  metResponseLimit?: boolean
+  completionGap?: string
+  responsesRemaining?: number
+} {
+  const requiredResponseLimit = normalizePositiveInteger(
+    status.requiredResponseLimit
+  )
+  const responseCount = Math.max(0, Number(status.responseCount ?? 0))
+
+  if (!requiredResponseLimit) {
+    return {
+      metResponseLimit: false,
+      completionGap: 'response_limit_unknown'
+    }
+  }
+
+  const responsesRemaining = Math.max(requiredResponseLimit - responseCount, 0)
+  const metResponseLimit =
+    status.autoResponderStopReason === 'limit_reached' &&
+    responseCount >= requiredResponseLimit
+
+  if (metResponseLimit) {
+    return {
+      requiredResponseLimit,
+      metResponseLimit,
+      completionGap: 'met_response_limit',
+      responsesRemaining
+    }
+  }
+
+  if (status.error) {
+    return {
+      requiredResponseLimit,
+      metResponseLimit: false,
+      completionGap: `error_before_requirement:${status.error}`,
+      responsesRemaining
+    }
+  }
+
+  if (
+    status.autoResponderStopReason === 'manual_targets_only' ||
+    status.autoResponderStopReason === 'no_new_targets' ||
+    status.autoResponderStopReason === 'orchestrator_stop_after_watch'
+  ) {
+    return {
+      requiredResponseLimit,
+      metResponseLimit: false,
+      completionGap: `${status.autoResponderStopReason}:missing_${responsesRemaining}_responses`,
+      responsesRemaining
+    }
+  }
+
+  return {
+    requiredResponseLimit,
+    metResponseLimit: false,
+    completionGap: status.autoResponderStopReason
+      ? `${status.autoResponderStopReason}:requirement_not_proven`
+      : 'no_terminal_stop_reason',
+    responsesRemaining
+  }
+}
+
+function applyResponseRequirementStatus(
+  status: OrchestratorStatus
+): OrchestratorStatus {
+  return {
+    ...status,
+    ...evaluateResponseRequirement(status)
+  }
 }
 
 function normalizeParserLogEntry(value: unknown): ParserLogEntry | undefined {
@@ -370,10 +535,13 @@ module.exports = {
   isClientRunSuccessful,
   isStopReasonNormal,
   normalizeManualVacancies,
+  applyResponseRequirementStatus,
+  evaluateResponseRequirement,
   normalizeParserErrorCode,
   normalizeParserErrors,
   normalizeParserLogs,
   normalizeRecentUrls,
   normalizeStopReason,
-  normalizeStopReasonValue
+  normalizeStopReasonValue,
+  summarizeManualBlockers
 }

@@ -42,8 +42,12 @@ const {
   EXTERNAL_TIMEOUT_MULTIPLIER,
   EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS,
   LOCAL_RUN_LOG_FILE,
+  ORCHESTRATOR_RESPONSE_LIMIT,
   ORCHESTRATOR_WORK_WITH_MARKET
 } = require('../orchestrator/config.ts')
+const {
+  applyResponseRequirementStatus
+} = require('../orchestrator/scraper-state.ts')
 
 type ClientAutomationData = import('../orchestrator/types.ts').ClientAutomationData
 type OrchestratorStatus = import('../orchestrator/types.ts').OrchestratorStatus
@@ -148,7 +152,11 @@ function getRecommendedExternalTimeoutMs(
   clientCount: number,
   watchMs = AUTO_RESPONDER_WATCH_MS,
   clientStartDelayMs = CLIENT_START_DELAY_MS
-): number {
+): number | undefined {
+  if (watchMs === undefined) {
+    return undefined
+  }
+
   const staggerTotalMs = Math.max(clientCount - 1, 0) * clientStartDelayMs
   const profileBufferMs = clientCount * EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS
 
@@ -157,12 +165,88 @@ function getRecommendedExternalTimeoutMs(
   )
 }
 
+function getClientReadinessError(client: ClientAutomationData): Error | null {
+  if (!client.stackScenario) {
+    return new Error(`Stack scenario for ${client.clientName} was not found`)
+  }
+
+  if (!Number.isFinite(Number(client.dolphinProfileId)) || Number(client.dolphinProfileId) <= 0) {
+    return new Error(`Dolphin profile id for ${client.clientName} is missing or invalid`)
+  }
+
+  if (!client.hhAuthCredentials) {
+    return new Error(`HH credentials for ${client.clientName}/${client.market ?? 'unknown'} are missing`)
+  }
+
+  if (!String(client.hhAuthCredentials.password ?? '').trim()) {
+    return new Error(`HH password for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
+  }
+
+  return null
+}
+
+function splitClientsByReadiness(clients: ClientAutomationData[]): {
+  clients: ClientAutomationData[]
+  skippedStatuses: OrchestratorStatus[]
+} {
+  const runnableClients: ClientAutomationData[] = []
+  const skippedStatuses: OrchestratorStatus[] = []
+
+  for (const client of clients) {
+    const error = getClientReadinessError(client)
+    if (!error) {
+      runnableClients.push(client)
+      continue
+    }
+
+    const status = makeClientPreparationErrorStatus(
+      client,
+      error,
+      'client skipped before run: readiness preflight failed'
+    )
+    console.warn(
+      `Skipping ${client.clientName}/${client.commonChatId}/${client.market}: ${error.message}`
+    )
+    writeLocalRunLog({
+      kind: 'client-skipped-before-run',
+      status
+    })
+    skippedStatuses.push(status)
+  }
+
+  return {
+    clients: runnableClients,
+    skippedStatuses
+  }
+}
+
 async function runClientsOrchestrator(
   clients: ClientAutomationData[],
   options: {
     extraSummaryStatuses?: OrchestratorStatus[]
   } = {}
 ): Promise<OrchestratorStatus[]> {
+  const readiness = splitClientsByReadiness(clients)
+  const extraSummaryStatuses = [
+    ...(options.extraSummaryStatuses ?? []),
+    ...readiness.skippedStatuses
+  ]
+
+  if (!readiness.clients.length) {
+    if (!extraSummaryStatuses.length) {
+      throw new Error('No enabled client market targets were found')
+    }
+
+    console.warn('No runnable clients remained after readiness preflight.')
+    writeLocalRunLog({
+      kind: 'run-results',
+      results: extraSummaryStatuses
+    })
+    await sendRunSummaryLogWithTimeout(extraSummaryStatuses)
+
+    return extraSummaryStatuses
+  }
+
   await assertDolphinAppRunning()
   writeLocalRunLog({
     kind: 'dolphin-local-api-preflight',
@@ -172,12 +256,8 @@ async function runClientsOrchestrator(
   })
   await assertPreexistingDolphinProfileLimit()
 
-  if (!clients.length) {
-    throw new Error('No enabled client market targets were found')
-  }
-
   console.log(
-    `Starting ${clients.length} clients with ${CLIENT_START_DELAY_MS}ms stagger: ${clients
+    `Starting ${readiness.clients.length} clients with ${CLIENT_START_DELAY_MS}ms stagger: ${readiness.clients
       .map(
         client =>
           `${client.clientName}/${client.commonChatId}/${client.market}(${client.dolphinProfileId})`
@@ -185,29 +265,34 @@ async function runClientsOrchestrator(
       .join(', ')}`
   )
   console.log(
-    `Recommended external timeout: ${getRecommendedExternalTimeoutMs(clients.length)}ms ` +
-      `(formula: (watchMs + staggerMs + ${EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS}ms * profiles) * ${EXTERNAL_TIMEOUT_MULTIPLIER})`
+    AUTO_RESPONDER_WATCH_MS === undefined
+      ? 'Orchestrator watch timer disabled; run will wait for response limit or another terminal stop.'
+      : `Recommended external timeout: ${getRecommendedExternalTimeoutMs(readiness.clients.length)}ms ` +
+        `(formula: (watchMs + staggerMs + ${EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS}ms * profiles) * ${EXTERNAL_TIMEOUT_MULTIPLIER})`
   )
   writeLocalRunLog({
     kind: 'run-start',
     localRunLogFile: LOCAL_RUN_LOG_FILE,
     market: ORCHESTRATOR_WORK_WITH_MARKET,
+    responseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
     watchMs: AUTO_RESPONDER_WATCH_MS,
+    watchTimerDisabled: AUTO_RESPONDER_WATCH_MS === undefined,
     clientStartDelayMs: CLIENT_START_DELAY_MS,
     recommendedExternalTimeoutMs: getRecommendedExternalTimeoutMs(
-      clients.length
+      readiness.clients.length
     ),
-    clients: clients.map(client => ({
+    clients: readiness.clients.map(client => ({
       clientName: client.clientName,
       commonChatId: client.commonChatId,
       market: client.market,
       stack: client.stack,
-      dolphinProfileId: client.dolphinProfileId
+      dolphinProfileId: client.dolphinProfileId,
+      responseLimit: ORCHESTRATOR_RESPONSE_LIMIT
     }))
   })
 
   const results = await Promise.all(
-    clients.map(async (client, index) => {
+    readiness.clients.map(async (client, index) => {
       const delayMs = index * CLIENT_START_DELAY_MS
 
       if (delayMs > 0) {
@@ -233,7 +318,7 @@ async function runClientsOrchestrator(
     })
   )
 
-  const summaryResults = [...(options.extraSummaryStatuses ?? []), ...results]
+  const summaryResults = [...extraSummaryStatuses, ...results]
 
   console.log(summaryResults)
   writeLocalRunLog({
@@ -250,7 +335,7 @@ function makeClientPreparationErrorStatus(
   error: unknown,
   event: string
 ): OrchestratorStatus {
-  return {
+  return applyResponseRequirementStatus({
     clientName: client.clientName,
     stack: client.stack,
     market: client.market,
@@ -269,9 +354,16 @@ function makeClientPreparationErrorStatus(
     indexScriptInjected: false,
     watcherInstalled: false,
     startButtonClicked: false,
+    requiredResponseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+    metResponseLimit: false,
+    completionGap: 'client_preparation_failed',
+    responsesRemaining: ORCHESTRATOR_RESPONSE_LIMIT,
+    responseLimitWatchMs: AUTO_RESPONDER_WATCH_MS,
+    responseLimitElapsedMs: 0,
+    responseLimitTimeLeftMs: AUTO_RESPONDER_WATCH_MS,
     error: getErrorMessage(error),
     errorStack: getErrorStack(error)
-  }
+  })
 }
 
 async function runSelectedClientsOrchestrator(

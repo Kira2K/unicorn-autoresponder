@@ -187,6 +187,48 @@ function testRunClassification(): void {
     ),
     'captcha_detected'
   )
+  const responseLimitMet = makeStatus({
+    requiredResponseLimit: 5,
+    responseCount: 5,
+    autoResponderStopReason: 'limit_reached',
+    metResponseLimit: true,
+    completionGap: 'met_response_limit'
+  })
+  const manualBelowLimit = makeStatus({
+    requiredResponseLimit: 5,
+    responseCount: 2,
+    manualVacanciesCount: 3,
+    autoResponderStopReason: 'manual_targets_only',
+    metResponseLimit: false,
+    completionGap: 'manual_targets_only:missing_3_responses'
+  })
+  const noNewTargetsBelowLimit = makeStatus({
+    requiredResponseLimit: 5,
+    responseCount: 2,
+    autoResponderStopReason: 'no_new_targets',
+    metResponseLimit: false,
+    completionGap: 'no_new_targets:missing_3_responses'
+  })
+  const timeoutBelowLimit = makeStatus({
+    requiredResponseLimit: 5,
+    responseCount: 2,
+    autoResponderStopReason: 'orchestrator_stop_after_watch',
+    autoResponderWatchTimedOut: true,
+    profileStopped: true,
+    profileTagRemoved: true,
+    profileStatusRestored: true,
+    metResponseLimit: false,
+    completionGap: 'orchestrator_stop_after_watch:missing_3_responses'
+  })
+
+  assert.equal(classifyClientRun(responseLimitMet), 'success')
+  assert.equal(isClientRunSuccessful(responseLimitMet), true)
+  assert.equal(classifyClientRun(manualBelowLimit), 'success')
+  assert.equal(isClientRunSuccessful(manualBelowLimit), true)
+  assert.equal(classifyClientRun(noNewTargetsBelowLimit), 'success')
+  assert.equal(isClientRunSuccessful(noNewTargetsBelowLimit), true)
+  assert.equal(classifyClientRun(timeoutBelowLimit), 'normal_timeout')
+  assert.equal(isClientRunSuccessful(timeoutBelowLimit), true)
 }
 
 function testTimeoutClassificationNeedsHealthyCleanup(): void {
