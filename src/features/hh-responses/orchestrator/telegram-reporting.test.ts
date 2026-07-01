@@ -94,10 +94,42 @@ function testTimerReachedIsOkEvenWhenResponseLimitNotMet(): void {
   assert.match(summary, /Нужно проверить: 0/)
 }
 
+function testAcceptedTerminalStopsAreGreenDots(): void {
+  const manualOnly = makeStatus({
+    clientName: 'Самвел Мхитарян',
+    autoResponderStopReason: 'manual_targets_only',
+    parserErrorCodes: ['MANUAL_RETURN_FORCED'],
+    requiredResponseLimit: 170,
+    metResponseLimit: false,
+    completionGap: 'manual_targets_only:missing_83_responses',
+    responseCount: 87,
+    manualVacanciesCount: 37
+  })
+  const dailyLimit = makeStatus({
+    clientName: 'Андрей Пашинцев',
+    autoResponderStopReason: 'hh_response_daily_limit_exceeded',
+    parserErrorCodes: ['DAILY_RESPONSE_LIMIT'],
+    requiredResponseLimit: 170,
+    metResponseLimit: false,
+    completionGap: 'hh_response_daily_limit_exceeded:missing_164_responses',
+    responseCount: 6,
+    manualVacanciesCount: 13
+  })
+  const summary = formatRunSummaryLog([manualOnly, dailyLimit])
+
+  assert.equal(hasClientFailure(manualOnly), false)
+  assert.equal(hasClientFailure(dailyLimit), false)
+  assert.match(summary, /Ок: 2/)
+  assert.match(summary, /Нужно проверить: 0/)
+  assert.match(summary, /Самвел Мхитарян \/ Ru: 🟢/)
+  assert.match(summary, /Андрей Пашинцев \/ Ru: 🟢/)
+}
+
 testNoCaptchaSummary()
 testSingleThrownCaptchaSummary()
 testMultipleCaptchaSummary()
 testRunSummaryIncludesCaptchaBlock()
 testTimerReachedIsOkEvenWhenResponseLimitNotMet()
+testAcceptedTerminalStopsAreGreenDots()
 
 console.log('orchestrator telegram reporting tests passed')

@@ -643,6 +643,21 @@ async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
 
 function hasClientFailure(status: OrchestratorStatus): boolean {
   if (
+    !status.error &&
+    !status.telegramError &&
+    status.opened !== false &&
+    status.startButtonClicked !== false &&
+    (
+      status.autoResponderStopReason === 'manual_targets_only' ||
+      status.autoResponderStopReason === 'hh_response_daily_limit_exceeded'
+    ) &&
+    classifyClientRun(status) !== 'captcha_detected' &&
+    classifyClientRun(status) !== 'auth_required'
+  ) {
+    return false
+  }
+
+  if (
     status.autoResponderStopReason === 'orchestrator_stop_after_watch' &&
     isAutoResponderStopNormal(status)
   ) {
