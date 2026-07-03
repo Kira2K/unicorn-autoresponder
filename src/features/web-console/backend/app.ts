@@ -21,6 +21,9 @@ const {
 const { createDefaultVerificationCodeService } = require('./dolphin-verification-code.ts') as {
   createDefaultVerificationCodeService(): VerificationCodeService
 }
+const { createTelegramService } = require('./telegram-service.ts') as {
+  createTelegramService(options: { repository: WebConsoleRepository; adapter?: any; proxyResolver?: any }): TelegramService
+}
 const {
   buildProxyName,
   buildProfileName,
@@ -77,6 +80,16 @@ type DolphinProfileProvisioner = {
 }
 type VerificationCodeService = {
   getLatestCode(): Promise<unknown>
+}
+type TelegramService = {
+  connect(clientId: number, input: { accountId?: number; phone?: string; code?: string; password?: string }): Promise<unknown>
+  status(clientId: number, accountId?: number): Promise<unknown>
+  folders(clientId: number, accountId?: number): Promise<unknown>
+  dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number }): Promise<unknown>
+  messages(clientId: number, input: { accountId?: number; chatId: string; limit?: number }): Promise<unknown>
+  send(clientId: number, input: { accountId?: number; chatId: string; text: string }): Promise<unknown>
+  reauth(clientId: number, accountId?: number): Promise<unknown>
+  disconnect(clientId: number, accountId?: number): Promise<unknown>
 }
 
 const SESSION_COOKIE = 'web_console_session'
@@ -302,6 +315,9 @@ function createWebConsoleApp(options: {
   dolphinProvisioningApi?: any
   dolphinTemplateProfileId?: number
   verificationCodeService?: VerificationCodeService
+  telegramService?: TelegramService
+  telegramAdapter?: any
+  telegramProxyResolver?: any
   useMockData?: boolean
 } = {}) {
   const repository =
@@ -319,6 +335,13 @@ function createWebConsoleApp(options: {
     templateProfileId: options.dolphinTemplateProfileId ?? (useMockData ? 1 : undefined)
   })
   const verificationCodeService = options.verificationCodeService ?? createDefaultVerificationCodeService()
+  const telegramService = options.telegramService ?? createTelegramService({
+    repository,
+    adapter: options.telegramAdapter,
+    proxyResolver: options.telegramProxyResolver ?? (useMockData
+      ? async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
+      : undefined)
+  })
   const sessions = createSessionStore()
   const app = express()
 
@@ -383,10 +406,15 @@ function createWebConsoleApp(options: {
     res.send([
       'Google OAuth code received.',
       '',
+      'Before approving again, make the Google OAuth consent screen Production if it is still Testing.',
+      'Testing-mode refresh tokens expire quickly; Production-mode tokens last much longer unless revoked by Google/account changes.',
+      '',
       'Run this in PowerShell:',
       `npm run web:gmail:token -- --code="${code}"`,
       '',
-      'Then add the printed DOLPHIN_VERIFICATION_GMAIL_REFRESH_TOKEN to .env.'
+      'Then add the printed DOLPHIN_VERIFICATION_GMAIL_REFRESH_TOKEN to .env and Render secrets.',
+      'Restart the backend/Render service and validate with:',
+      'npm run web:gmail:token -- --check'
     ].join('\n'))
   })
 
@@ -750,10 +778,133 @@ function createWebConsoleApp(options: {
       if (error?.code === 'mailbox_setup_error') {
         res.status(503).json({
           error: 'mailbox_setup_error',
+          reason: error.reason,
           message: error.message
         })
         return
       }
+      next(error)
+    }
+  })
+
+  function telegramAccountId(value: unknown): number | undefined {
+    const id = Number(value)
+    return Number.isFinite(id) && id > 0 ? id : undefined
+  }
+
+  function telegramTargetClientId(req: AuthedRequest): number {
+    const session = req.webSession!
+    if (session.role === 'client') return Number(session.clientId)
+    if (session.role === 'admin') {
+      const raw = (req.body?.targetClientId ?? req.query?.targetClientId)
+      const id = Number(raw)
+      if (Number.isFinite(id) && id > 0) return id
+      throw Object.assign(new Error('Admin target client id is required.'), { code: 'missing_target_client' })
+    }
+    throw Object.assign(new Error('Telegram is not available for this role.'), { code: 'forbidden' })
+  }
+
+  app.post('/api/telegram/connect', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = telegramTargetClientId(req)
+      res.json(await telegramService.connect(clientId, {
+        accountId: telegramAccountId(req.body?.platformAccountId ?? req.body?.accountId),
+        phone: String(req.body?.phone ?? '').trim() || undefined,
+        code: String(req.body?.code ?? '').trim() || undefined,
+        password: String(req.body?.password ?? '').trim() || undefined
+      }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/telegram/status', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = telegramTargetClientId(req)
+      res.json(await telegramService.status(clientId, telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId)))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/telegram/dialogs', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = telegramTargetClientId(req)
+      const limit = Number(req.query?.limit)
+      const folderId = Number(req.query?.folderId)
+      res.json(await telegramService.dialogs(clientId, {
+        accountId: telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId),
+        list: String(req.query?.list ?? 'main').trim() || 'main',
+        folderId: Number.isFinite(folderId) && folderId > 0 ? folderId : undefined,
+        query: String(req.query?.query ?? '').trim() || undefined,
+        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined
+      }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/telegram/folders', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = telegramTargetClientId(req)
+      res.json(await telegramService.folders(clientId, telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId)))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/telegram/messages', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.query?.chatId ?? '').trim()
+      if (!chatId) {
+        res.status(400).json({ error: 'missing_chat_id' })
+        return
+      }
+      const clientId = telegramTargetClientId(req)
+      const limit = Number(req.query?.limit)
+      res.json(await telegramService.messages(clientId, {
+        accountId: telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId),
+        chatId,
+        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined
+      }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/telegram/send', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.body?.chatId ?? '').trim()
+      const text = String(req.body?.text ?? '').trim()
+      if (!chatId || !text) {
+        res.status(400).json({ error: 'missing_message_input' })
+        return
+      }
+      const clientId = telegramTargetClientId(req)
+      res.json(await telegramService.send(clientId, {
+        accountId: telegramAccountId(req.body?.platformAccountId ?? req.body?.accountId),
+        chatId,
+        text
+      }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/telegram/reauth', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = telegramTargetClientId(req)
+      res.json(await telegramService.reauth(clientId, telegramAccountId(req.body?.platformAccountId ?? req.body?.accountId)))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.delete('/api/telegram/disconnect', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = telegramTargetClientId(req)
+      res.json(await telegramService.disconnect(clientId, telegramAccountId(req.body?.platformAccountId ?? req.body?.accountId ?? req.query?.platformAccountId ?? req.query?.accountId)))
+    } catch (error) {
       next(error)
     }
   })
@@ -791,6 +942,14 @@ function createWebConsoleApp(options: {
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if ((error as any)?.code === 'not_found') {
       res.status(404).json({ error: 'not_found', message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'forbidden') {
+      res.status(403).json({ error: 'forbidden', message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'missing_target_client' || (error as any)?.code === 'telegram_account_not_found') {
+      res.status(404).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return
     }
     const message = error instanceof Error ? error.message : String(error)

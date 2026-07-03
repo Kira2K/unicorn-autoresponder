@@ -37,6 +37,7 @@ type VerificationCodeNotFound = Error & {
 
 type MailboxSetupError = Error & {
   code: 'mailbox_setup_error'
+  reason?: string
 }
 
 const DOLPHIN_VERIFICATION_SENDER = 'no-reply@dolphin-anty.com'
@@ -113,10 +114,35 @@ function createCodeNotFoundError(): VerificationCodeNotFound {
   return error
 }
 
-function createMailboxSetupError(message: string): MailboxSetupError {
+function createMailboxSetupError(message: string, reason = 'setup'): MailboxSetupError {
   const error = new Error(message) as MailboxSetupError
   error.code = 'mailbox_setup_error'
+  error.reason = reason
   return error
+}
+
+function isGmailOAuthInvalidGrant(error: any): boolean {
+  const value = [
+    error?.code,
+    error?.message,
+    error?.response?.data?.error,
+    error?.response?.data?.error_description
+  ].map(item => String(item ?? '').toLowerCase()).join(' ')
+  return value.includes('invalid_grant')
+}
+
+function normalizeGmailError(error: any): never {
+  if (isGmailOAuthInvalidGrant(error)) {
+    throw createMailboxSetupError(
+      [
+        'Gmail authorization expired or was revoked.',
+        'Re-authorize kind.cute.unicorn@gmail.com and update DOLPHIN_VERIFICATION_GMAIL_REFRESH_TOKEN in Render/local env.',
+        'For longer-lived tokens, move the Google OAuth consent screen from Testing to Production before generating the new token.'
+      ].join(' '),
+      'gmail_oauth_invalid_grant'
+    )
+  }
+  throw error
 }
 
 function latestVerificationCode(
@@ -180,6 +206,20 @@ async function exchangeGmailOAuthCode(code: string, options: { clientId?: string
   return result.tokens
 }
 
+async function checkGmailAuthorization(options: { gmail?: any } = {}) {
+  const gmail = options.gmail ?? createGmailClient()
+  try {
+    const profile = await gmail.users.getProfile({ userId: 'me' })
+    return {
+      ok: true,
+      emailAddress: profile.data?.emailAddress,
+      messagesTotal: profile.data?.messagesTotal
+    }
+  } catch (error) {
+    normalizeGmailError(error)
+  }
+}
+
 function createGmailClient() {
   const oauthClientId = String(process.env.DOLPHIN_VERIFICATION_GMAIL_CLIENT_ID ?? '').trim()
   const oauthClientSecret = String(process.env.DOLPHIN_VERIFICATION_GMAIL_CLIENT_SECRET ?? '').trim()
@@ -228,21 +268,25 @@ function createGmailVerificationCodeService(options: { gmail?: any; maxAgeMs?: n
   return {
     async getLatestCode(): Promise<VerificationCodeResult> {
       const gmail = options.gmail ?? createGmailClient()
-      const list = await gmail.users.messages.list({
-        userId: 'me',
-        maxResults: 10,
-        q: `from:${DOLPHIN_VERIFICATION_SENDER} subject:"${DOLPHIN_VERIFICATION_SUBJECT}" newer_than:1d`
-      })
-      const ids = (list.data.messages ?? []).map((message: { id?: string }) => message.id).filter(Boolean)
-      const messages = await Promise.all(ids.map((id: string) => gmail.users.messages.get({
-        userId: 'me',
-        id,
-        format: 'full'
-      })))
-      const emails = messages.map((response: { data: GmailMessage }) => toVerificationEmail(response.data))
-      const code = latestVerificationCode(emails, { now: now(), maxAgeMs })
-      if (!code) throw createCodeNotFoundError()
-      return code
+      try {
+        const list = await gmail.users.messages.list({
+          userId: 'me',
+          maxResults: 10,
+          q: `from:${DOLPHIN_VERIFICATION_SENDER} subject:"${DOLPHIN_VERIFICATION_SUBJECT}" newer_than:1d`
+        })
+        const ids = (list.data.messages ?? []).map((message: { id?: string }) => message.id).filter(Boolean)
+        const messages = await Promise.all(ids.map((id: string) => gmail.users.messages.get({
+          userId: 'me',
+          id,
+          format: 'full'
+        })))
+        const emails = messages.map((response: { data: GmailMessage }) => toVerificationEmail(response.data))
+        const code = latestVerificationCode(emails, { now: now(), maxAgeMs })
+        if (!code) throw createCodeNotFoundError()
+        return code
+      } catch (error) {
+        normalizeGmailError(error)
+      }
     }
   }
 }
@@ -261,6 +305,7 @@ module.exports = {
   DOLPHIN_VERIFICATION_SUBJECT,
   GMAIL_READONLY_SCOPE,
   createCodeNotFoundError,
+  checkGmailAuthorization,
   createDefaultVerificationCodeService,
   createGmailClient,
   createGmailOAuthUrl,
@@ -271,8 +316,10 @@ module.exports = {
   decodeBase64Url,
   exchangeGmailOAuthCode,
   extractVerificationCode,
+  isGmailOAuthInvalidGrant,
   isDolphinVerificationEmail,
   latestVerificationCode,
+  normalizeGmailError,
   senderEmail,
   stripHtml,
   textFromGmailPart,

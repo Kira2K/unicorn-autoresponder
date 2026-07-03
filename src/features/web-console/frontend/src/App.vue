@@ -66,6 +66,23 @@ const accountError = ref('')
 const profileEditorOpen = ref('')
 const profileEditing = ref(false)
 const accountEditorOpen = ref(false)
+const telegramStatus = ref(null)
+const telegramError = ref('')
+const telegramLoading = ref(false)
+const telegramCode = ref('')
+const telegramPassword = ref('')
+const telegramPhone = ref('')
+const telegramOpen = ref(false)
+const telegramPanelOpen = ref('')
+const telegramFolders = ref([])
+const telegramList = ref('main')
+const telegramSearch = ref('')
+const telegramDialogs = ref([])
+const telegramMessages = ref([])
+const telegramSelectedChatId = ref('')
+const telegramMessageText = ref('')
+const telegramCopiedUsername = ref('')
+let telegramPollTimer = null
 let countdownTimer = null
 const SECURE_DNS_WARNING_KEY = 'webConsole.secureDnsWarningAccepted'
 const REQUIRED_DATA_WARNING_PREFIX = 'webConsole.requiredDolphinDataWarning'
@@ -74,6 +91,11 @@ const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
 const isClient = computed(() => session.value?.role === 'client')
 const accountRows = computed(() => dashboard.value?.platformAccounts || [])
+const telegramAccounts = computed(() => accountRows.value.filter(account => {
+  const value = `${account.platform || ''} ${account.accountLabel || ''}`.toLowerCase()
+  return value.includes('telegram') || value.includes('phone_en')
+}))
+const selectedTelegramAccount = computed(() => telegramAccounts.value[0] || null)
 const editingAccount = computed(() => Boolean(accountForm.value.id))
 const dryRunText = computed(() => {
   if (!dryRunResult.value) return ''
@@ -94,6 +116,21 @@ const dolphinActionLabel = computed(() =>
   dolphinActionMode.value === 'create_new' ? 'Create new profiles' : 'Open Dolphin profiles'
 )
 const hasActiveDolphinLease = computed(() => dolphinLeaseSecondsLeft.value > 0)
+const telegramTargetPayload = computed(() => ({
+  ...(isAdmin.value && dashboard.value?.client?.id ? { targetClientId: dashboard.value.client.id } : {}),
+  ...(selectedTelegramAccount.value?.id ? { platformAccountId: selectedTelegramAccount.value.id } : {})
+}))
+const telegramDotClass = computed(() => {
+  const status = telegramStatus.value?.status || selectedTelegramAccount.value?.telegramSessionStatus || 'disconnected'
+  if (status === 'active') return 'status-dot green'
+  if (['needs_code', 'needs_password', 'connecting'].includes(status)) return 'status-dot yellow'
+  return 'status-dot red'
+})
+const telegramStatusLabel = computed(() => telegramStatus.value?.status || selectedTelegramAccount.value?.telegramSessionStatus || 'disconnected')
+const telegramSelectedFolderTitle = computed(() => {
+  const selected = telegramFolders.value.find(folder => folder.id === telegramList.value)
+  return selected?.title || 'All chats'
+})
 
 function setError(value) {
   error.value = value instanceof Error ? value.message : String(value || '')
@@ -150,6 +187,24 @@ function resetProfileForm() {
 function resetAccountForm() {
   accountForm.value = { ...emptyAccountForm }
   accountError.value = ''
+}
+
+function resetTelegramUi() {
+  telegramStatus.value = null
+  telegramError.value = ''
+  telegramCode.value = ''
+  telegramPassword.value = ''
+  telegramPhone.value = ''
+  telegramOpen.value = false
+  telegramPanelOpen.value = ''
+  telegramFolders.value = []
+  telegramList.value = 'main'
+  telegramSearch.value = ''
+  telegramDialogs.value = []
+  telegramMessages.value = []
+  telegramSelectedChatId.value = ''
+  telegramMessageText.value = ''
+  telegramCopiedUsername.value = ''
 }
 
 function closeProfileEditor() {
@@ -225,6 +280,7 @@ async function loadDashboard() {
   verificationCodeError.value = ''
   profileMessage.value = ''
   accountMessage.value = ''
+  resetTelegramUi()
   try {
     if (isAdmin.value) {
       dashboard.value = await api.adminLatestClient()
@@ -250,10 +306,179 @@ async function loadDashboard() {
       providerDolphinEmail.value = ''
       ownProxy.value = false
     }
+    if ((isClient.value || isAdmin.value) && selectedTelegramAccount.value) {
+      telegramPhone.value = selectedTelegramAccount.value.phone || selectedTelegramAccount.value.foreignNumber || ''
+      await refreshTelegramStatus()
+    }
   } catch (caught) {
     setError(caught)
   } finally {
     pageLoading.value = false
+  }
+}
+
+async function refreshTelegramStatus() {
+  if (!selectedTelegramAccount.value) return
+  telegramLoading.value = true
+  telegramError.value = ''
+  try {
+    telegramStatus.value = await api.telegramStatus(telegramTargetPayload.value)
+  } catch (caught) {
+    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    telegramLoading.value = false
+  }
+}
+
+async function connectTelegram() {
+  if (!selectedTelegramAccount.value) return
+  telegramLoading.value = true
+  telegramError.value = ''
+  try {
+    telegramStatus.value = await api.telegramConnect({
+      ...telegramTargetPayload.value,
+      phone: telegramPhone.value || selectedTelegramAccount.value.phone || selectedTelegramAccount.value.foreignNumber || '',
+      code: telegramCode.value || undefined,
+      password: telegramPassword.value || undefined
+    })
+    if (telegramStatus.value.status === 'active') {
+      telegramCode.value = ''
+      telegramPassword.value = ''
+    }
+  } catch (caught) {
+    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    telegramLoading.value = false
+  }
+}
+
+async function disconnectTelegram() {
+  if (!selectedTelegramAccount.value) return
+  telegramLoading.value = true
+  telegramError.value = ''
+  try {
+    telegramStatus.value = await api.telegramDisconnect(telegramTargetPayload.value)
+    telegramOpen.value = false
+    telegramDialogs.value = []
+    telegramMessages.value = []
+  } catch (caught) {
+    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    telegramLoading.value = false
+  }
+}
+
+async function openTelegram() {
+  telegramOpen.value = true
+  telegramPanelOpen.value = 'telegram'
+  await loadTelegramFolders()
+  await loadTelegramDialogs()
+}
+
+function hideTelegram() {
+  telegramOpen.value = false
+  telegramPanelOpen.value = ''
+}
+
+async function loadTelegramFolders() {
+  if (!selectedTelegramAccount.value) return
+  try {
+    const result = await api.telegramFolders(telegramTargetPayload.value)
+    telegramFolders.value = result.folders || []
+    if (!telegramFolders.value.some(folder => folder.id === telegramList.value)) {
+      telegramList.value = telegramFolders.value[0]?.id || 'main'
+    }
+  } catch {
+    telegramFolders.value = [
+      { id: 'main', title: 'All chats', type: 'main' },
+      { id: 'archive', title: 'Archive', type: 'archive' }
+    ]
+  }
+}
+
+function telegramDialogParams() {
+  const folderValue = telegramList.value || 'main'
+  const folderMatch = folderValue.match(/^folder:(\d+)$/)
+  return {
+    ...telegramTargetPayload.value,
+    list: folderMatch ? 'folder' : folderValue,
+    folderId: folderMatch ? Number(folderMatch[1]) : undefined,
+    query: telegramSearch.value.trim() || undefined,
+    limit: 50
+  }
+}
+
+async function loadTelegramDialogs() {
+  if (!selectedTelegramAccount.value) return
+  telegramLoading.value = true
+  telegramError.value = ''
+  try {
+    const result = await api.telegramDialogs(telegramDialogParams())
+    telegramDialogs.value = result.dialogs || []
+    if (!telegramDialogs.value.some(dialog => dialog.id === telegramSelectedChatId.value)) {
+      telegramSelectedChatId.value = ''
+      telegramMessages.value = []
+    }
+    if (!telegramSearch.value.trim() && !telegramSelectedChatId.value && telegramDialogs.value[0]) {
+      telegramSelectedChatId.value = telegramDialogs.value[0].id
+    }
+    if (telegramSelectedChatId.value) await loadTelegramMessages()
+  } catch (caught) {
+    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    telegramLoading.value = false
+  }
+}
+
+async function changeTelegramList() {
+  telegramSelectedChatId.value = ''
+  telegramMessages.value = []
+  await loadTelegramDialogs()
+}
+
+async function loadTelegramMessages() {
+  if (!selectedTelegramAccount.value || !telegramSelectedChatId.value) return
+  const result = await api.telegramMessages({
+    ...telegramTargetPayload.value,
+    chatId: telegramSelectedChatId.value,
+    limit: 50
+  })
+  telegramMessages.value = result.messages || []
+}
+
+async function selectTelegramDialog(dialog) {
+  telegramSelectedChatId.value = dialog.id
+  await loadTelegramMessages()
+}
+
+async function copyTelegramUsername(username, event) {
+  event?.stopPropagation?.()
+  if (!username) return
+  try {
+    await navigator.clipboard?.writeText(username)
+  } catch {
+    // Copy status still confirms which handle the user selected.
+  }
+  telegramCopiedUsername.value = username
+}
+
+async function sendTelegramMessage() {
+  const text = telegramMessageText.value.trim()
+  if (!text || !telegramSelectedChatId.value) return
+  telegramLoading.value = true
+  telegramError.value = ''
+  try {
+    await api.telegramSend({
+      ...telegramTargetPayload.value,
+      chatId: telegramSelectedChatId.value,
+      text
+    })
+    telegramMessageText.value = ''
+    await loadTelegramMessages()
+  } catch (caught) {
+    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    telegramLoading.value = false
   }
 }
 
@@ -472,6 +697,8 @@ async function getDolphinVerificationCode() {
     verificationCode.value = null
     verificationCodeError.value = body.error === 'code_not_found'
       ? 'No fresh Dolphin verification code was found.'
+      : body.reason === 'gmail_oauth_invalid_grant'
+        ? 'Gmail access expired. Contact Kira or Dasha for fixes.'
       : caught instanceof Error ? caught.message : String(caught || '')
   } finally {
     verificationCodeLoading.value = false
@@ -827,6 +1054,110 @@ onUnmounted(() => {
                 <dd>{{ dashboard.client.linkedInStatus || 'empty' }}</dd>
               </div>
             </dl>
+          </template>
+        </Card>
+
+        <Card v-if="isClient || isAdmin" class="action-card telegram-card" data-testid="telegram-card">
+          <template #title>
+            <div class="profile-card-title-row">
+              <span>Telegram</span>
+              <span :class="telegramDotClass" :title="telegramStatusLabel"></span>
+            </div>
+          </template>
+          <template #subtitle>{{ selectedTelegramAccount ? selectedTelegramAccount.accountLabel : 'No Telegram account row' }}</template>
+          <template #content>
+            <Message v-if="telegramError" severity="error" :closable="false" data-testid="telegram-error">
+              {{ telegramError }}
+            </Message>
+            <div v-if="selectedTelegramAccount" class="telegram-panel">
+              <div class="telegram-status-row">
+                <span data-testid="telegram-status">Status: {{ telegramStatusLabel }}</span>
+                <Button icon="pi pi-refresh" label="Refresh" size="small" severity="secondary" :loading="telegramLoading" data-testid="telegram-refresh-button" @click="refreshTelegramStatus" />
+              </div>
+              <div class="telegram-connect-row">
+                <InputText v-model="telegramPhone" placeholder="Phone" data-testid="telegram-phone" />
+                <InputText v-if="telegramStatusLabel === 'needs_code'" v-model="telegramCode" placeholder="Code" data-testid="telegram-code" />
+                <Password v-if="telegramStatusLabel === 'needs_password'" v-model="telegramPassword" placeholder="Cloud password" toggle-mask :feedback="false" data-testid="telegram-password" />
+                <Button label="Connect Telegram" icon="pi pi-link" :loading="telegramLoading" data-testid="telegram-connect-button" @click="connectTelegram" />
+                <Button label="Disconnect" icon="pi pi-times" severity="danger" outlined :loading="telegramLoading" data-testid="telegram-disconnect-button" @click="disconnectTelegram" />
+              </div>
+              <div v-if="telegramStatusLabel === 'active'" class="telegram-open-row">
+                <Button v-if="!telegramOpen" label="Open Telegram" icon="pi pi-comments" severity="info" data-testid="telegram-open-button" @click="openTelegram" />
+                <Button v-else label="Hide Telegram" icon="pi pi-chevron-up" severity="secondary" outlined data-testid="telegram-hide-button" @click="hideTelegram" />
+              </div>
+              <Accordion v-if="telegramOpen" v-model:value="telegramPanelOpen" class="telegram-accordion" data-testid="telegram-accordion">
+                <AccordionPanel value="telegram">
+                  <AccordionHeader>
+                    <span class="accordion-title">
+                      <i class="pi pi-comments"></i>
+                      <span>Telegram</span>
+                      <small>{{ telegramSelectedFolderTitle }}</small>
+                    </span>
+                  </AccordionHeader>
+                  <AccordionContent>
+                    <div class="telegram-toolbar">
+                      <select v-model="telegramList" class="native-select telegram-folder-select" data-testid="telegram-folder-select" @change="changeTelegramList">
+                        <option v-for="folder in telegramFolders" :key="folder.id" :value="folder.id">
+                          {{ folder.title }}
+                        </option>
+                      </select>
+                      <form class="telegram-search-form" data-testid="telegram-search-form" @submit.prevent="loadTelegramDialogs">
+                        <InputText v-model="telegramSearch" placeholder="Search chats" data-testid="telegram-search-input" />
+                        <Button type="submit" icon="pi pi-search" severity="secondary" :loading="telegramLoading" data-testid="telegram-search-button" />
+                      </form>
+                      <Button icon="pi pi-refresh" severity="secondary" outlined :loading="telegramLoading" data-testid="telegram-dialogs-refresh-button" @click="loadTelegramDialogs" />
+                    </div>
+                    <section class="telegram-workspace" data-testid="telegram-workspace">
+                      <aside class="telegram-dialogs">
+                        <div
+                          v-for="dialog in telegramDialogs"
+                          :key="dialog.id"
+                          role="button"
+                          tabindex="0"
+                          :class="['telegram-dialog', { active: telegramSelectedChatId === dialog.id }]"
+                          @click="selectTelegramDialog(dialog)"
+                          @keydown.enter.prevent="selectTelegramDialog(dialog)"
+                          @keydown.space.prevent="selectTelegramDialog(dialog)"
+                        >
+                          <span class="telegram-dialog-title">
+                            <span>{{ dialog.title }}</span>
+                            <span v-if="dialog.username" class="telegram-username-row">
+                              <small>{{ dialog.username }}</small>
+                              <button
+                                type="button"
+                                class="telegram-username-copy"
+                                :aria-label="`Copy ${dialog.username}`"
+                                :title="`Copy ${dialog.username}`"
+                                data-testid="telegram-username-copy-button"
+                                @click="copyTelegramUsername(dialog.username, $event)"
+                              >
+                                <i class="pi pi-copy"></i>
+                              </button>
+                            </span>
+                          </span>
+                          <small v-if="dialog.unreadCount">{{ dialog.unreadCount }}</small>
+                        </div>
+                        <p v-if="!telegramDialogs.length" class="telegram-empty">No chats</p>
+                        <p v-if="telegramCopiedUsername" class="telegram-copy-status" data-testid="telegram-copy-status">
+                          Copied {{ telegramCopiedUsername }}
+                        </p>
+                      </aside>
+                      <div class="telegram-chat">
+                        <div class="telegram-messages">
+                          <div v-for="message in telegramMessages" :key="message.id" :class="['telegram-message', { outgoing: message.outgoing }]">
+                            {{ message.text }}
+                          </div>
+                        </div>
+                        <form class="telegram-send-row" @submit.prevent="sendTelegramMessage">
+                          <InputText v-model="telegramMessageText" placeholder="Message" data-testid="telegram-message-input" />
+                          <Button type="submit" icon="pi pi-send" label="Send" :loading="telegramLoading" data-testid="telegram-send-button" />
+                        </form>
+                      </div>
+                    </section>
+                  </AccordionContent>
+                </AccordionPanel>
+              </Accordion>
+            </div>
           </template>
         </Card>
 

@@ -40,6 +40,9 @@ const { linkedStatusMatches } = require('./repository.ts') as {
 const { DEFAULT_DOLPHIN_SHARED_USER_EMAIL } = require('./dolphin-lease.ts') as {
   DEFAULT_DOLPHIN_SHARED_USER_EMAIL: string
 }
+const { createFakeTdlibAdapter } = require('../../../integrations/telegram/tdlib-client.ts') as {
+  createFakeTdlibAdapter(): any
+}
 const {
   buildProfileName,
   buildProxyName,
@@ -182,6 +185,16 @@ function createFixtureNocoClient() {
       login: 'client-one.linkedin@example.com',
       rel_platformAccounts_client: { Id: 1 },
       rel_platformAccounts_platform: { Id: 16, name: 'linkedin', label: 'linkedin' }
+    },
+    {
+      Id: 17,
+      platform: 'telegram_ru',
+      account_label: 'Client One Telegram',
+      login: '@client_one_tg',
+      phone: '+79990001122',
+      password: 'tg-cloud-pass',
+      rel_platformAccounts_client: { Id: 1 },
+      rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
     },
     {
       Id: 11,
@@ -554,7 +567,7 @@ async function runTests(): Promise<void> {
   let leaseConflict = false
   let rejectDolphinEmail = false
   let stableDolphinEmailUnavailable = false
-  let verificationCodeMode: 'ok' | 'not_found' | 'setup_error' = 'ok'
+  let verificationCodeMode: 'ok' | 'not_found' | 'setup_error' | 'invalid_grant' = 'ok'
   let nextCreatedDolphinProfileId = 900100001
   const createdDolphinProfiles: any[] = []
   const updatedProxies: any[] = []
@@ -651,6 +664,8 @@ async function runTests(): Promise<void> {
         }
       }
     },
+    telegramAdapter: createFakeTdlibAdapter(),
+    telegramProxyResolver: async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 }),
     verificationCodeService: {
       async getLatestCode() {
         if (verificationCodeMode === 'not_found') {
@@ -661,6 +676,12 @@ async function runTests(): Promise<void> {
         if (verificationCodeMode === 'setup_error') {
           const error = new Error('Dolphin verification Gmail credentials are not configured.') as Error & { code?: string }
           error.code = 'mailbox_setup_error'
+          throw error
+        }
+        if (verificationCodeMode === 'invalid_grant') {
+          const error = new Error('Gmail authorization expired or was revoked.') as Error & { code?: string; reason?: string }
+          error.code = 'mailbox_setup_error'
+          error.reason = 'gmail_oauth_invalid_grant'
           throw error
         }
         return {
@@ -853,7 +874,66 @@ async function runTests(): Promise<void> {
     result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, clientLogin.cookie)
     assert.equal(result.response.status, 503)
     assert.equal(result.body.error, 'mailbox_setup_error')
+    verificationCodeMode = 'invalid_grant'
+    result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 503)
+    assert.equal(result.body.error, 'mailbox_setup_error')
+    assert.equal(result.body.reason, 'gmail_oauth_invalid_grant')
     verificationCodeMode = 'ok'
+
+    result = await request(server.baseUrl, '/api/telegram/status?platformAccountId=17', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.accountId, 17)
+    assert.equal(result.body.status, 'disconnected')
+
+    result = await request(server.baseUrl, '/api/telegram/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformAccountId: 17 })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.status, 'needs_code')
+
+    result = await request(server.baseUrl, '/api/telegram/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformAccountId: 17, code: '12345' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.status, 'active')
+
+    result = await request(server.baseUrl, '/api/telegram/dialogs?platformAccountId=17', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.dialogs.some((dialog: any) => dialog.id === 'reporting-chat'), true)
+
+    result = await request(server.baseUrl, '/api/telegram/folders?platformAccountId=17', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.folders.some((folder: any) => folder.id === 'archive'), true)
+
+    result = await request(server.baseUrl, '/api/telegram/dialogs?platformAccountId=17&list=archive', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.dialogs.some((dialog: any) => dialog.id === 'archived-chat'), true)
+
+    result = await request(server.baseUrl, '/api/telegram/dialogs?platformAccountId=17&query=client', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.dialogs.some((dialog: any) => dialog.id === 'client-chat'), true)
+    assert.equal(result.body.dialogs.find((dialog: any) => dialog.id === 'client-chat')?.username, '@client_partner')
+
+    result = await request(server.baseUrl, '/api/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformAccountId: 17, chatId: 'reporting-chat', text: 'TDLib route smoke test' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.message.text, 'TDLib route smoke test')
+
+    result = await request(server.baseUrl, '/api/telegram/messages?platformAccountId=17&chatId=reporting-chat', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.messages.some((message: any) => message.text === 'TDLib route smoke test'), true)
+
+    result = await request(server.baseUrl, '/api/telegram/disconnect?platformAccountId=17', { method: 'DELETE' }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.status, 'needs_reauth')
 
     result = await request(server.baseUrl, '/api/auth/logout', { method: 'POST' }, clientLogin.cookie)
     assert.equal(result.response.status, 200)

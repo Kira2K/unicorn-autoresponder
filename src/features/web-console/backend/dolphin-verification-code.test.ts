@@ -2,18 +2,24 @@ const assert = require('node:assert/strict')
 const {
   DOLPHIN_VERIFICATION_SUBJECT,
   GMAIL_READONLY_SCOPE,
+  checkGmailAuthorization,
   createGmailClient,
+  createGmailVerificationCodeService,
   createGmailOAuthUrl,
   extractVerificationCode,
+  isGmailOAuthInvalidGrant,
   isDolphinVerificationEmail,
   latestVerificationCode,
   toVerificationEmail
 } = require('./dolphin-verification-code.ts') as {
   DOLPHIN_VERIFICATION_SUBJECT: string
   GMAIL_READONLY_SCOPE: string
+  checkGmailAuthorization(options?: any): Promise<any>
   createGmailClient(): unknown
+  createGmailVerificationCodeService(options?: any): { getLatestCode(): Promise<any> }
   createGmailOAuthUrl(options?: { clientId?: string; clientSecret?: string; redirectUri?: string }): string
   extractVerificationCode(body: string): string | null
+  isGmailOAuthInvalidGrant(error: any): boolean
   isDolphinVerificationEmail(email: any): boolean
   latestVerificationCode(emails: any[], options?: { now?: number; maxAgeMs?: number }): any
   toVerificationEmail(message: any): any
@@ -32,7 +38,7 @@ function email(overrides: Partial<{ from: string; subject: string; body: string;
   }
 }
 
-function runTests(): void {
+async function runTests(): Promise<void> {
   assert.equal(isDolphinVerificationEmail(email()), true)
   assert.equal(isDolphinVerificationEmail(email({ from: 'not-dolphin@example.com' })), false)
   assert.equal(isDolphinVerificationEmail(email({ subject: 'Welcome to Dolphin' })), false)
@@ -93,6 +99,44 @@ function runTests(): void {
   assert.match(authUrl, /access_type=offline/)
   assert.match(authUrl, /prompt=consent/)
   assert.match(decodeURIComponent(authUrl), new RegExp(GMAIL_READONLY_SCOPE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.equal(isGmailOAuthInvalidGrant({ response: { data: { error: 'invalid_grant' } } }), true)
+  assert.equal(isGmailOAuthInvalidGrant(new Error('something else')), false)
+
+  const invalidGrantService = createGmailVerificationCodeService({
+    gmail: {
+      users: {
+        messages: {
+          async list() {
+            const error: any = new Error('invalid_grant')
+            error.response = { data: { error: 'invalid_grant' } }
+            throw error
+          }
+        }
+      }
+    }
+  })
+  await assert.rejects(
+    () => invalidGrantService.getLatestCode(),
+    (error: any) => {
+      assert.equal(error.code, 'mailbox_setup_error')
+      assert.equal(error.reason, 'gmail_oauth_invalid_grant')
+      assert.match(error.message, /OAuth consent screen from Testing to Production/)
+      return true
+    }
+  )
+  assert.deepEqual(await checkGmailAuthorization({
+    gmail: {
+      users: {
+        async getProfile() {
+          return { data: { emailAddress: 'kind.cute.unicorn@gmail.com', messagesTotal: 42 } }
+        }
+      }
+    }
+  }), {
+    ok: true,
+    emailAddress: 'kind.cute.unicorn@gmail.com',
+    messagesTotal: 42
+  })
 
   const previousEnv = {
     DOLPHIN_VERIFICATION_GMAIL_CLIENT_ID: process.env.DOLPHIN_VERIFICATION_GMAIL_CLIENT_ID,
@@ -127,4 +171,8 @@ function runTests(): void {
 }
 
 runTests()
-console.log('dolphin verification code tests passed')
+  .then(() => console.log('dolphin verification code tests passed'))
+  .catch((error: unknown) => {
+    console.error(error instanceof Error ? error.stack : error)
+    process.exitCode = 1
+  })
