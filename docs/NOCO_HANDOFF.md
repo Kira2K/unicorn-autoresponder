@@ -74,3 +74,8 @@ cleanup candidates that need a product/schema decision.
 npm run noco:test
 npm run typecheck
 ```
+
+## Related Notes
+
+- `docs/NOCO_WEB_CONSOLE_WORKING_NOTES.md`: web-console/platform-account rules
+  for Telegram session fields and live admin sender validation.
