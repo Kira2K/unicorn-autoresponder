@@ -70,6 +70,8 @@ function createFixtureNocoClient() {
       fio: 'Client One Legal',
       birth_date: '2000-01-01',
       education: 'Old school',
+      real_age: 24,
+      stop_list_company: 'BadCorp,EvilInc',
       calendar_email: 'client@example.com',
       telegram_personal_chat_id: '@client_one',
       telegram_general_chat_id: '1001',
@@ -439,6 +441,8 @@ async function runTests(): Promise<void> {
     fio: 'New Name',
     birthDate: '2001-02-03',
     education: 'University',
+    realAge: 29,
+    stopListCompany: 'Acme,Globex',
     englishLevelId: 4,
     telegramPersonalChatId: '@new',
     calendarEmail: 'new@example.com',
@@ -449,6 +453,8 @@ async function runTests(): Promise<void> {
     fio: 'New Name',
     birth_date: '2001-02-03',
     education: 'University',
+    real_age: 29,
+    stop_list_company: 'Acme,Globex',
     english_levels_id: 4,
     telegram_personal_chat_id: '@new',
     calendar_email: 'new@example.com'
@@ -474,6 +480,8 @@ async function runTests(): Promise<void> {
     fio: 'Client One Legal',
     birthDate: '2000-01-01',
     education: 'Old school',
+    realAge: 24,
+    stopListCompany: 'BadCorp,EvilInc',
     englishLevelId: 3,
     telegramPersonalChatId: '@client_one',
     calendarEmail: 'client@example.com'
@@ -483,6 +491,8 @@ async function runTests(): Promise<void> {
     fio: 'Client One Legal',
     birthDate: '2000-01-01',
     education: 'New school',
+    realAge: 24,
+    stopListCompany: 'BadCorp,EvilInc',
     englishLevelId: 3,
     telegramPersonalChatId: '@client_one',
     calendarEmail: 'client@example.com'
@@ -732,6 +742,8 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.client.clientName, 'Client One')
     assert.equal(result.body.client.firstName, 'Client')
     assert.equal(result.body.client.education, 'Old school')
+    assert.equal(result.body.client.realAge, 24)
+    assert.equal(result.body.client.stopListCompany, 'BadCorp,EvilInc')
     assert.equal(result.body.client.englishLevel, 'B1')
     assert.equal(result.body.linkedInEmail, 'client-one.linkedin@example.com')
     assert.equal(result.body.platformAccounts[0].password, '***')
@@ -750,6 +762,8 @@ async function runTests(): Promise<void> {
         fio: 'Updated Client Legal',
         birthDate: '2001-02-03',
         education: 'Updated university',
+        realAge: 25,
+        stopListCompany: 'Meta,Google',
         englishLevelId: 4,
         telegramPersonalChatId: '@updated_client',
         calendarEmail: 'updated-client@example.com',
@@ -762,6 +776,8 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.client.fio, 'Updated Client Legal')
     assert.equal(result.body.client.birthDate, '2001-02-03')
     assert.equal(result.body.client.education, 'Updated university')
+    assert.equal(result.body.client.realAge, 25)
+    assert.equal(result.body.client.stopListCompany, 'Meta,Google')
     assert.equal(result.body.client.englishLevelId, 4)
     assert.equal(result.body.client.englishLevel, 'B2')
     assert.equal(result.body.client.telegramPersonalChatId, '@updated_client')

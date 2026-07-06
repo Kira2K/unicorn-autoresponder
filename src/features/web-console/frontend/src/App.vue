@@ -8,6 +8,8 @@ const emptyProfileForm = {
   fio: '',
   birthDate: '',
   education: '',
+  realAge: '',
+  stopListCompany: '',
   englishLevelId: '',
   telegramPersonalChatId: '',
   calendarEmail: ''
@@ -394,6 +396,8 @@ function resetProfileForm() {
     fio: client.fio || '',
     birthDate: client.birthDate || '',
     education: client.education || '',
+    realAge: client.realAge === undefined ? '' : String(client.realAge),
+    stopListCompany: client.stopListCompany || '',
     englishLevelId: client.englishLevelId ? String(client.englishLevelId) : '',
     telegramPersonalChatId: client.telegramPersonalChatId || '',
     calendarEmail: client.calendarEmail || ''
@@ -1324,6 +1328,16 @@ onUnmounted(() => {
                     <label class="field wide-field">
                       <span>Education</span>
                       <InputText v-model="profileForm.education" data-testid="profile-education" />
+                      <small>Write "no" if you have no education.</small>
+                    </label>
+                    <label class="field">
+                      <span>Real age</span>
+                      <InputText v-model="profileForm.realAge" type="number" min="0" step="1" data-testid="profile-real-age" />
+                    </label>
+                    <label class="field wide-field">
+                      <span>Company stop list</span>
+                      <InputText v-model="profileForm.stopListCompany" data-testid="profile-stop-list-company" />
+                      <small>Use "," as delimiter, without spaces.</small>
                     </label>
                     <label class="field">
                       <span>Calendar email</span>
@@ -1350,6 +1364,14 @@ onUnmounted(() => {
                     <div>
                       <dt>Education</dt>
                       <dd>{{ dashboard.client.education || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Real age</dt>
+                      <dd>{{ dashboard.client.realAge ?? 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Company stop list</dt>
+                      <dd>{{ dashboard.client.stopListCompany || 'empty' }}</dd>
                     </div>
                     <div>
                       <dt>English level</dt>
@@ -1404,6 +1426,14 @@ onUnmounted(() => {
               <div>
                 <dt>Education</dt>
                 <dd>{{ dashboard.client.education || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Real age</dt>
+                <dd>{{ dashboard.client.realAge ?? 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Company stop list</dt>
+                <dd>{{ dashboard.client.stopListCompany || 'empty' }}</dd>
               </div>
               <div>
                 <dt>English level</dt>

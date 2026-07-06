@@ -15,6 +15,8 @@ export type WebClient = {
   fio: string
   birthDate: string
   education: string
+  realAge?: number
+  stopListCompany: string
   calendarEmail: string
   telegramPersonalChatId: string
   commonChatId: string
@@ -61,6 +63,8 @@ export type ClientProfilePatch = {
   fio?: string
   birthDate?: string
   education?: string
+  realAge?: number | string | null
+  stopListCompany?: string
   englishLevelId?: number | null
   telegramPersonalChatId?: string
   calendarEmail?: string

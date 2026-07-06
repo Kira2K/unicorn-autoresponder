@@ -171,6 +171,7 @@ function buildLinkedInEmailByClientId(accounts: NocoRecord[]): Map<number, strin
 }
 
 function toClient(record: NocoRecord): WebClient {
+  const realAge = Number(record.real_age)
   return {
     id: Number(record.Id),
     clientName: normalizeText(record.client_name),
@@ -179,6 +180,8 @@ function toClient(record: NocoRecord): WebClient {
     fio: normalizeText(record.fio),
     birthDate: normalizeText(record.birth_date),
     education: normalizeText(record.education),
+    realAge: Number.isFinite(realAge) ? realAge : undefined,
+    stopListCompany: normalizeText(record.stop_list_company),
     calendarEmail: normalizeText(record.calendar_email),
     telegramPersonalChatId: normalizeText(record.telegram_personal_chat_id),
     commonChatId: normalizeText(record.telegram_general_chat_id),
@@ -263,6 +266,13 @@ function cleanNullableId(value: unknown): number | null | undefined {
   return Number.isFinite(id) && id > 0 ? id : null
 }
 
+function cleanNullableNumber(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null || value === '') return null
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : undefined
+}
+
 function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
   const textFields: Array<[keyof ClientProfilePatch, string]> = [
@@ -271,6 +281,7 @@ function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
     ['fio', 'fio'],
     ['birthDate', 'birth_date'],
     ['education', 'education'],
+    ['stopListCompany', 'stop_list_company'],
     ['telegramPersonalChatId', 'telegram_personal_chat_id'],
     ['calendarEmail', 'calendar_email']
   ]
@@ -280,6 +291,8 @@ function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
   }
   const englishLevelId = cleanNullableId(input.englishLevelId)
   if (englishLevelId !== undefined) patch.english_levels_id = englishLevelId
+  const realAge = cleanNullableNumber(input.realAge)
+  if (realAge !== undefined) patch.real_age = realAge
   return patch
 }
 
@@ -291,6 +304,8 @@ function buildChangedClientPatch(current: WebClient, input: ClientProfilePatch):
     fio: current.fio,
     birth_date: current.birthDate,
     education: current.education,
+    real_age: current.realAge ?? null,
+    stop_list_company: current.stopListCompany,
     telegram_personal_chat_id: current.telegramPersonalChatId,
     calendar_email: current.calendarEmail,
     english_levels_id: current.englishLevelId ?? null
@@ -299,6 +314,12 @@ function buildChangedClientPatch(current: WebClient, input: ClientProfilePatch):
   for (const [field, value] of Object.entries(patch)) {
     const currentValue = currentByNocoField[field]
     if (field === 'english_levels_id') {
+      if ((Number(value) || null) === (Number(currentValue) || null)) {
+        delete patch[field]
+      }
+      continue
+    }
+    if (field === 'real_age') {
       if ((Number(value) || null) === (Number(currentValue) || null)) {
         delete patch[field]
       }
