@@ -88,6 +88,11 @@ function tdlibAuthTimeoutMs(): number {
   return Number.isFinite(value) && value > 0 ? value : 30000
 }
 
+function tdlibSendTimeoutMs(): number {
+  const value = Number(process.env.TELEGRAM_TDLIB_SEND_TIMEOUT_MS)
+  return Number.isFinite(value) && value > 0 ? value : 120000
+}
+
 function createMissingProxyResult(input: TelegramAccountRef): TelegramConnectResult {
   return {
     status: 'proxy_missing',
@@ -301,6 +306,72 @@ function createRealTdlibAdapter(): TelegramAdapter {
     } finally {
       if (timer) clearTimeout(timer)
     }
+  }
+
+  async function sendMessageWithDelivery(client: any, payload: any, timeoutMs = tdlibSendTimeoutMs()): Promise<any> {
+    return await new Promise(async (resolve, reject) => {
+      let settled = false
+      let localMessageId: number | null = null
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const earlyUpdates: any[] = []
+      const cleanup = () => {
+        if (timer) clearTimeout(timer)
+        client.off?.('update', onUpdate)
+        client.removeListener?.('update', onUpdate)
+      }
+      const settle = (fn: (value?: unknown) => void, value?: unknown) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        fn(value)
+      }
+      const handleDeliveryUpdate = (update: any) => {
+        if (localMessageId === null) {
+          earlyUpdates.push(update)
+          return
+        }
+        if (Number(update?.old_message_id) !== localMessageId) return
+        if (update?._ === 'updateMessageSendSucceeded') {
+          settle(resolve, update.message || { id: localMessageId })
+          return
+        }
+        if (update?._ === 'updateMessageSendFailed') {
+          const error = update.error || {}
+          settle(
+            reject,
+            Object.assign(new Error(error.message || 'Telegram message send failed.'), {
+              code: 'telegram_message_send_failed',
+              details: error
+            })
+          )
+        }
+      }
+      const onUpdate = (update: any) => {
+        if (update?._ !== 'updateMessageSendSucceeded' && update?._ !== 'updateMessageSendFailed') return
+        handleDeliveryUpdate(update)
+      }
+      client.on('update', onUpdate)
+      try {
+        const sent = await client.invoke(payload)
+        localMessageId = Number(sent.id)
+        if (!sent?.sending_state || !Number.isFinite(localMessageId)) {
+          settle(resolve, sent)
+          return
+        }
+        for (const update of earlyUpdates) handleDeliveryUpdate(update)
+        timer = setTimeout(() => {
+          settle(
+            reject,
+            Object.assign(new Error(`Telegram message is still pending after ${timeoutMs}ms.`), {
+              code: 'telegram_message_send_pending',
+              messageId: String(localMessageId)
+            })
+          )
+        }, timeoutMs)
+      } catch (error) {
+        settle(reject, error)
+      }
+    })
   }
 
   function chatListFromInput(input: { list?: string; folderId?: number }) {
@@ -600,7 +671,7 @@ function createRealTdlibAdapter(): TelegramAdapter {
       } catch {
         // Sending should still work if old history can't be marked read.
       }
-      const sent = await client.invoke({
+      const sent = await sendMessageWithDelivery(client, {
         _: 'sendMessage',
         chat_id: Number(input.chatId),
         input_message_content: {
@@ -637,11 +708,11 @@ function createRealTdlibAdapter(): TelegramAdapter {
       if (attachments.length) {
         for (const [index, attachment] of attachments.entries()) {
           try {
-            const sent = await invokeWithTimeout(client, {
+            const sent = await sendMessageWithDelivery(client, {
               _: 'sendMessage',
               chat_id: chatId,
               input_message_content: await attachmentContent(client, attachment, index === 0 ? input.text : '')
-            }, 120000, `Telegram send file ${attachment.fileName}`)
+            }, 120000)
             messages.push({
               id: String(sent.id),
               chatId: String(chatId),
@@ -654,7 +725,7 @@ function createRealTdlibAdapter(): TelegramAdapter {
           }
         }
       } else if (input.text) {
-        const sent = await client.invoke({
+        const sent = await sendMessageWithDelivery(client, {
           _: 'sendMessage',
           chat_id: chatId,
           input_message_content: {

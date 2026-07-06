@@ -72,6 +72,7 @@ function createFixtureNocoClient() {
       education: 'Old school',
       real_age: 24,
       stop_list_company: 'BadCorp,EvilInc',
+      google_folder: 'https://drive.google.com/drive/folders/client-one',
       calendar_email: 'client@example.com',
       telegram_personal_chat_id: '@client_one',
       telegram_general_chat_id: '1001',
@@ -92,6 +93,18 @@ function createFixtureNocoClient() {
       rel_clients_primary_stack: { Id: 10, name: 'PYTHON' },
       market: 'En',
       client_status: 'on en market'
+    },
+    {
+      Id: 2,
+      client_name: 'No Chat Client',
+      first_name: 'No',
+      last_name: 'Chat',
+      fio: 'No Chat',
+      calendar_email: 'no-chat@example.com',
+      telegram_general_chat_id: '',
+      rel_clients_primary_stack: { Id: 18, name: 'QA' },
+      market: 'Ru',
+      client_status: { Id: 1, title: 'studying' }
     },
     {
       Id: 3,
@@ -482,6 +495,7 @@ async function runTests(): Promise<void> {
     education: 'Old school',
     realAge: 24,
     stopListCompany: 'BadCorp,EvilInc',
+    googleFolder: 'https://drive.google.com/drive/folders/client-one',
     englishLevelId: 3,
     telegramPersonalChatId: '@client_one',
     calendarEmail: 'client@example.com'
@@ -493,6 +507,7 @@ async function runTests(): Promise<void> {
     education: 'New school',
     realAge: 24,
     stopListCompany: 'BadCorp,EvilInc',
+    googleFolder: 'https://drive.google.com/drive/folders/client-one',
     englishLevelId: 3,
     telegramPersonalChatId: '@client_one',
     calendarEmail: 'client@example.com'
@@ -581,6 +596,8 @@ async function runTests(): Promise<void> {
   let nextCreatedDolphinProfileId = 900100001
   const createdDolphinProfiles: any[] = []
   const updatedProxies: any[] = []
+  const telegramBotMessages: any[] = []
+  process.env.WEB_CONSOLE_BOT_API_TOKEN = 'test-bot-token'
   const fakeDolphinProvisioningApi = {
     async getProfile(profileId: number) {
       assert.equal(profileId, 123456789)
@@ -675,6 +692,15 @@ async function runTests(): Promise<void> {
       }
     },
     telegramAdapter: createFakeTdlibAdapter(),
+    telegramBotApi: {
+      async sendMessage(input: any) {
+        if (input.text === 'fail telegram') {
+          throw Object.assign(new Error('Telegram exploded'), { code: 'telegram_bot_api_failed' })
+        }
+        telegramBotMessages.push(input)
+        return { message_id: telegramBotMessages.length, chat: { id: input.chatId }, text: input.text }
+      }
+    },
     telegramProxyResolver: async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 }),
     verificationCodeService: {
       async getLatestCode() {
@@ -744,9 +770,80 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.client.education, 'Old school')
     assert.equal(result.body.client.realAge, 24)
     assert.equal(result.body.client.stopListCompany, 'BadCorp,EvilInc')
+    assert.equal(result.body.client.googleFolder, 'https://drive.google.com/drive/folders/client-one')
     assert.equal(result.body.client.englishLevel, 'B1')
     assert.equal(result.body.linkedInEmail, 'client-one.linkedin@example.com')
     assert.equal(result.body.platformAccounts[0].password, '***')
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/client', {
+      headers: { 'X-Bot-Api-Token': 'test-bot-token' }
+    })
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.found, true)
+    assert.equal(result.body.client.name, 'Client One')
+    assert.equal(result.body.client.chatId, '1001')
+    assert.equal(result.body.client.googleFolder, 'https://drive.google.com/drive/folders/client-one')
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/9999/client', {
+      headers: { 'X-Bot-Api-Token': 'test-bot-token' }
+    })
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.found, false)
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/client', {
+      headers: { 'X-Bot-Api-Token': 'wrong-token' }
+    })
+    assert.equal(result.response.status, 401, JSON.stringify(result.body))
+
+    const configuredBotToken = process.env.WEB_CONSOLE_BOT_API_TOKEN
+    delete process.env.WEB_CONSOLE_BOT_API_TOKEN
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/client', {
+      headers: { 'X-Bot-Api-Token': 'test-bot-token' }
+    })
+    assert.equal(result.response.status, 503, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'bot_api_token_not_configured')
+    process.env.WEB_CONSOLE_BOT_API_TOKEN = configuredBotToken
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
+      body: JSON.stringify({ googleFolder: 'https://drive.google.com/drive/folders/updated' })
+    })
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.success, true)
+    assert.equal(result.body.client.googleFolder, 'https://drive.google.com/drive/folders/updated')
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
+      body: JSON.stringify({ googleFolder: '' })
+    })
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'invalid_google_folder')
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
+      body: JSON.stringify({ googleFolder: 'drive-folder-without-url' })
+    })
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'invalid_google_folder')
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
+      body: JSON.stringify({ googleFolder: `https://${'a'.repeat(2049)}` })
+    })
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'invalid_google_folder')
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/9999/google-folder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
+      body: JSON.stringify({ googleFolder: 'https://drive.google.com/drive/folders/missing' })
+    })
+    assert.equal(result.response.status, 404, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'CLIENT_NOT_FOUND')
 
     result = await request(server.baseUrl, '/api/client/profile-options', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200)
@@ -952,6 +1049,40 @@ async function runTests(): Promise<void> {
     }, adminForTelegramLogin.cookie)
     assert.equal(result.response.status, 400, JSON.stringify(result.body))
     assert.equal(result.body.error, 'telegram_invalid_username')
+
+    result = await request(server.baseUrl, '/api/admin/clients/1/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Hello linked chat' })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.success, true)
+    assert.equal(result.body.sentTo.chatId, '1001')
+    assert.deepEqual(telegramBotMessages.at(-1), { chatId: '1001', text: 'Hello linked chat' })
+
+    result = await request(server.baseUrl, '/api/admin/clients/1/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '' })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'telegram_empty_message')
+
+    result = await request(server.baseUrl, '/api/admin/clients/2/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'No chat' })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'CLIENT_HAS_NO_TELEGRAM_CHAT_ID')
+
+    result = await request(server.baseUrl, '/api/admin/clients/1/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'fail telegram' })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 502, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'TELEGRAM_SEND_FAILED')
 
     result = await request(server.baseUrl, '/api/telegram/dialogs?platformAccountId=17', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
@@ -1189,6 +1320,12 @@ async function runTests(): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ targetClientId: 1, platformAccountId: 17, username: '@client_partner', text: 'blocked' })
+    }, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/admin/clients/1/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'blocked' })
     }, providerLogin.cookie)
     assert.equal(result.response.status, 403)
 

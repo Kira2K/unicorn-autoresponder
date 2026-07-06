@@ -147,5 +147,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     })
+  },
+  adminClientTelegramSend(clientId, payload = {}) {
+    return request(`/api/admin/clients/${encodeURIComponent(clientId)}/telegram/send`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
   }
 }

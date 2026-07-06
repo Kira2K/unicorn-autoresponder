@@ -18,6 +18,7 @@ export type WebClient = {
   realAge?: number
   stopListCompany: string
   calendarEmail: string
+  googleFolder: string
   telegramPersonalChatId: string
   commonChatId: string
   primaryStack?: string
@@ -119,6 +120,8 @@ export type WebConsoleRepository = {
   getDolphinProfileIdsForClient(clientId: number): Promise<number[]>
   getDolphinProfilesForClient(clientId: number): Promise<Array<{ id: number; locale: string }>>
   getLatestClientDashboard(options?: { fullAccess?: boolean }): Promise<ClientDashboard>
+  findClientByTelegramChatId(chatId: string): Promise<WebClient | null>
+  updateGoogleFolderByTelegramChatId(chatId: string, googleFolder: string): Promise<WebClient | null>
   getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null>
   getProviderClientsForStatus(statusLabel: string): Promise<ProviderClientRow[]>
   listEnglishLevels(): Promise<WebOption[]>

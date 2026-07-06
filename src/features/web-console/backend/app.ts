@@ -24,6 +24,9 @@ const { createDefaultVerificationCodeService } = require('./dolphin-verification
 const { createTelegramService } = require('./telegram-service.ts') as {
   createTelegramService(options: { repository: WebConsoleRepository; adapter?: any; proxyResolver?: any }): TelegramService
 }
+const { createTelegramBotApi } = require('../../../integrations/telegram/bot-api.ts') as {
+  createTelegramBotApi(options?: any): TelegramBotApi
+}
 const {
   buildProxyName,
   buildProfileName,
@@ -93,6 +96,9 @@ type TelegramService = {
   renameContact(clientId: number, input: { accountId?: number; chatId: string; firstName: string; lastName?: string }): Promise<unknown>
   reauth(clientId: number, accountId?: number): Promise<unknown>
   disconnect(clientId: number, accountId?: number): Promise<unknown>
+}
+type TelegramBotApi = {
+  sendMessage(input: { chatId: string; text: string }): Promise<unknown>
 }
 
 const SESSION_COOKIE = 'web_console_session'
@@ -319,6 +325,7 @@ function createWebConsoleApp(options: {
   dolphinTemplateProfileId?: number
   verificationCodeService?: VerificationCodeService
   telegramService?: TelegramService
+  telegramBotApi?: TelegramBotApi
   telegramAdapter?: any
   telegramProxyResolver?: any
   useMockData?: boolean
@@ -345,6 +352,7 @@ function createWebConsoleApp(options: {
       ? async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
       : undefined)
   })
+  const telegramBotApi = options.telegramBotApi ?? createTelegramBotApi()
   const sessions = createSessionStore()
   const app = express()
 
@@ -377,6 +385,54 @@ function createWebConsoleApp(options: {
       }
       next()
     }
+  }
+
+  function requireBotApiToken(req: Request, res: Response, next: NextFunction): void {
+    const expected = String(process.env.WEB_CONSOLE_BOT_API_TOKEN ?? '').trim()
+    const actual = String(req.header('X-Bot-Api-Token') ?? '').trim()
+    if (!expected) {
+      res.status(503).json({ error: 'bot_api_token_not_configured', message: 'WEB_CONSOLE_BOT_API_TOKEN is not configured.' })
+      return
+    }
+    if (!actual || actual !== expected) {
+      res.status(401).json({ error: 'unauthorized' })
+      return
+    }
+    next()
+  }
+
+  function publicTelegramClient(client: any) {
+    return {
+      id: client.id,
+      name: client.clientName,
+      chatId: client.commonChatId,
+      googleFolder: client.googleFolder || ''
+    }
+  }
+
+  function validateGoogleFolder(value: unknown): string {
+    const googleFolder = String(value ?? '').trim()
+    if (!googleFolder) {
+      throw Object.assign(new Error('Google folder is required.'), { code: 'invalid_google_folder' })
+    }
+    if (googleFolder.length > 2048) {
+      throw Object.assign(new Error('Google folder is too long.'), { code: 'invalid_google_folder' })
+    }
+    if (!/^https?:\/\//i.test(googleFolder)) {
+      throw Object.assign(new Error('Google folder must start with http:// or https://.'), { code: 'invalid_google_folder' })
+    }
+    return googleFolder
+  }
+
+  function validateTelegramMessage(value: unknown): string {
+    const text = String(value ?? '').trim()
+    if (!text) {
+      throw Object.assign(new Error('Telegram message text is required.'), { code: 'telegram_empty_message' })
+    }
+    if (text.length > 4096) {
+      throw Object.assign(new Error('Telegram message text is too long.'), { code: 'telegram_message_too_long' })
+    }
+    return text
   }
 
   function setSessionCookie(res: Response, session: WebSession): void {
@@ -473,6 +529,35 @@ function createWebConsoleApp(options: {
   app.get('/api/client/me', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       res.json(await repository.getClientDashboard(Number(req.webSession!.clientId), { fullAccess: false }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/bot/telegram/chats/:chatId/client', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.params.chatId ?? '').trim()
+      const client = await repository.findClientByTelegramChatId(chatId)
+      if (!client) {
+        res.json({ found: false, chatId })
+        return
+      }
+      res.json({ found: true, chatId, client: publicTelegramClient(client) })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.patch('/api/bot/telegram/chats/:chatId/google-folder', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.params.chatId ?? '').trim()
+      const googleFolder = validateGoogleFolder(req.body?.googleFolder)
+      const client = await repository.updateGoogleFolderByTelegramChatId(chatId, googleFolder)
+      if (!client) {
+        res.status(404).json({ success: false, error: 'CLIENT_NOT_FOUND', chatId })
+        return
+      }
+      res.json({ success: true, client: publicTelegramClient(client) })
     } catch (error) {
       next(error)
     }
@@ -947,6 +1032,34 @@ function createWebConsoleApp(options: {
     }
   })
 
+  app.post('/api/admin/clients/:clientId/telegram/send', requireRole('admin'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = Number(req.params.clientId)
+      if (!Number.isFinite(clientId) || clientId <= 0) {
+        res.status(400).json({ success: false, error: 'INVALID_CLIENT_ID' })
+        return
+      }
+      const client = await repository.getClientById(clientId)
+      const chatId = String(client.commonChatId ?? '').trim()
+      if (!chatId) {
+        res.status(400).json({ success: false, error: 'CLIENT_HAS_NO_TELEGRAM_CHAT_ID' })
+        return
+      }
+      const text = validateTelegramMessage(req.body?.text)
+      await telegramBotApi.sendMessage({ chatId, text })
+      res.json({
+        success: true,
+        sentTo: {
+          clientId: client.id,
+          clientName: client.clientName,
+          chatId
+        }
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
   app.post('/api/telegram/reauth', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       const clientId = telegramTargetClientId(req)
@@ -1004,6 +1117,10 @@ function createWebConsoleApp(options: {
       res.status(403).json({ error: 'forbidden', message: error instanceof Error ? error.message : String(error) })
       return
     }
+    if ((error as any)?.code === 'invalid_google_folder' || (error as any)?.code === 'telegram_message_too_long') {
+      res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
     if ((error as any)?.code === 'missing_target_client' || (error as any)?.code === 'telegram_account_not_found') {
       res.status(404).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return
@@ -1019,6 +1136,14 @@ function createWebConsoleApp(options: {
       (error as any)?.code === 'telegram_attachment_invalid'
     ) {
       res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'telegram_bot_token_missing') {
+      res.status(503).json({ success: false, error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'telegram_bot_api_failed') {
+      res.status(502).json({ success: false, error: 'TELEGRAM_SEND_FAILED', message: error instanceof Error ? error.message : String(error) })
       return
     }
     if ((error as any)?.code === 'telegram_connecting') {

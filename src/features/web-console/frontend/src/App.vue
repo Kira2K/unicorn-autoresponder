@@ -102,6 +102,10 @@ const adminTelegramAlwaysVerify = ref(true)
 const adminTelegramLoading = ref(false)
 const adminTelegramStatus = ref('')
 const adminTelegramError = ref('')
+const adminLinkedChatMessage = ref('')
+const adminLinkedChatLoading = ref(false)
+const adminLinkedChatStatus = ref('')
+const adminLinkedChatError = ref('')
 let telegramPollTimer = null
 let countdownTimer = null
 const SECURE_DNS_WARNING_KEY = 'webConsole.secureDnsWarningAccepted'
@@ -222,6 +226,15 @@ function telegramAdminErrorMessage(caught) {
   if (code === 'telegram_invalid_username') return 'Recipient must be a valid @username.'
   if (code === 'telegram_empty_message') return 'Add message text or at least one attachment.'
   if (code === 'telegram_attachment_missing' || code === 'telegram_attachment_invalid') return 'Attachment is missing or empty. Add the file again.'
+  return caught instanceof Error ? caught.message : String(caught || '')
+}
+
+function adminLinkedChatErrorMessage(caught) {
+  const code = caught?.body?.error
+  if (code === 'CLIENT_HAS_NO_TELEGRAM_CHAT_ID') return 'Client has no linked Telegram chat ID.'
+  if (code === 'telegram_empty_message') return 'Message text is required.'
+  if (code === 'telegram_bot_token_missing') return 'Telegram bot token is not configured.'
+  if (code === 'TELEGRAM_SEND_FAILED') return 'Telegram bot could not send this message.'
   return caught instanceof Error ? caught.message : String(caught || '')
 }
 
@@ -353,6 +366,34 @@ async function sendAdminTelegramMessage() {
   } finally {
     adminTelegramLoading.value = false
   }
+}
+
+async function sendAdminLinkedChatMessage() {
+  const clientId = dashboard.value?.client?.id
+  const text = adminLinkedChatMessage.value.trim()
+  if (!clientId) return
+  if (!text) {
+    adminLinkedChatError.value = 'Message text is required.'
+    return
+  }
+  adminLinkedChatLoading.value = true
+  adminLinkedChatError.value = ''
+  adminLinkedChatStatus.value = ''
+  try {
+    const result = await api.adminClientTelegramSend(clientId, { text })
+    adminLinkedChatStatus.value = `Sent to ${result.sentTo?.chatId || 'linked chat'}`
+    adminLinkedChatMessage.value = ''
+  } catch (caught) {
+    adminLinkedChatError.value = adminLinkedChatErrorMessage(caught)
+  } finally {
+    adminLinkedChatLoading.value = false
+  }
+}
+
+function resetAdminLinkedChatForm() {
+  adminLinkedChatMessage.value = ''
+  adminLinkedChatStatus.value = ''
+  adminLinkedChatError.value = ''
 }
 
 function requiredDataStorageKey(clientId, field) {
@@ -505,6 +546,7 @@ async function loadDashboard() {
   verificationCodeError.value = ''
   profileMessage.value = ''
   accountMessage.value = ''
+  resetAdminLinkedChatForm()
   resetTelegramUi()
   try {
     if (isAdmin.value) {
@@ -1691,6 +1733,28 @@ onUnmounted(() => {
                 </div>
               </dl>
             </section>
+          </template>
+        </Card>
+
+        <Card v-if="isAdmin" class="action-card">
+          <template #title>Message to Telegram chat</template>
+          <template #subtitle>Linked chat: {{ dashboard.client.commonChatId || 'empty' }}</template>
+          <template #content>
+            <form class="admin-linked-chat-form" data-testid="admin-linked-chat-form" @submit.prevent="sendAdminLinkedChatMessage">
+              <label class="field wide-field">
+                <span>Message to Telegram chat</span>
+                <textarea v-model="adminLinkedChatMessage" class="native-textarea" rows="5" data-testid="admin-linked-chat-message"></textarea>
+              </label>
+              <div class="form-actions wide-field">
+                <Button type="submit" label="Send to Telegram" icon="pi pi-send" :loading="adminLinkedChatLoading" data-testid="admin-linked-chat-send-button" />
+              </div>
+              <Message v-if="adminLinkedChatError" severity="error" :closable="false" class="wide-field" data-testid="admin-linked-chat-error">
+                {{ adminLinkedChatError }}
+              </Message>
+              <Message v-if="adminLinkedChatStatus" severity="success" :closable="false" class="wide-field" data-testid="admin-linked-chat-status">
+                {{ adminLinkedChatStatus }}
+              </Message>
+            </form>
           </template>
         </Card>
 

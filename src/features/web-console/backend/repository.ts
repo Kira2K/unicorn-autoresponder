@@ -183,6 +183,7 @@ function toClient(record: NocoRecord): WebClient {
     realAge: Number.isFinite(realAge) ? realAge : undefined,
     stopListCompany: normalizeText(record.stop_list_company),
     calendarEmail: normalizeText(record.calendar_email),
+    googleFolder: normalizeText(record.google_folder),
     telegramPersonalChatId: normalizeText(record.telegram_personal_chat_id),
     commonChatId: normalizeText(record.telegram_general_chat_id),
     primaryStack: linkedName(record.rel_clients_primary_stack) || undefined,
@@ -447,6 +448,13 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     return await dashboardForClient(client, fullAccess)
   }
 
+  async function findClientRecordByTelegramChatId(chatId: string): Promise<NocoRecord | null> {
+    const normalized = normalizeId(chatId)
+    if (!normalized) return null
+    const clients = await fetchClients()
+    return clients.find(candidate => normalizeId(candidate.telegram_general_chat_id) === normalized) ?? null
+  }
+
   async function findDolphinProfileClientRelationFieldId(): Promise<string | null> {
     if (typeof nocoClient.fetchTableMeta !== 'function') return null
     const meta = await nocoClient.fetchTableMeta(TABLES.dolphinProfiles.id)
@@ -536,6 +544,19 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       const client = [...clients].sort(sortByIdDesc)[0]
       if (!client) throw new Error('No clients found')
       return await dashboardForClient(client, Boolean(options.fullAccess))
+    },
+
+    async findClientByTelegramChatId(chatId: string): Promise<WebClient | null> {
+      const client = await findClientRecordByTelegramChatId(chatId)
+      return client ? toClient(client) : null
+    },
+
+    async updateGoogleFolderByTelegramChatId(chatId: string, googleFolder: string): Promise<WebClient | null> {
+      const client = await findClientRecordByTelegramChatId(chatId)
+      if (!client) return null
+      await nocoClient.patchRecord(TABLES.clients.id, Number(client.Id), { google_folder: normalizeText(googleFolder) })
+      const updated = await refetchDashboard(Number(client.Id))
+      return updated.client
     },
 
     async getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null> {
