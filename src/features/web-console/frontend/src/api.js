@@ -78,5 +78,74 @@ export const api = {
   },
   startHhResponsesDryRun() {
     return request('/api/admin/hh-responses/start', { method: 'POST' })
+  },
+  telegramStatus(params = {}) {
+    const query = new URLSearchParams()
+    if (params.targetClientId) query.set('targetClientId', params.targetClientId)
+    if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
+    return request(`/api/telegram/status${query.toString() ? `?${query}` : ''}`)
+  },
+  telegramConnect(payload = {}) {
+    return request('/api/telegram/connect', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  telegramDialogs(params = {}) {
+    const query = new URLSearchParams()
+    if (params.targetClientId) query.set('targetClientId', params.targetClientId)
+    if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
+    if (params.list) query.set('list', params.list)
+    if (params.folderId) query.set('folderId', params.folderId)
+    if (params.query) query.set('query', params.query)
+    if (params.limit) query.set('limit', params.limit)
+    return request(`/api/telegram/dialogs${query.toString() ? `?${query}` : ''}`)
+  },
+  telegramFolders(params = {}) {
+    const query = new URLSearchParams()
+    if (params.targetClientId) query.set('targetClientId', params.targetClientId)
+    if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
+    return request(`/api/telegram/folders${query.toString() ? `?${query}` : ''}`)
+  },
+  telegramMessages(params = {}) {
+    const query = new URLSearchParams()
+    if (params.targetClientId) query.set('targetClientId', params.targetClientId)
+    if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
+    if (params.chatId) query.set('chatId', params.chatId)
+    if (params.limit) query.set('limit', params.limit)
+    return request(`/api/telegram/messages${query.toString() ? `?${query}` : ''}`)
+  },
+  telegramSend(payload = {}) {
+    return request('/api/telegram/send', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  telegramRenameContact(payload = {}) {
+    return request('/api/telegram/rename-contact', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  telegramReauth(payload = {}) {
+    return request('/api/telegram/reauth', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  telegramDisconnect(payload = {}) {
+    const query = new URLSearchParams()
+    if (payload.platformAccountId) query.set('platformAccountId', payload.platformAccountId)
+    if (payload.targetClientId) query.set('targetClientId', payload.targetClientId)
+    return request(`/api/telegram/disconnect${query.toString() ? `?${query}` : ''}`, { method: 'DELETE' })
+  },
+  adminTelegramSenders() {
+    return request('/api/admin/telegram/senders')
+  },
+  adminTelegramSend(payload = {}) {
+    return request('/api/admin/telegram/send', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
   }
 }

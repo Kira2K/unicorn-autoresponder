@@ -12,7 +12,8 @@ const input = require("input") as {
 const apiId: number = 37642224;
 const apiHash = "c44116585f70919fa02eb5b8fd121ebc";
 const ROOT_DIR = path.resolve(__dirname, '../../..')
-const TELEGRAM_SESSION_FILE = path.resolve(ROOT_DIR, '.telegram-session')
+const TELEGRAM_STORAGE_ROOT = path.resolve(process.env.TELEGRAM_STORAGE_ROOT || path.join(ROOT_DIR, 'storage'))
+const TELEGRAM_SESSION_FILE = path.join(TELEGRAM_STORAGE_ROOT, 'telegram-reporting', '.telegram-session')
 const TELEGRAM_SEND_TIMEOUT_MS = Number(
   process.env.TELEGRAM_SEND_TIMEOUT_MS ?? 30000
 )
@@ -38,6 +39,7 @@ function saveTelegramSession(session: string): void {
     return
   }
 
+  fs.mkdirSync(path.dirname(TELEGRAM_SESSION_FILE), { recursive: true })
   fs.writeFileSync(TELEGRAM_SESSION_FILE, session, {
     encoding: 'utf8',
     mode: 0o600

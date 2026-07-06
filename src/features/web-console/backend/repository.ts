@@ -61,6 +61,11 @@ function linkedName(value: unknown): string {
   return normalizeText(record?.name ?? record?.stack ?? record?.label ?? record?.market ?? record?.level)
 }
 
+function linkedLabel(value: unknown): string {
+  const record = linkedRecords(value)[0]
+  return normalizeText(record?.label ?? record?.name ?? record?.title)
+}
+
 function linkedNames(value: unknown): string[] {
   return linkedRecords(value)
     .map(record => normalizeText(record.Name ?? record.name ?? record.label ?? record.title))
@@ -207,18 +212,23 @@ function maskSecret(value: unknown, fullAccess: boolean): string | undefined {
 function toPlatformAccount(record: NocoRecord, fullAccess: boolean): WebPlatformAccount {
   return {
     id: Number(record.Id),
+    clientId: accountClientId(record) || undefined,
     platform: normalizeText(record.platform || linkedName(record.rel_platformAccounts_platform)),
     platformId: accountPlatformId(record) || undefined,
-    accountLabel: normalizeText(record.account_label || record.label || record.platform),
+    accountLabel: normalizeText(record.account_label || record.label || record.platform || linkedLabel(record.rel_platformAccounts_platform)),
     login: normalizeText(record.login),
-    phone: normalizeText(record.phone),
+    phone: normalizeText(record.phone || record.phone_en),
     email: normalizeText(record.email),
     nickname: normalizeText(record.nickname) || undefined,
     linkedInUrl: normalizeText(record.linkedin_url) || undefined,
     foreignNumber: normalizeText(record.foreign_number) || undefined,
     recoveryCodes: normalizeText(record.recovery_codes) || undefined,
     password: maskSecret(record.password, fullAccess),
-    emailPassword: maskSecret(record.email_password, fullAccess)
+    emailPassword: maskSecret(record.email_password, fullAccess),
+    telegramSessionStatus: normalizeText(record.telegram_session_status) || undefined,
+    telegramTdlibDbPath: normalizeText(record.telegram_tdlib_db_path) || undefined,
+    telegramLastActive: normalizeText(record.telegram_last_active) || undefined,
+    telegramEventLog: normalizeText(record.telegram_event_log) || undefined
   }
 }
 
@@ -573,6 +583,72 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       await getOwnedPlatformAccount(clientId, accountId)
       await nocoClient.deleteRecord(TABLES.platformAccounts.id, Number(accountId))
       return await refetchDashboard(clientId)
+    },
+
+    async getTelegramPlatformAccountsForClient(clientId: number): Promise<WebPlatformAccount[]> {
+      return (await fetchPlatformAccountsForClient(clientId))
+        .map(account => toPlatformAccount(account, true))
+        .filter(account => {
+          const value = `${account.platform} ${account.accountLabel}`.toLowerCase()
+          return (
+            value.includes('telegram') ||
+            value.includes('tg_') ||
+            value.includes('telegram_') ||
+            value.includes('phone_en')
+          )
+        })
+    },
+
+    async listActiveTelegramSenders() {
+      const clients = await fetchClients()
+      const clientsById = new Map(clients.map(client => [Number(client.Id), toClient(client)]))
+      return (await fetchPlatformAccounts())
+        .map(account => toPlatformAccount(account, true))
+        .filter(account => {
+          const value = `${account.platform} ${account.accountLabel}`.toLowerCase()
+          return (
+            account.telegramSessionStatus === 'active' &&
+            Boolean(account.telegramTdlibDbPath) &&
+            Boolean(account.clientId) &&
+            (
+              value.includes('telegram') ||
+              value.includes('tg_') ||
+              value.includes('telegram_') ||
+              value.includes('phone_en')
+            )
+          )
+        })
+        .map(account => {
+          const client = clientsById.get(Number(account.clientId))
+          return {
+            clientId: Number(account.clientId),
+            clientName: client?.clientName || `Client ${account.clientId}`,
+            market: client?.market,
+            stack: client?.primaryStack,
+            accountId: account.id,
+            accountLabel: account.accountLabel,
+            platform: account.platform,
+            phone: account.phone || account.foreignNumber || '',
+            status: account.telegramSessionStatus || '',
+            dbPath: account.telegramTdlibDbPath || ''
+          }
+        })
+    },
+
+    async updateTelegramPlatformAccount(clientId: number, accountId: number, patch: Record<string, unknown>): Promise<WebPlatformAccount> {
+      await getOwnedPlatformAccount(clientId, accountId)
+      const allowed = new Set([
+        'phone',
+        'telegram_session_status',
+        'telegram_tdlib_db_path',
+        'telegram_last_active',
+        'telegram_event_log'
+      ])
+      const safePatch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)))
+      if (Object.keys(safePatch).length) {
+        await nocoClient.patchRecord(TABLES.platformAccounts.id, Number(accountId), safePatch)
+      }
+      return toPlatformAccount(await getOwnedPlatformAccount(clientId, accountId), true)
     },
 
     async createDolphinProfileBinding(input: {

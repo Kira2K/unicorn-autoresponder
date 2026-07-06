@@ -31,6 +31,7 @@ export type WebClient = {
 
 export type WebPlatformAccount = {
   id: number
+  clientId?: number
   platform: string
   platformId?: number
   accountLabel: string
@@ -43,6 +44,10 @@ export type WebPlatformAccount = {
   recoveryCodes?: string
   password?: string
   emailPassword?: string
+  telegramSessionStatus?: string
+  telegramTdlibDbPath?: string
+  telegramLastActive?: string
+  telegramEventLog?: string
 }
 
 export type WebOption = {
@@ -89,6 +94,19 @@ export type ProviderClientRow = {
   linkedInEmail: string
 }
 
+export type AdminTelegramSender = {
+  clientId: number
+  clientName: string
+  market?: string
+  stack?: string
+  accountId: number
+  accountLabel: string
+  platform: string
+  phone: string
+  status: string
+  dbPath: string
+}
+
 export type WebConsoleRepository = {
   findClientByCalendarEmail(email: string): Promise<WebClient | null>
   getAllDolphinProfileIds(): Promise<number[]>
@@ -105,6 +123,9 @@ export type WebConsoleRepository = {
   createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard>
   updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard>
   deletePlatformAccount(clientId: number, accountId: number): Promise<ClientDashboard>
+  getTelegramPlatformAccountsForClient(clientId: number): Promise<WebPlatformAccount[]>
+  listActiveTelegramSenders(): Promise<AdminTelegramSender[]>
+  updateTelegramPlatformAccount(clientId: number, accountId: number, patch: Record<string, unknown>): Promise<WebPlatformAccount>
   createDolphinProfileBinding(input: {
     clientId: number
     clientName: string
