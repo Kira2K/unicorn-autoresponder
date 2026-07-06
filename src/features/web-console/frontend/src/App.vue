@@ -199,6 +199,7 @@ const adminTelegramVisibleSenders = computed(() => {
     )
 })
 const adminTelegramSenderSummary = computed(() => {
+  if (adminTelegramLoading.value && !adminTelegramSenders.value.length) return 'Loading senders'
   const sender = adminTelegramSelectedSender.value
   if (!sender) return 'Choose sender'
   return `${sender.clientName} - ${sender.accountLabel} (${sender.phone || sender.platform})`
@@ -1095,6 +1096,7 @@ onUnmounted(() => {
             <div v-if="adminTelegramSenderOpen" class="sender-browser" data-testid="admin-telegram-sender-dropdown">
               <div class="sender-column" data-testid="admin-telegram-market-column">
                 <span class="sender-column-title">Market</span>
+                <p v-if="adminTelegramLoading && !adminTelegramSenders.length" class="sender-empty">Loading accounts...</p>
                 <button
                   v-for="market in adminTelegramSenderMarkets"
                   :key="market"
@@ -1105,10 +1107,11 @@ onUnmounted(() => {
                 >
                   {{ market }}
                 </button>
-                <p v-if="!adminTelegramSenderMarkets.length" class="sender-empty">No connected accounts</p>
+                <p v-if="!adminTelegramLoading && !adminTelegramSenderMarkets.length" class="sender-empty">No connected accounts</p>
               </div>
               <div v-if="adminTelegramSelectedMarket" class="sender-column" data-testid="admin-telegram-stack-column">
                 <span class="sender-column-title">Stack</span>
+                <p v-if="adminTelegramLoading && !adminTelegramSenderStacks.length" class="sender-empty">Loading stacks...</p>
                 <button
                   v-for="stack in adminTelegramSenderStacks"
                   :key="stack"
@@ -1119,7 +1122,7 @@ onUnmounted(() => {
                 >
                   {{ stack }}
                 </button>
-                <p v-if="!adminTelegramSenderStacks.length" class="sender-empty">No stacks</p>
+                <p v-if="!adminTelegramLoading && !adminTelegramSenderStacks.length" class="sender-empty">No stacks</p>
               </div>
               <div v-if="adminTelegramSelectedStack" class="sender-column sender-column-accounts" data-testid="admin-telegram-account-column">
                 <span class="sender-column-title">Telegram</span>
@@ -1140,7 +1143,8 @@ onUnmounted(() => {
                   <span>{{ sender.clientName }} - {{ sender.accountLabel }}</span>
                   <small>{{ sender.phone || sender.platform }}</small>
                 </button>
-                <p v-if="!adminTelegramVisibleSenders.length" class="sender-empty">No connected Telegram accounts</p>
+                <p v-if="adminTelegramLoading && !adminTelegramVisibleSenders.length" class="sender-empty">Loading Telegram accounts...</p>
+                <p v-if="!adminTelegramLoading && !adminTelegramVisibleSenders.length" class="sender-empty">No connected Telegram accounts</p>
               </div>
             </div>
           </section>
@@ -1488,6 +1492,9 @@ onUnmounted(() => {
               {{ telegramError }}
             </Message>
             <div v-if="selectedTelegramAccount" class="telegram-panel">
+              <Message severity="info" :closable="false" data-testid="telegram-beta-message">
+                Telegram writing is in beta.
+              </Message>
               <div class="telegram-status-row">
                 <span data-testid="telegram-status">Status: {{ telegramStatusLabel }}</span>
                 <Button icon="pi pi-refresh" label="Refresh" size="small" severity="secondary" :loading="telegramLoading" data-testid="telegram-refresh-button" @click="refreshTelegramStatus" />
