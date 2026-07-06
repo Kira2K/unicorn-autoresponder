@@ -902,6 +902,41 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.status, 'active')
 
+    const adminForTelegramLogin = await request(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'unicornveryevil@gmail.com', password: '101010' })
+    })
+    assert.equal(adminForTelegramLogin.response.status, 200)
+    result = await request(server.baseUrl, '/api/admin/telegram/senders', {}, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.senders.some((sender: any) => sender.clientId === 1 && sender.accountId === 17), true)
+    result = await request(server.baseUrl, '/api/admin/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetClientId: 1,
+        platformAccountId: 17,
+        username: '@client_partner',
+        text: 'Admin route smoke test',
+        attachments: [{ fileName: 'feature.md', mimeType: 'text/markdown', dataBase64: Buffer.from('# Feature').toString('base64') }]
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.messages.length, 2)
+    result = await request(server.baseUrl, '/api/admin/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetClientId: 1,
+        platformAccountId: 17,
+        username: 'client_partner',
+        text: 'Bad username'
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'telegram_invalid_username')
+
     result = await request(server.baseUrl, '/api/telegram/dialogs?platformAccountId=17', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.dialogs.some((dialog: any) => dialog.id === 'reporting-chat'), true)
@@ -924,8 +959,24 @@ async function runTests(): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ platformAccountId: 17, chatId: 'reporting-chat', text: 'TDLib route smoke test' })
     }, clientLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'telegram_readonly')
+
+    result = await request(server.baseUrl, '/api/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformAccountId: 17, chatId: 'reporting-chat', text: 'TDLib route smoke test', allowWrite: true })
+    }, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.message.text, 'TDLib route smoke test')
+
+    result = await request(server.baseUrl, '/api/telegram/rename-contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformAccountId: 17, chatId: 'client-chat', firstName: 'Safe', lastName: 'Lead' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.dialog.title, 'Safe Lead')
 
     result = await request(server.baseUrl, '/api/telegram/messages?platformAccountId=17&chatId=reporting-chat', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
@@ -1115,6 +1166,14 @@ async function runTests(): Promise<void> {
     }, providerLogin.cookie)
     assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/admin/telegram/senders', {}, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/admin/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetClientId: 1, platformAccountId: 17, username: '@client_partner', text: 'blocked' })
+    }, providerLogin.cookie)
     assert.equal(result.response.status, 403)
 
     result = await request(server.baseUrl, '/api/auth/logout', { method: 'POST' }, providerLogin.cookie)

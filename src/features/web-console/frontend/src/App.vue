@@ -82,6 +82,24 @@ const telegramMessages = ref([])
 const telegramSelectedChatId = ref('')
 const telegramMessageText = ref('')
 const telegramCopiedUsername = ref('')
+const telegramWriteEnabled = ref(false)
+const telegramRenameFirstName = ref('')
+const telegramRenameLastName = ref('')
+const telegramRenameMessage = ref('')
+const adminTelegramModalOpen = ref(false)
+const adminTelegramSenders = ref([])
+const adminTelegramSenderKey = ref('')
+const adminTelegramSelectedMarket = ref('')
+const adminTelegramSelectedStack = ref('')
+const adminTelegramSenderOpen = ref(false)
+const adminTelegramSenderQuery = ref('')
+const adminTelegramRecipient = ref('@')
+const adminTelegramMessage = ref('')
+const adminTelegramAttachments = ref([])
+const adminTelegramAlwaysVerify = ref(true)
+const adminTelegramLoading = ref(false)
+const adminTelegramStatus = ref('')
+const adminTelegramError = ref('')
 let telegramPollTimer = null
 let countdownTimer = null
 const SECURE_DNS_WARNING_KEY = 'webConsole.secureDnsWarningAccepted'
@@ -115,6 +133,9 @@ const dolphinActionMode = computed(() => {
 const dolphinActionLabel = computed(() =>
   dolphinActionMode.value === 'create_new' ? 'Create new profiles' : 'Open Dolphin profiles'
 )
+const adminCanOpenDolphinProfiles = computed(() =>
+  isAdmin.value && dolphinProfileStatus.value?.action === 'open_existing' && (dolphinProfileStatus.value?.existingProfiles || []).length > 0
+)
 const hasActiveDolphinLease = computed(() => dolphinLeaseSecondsLeft.value > 0)
 const telegramTargetPayload = computed(() => ({
   ...(isAdmin.value && dashboard.value?.client?.id ? { targetClientId: dashboard.value.client.id } : {}),
@@ -131,9 +152,204 @@ const telegramSelectedFolderTitle = computed(() => {
   const selected = telegramFolders.value.find(folder => folder.id === telegramList.value)
   return selected?.title || 'All chats'
 })
+const telegramSelectedDialog = computed(() =>
+  telegramDialogs.value.find(dialog => dialog.id === telegramSelectedChatId.value) || null
+)
+const telegramModeLabel = computed(() => telegramWriteEnabled.value ? 'Writing enabled' : 'Read-only')
+const telegramModeTitle = computed(() => telegramWriteEnabled.value
+  ? 'Click to return Telegram to read-only mode.'
+  : "in readonly mode you can't send messages, but also doesn't trigger unread messages status"
+)
+const adminTelegramSelectedSender = computed(() =>
+  adminTelegramSenders.value.find(sender => adminTelegramSenderKey.value === `${sender.clientId}:${sender.accountId}`) || null
+)
+const adminTelegramSenderMarkets = computed(() => {
+  const markets = new Set()
+  for (const sender of adminTelegramSenders.value) markets.add(sender.market || 'No market')
+  return [...markets].sort((left, right) => String(left).localeCompare(String(right)))
+})
+const adminTelegramSenderStacks = computed(() => {
+  if (!adminTelegramSelectedMarket.value) return []
+  const stacks = new Set()
+  for (const sender of adminTelegramSenders.value) {
+    if ((sender.market || 'No market') === adminTelegramSelectedMarket.value) {
+      stacks.add(sender.stack || 'No stack')
+    }
+  }
+  return [...stacks].sort((left, right) => String(left).localeCompare(String(right)))
+})
+const adminTelegramVisibleSenders = computed(() => {
+  if (!adminTelegramSelectedMarket.value || !adminTelegramSelectedStack.value) return []
+  const query = adminTelegramSenderQuery.value.trim().toLowerCase()
+  return adminTelegramSenders.value
+    .filter(sender =>
+      (sender.market || 'No market') === adminTelegramSelectedMarket.value &&
+      (sender.stack || 'No stack') === adminTelegramSelectedStack.value
+    )
+    .filter(sender => {
+      if (!query) return true
+      const haystack = `${sender.clientName || ''} ${sender.accountLabel || ''} ${sender.phone || ''} ${sender.platform || ''}`.toLowerCase()
+      return haystack.includes(query)
+    })
+    .sort((left, right) =>
+      String(left.clientName || '').localeCompare(String(right.clientName || '')) ||
+      String(left.accountLabel || '').localeCompare(String(right.accountLabel || ''))
+    )
+})
+const adminTelegramSenderSummary = computed(() => {
+  const sender = adminTelegramSelectedSender.value
+  if (!sender) return 'Choose sender'
+  return `${sender.clientName} - ${sender.accountLabel} (${sender.phone || sender.platform})`
+})
+const adminTelegramVerifyTitle = computed(() => adminTelegramAlwaysVerify.value
+  ? 'ask to verify every message'
+  : 'check for enable verification'
+)
 
 function setError(value) {
   error.value = value instanceof Error ? value.message : String(value || '')
+}
+
+function telegramAdminErrorMessage(caught) {
+  const code = caught?.body?.error
+  if (code === 'telegram_connecting') return 'Telegram session is still reconnecting. Try Refresh, then send again.'
+  if (code === 'telegram_tdlib_timeout') return 'Telegram did not answer in time. Check the session status and retry.'
+  if (code === 'telegram_file_send_failed') return caught.message || 'Telegram could not send the file. Try a smaller file or retry.'
+  if (code === 'telegram_sender_inactive') return 'Selected sender is not active. Refresh senders or reconnect Telegram.'
+  if (code === 'telegram_invalid_username') return 'Recipient must be a valid @username.'
+  if (code === 'telegram_empty_message') return 'Add message text or at least one attachment.'
+  if (code === 'telegram_attachment_missing' || code === 'telegram_attachment_invalid') return 'Attachment is missing or empty. Add the file again.'
+  return caught instanceof Error ? caught.message : String(caught || '')
+}
+
+function normalizeAdminTelegramRecipient() {
+  const raw = adminTelegramRecipient.value.trim()
+  adminTelegramRecipient.value = raw ? `@${raw.replace(/^@+/, '')}` : '@'
+}
+
+async function readFileAsBase64(file) {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const value = String(reader.result || '')
+      resolve(value.includes(',') ? value.split(',').pop() : value)
+    }
+    reader.onerror = () => reject(reader.error || new Error('Could not read file.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function addAdminTelegramFiles(event) {
+  const files = Array.from(event.target.files || [])
+  const additions = []
+  for (const file of files) {
+    additions.push({
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      dataBase64: await readFileAsBase64(file)
+    })
+  }
+  adminTelegramAttachments.value = [...adminTelegramAttachments.value, ...additions]
+  event.target.value = ''
+}
+
+function removeAdminTelegramAttachment(index) {
+  adminTelegramAttachments.value = adminTelegramAttachments.value.filter((_, itemIndex) => itemIndex !== index)
+}
+
+function adminTelegramSenderKeyFor(sender) {
+  return `${sender.clientId}:${sender.accountId}`
+}
+
+function selectAdminTelegramMarket(market) {
+  adminTelegramSelectedMarket.value = market
+  adminTelegramSelectedStack.value = ''
+  adminTelegramSenderKey.value = ''
+  adminTelegramSenderQuery.value = ''
+}
+
+function selectAdminTelegramStack(stack) {
+  adminTelegramSelectedStack.value = stack
+  adminTelegramSenderKey.value = ''
+  adminTelegramSenderQuery.value = ''
+}
+
+function selectAdminTelegramSender(sender) {
+  adminTelegramSenderKey.value = adminTelegramSenderKeyFor(sender)
+  adminTelegramSenderOpen.value = false
+}
+
+function toggleAdminTelegramSenderPicker() {
+  adminTelegramSenderOpen.value = !adminTelegramSenderOpen.value
+}
+
+async function openAdminTelegramModal() {
+  adminTelegramModalOpen.value = true
+  adminTelegramError.value = ''
+  adminTelegramStatus.value = ''
+  adminTelegramSenderOpen.value = false
+  await loadAdminTelegramSenders()
+}
+
+async function loadAdminTelegramSenders() {
+  adminTelegramLoading.value = true
+  adminTelegramError.value = ''
+  try {
+    const result = await api.adminTelegramSenders()
+    adminTelegramSenders.value = result.senders || []
+    const currentSender = adminTelegramSelectedSender.value
+    if (currentSender) {
+      adminTelegramSelectedMarket.value = currentSender.market || 'No market'
+      adminTelegramSelectedStack.value = currentSender.stack || 'No stack'
+    } else {
+      adminTelegramSelectedMarket.value = ''
+      adminTelegramSelectedStack.value = ''
+      adminTelegramSenderKey.value = ''
+    }
+  } catch (caught) {
+    adminTelegramError.value = telegramAdminErrorMessage(caught)
+  } finally {
+    adminTelegramLoading.value = false
+  }
+}
+
+async function sendAdminTelegramMessage() {
+  normalizeAdminTelegramRecipient()
+  const sender = adminTelegramSelectedSender.value
+  if (!sender) {
+    adminTelegramError.value = 'Choose Telegram sender'
+    return
+  }
+  if (!/^@[A-Za-z0-9_]{5,32}$/.test(adminTelegramRecipient.value)) {
+    adminTelegramError.value = 'Recipient must start from @'
+    return
+  }
+  if (!adminTelegramMessage.value.trim() && !adminTelegramAttachments.value.length) {
+    adminTelegramError.value = 'Message or file is required'
+    return
+  }
+  if (adminTelegramAlwaysVerify.value && !window.confirm(`Send Telegram message to ${adminTelegramRecipient.value} from ${sender.clientName}?`)) {
+    return
+  }
+  adminTelegramLoading.value = true
+  adminTelegramError.value = ''
+  adminTelegramStatus.value = ''
+  try {
+    await api.adminTelegramSend({
+      targetClientId: sender.clientId,
+      platformAccountId: sender.accountId,
+      username: adminTelegramRecipient.value,
+      text: adminTelegramMessage.value,
+      attachments: adminTelegramAttachments.value
+    })
+    adminTelegramStatus.value = 'Message sent'
+    adminTelegramMessage.value = ''
+    adminTelegramAttachments.value = []
+  } catch (caught) {
+    adminTelegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    adminTelegramLoading.value = false
+  }
 }
 
 function requiredDataStorageKey(clientId, field) {
@@ -205,6 +421,10 @@ function resetTelegramUi() {
   telegramSelectedChatId.value = ''
   telegramMessageText.value = ''
   telegramCopiedUsername.value = ''
+  telegramWriteEnabled.value = false
+  telegramRenameFirstName.value = ''
+  telegramRenameLastName.value = ''
+  telegramRenameMessage.value = ''
 }
 
 function closeProfileEditor() {
@@ -371,6 +591,7 @@ async function disconnectTelegram() {
 async function openTelegram() {
   telegramOpen.value = true
   telegramPanelOpen.value = 'telegram'
+  telegramWriteEnabled.value = false
   await loadTelegramFolders()
   await loadTelegramDialogs()
 }
@@ -418,6 +639,7 @@ async function loadTelegramDialogs() {
     if (!telegramDialogs.value.some(dialog => dialog.id === telegramSelectedChatId.value)) {
       telegramSelectedChatId.value = ''
       telegramMessages.value = []
+      resetTelegramRenameForm()
     }
     if (!telegramSearch.value.trim() && !telegramSelectedChatId.value && telegramDialogs.value[0]) {
       telegramSelectedChatId.value = telegramDialogs.value[0].id
@@ -433,6 +655,7 @@ async function loadTelegramDialogs() {
 async function changeTelegramList() {
   telegramSelectedChatId.value = ''
   telegramMessages.value = []
+  resetTelegramRenameForm()
   await loadTelegramDialogs()
 }
 
@@ -448,7 +671,24 @@ async function loadTelegramMessages() {
 
 async function selectTelegramDialog(dialog) {
   telegramSelectedChatId.value = dialog.id
+  resetTelegramRenameForm(dialog)
   await loadTelegramMessages()
+}
+
+function toggleTelegramWriteMode() {
+  telegramWriteEnabled.value = !telegramWriteEnabled.value
+}
+
+function resetTelegramRenameForm(dialog = telegramSelectedDialog.value) {
+  telegramRenameMessage.value = ''
+  if (!dialog?.isPrivate) {
+    telegramRenameFirstName.value = ''
+    telegramRenameLastName.value = ''
+    return
+  }
+  const parts = String(dialog.title || '').trim().split(/\s+/).filter(Boolean)
+  telegramRenameFirstName.value = parts[0] || ''
+  telegramRenameLastName.value = parts.slice(1).join(' ')
 }
 
 async function copyTelegramUsername(username, event) {
@@ -465,18 +705,52 @@ async function copyTelegramUsername(username, event) {
 async function sendTelegramMessage() {
   const text = telegramMessageText.value.trim()
   if (!text || !telegramSelectedChatId.value) return
+  if (!telegramWriteEnabled.value) {
+    telegramError.value = 'Telegram is read-only. Enable writing before sending.'
+    return
+  }
   telegramLoading.value = true
   telegramError.value = ''
   try {
     await api.telegramSend({
       ...telegramTargetPayload.value,
       chatId: telegramSelectedChatId.value,
-      text
+      text,
+      allowWrite: telegramWriteEnabled.value
     })
     telegramMessageText.value = ''
     await loadTelegramMessages()
   } catch (caught) {
     telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    telegramLoading.value = false
+  }
+}
+
+async function renameTelegramContact() {
+  if (!telegramSelectedDialog.value?.isPrivate) return
+  const firstName = telegramRenameFirstName.value.trim()
+  if (!firstName) {
+    telegramRenameMessage.value = 'First name is required'
+    return
+  }
+  telegramLoading.value = true
+  telegramError.value = ''
+  telegramRenameMessage.value = ''
+  try {
+    const result = await api.telegramRenameContact({
+      ...telegramTargetPayload.value,
+      chatId: telegramSelectedChatId.value,
+      firstName,
+      lastName: telegramRenameLastName.value.trim() || undefined
+    })
+    const updated = result.dialog
+    telegramDialogs.value = telegramDialogs.value.map(dialog =>
+      dialog.id === updated.id ? { ...dialog, ...updated } : dialog
+    )
+    telegramRenameMessage.value = 'Saved on Telegram'
+  } catch (caught) {
+    telegramRenameMessage.value = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
     telegramLoading.value = false
   }
@@ -771,7 +1045,10 @@ onUnmounted(() => {
           </div>
         </template>
         <template #end>
-          <Button label="Logout" icon="pi pi-sign-out" severity="secondary" data-testid="logout-button" @click="logout" />
+          <div class="topbar-actions">
+            <Button v-if="isAdmin" icon="pi pi-telegram" severity="info" data-testid="admin-telegram-open-button" aria-label="Write in Telegram" @click="openAdminTelegramModal" />
+            <Button label="Logout" icon="pi pi-sign-out" severity="secondary" data-testid="logout-button" @click="logout" />
+          </div>
         </template>
       </Toolbar>
 
@@ -794,6 +1071,117 @@ onUnmounted(() => {
         </p>
         <template #footer>
           <Button label="OK" icon="pi pi-check" data-testid="confirm-required-data-dialog-button" @click="confirmRequiredDataDialog" />
+        </template>
+      </Dialog>
+      <Dialog v-model:visible="adminTelegramModalOpen" modal header="Write in Telegram" class="admin-telegram-dialog" data-testid="admin-telegram-dialog">
+        <div class="admin-telegram-form">
+          <section class="field wide-field admin-telegram-sender-picker" data-testid="admin-telegram-sender-picker">
+            <span>Who you want to write from</span>
+            <button
+              type="button"
+              :class="['admin-telegram-sender-summary', { open: adminTelegramSenderOpen }]"
+              data-testid="admin-telegram-sender-summary"
+              aria-haspopup="listbox"
+              :aria-expanded="adminTelegramSenderOpen ? 'true' : 'false'"
+              @click="toggleAdminTelegramSenderPicker"
+            >
+              <span>{{ adminTelegramSenderSummary }}</span>
+              <i :class="adminTelegramSenderOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i>
+            </button>
+            <div v-if="adminTelegramSenderOpen" class="sender-browser" data-testid="admin-telegram-sender-dropdown">
+              <div class="sender-column" data-testid="admin-telegram-market-column">
+                <span class="sender-column-title">Market</span>
+                <button
+                  v-for="market in adminTelegramSenderMarkets"
+                  :key="market"
+                  type="button"
+                  :class="['sender-option', { selected: adminTelegramSelectedMarket === market }]"
+                  :data-testid="`admin-telegram-market-${market}`"
+                  @click="selectAdminTelegramMarket(market)"
+                >
+                  {{ market }}
+                </button>
+                <p v-if="!adminTelegramSenderMarkets.length" class="sender-empty">No connected accounts</p>
+              </div>
+              <div v-if="adminTelegramSelectedMarket" class="sender-column" data-testid="admin-telegram-stack-column">
+                <span class="sender-column-title">Stack</span>
+                <button
+                  v-for="stack in adminTelegramSenderStacks"
+                  :key="stack"
+                  type="button"
+                  :class="['sender-option', { selected: adminTelegramSelectedStack === stack }]"
+                  :data-testid="`admin-telegram-stack-${stack}`"
+                  @click="selectAdminTelegramStack(stack)"
+                >
+                  {{ stack }}
+                </button>
+                <p v-if="!adminTelegramSenderStacks.length" class="sender-empty">No stacks</p>
+              </div>
+              <div v-if="adminTelegramSelectedStack" class="sender-column sender-column-accounts" data-testid="admin-telegram-account-column">
+                <span class="sender-column-title">Telegram</span>
+                <InputText
+                  v-model="adminTelegramSenderQuery"
+                  class="sender-search"
+                  placeholder="Search account"
+                  data-testid="admin-telegram-sender-search"
+                />
+                <button
+                  v-for="sender in adminTelegramVisibleSenders"
+                  :key="adminTelegramSenderKeyFor(sender)"
+                  type="button"
+                  :class="['sender-option sender-account-option', { selected: adminTelegramSenderKey === adminTelegramSenderKeyFor(sender) }]"
+                  :data-testid="`admin-telegram-sender-${sender.clientId}-${sender.accountId}`"
+                  @click="selectAdminTelegramSender(sender)"
+                >
+                  <span>{{ sender.clientName }} - {{ sender.accountLabel }}</span>
+                  <small>{{ sender.phone || sender.platform }}</small>
+                </button>
+                <p v-if="!adminTelegramVisibleSenders.length" class="sender-empty">No connected Telegram accounts</p>
+              </div>
+            </div>
+          </section>
+          <label class="field">
+            <span>Who you want to write to</span>
+            <InputText v-model="adminTelegramRecipient" placeholder="@username" data-testid="admin-telegram-recipient" @blur="normalizeAdminTelegramRecipient" />
+          </label>
+          <label class="field wide-field">
+            <span>Message</span>
+            <textarea v-model="adminTelegramMessage" class="native-textarea" rows="7" data-testid="admin-telegram-message"></textarea>
+          </label>
+          <div class="admin-telegram-attachments wide-field">
+            <label class="file-button">
+              <i class="pi pi-image"></i>
+              <span>Add image</span>
+              <input type="file" accept="image/*" data-testid="admin-telegram-image-input" @change="addAdminTelegramFiles" />
+            </label>
+            <label class="file-button">
+              <i class="pi pi-paperclip"></i>
+              <span>Add file</span>
+              <input type="file" data-testid="admin-telegram-file-input" @change="addAdminTelegramFiles" />
+            </label>
+            <div v-if="adminTelegramAttachments.length" class="attachment-list" data-testid="admin-telegram-attachments">
+              <button v-for="(attachment, index) in adminTelegramAttachments" :key="`${attachment.fileName}-${index}`" type="button" class="attachment-chip" @click="removeAdminTelegramAttachment(index)">
+                {{ attachment.fileName }} x
+              </button>
+            </div>
+          </div>
+          <label class="checkbox-field wide-field" :title="adminTelegramVerifyTitle">
+            <input v-model="adminTelegramAlwaysVerify" type="checkbox" data-testid="admin-telegram-always-verify" />
+            <span>Always verify</span>
+          </label>
+        </div>
+        <template #footer>
+          <div class="admin-telegram-footer">
+            <Message v-if="adminTelegramError" severity="error" :closable="false" class="admin-telegram-footer-message" data-testid="admin-telegram-error">
+              {{ adminTelegramError }}
+            </Message>
+            <Message v-else-if="adminTelegramStatus" severity="success" :closable="false" class="admin-telegram-footer-message" data-testid="admin-telegram-status">
+              {{ adminTelegramStatus }}
+            </Message>
+            <span v-else class="admin-telegram-footer-spacer" aria-hidden="true"></span>
+            <Button label="Refresh" icon="pi pi-refresh" severity="secondary" outlined :loading="adminTelegramLoading" data-testid="admin-telegram-refresh-button" @click="loadAdminTelegramSenders" />
+            <Button label="Write" icon="pi pi-send" :loading="adminTelegramLoading" data-testid="admin-telegram-send-button" @click="sendAdminTelegramMessage" />
+          </div>
         </template>
       </Dialog>
 
@@ -1057,7 +1445,7 @@ onUnmounted(() => {
           </template>
         </Card>
 
-        <Card v-if="isClient || isAdmin" class="action-card telegram-card" data-testid="telegram-card">
+        <Card v-if="isClient" class="action-card telegram-card" data-testid="telegram-card">
           <template #title>
             <div class="profile-card-title-row">
               <span>Telegram</span>
@@ -1096,6 +1484,16 @@ onUnmounted(() => {
                   </AccordionHeader>
                   <AccordionContent>
                     <div class="telegram-toolbar">
+                      <button
+                        type="button"
+                        :class="['telegram-mode-toggle', { enabled: telegramWriteEnabled }]"
+                        :title="telegramModeTitle"
+                        data-testid="telegram-write-toggle"
+                        @click="toggleTelegramWriteMode"
+                      >
+                        <i :class="telegramWriteEnabled ? 'pi pi-lock-open' : 'pi pi-lock'"></i>
+                        <span>{{ telegramModeLabel }}</span>
+                      </button>
                       <select v-model="telegramList" class="native-select telegram-folder-select" data-testid="telegram-folder-select" @change="changeTelegramList">
                         <option v-for="folder in telegramFolders" :key="folder.id" :value="folder.id">
                           {{ folder.title }}
@@ -1143,14 +1541,20 @@ onUnmounted(() => {
                         </p>
                       </aside>
                       <div class="telegram-chat">
+                        <form v-if="telegramSelectedDialog?.isPrivate" class="telegram-contact-form" data-testid="telegram-contact-form" @submit.prevent="renameTelegramContact">
+                          <InputText v-model="telegramRenameFirstName" placeholder="First name" data-testid="telegram-contact-first-name" />
+                          <InputText v-model="telegramRenameLastName" placeholder="Last name" data-testid="telegram-contact-last-name" />
+                          <Button type="submit" icon="pi pi-save" label="Save name" size="small" severity="secondary" :loading="telegramLoading" data-testid="telegram-contact-save-button" />
+                          <span v-if="telegramRenameMessage" class="telegram-contact-status" data-testid="telegram-contact-status">{{ telegramRenameMessage }}</span>
+                        </form>
                         <div class="telegram-messages">
                           <div v-for="message in telegramMessages" :key="message.id" :class="['telegram-message', { outgoing: message.outgoing }]">
                             {{ message.text }}
                           </div>
                         </div>
                         <form class="telegram-send-row" @submit.prevent="sendTelegramMessage">
-                          <InputText v-model="telegramMessageText" placeholder="Message" data-testid="telegram-message-input" />
-                          <Button type="submit" icon="pi pi-send" label="Send" :loading="telegramLoading" data-testid="telegram-send-button" />
+                          <InputText v-model="telegramMessageText" :placeholder="telegramWriteEnabled ? 'Message' : 'Read-only mode'" :disabled="!telegramWriteEnabled" data-testid="telegram-message-input" />
+                          <Button type="submit" icon="pi pi-send" label="Send" :disabled="!telegramWriteEnabled" :loading="telegramLoading" data-testid="telegram-send-button" />
                         </form>
                       </div>
                     </section>
@@ -1215,17 +1619,11 @@ onUnmounted(() => {
           </template>
         </Card>
 
-        <Card v-if="isAdmin" class="action-card">
+        <Card v-if="adminCanOpenDolphinProfiles" class="action-card">
           <template #title>Dolphin profile</template>
-          <template #subtitle>{{ dolphinActionMode === 'create_new' ? 'Create missing profiles for the latest client' : 'Open profiles for the latest client' }}</template>
+          <template #subtitle>Open profiles for the latest client</template>
           <template #content>
-            <div v-if="dolphinActionMode === 'create_new'" class="proxy-choice-panel" data-testid="own-proxy-panel">
-              <label class="checkbox-field">
-                <input v-model="ownProxy" type="checkbox" data-testid="own-proxy-checkbox" />
-                <span>I have my own proxy</span>
-              </label>
-            </div>
-            <Button v-if="!hasActiveDolphinLease" :label="dolphinActionLabel" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-admin-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, dolphinActionMode)" />
+            <Button v-if="!hasActiveDolphinLease" label="Open Dolphin profiles" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-admin-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, 'open_existing')" />
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
               <h3>Dolphin access</h3>
               <p>Open Dolphin Anty and enter the credentials below.</p>

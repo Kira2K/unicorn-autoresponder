@@ -38,6 +38,20 @@ async function runTests(): Promise<void> {
     },
     async getDolphinProfilesForClient() {
       return []
+    },
+    async listActiveTelegramSenders() {
+      return [{
+        clientId: 1,
+        clientName: 'Kira',
+        market: 'Ru',
+        stack: 'Frontend',
+        accountId: account.id,
+        accountLabel: account.accountLabel,
+        platform: account.platform,
+        phone: account.phone,
+        status: account.telegramSessionStatus,
+        dbPath: account.telegramTdlibDbPath
+      }]
     }
   }
   const service = createTelegramService({
@@ -67,11 +81,48 @@ async function runTests(): Promise<void> {
   assert.equal(searchedDialogs.dialogs.some((dialog: any) => dialog.id === 'client-chat'), true)
   assert.equal(searchedDialogs.dialogs.find((dialog: any) => dialog.id === 'client-chat')?.username, '@client_partner')
 
-  const sent = await service.send(1, { accountId: 102, chatId: 'reporting-chat', text: 'TDLib smoke test' })
+  await assert.rejects(
+    () => service.send(1, { accountId: 102, chatId: 'reporting-chat', text: 'TDLib smoke test' }),
+    (error: any) => {
+      assert.equal(error.code, 'telegram_readonly')
+      return true
+    }
+  )
+
+  const sent = await service.send(1, { accountId: 102, chatId: 'reporting-chat', text: 'TDLib smoke test', allowWrite: true })
   assert.equal(sent.message.text, 'TDLib smoke test')
+
+  const adminSenders = await service.listAdminSenders()
+  assert.equal(adminSenders.senders.length, 1)
+
+  const adminSent = await service.sendToUsername(1, {
+    accountId: 102,
+    username: '@client_partner',
+    text: 'Admin feature smoke test',
+    allowWrite: true,
+    attachments: [{ fileName: 'feature.md', mimeType: 'text/markdown', dataBase64: Buffer.from('# Feature').toString('base64') }]
+  })
+  assert.equal(adminSent.messages.length, 2)
+  const adminEvents = JSON.parse(account.telegramEventLog)
+  const adminEvent = adminEvents.find((event: any) => event.event === 'admin_message_sent')
+  assert.equal(adminEvent.details.username, '@client_partner')
+  assert.equal(adminEvent.details.attachmentCount, 1)
+  assert.equal(adminEvent.details.attachmentNames[0], 'feature.md')
+  assert.equal(adminEvent.details.messageCount, 2)
+
+  await assert.rejects(
+    () => service.sendToUsername(1, { accountId: 102, username: 'client_partner', text: 'bad', allowWrite: true }),
+    (error: any) => {
+      assert.equal(error.code, 'telegram_invalid_username')
+      return true
+    }
+  )
 
   const messages = await service.messages(1, { accountId: 102, chatId: 'reporting-chat' })
   assert.equal(messages.messages.some((message: any) => message.text === 'TDLib smoke test'), true)
+
+  const renamed = await service.renameContact(1, { accountId: 102, chatId: 'client-chat', firstName: 'Safe', lastName: 'Lead' })
+  assert.equal(renamed.dialog.title, 'Safe Lead')
 
   result = await service.disconnect(1, 102)
   assert.equal(result.status, 'needs_reauth')

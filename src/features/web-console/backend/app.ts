@@ -87,7 +87,10 @@ type TelegramService = {
   folders(clientId: number, accountId?: number): Promise<unknown>
   dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number }): Promise<unknown>
   messages(clientId: number, input: { accountId?: number; chatId: string; limit?: number }): Promise<unknown>
-  send(clientId: number, input: { accountId?: number; chatId: string; text: string }): Promise<unknown>
+  send(clientId: number, input: { accountId?: number; chatId: string; text: string; allowWrite?: boolean }): Promise<unknown>
+  listAdminSenders(): Promise<unknown>
+  sendToUsername(clientId: number, input: { accountId?: number; username: string; text: string; attachments?: Array<{ fileName: string; mimeType?: string; dataBase64: string }>; allowWrite?: boolean }): Promise<unknown>
+  renameContact(clientId: number, input: { accountId?: number; chatId: string; firstName: string; lastName?: string }): Promise<unknown>
   reauth(clientId: number, accountId?: number): Promise<unknown>
   disconnect(clientId: number, accountId?: number): Promise<unknown>
 }
@@ -345,7 +348,7 @@ function createWebConsoleApp(options: {
   const sessions = createSessionStore()
   const app = express()
 
-  app.use(express.json())
+  app.use(express.json({ limit: '25mb' }))
   app.use(cookieParser())
 
   function attachSession(req: AuthedRequest, _res: Response, next: NextFunction): void {
@@ -884,7 +887,60 @@ function createWebConsoleApp(options: {
       res.json(await telegramService.send(clientId, {
         accountId: telegramAccountId(req.body?.platformAccountId ?? req.body?.accountId),
         chatId,
-        text
+        text,
+        allowWrite: req.body?.allowWrite === true
+      }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/telegram/rename-contact', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.body?.chatId ?? '').trim()
+      const firstName = String(req.body?.firstName ?? '').trim()
+      const lastName = String(req.body?.lastName ?? '').trim()
+      if (!chatId || !firstName) {
+        res.status(400).json({ error: 'missing_telegram_contact_name' })
+        return
+      }
+      const clientId = telegramTargetClientId(req)
+      res.json(await telegramService.renameContact(clientId, {
+        accountId: telegramAccountId(req.body?.platformAccountId ?? req.body?.accountId),
+        chatId,
+        firstName,
+        lastName: lastName || undefined
+      }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/admin/telegram/senders', requireRole('admin'), async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json(await telegramService.listAdminSenders())
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/admin/telegram/send', requireRole('admin'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const clientId = Number(req.body?.targetClientId)
+      const accountId = telegramAccountId(req.body?.platformAccountId ?? req.body?.accountId)
+      const username = String(req.body?.username ?? '').trim()
+      const text = String(req.body?.text ?? '')
+      const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments : []
+      if (!Number.isFinite(clientId) || clientId <= 0 || !accountId || !username) {
+        res.status(400).json({ error: 'missing_admin_telegram_send_input' })
+        return
+      }
+      res.json(await telegramService.sendToUsername(clientId, {
+        accountId,
+        username,
+        text,
+        attachments,
+        allowWrite: true
       }))
     } catch (error) {
       next(error)
@@ -950,6 +1006,27 @@ function createWebConsoleApp(options: {
     }
     if ((error as any)?.code === 'missing_target_client' || (error as any)?.code === 'telegram_account_not_found') {
       res.status(404).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if (
+      (error as any)?.code === 'telegram_readonly' ||
+      (error as any)?.code === 'telegram_rename_not_supported' ||
+      (error as any)?.code === 'telegram_rename_invalid_name' ||
+      (error as any)?.code === 'telegram_invalid_username' ||
+      (error as any)?.code === 'telegram_empty_message' ||
+      (error as any)?.code === 'telegram_sender_inactive' ||
+      (error as any)?.code === 'telegram_attachment_missing' ||
+      (error as any)?.code === 'telegram_attachment_invalid'
+    ) {
+      res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'telegram_connecting') {
+      res.status(409).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'telegram_tdlib_timeout' || (error as any)?.code === 'telegram_file_send_failed') {
+      res.status(504).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return
     }
     const message = error instanceof Error ? error.message : String(error)

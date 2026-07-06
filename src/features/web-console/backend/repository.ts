@@ -599,6 +599,42 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         })
     },
 
+    async listActiveTelegramSenders() {
+      const clients = await fetchClients()
+      const clientsById = new Map(clients.map(client => [Number(client.Id), toClient(client)]))
+      return (await fetchPlatformAccounts())
+        .map(account => toPlatformAccount(account, true))
+        .filter(account => {
+          const value = `${account.platform} ${account.accountLabel}`.toLowerCase()
+          return (
+            account.telegramSessionStatus === 'active' &&
+            Boolean(account.telegramTdlibDbPath) &&
+            Boolean(account.clientId) &&
+            (
+              value.includes('telegram') ||
+              value.includes('tg_') ||
+              value.includes('telegram_') ||
+              value.includes('phone_en')
+            )
+          )
+        })
+        .map(account => {
+          const client = clientsById.get(Number(account.clientId))
+          return {
+            clientId: Number(account.clientId),
+            clientName: client?.clientName || `Client ${account.clientId}`,
+            market: client?.market,
+            stack: client?.primaryStack,
+            accountId: account.id,
+            accountLabel: account.accountLabel,
+            platform: account.platform,
+            phone: account.phone || account.foreignNumber || '',
+            status: account.telegramSessionStatus || '',
+            dbPath: account.telegramTdlibDbPath || ''
+          }
+        })
+    },
+
     async updateTelegramPlatformAccount(clientId: number, accountId: number, patch: Record<string, unknown>): Promise<WebPlatformAccount> {
       await getOwnedPlatformAccount(clientId, accountId)
       const allowed = new Set([

@@ -121,6 +121,12 @@ export const api = {
       body: JSON.stringify(payload)
     })
   },
+  telegramRenameContact(payload = {}) {
+    return request('/api/telegram/rename-contact', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
   telegramReauth(payload = {}) {
     return request('/api/telegram/reauth', {
       method: 'POST',
@@ -132,5 +138,14 @@ export const api = {
     if (payload.platformAccountId) query.set('platformAccountId', payload.platformAccountId)
     if (payload.targetClientId) query.set('targetClientId', payload.targetClientId)
     return request(`/api/telegram/disconnect${query.toString() ? `?${query}` : ''}`, { method: 'DELETE' })
+  },
+  adminTelegramSenders() {
+    return request('/api/admin/telegram/senders')
+  },
+  adminTelegramSend(payload = {}) {
+    return request('/api/admin/telegram/send', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
   }
 }

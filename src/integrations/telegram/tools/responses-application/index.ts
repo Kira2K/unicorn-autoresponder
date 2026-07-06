@@ -9,6 +9,9 @@ const input = require('input') as {
   text(prompt: string): Promise<string>
 }
 const ROOT_DIR = path.resolve(__dirname, '../../../../..')
+const TELEGRAM_STORAGE_ROOT = path.resolve(process.env.TELEGRAM_STORAGE_ROOT || path.join(ROOT_DIR, 'storage'))
+const DEFAULT_RESPONSES_SESSION_FILE = path.join(TELEGRAM_STORAGE_ROOT, 'telegram-responses', '.telegram-session')
+const TELEGRAM_RESPONSES_TIMEOUT_MS = Number(process.env.TELEGRAM_RESPONSES_TIMEOUT_MS || 30000)
 
 type CliOptions = {
   apiId?: string
@@ -104,12 +107,52 @@ function saveSessionFile(sessionFile: string, session: string): void {
   })
 }
 
+function defaultedSessionFile(value?: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return DEFAULT_RESPONSES_SESSION_FILE
+  return path.resolve(raw)
+}
+
+function telegramResponsesTimeoutError(message: string): Error {
+  const error = new Error(message) as Error & { code?: string }
+  error.code = 'telegram_responses_timeout'
+  return error
+}
+
+async function withTelegramResponsesTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+  onTimeout?: () => Promise<void>
+): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(async () => {
+          try {
+            await onTimeout?.()
+          } catch {
+            // Timeout cleanup is best-effort; preserve the original timeout reason.
+          }
+
+          reject(telegramResponsesTimeoutError(message))
+        }, TELEGRAM_RESPONSES_TIMEOUT_MS)
+      })
+    ])
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
 function getConfig(options: CliOptions = {}): TelegramResponsesConfig {
-  const sessionFile = path.resolve(
-      options.sessionFile ??
-      process.env.telegram_responses_session_file ??
-      path.join(ROOT_DIR, 'telegramResponsesApplication', '.telegram-session')
-  )
+  const sessionFile = options.sessionFile
+    ? path.resolve(options.sessionFile)
+    : defaultedSessionFile(process.env.telegram_responses_session_file)
+  const sessionFromFile = readSessionFile(sessionFile)
   const apiIdValue =
     options.apiId ?? process.env.telegram_responses_api_id
   const apiHash =
@@ -133,7 +176,7 @@ function getConfig(options: CliOptions = {}): TelegramResponsesConfig {
     session:
       options.session ??
       process.env.telegram_responses_session ??
-      readSessionFile(sessionFile),
+      sessionFromFile,
     sessionFile,
     phone: options.phone ?? process.env.telegram_responses_phone,
     saveSession: !options.noSaveSession
@@ -239,17 +282,39 @@ async function sendTelegramResponsesMessage(
   message: string,
   options: CliOptions = {}
 ): Promise<void> {
-  const client = await createTelegramResponsesClient(options)
+  const config = getConfig(options)
+  if (!config.session) {
+    throw new Error(
+      `Missing Telegram responses session. Connect the responses account once and save it to ${config.sessionFile}.`
+    )
+  }
+
+  let client: any
+  client = await withTelegramResponsesTimeout(
+    createTelegramResponsesClient(options),
+    `Telegram responses client start timed out after ${TELEGRAM_RESPONSES_TIMEOUT_MS}ms`
+  )
 
   try {
-    const target = await resolveTelegramTarget(client, to)
+    const disconnect = async () => {
+      await client?.disconnect?.()
+    }
+    const target = await withTelegramResponsesTimeout(
+      resolveTelegramTarget(client, to),
+      `Telegram responses target resolution timed out after ${TELEGRAM_RESPONSES_TIMEOUT_MS}ms`,
+      disconnect
+    )
 
-    await client.sendMessage(target, {
-      message,
-      parseMode: false
-    })
+    await withTelegramResponsesTimeout(
+      client.sendMessage(target, {
+        message,
+        parseMode: false
+      }),
+      `Telegram responses message send timed out after ${TELEGRAM_RESPONSES_TIMEOUT_MS}ms`,
+      disconnect
+    )
   } finally {
-    await client.disconnect()
+    await client?.disconnect?.()
   }
 }
 
