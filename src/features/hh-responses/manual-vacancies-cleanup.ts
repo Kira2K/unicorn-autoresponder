@@ -3,6 +3,7 @@ const DEFAULT_TIMEOUT_MS = 150000
 const DEFAULT_MAX_CHECKS = 200
 const DEFAULT_MANUAL_LIST_KEY = 'hh_ar_v2_manual_list'
 const { normalizeHhUrl } = require('./shared/hh-url.ts')
+const { isPageClosedError } = require('../../platform/browser/page-utils.ts')
 
 const APPLY_BUTTON_SELECTOR = [
   '[data-qa="vacancy-response-link-top"]',
@@ -45,6 +46,37 @@ type ManualVacanciesCleanupResult = {
   keptCount: number
   error?: string
   items: ManualVacancyCleanupItem[]
+}
+
+function isPageUnavailable(page: any, error?: unknown): boolean {
+  return Boolean(page?.isClosed?.()) || (error !== undefined && isPageClosedError(error))
+}
+
+function makeCleanupUnavailableResult(options: {
+  reason: string
+  initialCount?: number
+  checkedCount?: number
+  removedCount?: number
+  items?: ManualVacancyCleanupItem[]
+}): ManualVacanciesCleanupResult {
+  const initialCount = options.initialCount ?? 0
+  const checkedCount = options.checkedCount ?? 0
+  const removedCount = options.removedCount ?? 0
+  const items = options.items ?? []
+  const keptCount = items.filter((item) => item.action === 'kept').length
+  const remainingCount = Math.max(initialCount - removedCount, 0)
+
+  return {
+    skipped: true,
+    completed: initialCount === 0,
+    initialCount,
+    checkedCount,
+    removedCount,
+    remainingCount,
+    keptCount,
+    error: options.reason,
+    items
+  }
 }
 
 function getVacancyIdFromValue(value: unknown): string | undefined {
@@ -114,6 +146,10 @@ async function openManualListStorage(page: any, timeoutMs: number): Promise<void
 }
 
 async function getManualVacancies(page: any, manualListKey: string): Promise<ManualVacancyEntry[]> {
+  if (isPageUnavailable(page)) {
+    return []
+  }
+
   return page.evaluate((storageKey: string) => {
     try {
       const parsed = JSON.parse(localStorage.getItem(storageKey) || '[]')
@@ -239,9 +275,43 @@ async function runManualVacanciesCleanup(
   let checkedCount = 0
   let removedCount = 0
 
-  await openManualListStorage(page, timeoutMs)
+  if (isPageUnavailable(page)) {
+    log('Manual vacancies cleanup skipped: page is already closed')
 
-  let manualVacancies = await getManualVacancies(page, manualListKey)
+    return makeCleanupUnavailableResult({
+      reason: 'manual vacancies cleanup skipped because page is already closed'
+    })
+  }
+
+  try {
+    await openManualListStorage(page, timeoutMs)
+  } catch (error: unknown) {
+    if (isPageUnavailable(page, error)) {
+      log('Manual vacancies cleanup skipped: cleanup page closed while opening storage')
+
+      return makeCleanupUnavailableResult({
+        reason: 'cleanup page closed while opening manual vacancies storage'
+      })
+    }
+
+    throw error
+  }
+
+  let manualVacancies: ManualVacancyEntry[]
+
+  try {
+    manualVacancies = await getManualVacancies(page, manualListKey)
+  } catch (error: unknown) {
+    if (isPageUnavailable(page, error)) {
+      log('Manual vacancies cleanup skipped: cleanup page closed while reading storage')
+
+      return makeCleanupUnavailableResult({
+        reason: 'cleanup page closed while reading manual vacancies storage'
+      })
+    }
+
+    throw error
+  }
   const initialCount = manualVacancies.length
 
   if (!initialCount) {
@@ -283,19 +353,66 @@ async function runManualVacanciesCleanup(
         reason: 'vacancy id was not found in manual list entry'
       })
       log(`Manual vacancy kept: ${getEntryKey(vacancy)} has no vacancy id`)
-      manualVacancies = await getManualVacancies(page, manualListKey)
+      try {
+        manualVacancies = await getManualVacancies(page, manualListKey)
+      } catch (error: unknown) {
+        if (isPageUnavailable(page, error)) {
+          return makeCleanupUnavailableResult({
+            reason: 'cleanup page closed while refreshing manual vacancies',
+            initialCount,
+            checkedCount,
+            removedCount,
+            items
+          })
+        }
+
+        throw error
+      }
       continue
     }
 
-    await page.goto(checkUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: timeoutMs
-    })
-    await page.waitForLoadState('load', {
-      timeout: timeoutMs
-    }).catch(() => undefined)
+    try {
+      await page.goto(checkUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: timeoutMs
+      })
+      await page.waitForLoadState('load', {
+        timeout: timeoutMs
+      }).catch(() => undefined)
+    } catch (error: unknown) {
+      if (isPageUnavailable(page, error)) {
+        return makeCleanupUnavailableResult({
+          reason: 'cleanup page closed while checking manual vacancy',
+          initialCount,
+          checkedCount,
+          removedCount,
+          items
+        })
+      }
 
-    const responseState = await getVacancyResponseState(page)
+      throw error
+    }
+
+    let responseState: {
+      hasApplyButton: boolean
+      hasAlreadyRespondedText: boolean
+    }
+
+    try {
+      responseState = await getVacancyResponseState(page)
+    } catch (error: unknown) {
+      if (isPageUnavailable(page, error)) {
+        return makeCleanupUnavailableResult({
+          reason: 'cleanup page closed while reading manual vacancy state',
+          initialCount,
+          checkedCount,
+          removedCount,
+          items
+        })
+      }
+
+      throw error
+    }
     const shouldRemove = !responseState.hasApplyButton || responseState.hasAlreadyRespondedText
 
     if (!shouldRemove) {
@@ -308,11 +425,41 @@ async function runManualVacanciesCleanup(
         reason: 'apply button is still available'
       })
       log(`Manual vacancy kept: ${vacancyId || getEntryKey(vacancy)} still has apply button`)
-      manualVacancies = await getManualVacancies(page, manualListKey)
+      try {
+        manualVacancies = await getManualVacancies(page, manualListKey)
+      } catch (error: unknown) {
+        if (isPageUnavailable(page, error)) {
+          return makeCleanupUnavailableResult({
+            reason: 'cleanup page closed while refreshing manual vacancies',
+            initialCount,
+            checkedCount,
+            removedCount,
+            items
+          })
+        }
+
+        throw error
+      }
       continue
     }
 
-    const removed = await removeManualVacancy(page, manualListKey, vacancy)
+    let removed: boolean
+
+    try {
+      removed = await removeManualVacancy(page, manualListKey, vacancy)
+    } catch (error: unknown) {
+      if (isPageUnavailable(page, error)) {
+        return makeCleanupUnavailableResult({
+          reason: 'cleanup page closed while removing manual vacancy',
+          initialCount,
+          checkedCount,
+          removedCount,
+          items
+        })
+      }
+
+      throw error
+    }
 
     if (!removed) {
       keptKeys.add(getEntryKey(vacancy))
@@ -338,7 +485,21 @@ async function runManualVacanciesCleanup(
       log(`Manual vacancy removed: ${vacancyId || getEntryKey(vacancy)}`)
     }
 
-    manualVacancies = await getManualVacancies(page, manualListKey)
+    try {
+      manualVacancies = await getManualVacancies(page, manualListKey)
+    } catch (error: unknown) {
+      if (isPageUnavailable(page, error)) {
+        return makeCleanupUnavailableResult({
+          reason: 'cleanup page closed while refreshing manual vacancies',
+          initialCount,
+          checkedCount,
+          removedCount,
+          items
+        })
+      }
+
+      throw error
+    }
   }
 
   const remainingCount = manualVacancies.length

@@ -1384,7 +1384,10 @@
         ].filter(Boolean).join(' ');
 
         log(`Manual response return loop reached ${attempts} attempts. Forcing return to search and continuing. ${reason}`, true);
-        StateManager.addParserError('MANUAL_RETURN_FORCED', reason);
+        const forcedManualVid = vid || getManualResponseVacancyId();
+        if (forcedManualVid) {
+            StateManager.addProcessedID(forcedManualVid);
+        }
         StateManager.clearTrapLock();
         StateManager.clearManualReturnState();
         setStatus('running', 'Manual response saved; forcing return to search');

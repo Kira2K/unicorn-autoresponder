@@ -7,6 +7,7 @@ const {
 } = require('../orchestrator/config.ts')
 const {
   isExecutionContextDestroyedError,
+  isPageClosedError,
   waitForDomContentLoaded
 } = require('../../../platform/browser/page-utils.ts')
 const { wait } = require('../orchestrator/runtime-utils.ts')
@@ -53,6 +54,10 @@ async function getAutoResponderStopReason(
 
       return normalizeStopReasonValue(rawStopReason)
     } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return undefined
+      }
+
       if (!isExecutionContextDestroyedError(error)) {
         throw error
       }
@@ -89,6 +94,10 @@ async function getAutoResponderRecentUrls(
 
       return normalizeRecentUrls(rawRecentUrls)
     } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return []
+      }
+
       if (!isExecutionContextDestroyedError(error)) {
         throw error
       }
@@ -124,6 +133,10 @@ async function getManualVacancies(
 
       return normalizeManualVacancies(rawManualVacancies)
     } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return []
+      }
+
       if (!isExecutionContextDestroyedError(error)) {
         throw error
       }
@@ -154,6 +167,10 @@ async function getAutoResponderSuccessCount(
         return Number.isFinite(count) ? count : 0
       }, HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY)
     } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return 0
+      }
+
       if (!isExecutionContextDestroyedError(error)) {
         throw error
       }

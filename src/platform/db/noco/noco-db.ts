@@ -209,13 +209,17 @@ function toHHAuthCredentials(
 ): ClientHHAuthCredentials {
   const phone = normalizeId(account.phone || account.login)
   const password = String(account.password ?? '').trim()
-  const email = String(account.email ?? '').trim() || undefined
+  const email = String(account.email ?? '').trim()
   const emailPassword = String(account.email_password ?? '').trim() || undefined
   const clientName = String(client.client_name ?? account.client_name ?? '').trim()
   const commonChatId = normalizeId(client.telegram_general_chat_id)
 
   if (!phone) {
     throw new Error(`Noco HH ${market} credentials for "${clientName}" are missing phone/login`)
+  }
+
+  if (!email) {
+    throw new Error(`Noco HH ${market} credentials for "${clientName}" are missing email`)
   }
 
   if (!password) {

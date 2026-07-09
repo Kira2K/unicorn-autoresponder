@@ -36,20 +36,39 @@ const DEFAULT_WATCH_MS = 15 * 60 * 1000
 const hasExplicitOrchestratorWatchMs =
   process.env.ORCHESTRATOR_WATCH_MS !== undefined &&
   String(process.env.ORCHESTRATOR_WATCH_MS).trim() !== ''
+const normalizedOrchestratorWatchMs = String(
+  process.env.ORCHESTRATOR_WATCH_MS ?? ''
+)
+  .trim()
+  .toLowerCase()
+const isOrchestratorWatchDisabled = [
+  '0',
+  'off',
+  'false',
+  'disabled',
+  'none'
+].includes(normalizedOrchestratorWatchMs)
 const hasExplicitOrchestratorResponseLimit =
   process.env.ORCHESTRATOR_RESPONSE_LIMIT !== undefined &&
   String(process.env.ORCHESTRATOR_RESPONSE_LIMIT).trim() !== ''
 const AUTO_RESPONDER_WATCH_MS = hasExplicitOrchestratorWatchMs
-  ? Number(process.env.ORCHESTRATOR_WATCH_MS)
-  : hasExplicitOrchestratorResponseLimit
+  ? isOrchestratorWatchDisabled
     ? undefined
-    : DEFAULT_WATCH_MS
+    : Number(process.env.ORCHESTRATOR_WATCH_MS)
+  : DEFAULT_WATCH_MS
 const DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT = 180
 const ORCHESTRATOR_RESPONSE_LIMIT =
   process.env.ORCHESTRATOR_RESPONSE_LIMIT === undefined ||
   String(process.env.ORCHESTRATOR_RESPONSE_LIMIT).trim() === ''
     ? DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT
     : Number(process.env.ORCHESTRATOR_RESPONSE_LIMIT)
+const DEFAULT_ORCHESTRATOR_CONCURRENCY = 1
+const parsedOrchestratorConcurrency = Number(
+  process.env.ORCHESTRATOR_CONCURRENCY ?? DEFAULT_ORCHESTRATOR_CONCURRENCY
+)
+const ORCHESTRATOR_CONCURRENCY = Number.isFinite(parsedOrchestratorConcurrency)
+  ? Math.max(1, Math.floor(parsedOrchestratorConcurrency))
+  : DEFAULT_ORCHESTRATOR_CONCURRENCY
 const DEFAULT_CLIENT_START_DELAY_MS = 20 * 1000
 const CLIENT_START_DELAY_MS = Number(
   process.env.ORCHESTRATOR_START_DELAY_MS ?? DEFAULT_CLIENT_START_DELAY_MS
@@ -87,6 +106,7 @@ module.exports = {
   CLIENT_START_DELAY_MS,
   CONNECT_OVER_CDP_TIMEOUT_MS: 60000,
   DEFAULT_CLIENT_START_DELAY_MS,
+  DEFAULT_ORCHESTRATOR_CONCURRENCY,
   DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT,
   DEFAULT_WATCH_MS,
   HAS_EXPLICIT_ORCHESTRATOR_RESPONSE_LIMIT: hasExplicitOrchestratorResponseLimit,
@@ -163,6 +183,7 @@ module.exports = {
   ]),
   SUMMARY_LOGS_CHANNEL_ID: process.env.summary_logs_channel_id?.trim(),
   TELEGRAM_MESSAGE_LIMIT: 3900,
+  ORCHESTRATOR_CONCURRENCY,
   ORCHESTRATOR_WORK_WITH_MARKET: parseMarketEnv(
     process.env.ORCHESTRATOR_WORK_WITH_MARKET
   ),

@@ -5,8 +5,10 @@ process.env.HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS = '10000'
 process.env.HH_SCENARIO_AUTH_MAX_RECHECKS = '3'
 
 const {
+  detectHhAuthState,
   waitForScenarioAuthDecision
 } = require('./orchestrator.ts') as {
+  detectHhAuthState(page: any): Promise<any>
   waitForScenarioAuthDecision(
     page: any,
     initialCheck: any
@@ -50,6 +52,66 @@ function makePage(checks: any[]) {
   }
 }
 
+function makeDetectPage(checks: any[], options: { closed?: boolean } = {}) {
+  let evaluateCount = 0
+
+  return {
+    get evaluateCount() {
+      return evaluateCount
+    },
+    isClosed: () => Boolean(options.closed),
+    url: () => 'https://hh.ru/search/vacancy',
+    waitForLoadState: async () => undefined,
+    evaluate: async () => {
+      const fallback = checks[checks.length - 1] ?? authCheck('unknown')
+      const check = checks[evaluateCount] ?? fallback
+      evaluateCount += 1
+
+      return check
+    }
+  }
+}
+
+async function testQuickAuthProbeReturnsAfterOneEvaluate(): Promise<void> {
+  const page = makeDetectPage([
+    {
+      ...authCheck('logged_in'),
+      quickAuthProbe: true
+    }
+  ])
+
+  const result = await detectHhAuthState(page)
+
+  assert.equal(result.state, 'logged_in')
+  assert.equal(result.quickAuthProbe, undefined)
+  assert.equal(page.evaluateCount, 1)
+}
+
+async function testUnknownQuickProbeFallsBackToFullScan(): Promise<void> {
+  const page = makeDetectPage([
+    {
+      ...authCheck('unknown'),
+      quickAuthProbe: true
+    },
+    authCheck('captcha')
+  ])
+
+  const result = await detectHhAuthState(page)
+
+  assert.equal(result.state, 'captcha')
+  assert.equal(page.evaluateCount, 2)
+}
+
+async function testClosedPageDoesNotEvaluate(): Promise<void> {
+  const page = makeDetectPage([], { closed: true })
+
+  const result = await detectHhAuthState(page)
+
+  assert.equal(result.state, 'unknown')
+  assert.equal(result.url, 'closed-page')
+  assert.equal(page.evaluateCount, 0)
+}
+
 async function testUnknownRechecksExactlyThreeTimes(): Promise<void> {
   const page = makePage([
     authCheck('unknown'),
@@ -86,6 +148,9 @@ async function testNonIndecisiveStateDoesNotRecheck(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await testQuickAuthProbeReturnsAfterOneEvaluate()
+  await testUnknownQuickProbeFallsBackToFullScan()
+  await testClosedPageDoesNotEvaluate()
   await testUnknownRechecksExactlyThreeTimes()
   await testCaptchaRecheckReturnsEarly()
   await testNonIndecisiveStateDoesNotRecheck()

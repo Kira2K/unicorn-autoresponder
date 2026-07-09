@@ -118,6 +118,54 @@ async function runTests(): Promise<void> {
   assert.equal(targets[1].coverText, 'Добрый день!')
   assert.equal(targets[1].stackScenario, 'https://hh.ru/applicant/vacancy_response?front')
 
+  const enTargets = buildAutomationTargetsFromNocoState(
+    {
+      clients: [
+        {
+          Id: 3,
+          client_name: 'Denis',
+          telegram_general_chat_id: '-2001',
+          rel_clients_primary_stack: { Id: 4, name: 'FRONTEND' }
+        }
+      ],
+      autoresponseRows: [
+        {
+          Id: 4,
+          rel_hhAutoresponses_client: { Id: 3, client_name: 'Denis' },
+          Сопровод_En: 'Hello!',
+          [responseField('Ru')]: 'FALSE',
+          [responseField('En')]: 'TRUE'
+        }
+      ],
+      profiles: [
+        {
+          Id: 3,
+          locale: 'en',
+          dolphin_profile_id: '555123456',
+          rel_dolphinProfiles_client: { Id: 3 }
+        }
+      ],
+      stacks: [
+        {
+          Id: 4,
+          name: 'FRONTEND',
+          slug: 'frontend',
+          hh_scenario_alias: 'React',
+          hh_scenario_url_ru: 'https://hh.ru/search/vacancy?text=react',
+          hh_scenario_url_en: 'https://hh.ru/search/vacancy?text=react-en'
+        }
+      ]
+    },
+    { market: 'En' }
+  )
+
+  assert.equal(enTargets.length, 1)
+  assert.equal(enTargets[0].clientName, 'Denis')
+  assert.equal(enTargets[0].market, 'En')
+  assert.equal(enTargets[0].dolphinProfileId, 555123456)
+  assert.equal(enTargets[0].coverText, 'Hello!')
+  assert.equal(enTargets[0].stackScenario, 'https://hh.ru/search/vacancy?text=react-en')
+
   const kiraOverrideTargets = buildAutomationTargetsFromNocoState(
     {
       clients: [
@@ -291,7 +339,32 @@ async function runTests(): Promise<void> {
   assert.equal(credentials.commonChatId, '-1003794953830')
   assert.equal(credentials.market, 'Ru')
   assert.equal(credentials.phone, '+79990001122')
+  assert.equal(credentials.email, 'ivan@example.com')
   assert.equal(credentials.password, 'canonical-secret')
+
+  const missingEmailDb = createNocoDb({
+    nocoClient: {
+      fetchRecords: async (tableId: string) => ({
+        ...recordsByTable,
+        m8zej2vsv4iypl8: [
+          {
+            Id: 103,
+            client_name: 'Иван Чебыкин',
+            platforms_id: 11,
+            rel_platformAccounts_platform: { Id: 11, label: 'hh_ru', name: 'hh' },
+            rel_platformAccounts_client: { Id: 36 },
+            phone: '+79990001122',
+            password: 'canonical-secret'
+          }
+        ]
+      })[tableId] ?? []
+    }
+  })
+
+  await assert.rejects(
+    () => missingEmailDb.getHHAuthCredentialsByCommonChatId('-1003794953830', 'Ru'),
+    /missing email/
+  )
 
   const duplicateDb = createNocoDb({
     nocoClient: {

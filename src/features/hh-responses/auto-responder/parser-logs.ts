@@ -5,6 +5,7 @@ const {
 } = require('../orchestrator/config.ts')
 const {
   isExecutionContextDestroyedError,
+  isPageClosedError,
   waitForDomContentLoaded
 } = require('../../../platform/browser/page-utils.ts')
 const { wait } = require('../orchestrator/runtime-utils.ts')
@@ -66,6 +67,10 @@ async function getAutoResponderParserErrors(
 
       return normalizeParserErrors(rawParserErrors)
     } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return []
+      }
+
       if (!isExecutionContextDestroyedError(error)) {
         throw error
       }
@@ -99,6 +104,10 @@ async function getParserLogs(page: BrowserPageLike): Promise<ParserLogEntry[]> {
 
       return normalizeParserLogs(rawParserLogs)
     } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return []
+      }
+
       if (!isExecutionContextDestroyedError(error)) {
         throw error
       }

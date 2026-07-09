@@ -38,7 +38,7 @@ export type ClientHHAuthCredentials = {
   phone: string
   rawPhone: string
   password: string
-  email?: string
+  email: string
   emailPassword?: string
 }
 

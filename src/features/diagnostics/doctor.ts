@@ -171,6 +171,7 @@ function printEnv(): void {
   console.log(`  ORCHESTRATOR_WORK_WITH_MARKET: ${marketValue ?? ''}`)
   console.log(`  parsed market: ${parsedMarket}`)
   console.log(`  ORCHESTRATOR_WATCH_MS: ${process.env.ORCHESTRATOR_WATCH_MS ?? ''}`)
+  console.log(`  ORCHESTRATOR_CONCURRENCY: ${process.env.ORCHESTRATOR_CONCURRENCY ?? ''}`)
   console.log(`  ORCHESTRATOR_START_DELAY_MS: ${process.env.ORCHESTRATOR_START_DELAY_MS ?? ''}`)
   console.log(`  DOLPHIN_HEADLESS: ${process.env.DOLPHIN_HEADLESS ?? ''}`)
   console.log(`  HH_AUTH_DEBUG: ${process.env.HH_AUTH_DEBUG ?? ''}`)

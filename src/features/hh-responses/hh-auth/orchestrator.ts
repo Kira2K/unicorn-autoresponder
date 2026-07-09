@@ -8,6 +8,7 @@ const { createAppDb } = require('../../../platform/db/index.ts') as {
 const { authorizeHHPage } = require('./index.ts')
 const {
   isExecutionContextDestroyedError,
+  isPageClosedError,
   waitForDomContentLoaded
 } = require('../../../platform/browser/page-utils.ts')
 const {
@@ -29,24 +30,129 @@ type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
 type HhAuthCheck = import('../orchestrator/types.ts').HhAuthCheck
 type HhAuthState = import('../orchestrator/types.ts').HhAuthState
 
-async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
-  const fallback = {
+function makeFallbackHhAuthCheck(
+  page: BrowserPageLike,
+  state: HhAuthState = 'unknown'
+): HhAuthCheck {
+  const pageClosed = page.isClosed()
+
+  return {
     checkedAt: new Date().toISOString(),
-    url: page.isClosed() ? 'closed-page' : page.url(),
+    url: pageClosed ? 'closed-page' : page.url(),
     title: '',
+    state,
     signals: {}
   }
+}
 
+async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
   if (page.isClosed()) {
-    return {
-      ...fallback,
-      state: 'unknown'
-    }
+    return makeFallbackHhAuthCheck(page)
   }
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
       await waitForDomContentLoaded(page)
+
+      const quickCheck = await page.evaluate(() => {
+        const readSignal = (selector: string) => {
+          const element = document.querySelector(selector)
+
+          if (!element) {
+            return { exists: false }
+          }
+
+          return {
+            exists: true,
+            tag: element.tagName,
+            dataQa: element.getAttribute('data-qa'),
+            href: element.getAttribute('href'),
+            text: (element.textContent || '').trim().slice(0, 120)
+          }
+        }
+        const readAnySignal = (selectors: string[]) => {
+          for (const selector of selectors) {
+            const signal = readSignal(selector)
+
+            if (signal.exists) {
+              return {
+                ...signal,
+                selector
+              }
+            }
+          }
+
+          return { exists: false }
+        }
+        const signals = {
+          login: readAnySignal([
+            '[data-qa="login"]',
+            '[data-qa="mainmenu_login"]',
+            '[href*="/account/login"]'
+          ]),
+          signup: readSignal('[data-qa="signup"]'),
+          anonymousProfileLink: readSignal(
+            '[data-qa="mainmenu_profile-link"][href*="/account/login"]'
+          ),
+          profileAndResumesButton: readSignal(
+            '[data-qa="profileAndResumes-button"]'
+          ),
+          vacancyResponsesButton: readSignal(
+            '[data-qa="vacancyResponses-button"]'
+          ),
+          mainmenuProfileAndResumes: readSignal(
+            '[data-qa="mainmenu_profileAndResumes"]'
+          ),
+          mainmenuVacancyResponses: readSignal(
+            '[data-qa="mainmenu_vacancyResponses"]'
+          ),
+          applicantResumesLink: readSignal('[href*="/applicant/resumes"]'),
+          applicantNegotiationsLink: readSignal(
+            '[href*="/applicant/negotiations"]'
+          ),
+          loginUrl: {
+            exists: /^https:\/\/([^/]+\.)?hh\.ru\/account\/login/i.test(location.href)
+          },
+          loginUrlHasBackUrl: {
+            exists:
+              /^https:\/\/([^/]+\.)?hh\.ru\/account\/login/i.test(location.href) &&
+              /[?&]backUrl=/i.test(location.href)
+          }
+        }
+        const strongLoggedOut =
+          signals.login.exists ||
+          signals.signup.exists ||
+          signals.anonymousProfileLink.exists ||
+          signals.loginUrl.exists
+        const loggedIn =
+          signals.profileAndResumesButton.exists ||
+          signals.vacancyResponsesButton.exists ||
+          signals.mainmenuProfileAndResumes.exists ||
+          signals.mainmenuVacancyResponses.exists ||
+          signals.applicantResumesLink.exists ||
+          signals.applicantNegotiationsLink.exists
+        const state =
+          loggedIn && !signals.loginUrl.exists
+            ? 'logged_in'
+            : strongLoggedOut
+              ? 'logged_out'
+              : 'unknown'
+
+        return {
+          state,
+          checkedAt: new Date().toISOString(),
+          url: location.href,
+          title: document.title,
+          signals,
+          quickAuthProbe: true
+        }
+      }) as HhAuthCheck & { quickAuthProbe?: boolean }
+
+      if (!quickCheck.quickAuthProbe || quickCheck.state !== 'unknown') {
+        const { quickAuthProbe: _quickAuthProbe, ...authCheck } = quickCheck
+
+        return authCheck
+      }
 
       return await page.evaluate(() => {
         const readSignal = (selector: string) => {
@@ -207,6 +313,10 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
         }
       })
     } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return makeFallbackHhAuthCheck(page)
+      }
+
       if (!isExecutionContextDestroyedError(error)) {
         throw error
       }
@@ -216,7 +326,7 @@ async function detectHhAuthState(page: BrowserPageLike): Promise<HhAuthCheck> {
   }
 
   return {
-    ...fallback,
+    ...makeFallbackHhAuthCheck(page),
     state: 'unknown'
   }
 }
@@ -335,6 +445,13 @@ async function ensureHHAuthOnCurrentPage(
   clientData: ClientAutomationData,
   page: BrowserPageLike
 ): Promise<HhAuthCheck> {
+  if (page.isClosed()) {
+    throw new Error(
+      `HH auth cannot run because the page is already closed for ` +
+        `${clientData.clientName}/${clientData.market}`
+    )
+  }
+
   const result = await withTimeout(
     authorizeHHPage(page, {
       artifactDir: getHHAuthArtifactDir(clientData),

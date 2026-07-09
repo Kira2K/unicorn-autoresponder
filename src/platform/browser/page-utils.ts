@@ -12,6 +12,12 @@ function isExecutionContextDestroyedError(error: unknown): boolean {
   )
 }
 
+function isPageClosedError(error: unknown): boolean {
+  return /Target page, context or browser has been closed|Target closed|Page closed|Context closed|Browser has been closed/i.test(
+    String((error as any)?.message ?? error)
+  )
+}
+
 async function waitForDomContentLoaded(
   page: BrowserPageLike,
   timeout = 5000
@@ -30,5 +36,6 @@ async function closePageQuietly(page: BrowserPageLike | undefined): Promise<void
 module.exports = {
   closePageQuietly,
   isExecutionContextDestroyedError,
+  isPageClosedError,
   waitForDomContentLoaded
 }

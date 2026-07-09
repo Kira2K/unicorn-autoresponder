@@ -66,6 +66,7 @@ function testClientTypeCompatibility(): void {
       market: 'Ru',
       phone: '9775442105',
       rawPhone: '+79775442105',
+      email: 'kira@example.test',
       password: 'temporary-password'
     }
   }
@@ -73,7 +74,7 @@ function testClientTypeCompatibility(): void {
   const runnable = assertRunnableClient(dbCompatibleClient)
 
   assert.equal(runnable.stackScenario, 'https://hh.ru/search/vacancy')
-  assert.equal(runnable.hhAuthCredentials?.email, undefined)
+  assert.equal(runnable.hhAuthCredentials?.email, 'kira@example.test')
 }
 
 function testManualVacancyNormalization(): void {

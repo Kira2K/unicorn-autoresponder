@@ -42,6 +42,7 @@ const {
   EXTERNAL_TIMEOUT_MULTIPLIER,
   EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS,
   LOCAL_RUN_LOG_FILE,
+  ORCHESTRATOR_CONCURRENCY,
   ORCHESTRATOR_RESPONSE_LIMIT,
   ORCHESTRATOR_WORK_WITH_MARKET
 } = require('../orchestrator/config.ts')
@@ -59,6 +60,7 @@ const RUN_CLEANUP_TIMEOUT_MS = Number(
   process.env.ORCHESTRATOR_FINAL_CLEANUP_TIMEOUT_MS ?? 30000
 )
 let runExitLogged = false
+let latestRunSummaryStatuses: OrchestratorStatus[] = []
 
 function writeRunExitLog(options: {
   exitCode: number
@@ -89,7 +91,8 @@ function getRunCompletionReason(results: OrchestratorStatus[]): string {
 }
 
 async function sendRunSummaryLogWithTimeout(
-  results: OrchestratorStatus[]
+  results: OrchestratorStatus[],
+  reason = 'final'
 ): Promise<void> {
   try {
     await withTimeout(
@@ -101,11 +104,29 @@ async function sendRunSummaryLogWithTimeout(
     console.error(`Failed to send run summary: ${getErrorMessage(error)}`)
     writeLocalRunLog({
       kind: 'run-summary-send-failed',
+      reason,
       timeoutMs: RUN_REPORT_TIMEOUT_MS,
       error: getErrorMessage(error),
       errorStack: getErrorStack(error)
     })
   }
+}
+
+async function sendRunCheckpointLogWithTimeout(
+  results: OrchestratorStatus[],
+  reason: string
+): Promise<void> {
+  if (!results.length) {
+    return
+  }
+
+  latestRunSummaryStatuses = [...results]
+  writeLocalRunLog({
+    kind: 'run-checkpoint',
+    reason,
+    results
+  })
+  await sendRunSummaryLogWithTimeout(results, reason)
 }
 
 async function sendRunErrorLogWithTimeout(error: unknown): Promise<void> {
@@ -151,18 +172,88 @@ async function stopStartedProfilesWithTimeout(reason: string): Promise<void> {
 function getRecommendedExternalTimeoutMs(
   clientCount: number,
   watchMs = AUTO_RESPONDER_WATCH_MS,
-  clientStartDelayMs = CLIENT_START_DELAY_MS
+  clientStartDelayMs = CLIENT_START_DELAY_MS,
+  concurrency = ORCHESTRATOR_CONCURRENCY
 ): number | undefined {
   if (watchMs === undefined) {
     return undefined
   }
 
+  const safeConcurrency = Math.max(1, Math.floor(Number(concurrency) || 1))
+  const clientBatches = Math.ceil(clientCount / safeConcurrency)
+  const watchTotalMs = clientBatches * watchMs
   const staggerTotalMs = Math.max(clientCount - 1, 0) * clientStartDelayMs
   const profileBufferMs = clientCount * EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS
 
   return Math.ceil(
-    (watchMs + staggerTotalMs + profileBufferMs) * EXTERNAL_TIMEOUT_MULTIPLIER
+    (watchTotalMs + staggerTotalMs + profileBufferMs) * EXTERNAL_TIMEOUT_MULTIPLIER
   )
+}
+
+async function runWithBoundedConcurrency<T, R>(
+  items: T[],
+  options: {
+    concurrency: number
+    startDelayMs: number
+    runItem: (item: T, index: number) => Promise<R>
+    getWaitMessage?: (item: T, index: number, waitMs: number) => string
+  }
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  const workerCount = Math.min(
+    items.length,
+    Math.max(1, Math.floor(Number(options.concurrency) || 1))
+  )
+  const startDelayMs = Math.max(0, Number(options.startDelayMs) || 0)
+  let nextIndex = 0
+  let nextStartAt = 0
+  let startGate: Promise<void> = Promise.resolve()
+
+  async function waitForStartTurn(item: T, index: number): Promise<void> {
+    const previousGate = startGate
+    let releaseGate: () => void = () => undefined
+
+    startGate = new Promise<void>(resolve => {
+      releaseGate = resolve
+    })
+
+    await previousGate
+
+    try {
+      const waitMs = Math.max(nextStartAt - Date.now(), 0)
+
+      if (waitMs > 0) {
+        const message = options.getWaitMessage?.(item, index, waitMs)
+
+        if (message) {
+          console.log(message)
+        }
+
+        await wait(waitMs)
+      }
+
+      nextStartAt = Date.now() + startDelayMs
+    } finally {
+      releaseGate()
+    }
+  }
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      const item = items[index]
+
+      await waitForStartTurn(item, index)
+      results[index] = await options.runItem(item, index)
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => runWorker())
+  )
+
+  return results
 }
 
 function getClientReadinessError(client: ClientAutomationData): Error | null {
@@ -180,6 +271,10 @@ function getClientReadinessError(client: ClientAutomationData): Error | null {
 
   if (!String(client.hhAuthCredentials.password ?? '').trim()) {
     return new Error(`HH password for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
+  }
+
+  if (!String(client.hhAuthCredentials.email ?? '').trim()) {
+    return new Error(`HH email for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
   }
 
   return null
@@ -257,7 +352,8 @@ async function runClientsOrchestrator(
   await assertPreexistingDolphinProfileLimit()
 
   console.log(
-    `Starting ${readiness.clients.length} clients with ${CLIENT_START_DELAY_MS}ms stagger: ${readiness.clients
+    `Starting ${readiness.clients.length} clients with concurrency ${ORCHESTRATOR_CONCURRENCY} ` +
+      `and ${CLIENT_START_DELAY_MS}ms start delay: ${readiness.clients
       .map(
         client =>
           `${client.clientName}/${client.commonChatId}/${client.market}(${client.dolphinProfileId})`
@@ -278,6 +374,7 @@ async function runClientsOrchestrator(
     watchMs: AUTO_RESPONDER_WATCH_MS,
     watchTimerDisabled: AUTO_RESPONDER_WATCH_MS === undefined,
     clientStartDelayMs: CLIENT_START_DELAY_MS,
+    orchestratorConcurrency: ORCHESTRATOR_CONCURRENCY,
     recommendedExternalTimeoutMs: getRecommendedExternalTimeoutMs(
       readiness.clients.length
     ),
@@ -291,18 +388,14 @@ async function runClientsOrchestrator(
     }))
   })
 
-  const results = await Promise.all(
-    readiness.clients.map(async (client, index) => {
-      const delayMs = index * CLIENT_START_DELAY_MS
-
-      if (delayMs > 0) {
-        console.log(
-          `Waiting ${delayMs}ms before starting ${client.clientName}/${client.market}(${client.dolphinProfileId})`
-        )
-        await wait(delayMs)
-      }
-
-      return runClientOrchestrator(client).catch((error: unknown) => {
+  const completedStatuses: OrchestratorStatus[] = []
+  const results = await runWithBoundedConcurrency(readiness.clients, {
+    concurrency: ORCHESTRATOR_CONCURRENCY,
+    startDelayMs: CLIENT_START_DELAY_MS,
+    getWaitMessage: (client, _index, waitMs) =>
+      `Waiting ${waitMs}ms before starting ${client.clientName}/${client.market}(${client.dolphinProfileId})`,
+    runItem: async client => {
+      const status = await runClientOrchestrator(client).catch((error: unknown) => {
         const status = makeClientPreparationErrorStatus(
           client,
           error,
@@ -315,12 +408,26 @@ async function runClientsOrchestrator(
 
         return status
       })
-    })
-  )
+
+      const checkpointResults = [
+        ...extraSummaryStatuses,
+        ...completedStatuses,
+        status
+      ]
+      completedStatuses.push(status)
+      await sendRunCheckpointLogWithTimeout(
+        checkpointResults,
+        `client-finished:${client.clientName}/${client.market ?? 'unknown'}`
+      )
+
+      return status
+    }
+  })
 
   const summaryResults = [...extraSummaryStatuses, ...results]
 
   console.log(summaryResults)
+  latestRunSummaryStatuses = [...summaryResults]
   writeLocalRunLog({
     kind: 'run-results',
     results: summaryResults
@@ -481,6 +588,10 @@ function installProcessShutdownCleanup(): void {
       signal,
       startedProfileIds: getStartedProfileIds()
     })
+    await sendRunCheckpointLogWithTimeout(
+      latestRunSummaryStatuses,
+      `process-signal:${signal}`
+    )
     await stopStartedProfilesWithTimeout(signal)
     writeRunExitLog({
       exitCode,
@@ -545,6 +656,7 @@ module.exports = {
   getRunningDolphinBrowserProfileIds,
   openScenarioAndInjectIndex,
   main,
+  runWithBoundedConcurrency,
   runAllClientsOrchestrator,
   runClientOrchestrator,
   runConfiguredOrchestrator,

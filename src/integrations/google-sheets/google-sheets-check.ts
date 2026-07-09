@@ -90,7 +90,7 @@ type ClientHHAuthCredentials = {
   phone: string
   rawPhone: string
   password: string
-  email?: string
+  email: string
   emailPassword?: string
 }
 
@@ -895,7 +895,7 @@ function mapClientHHAuthCredentialsFromColumn(
     phone,
     rawPhone,
     password,
-    email: email || undefined,
+    email,
     emailPassword: emailPassword || undefined
   }
 }

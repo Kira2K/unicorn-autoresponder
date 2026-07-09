@@ -31,6 +31,7 @@ function makeCredentials(
     market: 'Ru',
     phone: '9775442105',
     rawPhone: '+79775442105',
+    email: 'client@example.test',
     password: 'temporary-password'
   }
 }
