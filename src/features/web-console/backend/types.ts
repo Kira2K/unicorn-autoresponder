@@ -112,6 +112,41 @@ export type AdminTelegramSender = {
   dbPath: string
 }
 
+export type ResumeWorkflowPatch = Partial<{
+  status: string
+  studentDataFolderUrl: string
+  cvDraftUrl: string
+  enVersionUrl: string
+  ruVersionUrl: string
+  additionalVersions: string
+  kirasComments: string
+  lastResponsible: string
+  lastWorkflowError: string
+  workflowTrace: string
+}>
+
+export type ResumeWorkflowRecord = {
+  id: number
+  clientId: number
+  clientName: string
+  clientMarket?: string
+  clientTelegramUsername?: string
+  commonChatId?: string
+  education?: string
+  englishLevel?: string
+  englishLevelId?: number
+  status: string
+  studentDataFolderUrl: string
+  cvDraftUrl: string
+  enVersionUrl: string
+  ruVersionUrl: string
+  additionalVersions: string
+  kirasComments: string
+  lastResponsible: string
+  lastWorkflowError: string
+  workflowTrace: string
+}
+
 export type WebConsoleRepository = {
   findClientByCalendarEmail(email: string): Promise<WebClient | null>
   getAllDolphinProfileIds(): Promise<number[]>
@@ -122,6 +157,10 @@ export type WebConsoleRepository = {
   getLatestClientDashboard(options?: { fullAccess?: boolean }): Promise<ClientDashboard>
   findClientByTelegramChatId(chatId: string): Promise<WebClient | null>
   updateGoogleFolderByTelegramChatId(chatId: string, googleFolder: string): Promise<WebClient | null>
+  getResumeWorkflowByTelegramChatId(chatId: string, options?: { ensure?: boolean }): Promise<ResumeWorkflowRecord | null>
+  getResumeWorkflowById(workflowId: number): Promise<ResumeWorkflowRecord | null>
+  getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]>
+  patchResumeWorkflow(recordId: number, patch: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord>
   getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null>
   getProviderClientsForStatus(statusLabel: string): Promise<ProviderClientRow[]>
   listEnglishLevels(): Promise<WebOption[]>

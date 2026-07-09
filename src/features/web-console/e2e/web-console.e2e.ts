@@ -6,6 +6,9 @@ const { chromium } = require('playwright')
 
 const ROOT = path.resolve(__dirname, '../../../..')
 const ARTIFACT_DIR = path.join(ROOT, 'tmp', 'web-console-e2e')
+const AI_TAILOR_FIXTURE_DIR = path.join(ROOT, 'src', 'features', 'web-console', 'test-fixtures', 'ai-tailoring')
+const AI_TAILOR_PDF = path.join(AI_TAILOR_FIXTURE_DIR, 'Kira Samsonova React.pdf')
+const AI_TAILOR_JOB_REQUIREMENTS = fs.readFileSync(path.join(AI_TAILOR_FIXTURE_DIR, 'AI-tailor-test-text.txt'), 'utf8')
 const API_PORT = 4310
 const UI_PORT = 4311
 const MOCK_PLATFORM_LABELS = ['email_en', 'hh_ru', 'linkedin', 'telegram_ru']
@@ -258,6 +261,7 @@ async function runTests(): Promise<void> {
     await page.locator('input[type="password"]').fill('Nariman')
     await page.getByTestId('login-button').click()
     await page.getByTestId('provider-dashboard').waitFor()
+    assert.equal(await page.getByTestId('admin-ai-tailor-open-button').count(), 0)
     assert.equal(await page.getByTestId('admin-telegram-open-button').count(), 0)
     await assertText(page, 'Ильяс Тохтаран')
     await assertText(page, 'LinkedIn email')
@@ -288,6 +292,7 @@ async function runTests(): Promise<void> {
     await page.locator('input[type="password"]').fill('1234')
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
+    assert.equal(await page.getByTestId('admin-ai-tailor-open-button').count(), 0)
     await dismissRequiredDataDialogIfVisible(page)
     await page.getByTestId('open-dolphin-client-button').click()
     await page.getByTestId('dolphin-lease-error').waitFor()
@@ -313,6 +318,42 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByTestId('telegram-card').count(), 0)
     assert.equal(await page.getByTestId('own-proxy-panel').count(), 0)
     assert.equal(await page.getByTestId('open-dolphin-admin-button').count(), 0)
+    await page.getByTestId('admin-ai-tailor-open-button').click()
+    await page.getByTestId('admin-ai-tailor-dialog').waitFor()
+    await page.getByTestId('admin-ai-tailor-dialog').getByText('[Beta] CV AI-tailoring', { exact: false }).waitFor()
+    await page.getByTestId('admin-ai-tailor-file-input').setInputFiles(AI_TAILOR_PDF)
+    await page.getByTestId('admin-ai-tailor-file-name').getByText('Kira Samsonova React.pdf', { exact: false }).waitFor()
+    await page.getByTestId('admin-ai-tailor-job-requirements').fill(AI_TAILOR_JOB_REQUIREMENTS)
+    page.once('dialog', (dialog: any) => dialog.accept())
+    await page.getByTestId('admin-ai-tailor-submit-button').click()
+    await page.getByTestId('admin-ai-tailor-status').getByText('Tailored CV is ready', { exact: false }).waitFor()
+    await page.getByTestId('admin-ai-tailor-result-link').getByText('https://tailered-cv.example/mock/Kira%20Samsonova%20React.pdf', { exact: false }).waitFor()
+    assert.equal(
+      await page.getByTestId('admin-ai-tailor-result-link').getAttribute('href'),
+      'https://tailered-cv.example/mock/Kira%20Samsonova%20React.pdf'
+    )
+    assert.equal(await page.getByTestId('admin-ai-tailor-result-link').getAttribute('target'), '_blank')
+    await page.getByTestId('admin-ai-tailor-job-requirements').fill(`${AI_TAILOR_JOB_REQUIREMENTS}\nSecond pass`)
+    await page.getByTestId('admin-ai-tailor-always-verify').uncheck()
+    assert.equal(await page.getByTestId('admin-ai-tailor-always-verify').isChecked(), false)
+    let unexpectedAiTailorDialog = false
+    const unexpectedDialogHandler = async (dialog: any) => {
+      unexpectedAiTailorDialog = true
+      await dialog.dismiss()
+    }
+    page.once('dialog', unexpectedDialogHandler)
+    await page.getByTestId('admin-ai-tailor-submit-button').click()
+    await page.getByTestId('admin-ai-tailor-result-link').waitFor()
+    await page.waitForTimeout(250)
+    page.off('dialog', unexpectedDialogHandler)
+    assert.equal(unexpectedAiTailorDialog, false)
+    await page.getByTestId('admin-ai-tailor-clear-button').click()
+    assert.equal(await page.getByTestId('admin-ai-tailor-file-name').count(), 0)
+    assert.equal(await page.getByTestId('admin-ai-tailor-job-requirements').inputValue(), '')
+    assert.equal(await page.getByTestId('admin-ai-tailor-result-link').count(), 0)
+    assert.equal(await page.getByTestId('admin-ai-tailor-status').count(), 0)
+    assert.equal(await page.getByTestId('admin-ai-tailor-always-verify').isChecked(), false)
+    await page.keyboard.press('Escape')
     await page.getByTestId('admin-telegram-open-button').click()
     await page.getByTestId('admin-telegram-dialog').waitFor()
     await page.getByTestId('admin-telegram-sender-summary').click()

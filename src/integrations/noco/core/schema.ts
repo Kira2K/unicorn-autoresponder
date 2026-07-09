@@ -75,6 +75,11 @@ const TABLES = {
     id: 'mes5o0s90zwat1t',
     title: 'hh-autoresponses'
   },
+  cvProcessing: {
+    key: 'cvProcessing',
+    id: 'mhiysd8l0f33bny',
+    title: 'CV processing'
+  },
   market: {
     key: 'market',
     id: 'molt1q7vu7peibh',
@@ -97,7 +102,8 @@ const RELATION_TABLE_KEYS = [
   'restrictions',
   'dataStatuses',
   'resumeProfiles',
-  'hhAutoresponses'
+  'hhAutoresponses',
+  'cvProcessing'
 ] as const
 
 const RELATIONS = {

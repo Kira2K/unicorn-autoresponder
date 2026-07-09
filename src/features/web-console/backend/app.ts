@@ -28,6 +28,29 @@ const { createTelegramBotApi } = require('../../../integrations/telegram/bot-api
   createTelegramBotApi(options?: any): TelegramBotApi
 }
 const {
+  getProviderTaskById,
+  getProviderTasks,
+  getResumeStatus,
+  publicWorkflow,
+  resetResumeWorkflowForTest,
+  resumeWorkflow,
+  resumeWorkflowById
+} = require('../../../integrations/telegram/resume-workflow.ts') as {
+  getProviderTaskById(workflowId: number, repository: WebConsoleRepository, actor?: any): Promise<any>
+  getProviderTasks(repository: WebConsoleRepository, actor?: any): Promise<any>
+  getResumeStatus(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
+  publicWorkflow(record: any): any
+  resetResumeWorkflowForTest(chatId: string, repository: WebConsoleRepository): Promise<any>
+  resumeWorkflow(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
+  resumeWorkflowById(workflowId: number, repository: WebConsoleRepository, options?: any): Promise<any>
+}
+const { sendTelegramMessage } = require('../../../integrations/telegram/messenger.ts') as {
+  sendTelegramMessage(to: string, message: string, options?: { parseMode?: false | 'html' | 'md' | 'markdown' }): Promise<void>
+}
+const { SUMMARY_LOGS_CHANNEL_ID } = require('../../hh-responses/orchestrator/config.ts') as {
+  SUMMARY_LOGS_CHANNEL_ID?: string
+}
+const {
   buildProxyName,
   buildProfileName,
   buildProxyNameExample,
@@ -98,7 +121,19 @@ type TelegramService = {
   disconnect(clientId: number, accountId?: number): Promise<unknown>
 }
 type TelegramBotApi = {
-  sendMessage(input: { chatId: string; text: string }): Promise<unknown>
+  sendMessage(input: { chatId: string; text: string; replyMarkup?: unknown; parseMode?: string }): Promise<unknown>
+}
+type CvTailoringRequest = {
+  fileName: string
+  mimeType: string
+  fileBuffer: Buffer
+  jobRequirements: string
+}
+type CvTailoringResult = {
+  url: string
+}
+type CvTailoringService = {
+  tailorFromPdf(request: CvTailoringRequest): Promise<CvTailoringResult>
 }
 
 const SESSION_COOKIE = 'web_console_session'
@@ -108,6 +143,8 @@ const CLIENT_PASSWORD = '1234'
 const PROVIDER_LOGIN = 'Nariman'
 const PROVIDER_PASSWORD = 'Nariman'
 const PROVIDER_STATUS_LABEL = 'on en market'
+const CV_TAILORING_ENDPOINT = 'https://tailered-cv.onrender.com/cv-from-pdf'
+const CV_TAILORING_MAX_PDF_BYTES = 15 * 1024 * 1024
 
 type AuthedRequest = Request & { webSession?: WebSession }
 
@@ -317,6 +354,73 @@ async function buildOwnProxyName(repository: WebConsoleRepository, client: any):
   return enProfile ? buildProxyName(client, enProfile.id) : ''
 }
 
+function createDefaultCvTailoringService(fetchImpl: typeof fetch = fetch): CvTailoringService {
+  return {
+    async tailorFromPdf(request: CvTailoringRequest): Promise<CvTailoringResult> {
+      const apiKey = String(process.env.CV_TAILORING_API_KEY ?? '').trim()
+      if (!apiKey) {
+        throw Object.assign(new Error('CV tailoring API key is not configured.'), {
+          code: 'cv_tailoring_not_configured'
+        })
+      }
+      const formData = new FormData()
+      const pdfBytes = new Uint8Array(request.fileBuffer.length)
+      pdfBytes.set(request.fileBuffer)
+      formData.append('cv', new Blob([pdfBytes.buffer], { type: 'application/pdf' }), request.fileName)
+      formData.append('jobRequirements', request.jobRequirements)
+      const response = await fetchImpl(CV_TAILORING_ENDPOINT, {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey },
+        body: formData
+      })
+      if (!response.ok) {
+        const message = await response.text().catch(() => '')
+        throw Object.assign(new Error(message || `CV tailoring API failed with ${response.status}`), {
+          code: 'cv_tailoring_api_failed',
+          status: response.status
+        })
+      }
+      const rawUrl = (await response.text()).trim()
+      const parsedUrl = extractCvTailoringUrl(rawUrl)
+      if (!parsedUrl) {
+        throw Object.assign(new Error('CV tailoring API returned an empty URL.'), {
+          code: 'cv_tailoring_api_failed',
+          status: response.status
+        })
+      }
+      return { url: parsedUrl }
+    }
+  }
+}
+
+function extractCvTailoringUrl(value: string): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const parsedUrl = (() => {
+    try {
+      const parsed = JSON.parse(raw)
+      if (typeof parsed === 'string') return parsed.trim()
+      if (parsed && typeof parsed.url === 'string') return parsed.url.trim()
+      if (parsed && typeof parsed.result === 'string') return parsed.result.trim()
+      if (parsed && typeof parsed.fileUrl === 'string') return parsed.fileUrl.trim()
+      return ''
+    } catch {
+      return raw
+    }
+  })()
+  return parsedUrl
+}
+
+function createMockCvTailoringService(): CvTailoringService {
+  return {
+    async tailorFromPdf(request: CvTailoringRequest): Promise<CvTailoringResult> {
+      return {
+        url: `https://tailered-cv.example/mock/${encodeURIComponent(request.fileName)}`
+      }
+    }
+  }
+}
+
 function createWebConsoleApp(options: {
   repository?: WebConsoleRepository
   dolphinLeaseService?: DolphinLeaseService
@@ -326,6 +430,10 @@ function createWebConsoleApp(options: {
   verificationCodeService?: VerificationCodeService
   telegramService?: TelegramService
   telegramBotApi?: TelegramBotApi
+  cvTailoringService?: CvTailoringService
+  cvTailoringFetch?: typeof fetch
+  summaryLogsChannelId?: string
+  sendSummaryTelegramMessage?: typeof sendTelegramMessage
   telegramAdapter?: any
   telegramProxyResolver?: any
   useMockData?: boolean
@@ -353,6 +461,11 @@ function createWebConsoleApp(options: {
       : undefined)
   })
   const telegramBotApi = options.telegramBotApi ?? createTelegramBotApi()
+  const cvTailoringService = options.cvTailoringService ?? (useMockData
+    ? createMockCvTailoringService()
+    : createDefaultCvTailoringService(options.cvTailoringFetch))
+  const summaryLogsChannelId = options.summaryLogsChannelId ?? SUMMARY_LOGS_CHANNEL_ID
+  const sendSummaryTelegramMessage = options.sendSummaryTelegramMessage ?? sendTelegramMessage
   const sessions = createSessionStore()
   const app = express()
 
@@ -433,6 +546,95 @@ function createWebConsoleApp(options: {
       throw Object.assign(new Error('Telegram message text is too long.'), { code: 'telegram_message_too_long' })
     }
     return text
+  }
+
+  function validateCvTailoringRequest(body: any): CvTailoringRequest {
+    const fileName = String(body?.fileName ?? '').trim() || 'cv.pdf'
+    const mimeType = String(body?.mimeType ?? '').trim() || 'application/pdf'
+    const dataBase64 = String(body?.dataBase64 ?? '').trim()
+    const jobRequirements = String(body?.jobRequirements ?? '').trim()
+    if (!jobRequirements) {
+      throw Object.assign(new Error('Job requirements are required.'), { code: 'cv_tailoring_missing_job_requirements' })
+    }
+    if (!dataBase64) {
+      throw Object.assign(new Error('PDF file is required.'), { code: 'cv_tailoring_missing_pdf' })
+    }
+    if (!/\.pdf$/i.test(fileName) || mimeType !== 'application/pdf') {
+      throw Object.assign(new Error('CV must be a PDF file.'), { code: 'cv_tailoring_invalid_pdf' })
+    }
+    const fileBuffer = Buffer.from(dataBase64, 'base64')
+    if (!fileBuffer.length || fileBuffer.length > CV_TAILORING_MAX_PDF_BYTES || fileBuffer.subarray(0, 4).toString('utf8') !== '%PDF') {
+      throw Object.assign(new Error('CV must be a non-empty PDF file.'), { code: 'cv_tailoring_invalid_pdf' })
+    }
+    return { fileName, mimeType, fileBuffer, jobRequirements }
+  }
+
+  function botActorFromRequest(req: Request) {
+    return {
+      userId: String(req.header('X-Telegram-User-Id') ?? req.body?.actor?.userId ?? req.query?.actorUserId ?? '').trim(),
+      username: String(req.header('X-Telegram-Username') ?? req.body?.actor?.username ?? req.query?.actorUsername ?? '').trim(),
+      chatId: String(req.header('X-Telegram-Chat-Id') ?? req.body?.actor?.chatId ?? req.query?.actorChatId ?? '').trim(),
+      chatType: String(req.header('X-Telegram-Chat-Type') ?? req.body?.actor?.chatType ?? req.query?.actorChatType ?? '').trim()
+    }
+  }
+
+  function publicResumeResult(result: any, extra: Record<string, unknown> = {}) {
+    return {
+      ...result,
+      ...extra,
+      workflow: result.workflow ? publicWorkflow(result.workflow) : undefined
+    }
+  }
+
+  async function sendResumeNotifications(result: any): Promise<string[]> {
+    const warnings: string[] = []
+    const notifications = Array.isArray(result?.notifications) ? result.notifications : []
+
+    function notificationWarning(notification: any, error: any): string {
+      const message = error instanceof Error ? error.message : String(error)
+      if (
+        (notification.kind === 'private_provider' || notification.kind === 'private_kira') &&
+        /bot can't initiate conversation with a user/i.test(message)
+      ) {
+        return `${notification.kind} notification failed: ask this Telegram user to open @veu_support_bot and send /start once.`
+      }
+      return `${notification.kind} notification failed: ${message}`
+    }
+
+    for (const notification of notifications) {
+      try {
+        if (notification.kind === 'hh_summary') {
+          if (summaryLogsChannelId) {
+            await sendSummaryTelegramMessage(summaryLogsChannelId, notification.text, { parseMode: false })
+          }
+          continue
+        }
+
+        if (!notification.chatId) {
+          warnings.push(`Notification ${notification.kind} skipped: missing chat id.`)
+          continue
+        }
+
+        await telegramBotApi.sendMessage({
+          chatId: notification.chatId,
+          text: notification.text
+        })
+      } catch (error: any) {
+        warnings.push(notificationWarning(notification, error))
+      }
+    }
+
+    if (warnings.length && result?.workflow?.id) {
+      try {
+        await repository.patchResumeWorkflow(Number(result.workflow.id), {
+          lastWorkflowError: `Notification warning: ${warnings.join('; ')}`
+        })
+      } catch {
+        // Preserve the original workflow response.
+      }
+    }
+
+    return warnings
   }
 
   function setSessionCookie(res: Response, session: WebSession): void {
@@ -534,6 +736,14 @@ function createWebConsoleApp(options: {
     }
   })
 
+  app.get('/api/bot/status', requireBotApiToken, async (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      service: 'web-console-backend',
+      checkedAt: new Date().toISOString()
+    })
+  })
+
   app.get('/api/bot/telegram/chats/:chatId/client', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const chatId = String(req.params.chatId ?? '').trim()
@@ -558,6 +768,86 @@ function createWebConsoleApp(options: {
         return
       }
       res.json({ success: true, client: publicTelegramClient(client) })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/bot/telegram/chats/:chatId/resume', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.params.chatId ?? '').trim()
+      const result = await resumeWorkflow(chatId, repository, {
+        actor: botActorFromRequest(req),
+        expectedStatus: req.body?.expectedStatus
+      })
+      const notificationWarnings = await sendResumeNotifications(result)
+      res.status(result.found ? 200 : 404).json(publicResumeResult(result, { notificationWarnings }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/bot/telegram/chats/:chatId/resume/status', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.params.chatId ?? '').trim()
+      const result = await getResumeStatus(chatId, repository, {
+        actor: botActorFromRequest(req)
+      })
+      res.status(result.found ? 200 : 404).json(publicResumeResult(result))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/bot/telegram/chats/:chatId/resume/reset-test', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.params.chatId ?? '').trim()
+      const result = await resetResumeWorkflowForTest(chatId, repository)
+      res.status(result.found ? 200 : 404).json(publicResumeResult(result))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/bot/telegram/resume/provider/tasks', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await getProviderTasks(repository, botActorFromRequest(req))
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/bot/telegram/resume/workflows/:workflowId', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const workflowId = Number(req.params.workflowId)
+      if (!Number.isFinite(workflowId) || workflowId <= 0) {
+        res.status(400).json({ error: 'invalid_workflow_id' })
+        return
+      }
+      const result = await getProviderTaskById(workflowId, repository, botActorFromRequest(req))
+      res.status(result.workflow ? 200 : 404).json({
+        ...result,
+        workflow: result.workflow ? publicWorkflow(result.workflow) : undefined
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/bot/telegram/resume/workflows/:workflowId/advance', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const workflowId = Number(req.params.workflowId)
+      if (!Number.isFinite(workflowId) || workflowId <= 0) {
+        res.status(400).json({ error: 'invalid_workflow_id' })
+        return
+      }
+      const result = await resumeWorkflowById(workflowId, repository, {
+        actor: botActorFromRequest(req),
+        expectedStatus: req.body?.expectedStatus
+      })
+      const notificationWarnings = await sendResumeNotifications(result)
+      res.status(result.found ? 200 : 404).json(publicResumeResult(result, { notificationWarnings }))
     } catch (error) {
       next(error)
     }
@@ -1032,6 +1322,18 @@ function createWebConsoleApp(options: {
     }
   })
 
+  app.post('/api/admin/cv-tailor/from-pdf', requireRole('admin'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const input = validateCvTailoringRequest(req.body)
+      const result = await cvTailoringService.tailorFromPdf(input)
+      res.json({
+        url: result.url
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
   app.post('/api/admin/clients/:clientId/telegram/send', requireRole('admin'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       const clientId = Number(req.params.clientId)
@@ -1119,6 +1421,50 @@ function createWebConsoleApp(options: {
     }
     if ((error as any)?.code === 'invalid_google_folder' || (error as any)?.code === 'telegram_message_too_long') {
       res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if (
+      (error as any)?.code === 'cv_tailoring_missing_job_requirements' ||
+      (error as any)?.code === 'cv_tailoring_missing_pdf' ||
+      (error as any)?.code === 'cv_tailoring_invalid_pdf'
+    ) {
+      res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'cv_tailoring_api_failed') {
+      res.status(502).json({
+        error: (error as any).code,
+        message: error instanceof Error ? error.message : String(error),
+        status: (error as any).status
+      })
+      return
+    }
+    if ((error as any)?.code === 'cv_tailoring_not_configured') {
+      res.status(503).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'resume_reset_test_disabled') {
+      res.status(403).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'resume_required_data_missing') {
+      res.status(422).json({
+        error: (error as any).code,
+        message: error instanceof Error ? error.message : String(error),
+        missingFields: (error as any).missingFields ?? []
+      })
+      return
+    }
+    if (
+      (error as any)?.code === 'resume_workflow_stale_status' ||
+      (error as any)?.code === 'resume_workflow_noop' ||
+      (error as any)?.code === 'resume_workflow_stopped'
+    ) {
+      res.status(409).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if ((error as any)?.code === 'resume_workflow_failed') {
+      res.status(500).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return
     }
     if ((error as any)?.code === 'missing_target_client' || (error as any)?.code === 'telegram_account_not_found') {

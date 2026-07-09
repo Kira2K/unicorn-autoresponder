@@ -102,6 +102,15 @@ const adminTelegramAlwaysVerify = ref(true)
 const adminTelegramLoading = ref(false)
 const adminTelegramStatus = ref('')
 const adminTelegramError = ref('')
+const adminAiTailorModalOpen = ref(false)
+const adminAiTailorFile = ref(null)
+const adminAiTailorFileName = ref('')
+const adminAiTailorJobRequirements = ref('')
+const adminAiTailorAlwaysVerify = ref(true)
+const adminAiTailorLoading = ref(false)
+const adminAiTailorStatus = ref('')
+const adminAiTailorError = ref('')
+const adminAiTailorResultUrl = ref('')
 const adminLinkedChatMessage = ref('')
 const adminLinkedChatLoading = ref(false)
 const adminLinkedChatStatus = ref('')
@@ -212,6 +221,10 @@ const adminTelegramVerifyTitle = computed(() => adminTelegramAlwaysVerify.value
   ? 'ask to verify every message'
   : 'check for enable verification'
 )
+const adminAiTailorVerifyTitle = computed(() => adminAiTailorAlwaysVerify.value
+  ? 'ask to verify every tailoring request'
+  : 'check for enable verification'
+)
 
 function setError(value) {
   error.value = value instanceof Error ? value.message : String(value || '')
@@ -271,6 +284,69 @@ async function addAdminTelegramFiles(event) {
 
 function removeAdminTelegramAttachment(index) {
   adminTelegramAttachments.value = adminTelegramAttachments.value.filter((_, itemIndex) => itemIndex !== index)
+}
+
+function openAdminAiTailorModal() {
+  adminAiTailorModalOpen.value = true
+  adminAiTailorError.value = ''
+  adminAiTailorStatus.value = ''
+}
+
+function addAdminAiTailorFile(event) {
+  const file = event.target.files?.[0] || null
+  adminAiTailorFile.value = file
+  adminAiTailorFileName.value = file?.name || ''
+  adminAiTailorError.value = ''
+  adminAiTailorStatus.value = ''
+  adminAiTailorResultUrl.value = ''
+  event.target.value = ''
+}
+
+function clearAdminAiTailorForm() {
+  adminAiTailorFile.value = null
+  adminAiTailorFileName.value = ''
+  adminAiTailorJobRequirements.value = ''
+  adminAiTailorError.value = ''
+  adminAiTailorStatus.value = ''
+  adminAiTailorResultUrl.value = ''
+}
+
+async function tailorAdminCv() {
+  const file = adminAiTailorFile.value
+  const jobRequirements = adminAiTailorJobRequirements.value.trim()
+  if (!file) {
+    adminAiTailorError.value = 'PDF CV is required'
+    return
+  }
+  if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+    adminAiTailorError.value = 'CV must be a PDF file'
+    return
+  }
+  if (!jobRequirements) {
+    adminAiTailorError.value = 'Job requirements are required'
+    return
+  }
+  if (adminAiTailorAlwaysVerify.value && !window.confirm(`Tailor ${file.name}?`)) {
+    return
+  }
+  adminAiTailorLoading.value = true
+  adminAiTailorError.value = ''
+  adminAiTailorStatus.value = ''
+  adminAiTailorResultUrl.value = ''
+  try {
+    const result = await api.adminCvTailorFromPdf({
+      fileName: file.name,
+      mimeType: file.type || 'application/pdf',
+      dataBase64: await readFileAsBase64(file),
+      jobRequirements
+    })
+    adminAiTailorResultUrl.value = result.url || ''
+    adminAiTailorStatus.value = adminAiTailorResultUrl.value ? 'Tailored CV is ready' : 'Tailoring finished without a link'
+  } catch (caught) {
+    adminAiTailorError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    adminAiTailorLoading.value = false
+  }
 }
 
 function adminTelegramSenderKeyFor(sender) {
@@ -1093,6 +1169,7 @@ onUnmounted(() => {
         </template>
         <template #end>
           <div class="topbar-actions">
+            <Button v-if="isAdmin" icon="pi pi-sparkles" severity="help" data-testid="admin-ai-tailor-open-button" aria-label="CV AI-tailoring" @click="openAdminAiTailorModal" />
             <Button v-if="isAdmin" icon="pi pi-telegram" severity="info" data-testid="admin-telegram-open-button" aria-label="Write in Telegram" @click="openAdminTelegramModal" />
             <Button label="Logout" icon="pi pi-sign-out" severity="secondary" data-testid="logout-button" @click="logout" />
           </div>
@@ -1231,6 +1308,54 @@ onUnmounted(() => {
             <span v-else class="admin-telegram-footer-spacer" aria-hidden="true"></span>
             <Button label="Refresh" icon="pi pi-refresh" severity="secondary" outlined :loading="adminTelegramLoading" data-testid="admin-telegram-refresh-button" @click="loadAdminTelegramSenders" />
             <Button label="Write" icon="pi pi-send" :loading="adminTelegramLoading" data-testid="admin-telegram-send-button" @click="sendAdminTelegramMessage" />
+          </div>
+        </template>
+      </Dialog>
+      <Dialog v-model:visible="adminAiTailorModalOpen" modal header="[Beta] CV AI-tailoring" class="admin-ai-tailor-dialog" data-testid="admin-ai-tailor-dialog">
+        <div class="admin-ai-tailor-form">
+          <label class="field wide-field">
+            <span>CV</span>
+            <span class="admin-ai-tailor-file-row">
+              <span class="file-button">
+                <i class="pi pi-file-pdf"></i>
+                <span>Choose PDF</span>
+                <input type="file" accept="application/pdf,.pdf" data-testid="admin-ai-tailor-file-input" @change="addAdminAiTailorFile" />
+              </span>
+              <span v-if="adminAiTailorFileName" class="admin-ai-tailor-file-name" data-testid="admin-ai-tailor-file-name">
+                {{ adminAiTailorFileName }}
+              </span>
+            </span>
+          </label>
+          <label class="field wide-field">
+            <span>Job requirements</span>
+            <textarea v-model="adminAiTailorJobRequirements" class="native-textarea" rows="9" data-testid="admin-ai-tailor-job-requirements"></textarea>
+          </label>
+          <label class="checkbox-field wide-field" :title="adminAiTailorVerifyTitle">
+            <input v-model="adminAiTailorAlwaysVerify" type="checkbox" data-testid="admin-ai-tailor-always-verify" />
+            <span>Always verify</span>
+          </label>
+          <a
+            v-if="adminAiTailorResultUrl"
+            class="admin-ai-tailor-result-link wide-field"
+            :href="adminAiTailorResultUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="admin-ai-tailor-result-link"
+          >
+            {{ adminAiTailorResultUrl }}
+          </a>
+        </div>
+        <template #footer>
+          <div class="admin-telegram-footer">
+            <Message v-if="adminAiTailorError" severity="error" :closable="false" class="admin-telegram-footer-message" data-testid="admin-ai-tailor-error">
+              {{ adminAiTailorError }}
+            </Message>
+            <Message v-else-if="adminAiTailorStatus" severity="success" :closable="false" class="admin-telegram-footer-message" data-testid="admin-ai-tailor-status">
+              {{ adminAiTailorStatus }}
+            </Message>
+            <span v-else class="admin-telegram-footer-spacer" aria-hidden="true"></span>
+            <Button label="Clear" icon="pi pi-times" severity="secondary" outlined data-testid="admin-ai-tailor-clear-button" @click="clearAdminAiTailorForm" />
+            <Button label="Tailor" icon="pi pi-sparkles" :loading="adminAiTailorLoading" data-testid="admin-ai-tailor-submit-button" @click="tailorAdminCv" />
           </div>
         </template>
       </Dialog>

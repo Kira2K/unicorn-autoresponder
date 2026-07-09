@@ -16,6 +16,8 @@ type WebConsoleRepository = import('./types.ts').WebConsoleRepository
 type WebOption = import('./types.ts').WebOption
 type WebPlatformAccount = import('./types.ts').WebPlatformAccount
 type ProviderClientRow = import('./types.ts').ProviderClientRow
+type ResumeWorkflowPatch = import('./types.ts').ResumeWorkflowPatch
+type ResumeWorkflowRecord = import('./types.ts').ResumeWorkflowRecord
 
 type NocoRecord = Record<string, unknown> & { Id: number }
 type NocoSelectOption = { id?: string; Id?: string | number; title?: string; name?: string; label?: string }
@@ -205,6 +207,70 @@ function toProviderClientRow(record: NocoRecord, linkedInEmail = ''): ProviderCl
     primaryStack: linkedName(record.rel_clients_primary_stack) || undefined,
     linkedInEmail
   }
+}
+
+function cvProcessingClientId(record: NocoRecord): number | null {
+  const id = linkedId(record.client) ?? linkedId(record.clients) ?? Number(record.clients_id)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): ResumeWorkflowRecord {
+  const clientId = cvProcessingClientId(record) ?? Number((client as any)?.Id ?? (client as any)?.id)
+  const clientName = normalizeText(
+    (client as any)?.client_name ??
+    (client as any)?.clientName ??
+    linkedName(record.client) ??
+    record.record_key
+  )
+  const clientMarket =
+    linkedName((client as any)?.market) ||
+    normalizeText((client as any)?.market)
+  const englishLevelId =
+    (linkedId((client as any)?.['English level']) ?? Number((client as any)?.english_levels_id ?? (client as any)?.englishLevelId)) || undefined
+  const englishLevel =
+    linkedName((client as any)?.['English level']) ||
+    normalizeText((client as any)?.englishLevel ?? (client as any)?.english_level)
+  return {
+    id: Number(record.Id),
+    clientId,
+    clientName,
+    clientMarket: clientMarket || undefined,
+    clientTelegramUsername: normalizeText((client as any)?.telegram_personal_chat_id ?? (client as any)?.telegramPersonalChatId) || undefined,
+    commonChatId: normalizeText((client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId) || undefined,
+    education: normalizeText((client as any)?.education) || undefined,
+    englishLevel,
+    englishLevelId,
+    status: normalizeText(record.status),
+    studentDataFolderUrl: normalizeText(record.student_data_folder_url ?? record.student_experience_folder_url),
+    cvDraftUrl: normalizeText(record.cv_draft_url),
+    enVersionUrl: normalizeText(record.en_version_url),
+    ruVersionUrl: normalizeText(record.ru_version_url),
+    additionalVersions: normalizeText(record.additional_versions),
+    kirasComments: normalizeText(record.kiras_comments),
+    lastResponsible: normalizeText(record.last_responsible),
+    lastWorkflowError: normalizeText(record.last_workflow_error),
+    workflowTrace: normalizeText(record.workflow_trace)
+  }
+}
+
+function buildResumeWorkflowPatch(input: ResumeWorkflowPatch): Record<string, unknown> {
+  const fields: Array<[keyof ResumeWorkflowPatch, string]> = [
+    ['status', 'status'],
+    ['studentDataFolderUrl', 'student_data_folder_url'],
+    ['cvDraftUrl', 'cv_draft_url'],
+    ['enVersionUrl', 'en_version_url'],
+    ['ruVersionUrl', 'ru_version_url'],
+    ['additionalVersions', 'additional_versions'],
+    ['kirasComments', 'kiras_comments'],
+    ['lastResponsible', 'last_responsible'],
+    ['lastWorkflowError', 'last_workflow_error'],
+    ['workflowTrace', 'workflow_trace']
+  ]
+  const patch: Record<string, unknown> = {}
+  for (const [inputField, nocoField] of fields) {
+    if (input[inputField] !== undefined) patch[nocoField] = normalizeText(input[inputField])
+  }
+  return patch
 }
 
 function maskSecret(value: unknown, fullAccess: boolean): string | undefined {
@@ -413,6 +479,10 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     return await nocoClient.fetchRecords(TABLES.platforms.id, 1000)
   }
 
+  async function fetchCvProcessing(): Promise<NocoRecord[]> {
+    return await nocoClient.fetchRecords(TABLES.cvProcessing.id, 1000)
+  }
+
   async function fetchClientStatusOptions(): Promise<NocoSelectOption[]> {
     if (typeof nocoClient.fetchTableMeta !== 'function') return []
     const meta = await nocoClient.fetchTableMeta(TABLES.clients.id)
@@ -453,6 +523,33 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     if (!normalized) return null
     const clients = await fetchClients()
     return clients.find(candidate => normalizeId(candidate.telegram_general_chat_id) === normalized) ?? null
+  }
+
+  async function findCvProcessingRecordByClientId(clientId: number): Promise<NocoRecord | null> {
+    const records = await fetchCvProcessing()
+    return records
+      .sort((a, b) => Number(a.Id) - Number(b.Id))
+      .find(record => cvProcessingClientId(record) === Number(clientId)) ?? null
+  }
+
+  async function ensureCvProcessingRecordForClient(client: NocoRecord): Promise<NocoRecord> {
+    const existing = await findCvProcessingRecordByClientId(Number(client.Id))
+    if (existing) return existing
+    const created = await nocoClient.createRecord(TABLES.cvProcessing.id, {
+      record_key: normalizeText(client.client_name) || `client:${client.Id}`,
+      clients_id: Number(client.Id),
+      status: "collection student's data",
+      student_data_folder_url: '',
+      cv_draft_url: '',
+      en_version_url: '',
+      ru_version_url: '',
+      additional_versions: '',
+      kiras_comments: '',
+      last_responsible: 'student',
+      last_workflow_error: '',
+      workflow_trace: ''
+    }) as NocoRecord
+    return Array.isArray(created) ? created[0] : created
   }
 
   async function findDolphinProfileClientRelationFieldId(): Promise<string | null> {
@@ -557,6 +654,49 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       await nocoClient.patchRecord(TABLES.clients.id, Number(client.Id), { google_folder: normalizeText(googleFolder) })
       const updated = await refetchDashboard(Number(client.Id))
       return updated.client
+    },
+
+    async getResumeWorkflowByTelegramChatId(chatId: string, options: { ensure?: boolean } = {}): Promise<ResumeWorkflowRecord | null> {
+      const client = await findClientRecordByTelegramChatId(chatId)
+      if (!client) return null
+      const record = options.ensure
+        ? await ensureCvProcessingRecordForClient(client)
+        : await findCvProcessingRecordByClientId(Number(client.Id))
+      if (!record) return null
+      return toResumeWorkflow(record, client)
+    },
+
+    async getResumeWorkflowById(workflowId: number): Promise<ResumeWorkflowRecord | null> {
+      const records = await fetchCvProcessing()
+      const record = records.find(candidate => Number(candidate.Id) === Number(workflowId))
+      if (!record) return null
+      const clientId = cvProcessingClientId(record)
+      const client = clientId ? (await fetchClients()).find(candidate => Number(candidate.Id) === clientId) : undefined
+      return toResumeWorkflow(record, client)
+    },
+
+    async getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]> {
+      const [clients, records] = await Promise.all([fetchClients(), fetchCvProcessing()])
+      const clientsById = new Map(clients.map(client => [Number(client.Id), client]))
+      return records
+        .sort((a, b) => Number(a.Id) - Number(b.Id))
+        .map(record => {
+          const clientId = cvProcessingClientId(record)
+          return toResumeWorkflow(record, clientId ? clientsById.get(clientId) : undefined)
+        })
+    },
+
+    async patchResumeWorkflow(recordId: number, input: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord> {
+      const patch = buildResumeWorkflowPatch(input)
+      if (Object.keys(patch).length) {
+        await nocoClient.patchRecord(TABLES.cvProcessing.id, Number(recordId), patch)
+      }
+      const records = await fetchCvProcessing()
+      const record = records.find(candidate => Number(candidate.Id) === Number(recordId))
+      if (!record) throw notFoundError(`CV processing row ${recordId} was not found`)
+      const clientId = cvProcessingClientId(record)
+      const client = clientId ? (await fetchClients()).find(candidate => Number(candidate.Id) === clientId) : undefined
+      return toResumeWorkflow(record, client)
     },
 
     async getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null> {
@@ -730,7 +870,10 @@ module.exports = {
   buildAccountPatch,
   buildChangedClientPatch,
   buildClientPatch,
+  buildResumeWorkflowPatch,
+  cvProcessingClientId,
   toClient,
   toPlatformAccount,
-  toProviderClientRow
+  toProviderClientRow,
+  toResumeWorkflow
 }

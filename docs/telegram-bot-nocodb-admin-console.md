@@ -13,7 +13,8 @@ Admin Console -> web-console API -> Telegram Bot API -> Telegram group
 ```
 
 The bot matches a Telegram group to a student by comparing the current Telegram
-chat ID with `clients.telegram_general_chat_id` in NocoDB.
+chat ID with `clients.telegram_general_chat_id` in NocoDB. Resume workflow
+commands are documented in [resume-workflow.md](./resume-workflow.md).
 
 ## Environment
 
@@ -21,6 +22,14 @@ chat ID with `clients.telegram_general_chat_id` in NocoDB.
 VEU_SUPPORT_BOT=
 WEB_CONSOLE_BOT_API_TOKEN=
 WEB_CONSOLE_BASE_URL=http://127.0.0.1:4300
+RESUME_WORKFLOW_TEST_MODE=false
+RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS=8222949251
+RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS=102:473
+RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID=8222949251
+RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS=7586552066
+RESUME_WORKFLOW_KIRA_PLATFORM_ACCOUNT_REFS=1:452
+RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID=7586552066
+RESUME_WORKFLOW_STUDENT_USER_IDS_BY_CLIENT=
 TELEGRAM_TDLIB_SEND_TIMEOUT_MS=120000
 ```
 
@@ -28,6 +37,21 @@ TELEGRAM_TDLIB_SEND_TIMEOUT_MS=120000
 - `WEB_CONSOLE_BOT_API_TOKEN`: shared internal token used by the bot when it
   calls the web-console API.
 - `WEB_CONSOLE_BASE_URL`: public or local URL of the web-console backend.
+- `RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS`: comma-separated Telegram user
+  IDs allowed to open and advance provider CV tasks.
+- `RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS`: comma-separated
+  `clientId:platformAccountId` pairs. Provider private task lists and provider
+  advancements are limited to these client IDs.
+- `RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS`: comma-separated Telegram user IDs
+  allowed to advance Kira CV approval/comment tasks.
+- `RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID` and
+  `RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID`: private chats for next-responsible
+  notifications. Defaults to the first configured user ID for that role.
+- `RESUME_WORKFLOW_STUDENT_USER_IDS_BY_CLIENT`: optional
+  `clientId:telegramUserId` pairs for clients whose Telegram username is not
+  enough. In the linked common chat, the matching client username or mapped user
+  ID is treated as the student even if that account is also configured as an
+  internal test role.
 - `TELEGRAM_TDLIB_SEND_TIMEOUT_MS`: how long TDLib sender waits for Telegram
   delivery confirmation before returning a pending-send error.
 
@@ -40,9 +64,30 @@ Do not commit real token values.
 - `/whoami`: prints chat ID, chat type, and user ID.
 - `/change_google_folder <value>`: updates `clients.google_folder` for the
   client linked to the current chat.
+- `/resume`: advances the CV workflow by one checkpoint when the current
+  Telegram user is responsible for that checkpoint.
+- `/resume_status`: shows the linked CV workflow row and current responsible
+  side.
+- `/resume_reset_test`: resets the linked CV workflow row only when
+  `RESUME_WORKFLOW_TEST_MODE=true`.
+- `/open_my_tasks` or `/tasks`: provider-only private command. Shows provider
+  CV tasks waiting on that provider and returns inline buttons to open/advance a
+  selected client.
+
+`/commands` is context-aware: linked student/group chats see student commands,
+while private Kira/provider chats see the private task queue command after the
+backend confirms the actor is configured for that role.
 
 The Google folder value must be non-empty, start with `http://` or `https://`,
 and be at most 2048 characters.
+
+Telegram Bot API cannot initiate a private conversation with a user. Each Kira
+or provider Telegram account must open `@veu_support_bot` and send `/start`
+once before private next-responsible notifications can be delivered.
+
+API-driven resume tests do not create visible student command history in
+Telegram. Use `npm run tg:resume:e2e:test-user` when the acceptance criterion is
+"open the Test student chat and see the student commands/replies."
 
 ## API Endpoints
 
@@ -51,6 +96,12 @@ Bot endpoints use `X-Bot-Api-Token: <WEB_CONSOLE_BOT_API_TOKEN>`.
 ```http
 GET /api/bot/telegram/chats/:chatId/client
 PATCH /api/bot/telegram/chats/:chatId/google-folder
+POST /api/bot/telegram/chats/:chatId/resume
+GET /api/bot/telegram/chats/:chatId/resume/status
+POST /api/bot/telegram/chats/:chatId/resume/reset-test
+GET /api/bot/telegram/resume/provider/tasks
+GET /api/bot/telegram/resume/workflows/:workflowId
+POST /api/bot/telegram/resume/workflows/:workflowId/advance
 ```
 
 The admin console endpoint uses the normal admin cookie session:
@@ -72,8 +123,21 @@ Body:
 On `clients`:
 
 - `telegram_general_chat_id`: linked Telegram group chat ID.
+- `telegram_personal_chat_id`: client Telegram username used to authorize the
+  student actor inside the linked common chat.
 - `google_folder`: Google Drive folder URL updated by the bot.
 - `client_name`: display name used in bot replies.
+- `education`: required before leaving `collection student's data`.
+- `English level` / `english_levels_id`: required before leaving
+  `collection student's data`.
+
+On `CV processing`:
+
+- `clients_id`: relation/id link to the existing client.
+- `status`: the current CV workflow checkpoint.
+- `student_data_folder_url`: source-data folder used by the resume workflow.
+- `cv_draft_url`, `en_version_url`, `ru_version_url`, `kiras_comments`: links
+  and comments filled manually in normal mode or with fake values in test mode.
 
 ## Local Testing
 
@@ -92,6 +156,7 @@ npm run tg:support-bot
 Run automated tests:
 
 ```powershell
+npm run tg:resume:e2e:test
 npm run web:test
 npm run web:build
 npm run typecheck
@@ -109,8 +174,24 @@ Manual scenario:
 2. Send `/student`; the bot should reply with the linked student name.
 3. Send `/change_google_folder https://drive.google.com/drive/folders/example`.
 4. Verify `clients.google_folder` changed in NocoDB.
-5. Open the admin console, log in as admin, and use “Message to Telegram chat”.
-6. Confirm the bot posts the admin message to the linked group.
+5. Send `/resume`; if Education or English level is missing, fill it in the
+   Console and retry.
+6. Use `/open_my_tasks` in the provider's private chat when the workflow reaches
+   a provider-owned status.
+7. Open the admin console, log in as admin, and use "Message to Telegram chat".
+8. Confirm the bot posts the admin message to the linked group.
+
+Visible Test-user e2e:
+
+```powershell
+npm run tg:resume:e2e:test-user
+```
+
+This command sends the student-owned workflow commands through TDLib account
+`102:473` into chat `-5216637594`, while Kira/provider steps stay private. It
+starts with `/whoami` so the local e2e backend can map the actual Telegram user
+ID to Test client `102`. Do not repoint this flow to real accounts unless the
+acceptance criterion explicitly requires a visible live-account run.
 
 ## TDLib Delivery Notes
 
@@ -148,6 +229,14 @@ Set the same `WEB_CONSOLE_BOT_API_TOKEN` on both services. Set
   `updateMessageSendSucceeded` or treat it as not delivered.
 - Chat ID not found: run `/whoami` and copy the exact chat ID into
   `clients.telegram_general_chat_id`.
+- Resume step says "This step must be advanced by ...": the current Telegram
+  account is not the role responsible for the status. Use the linked student in
+  the common chat, a configured Kira account, or a configured provider account.
+- Resume step asks for Education or English level: add those fields in the
+  Console. The Telegram bot intentionally does not edit them.
+- Private Kira/provider notification says the bot cannot initiate a
+  conversation: open `@veu_support_bot` from that Telegram account and send
+  `/start`, then retry the workflow step.
 - NocoDB update failed: confirm the client row exists and `google_folder` is a
   valid URL.
 - Admin Console message not sent: confirm the client has

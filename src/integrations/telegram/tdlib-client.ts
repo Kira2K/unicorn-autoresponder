@@ -64,6 +64,7 @@ type TelegramAdapter = {
   send(input: TelegramAccountRef & { chatId: string; text: string }): Promise<TelegramMessage>
   sendToUsername(input: TelegramAccountRef & { username: string; text: string; attachments?: TelegramAttachment[] }): Promise<{ chatId: string; messages: TelegramMessage[] }>
   renameContact(input: TelegramAccountRef & { chatId: string; firstName: string; lastName?: string }): Promise<TelegramDialog>
+  close(input: TelegramAccountRef): Promise<TelegramConnectResult>
   disconnect(input: TelegramAccountRef): Promise<TelegramConnectResult>
 }
 
@@ -200,6 +201,10 @@ function createFakeTdlibAdapter(): TelegramAdapter {
         userId: '901',
         isPrivate: true
       }
+    },
+    async close(input) {
+      const dbPath = input.dbPath || tdlibDbPath(input)
+      return { status: states.get(key(input)) || 'active', dbPath }
     },
     async disconnect(input) {
       const dbPath = input.dbPath || tdlibDbPath(input)
@@ -764,6 +769,14 @@ function createRealTdlibAdapter(): TelegramAdapter {
         share_phone_number: false
       })
       return await dialogFromChat(client, Number(input.chatId), 'main')
+    },
+    async close(input) {
+      const accountKey = key(input)
+      const client = clients.get(accountKey)
+      await client?.close?.()
+      clients.delete(accountKey)
+      const dbPath = input.dbPath || tdlibDbPath(input)
+      return { status: authStates.get(accountKey) || 'active', dbPath }
     },
     async disconnect(input) {
       const accountKey = key(input)

@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const {
   buildProfileAccessInput,
   createWebConsoleApp,
@@ -20,6 +22,8 @@ const {
   buildChangedClientPatch,
   buildLinkedInEmailByClientId,
   buildClientPatch,
+  buildResumeWorkflowPatch,
+  cvProcessingClientId,
   isLinkedInPlatformAccount,
   LINKEDIN_PLATFORM_ID,
   profileClientId,
@@ -29,6 +33,8 @@ const {
   buildChangedClientPatch(current: any, input: any): Record<string, unknown>
   buildLinkedInEmailByClientId(accounts: Array<Record<string, unknown> & { Id: number }>): Map<number, string>
   buildClientPatch(input: any): Record<string, unknown>
+  buildResumeWorkflowPatch(input: any): Record<string, unknown>
+  cvProcessingClientId(record: Record<string, unknown> & { Id: number }): number | null
   isLinkedInPlatformAccount(account: Record<string, unknown> & { Id: number }): boolean
   LINKEDIN_PLATFORM_ID: number
   profileClientId(profile: Record<string, unknown> & { Id: number }): number | null
@@ -89,6 +95,7 @@ function createFixtureNocoClient() {
       last_name: 'Client',
       fio: 'Newest Client',
       calendar_email: 'newest@example.com',
+      telegram_personal_chat_id: '@newest_student',
       telegram_general_chat_id: '1003',
       rel_clients_primary_stack: { Id: 10, name: 'PYTHON' },
       market: 'En',
@@ -308,6 +315,23 @@ function createFixtureNocoClient() {
       clients_id: 6
     }
   ]
+  const cvProcessing: Array<Record<string, any> & { Id: number }> = [
+    {
+      Id: 98,
+      record_key: 'Client One',
+      clients_id: 1,
+      status: "collection student's data",
+      student_data_folder_url: '',
+      cv_draft_url: '',
+      en_version_url: '',
+      ru_version_url: '',
+      additional_versions: '',
+      kiras_comments: '',
+      last_responsible: 'student',
+      last_workflow_error: '',
+      workflow_trace: ''
+    }
+  ]
 
   return {
     calls,
@@ -337,11 +361,12 @@ function createFixtureNocoClient() {
       if (tableId === 'mg3ovkendur1kpo') return platforms
       if (tableId === 'mpteejwqy2kvmvm') return englishLevels
       if (tableId === 'm4thvbutfyb15qz') return dolphinProfiles
+      if (tableId === 'mhiysd8l0f33bny') return cvProcessing
       return []
     },
     async createRecord(tableId: string, record: Record<string, any>) {
       calls.push(`create:${tableId}`)
-      assert(['m8zej2vsv4iypl8', 'm4thvbutfyb15qz'].includes(tableId))
+      assert(['m8zej2vsv4iypl8', 'm4thvbutfyb15qz', 'mhiysd8l0f33bny'].includes(tableId))
       if (tableId === 'm4thvbutfyb15qz') {
         const created: Record<string, any> & { Id: number } = {
           Id: Math.max(...dolphinProfiles.map(profile => Number(profile.Id))) + 1,
@@ -352,6 +377,14 @@ function createFixtureNocoClient() {
           if (client) created.rel_dolphinProfiles_client = { Id: client.Id, client_name: client.client_name }
         }
         dolphinProfiles.push(created)
+        return created
+      }
+      if (tableId === 'mhiysd8l0f33bny') {
+        const created: Record<string, any> & { Id: number } = {
+          Id: Math.max(...cvProcessing.map(row => Number(row.Id))) + 1,
+          ...record
+        }
+        cvProcessing.push(created)
         return created
       }
       const created: Record<string, any> & { Id: number } = {
@@ -370,7 +403,13 @@ function createFixtureNocoClient() {
     },
     async patchRecord(tableId: string, recordId: number, patch: Record<string, any>) {
       calls.push(`patch:${tableId}:${recordId}`)
-      const records = tableId === 'mxza381054ldlza' ? clients : tableId === 'm8zej2vsv4iypl8' ? platformAccounts : []
+      const records = tableId === 'mxza381054ldlza'
+        ? clients
+        : tableId === 'm8zej2vsv4iypl8'
+          ? platformAccounts
+          : tableId === 'mhiysd8l0f33bny'
+            ? cvProcessing
+            : []
       const record = records.find(candidate => Number(candidate.Id) === Number(recordId))
       if (!record) throw new Error(`Record ${recordId} not found`)
       Object.assign(record, patch)
@@ -448,6 +487,8 @@ async function runTests(): Promise<void> {
   assert.equal(profileClientId({ Id: 1, clients_id: 30 }), 30)
   assert.equal(profileClientId({ Id: 1, rel_dolphinProfiles_client: { Id: 31 }, clients_id: 30 }), 31)
   assert.equal(profileId({ Id: 1, dolphin_profile_id: '762000802.0' }), 762000802)
+  assert.equal(cvProcessingClientId({ Id: 1, clients_id: 30 }), 30)
+  assert.equal(cvProcessingClientId({ Id: 1, client: { Id: 31 }, clients_id: 30 }), 31)
   assert.deepEqual(buildClientPatch({
     firstName: 'New',
     lastName: 'Name',
@@ -513,6 +554,28 @@ async function runTests(): Promise<void> {
     calendarEmail: 'client@example.com'
   }), {
     education: 'New school'
+  })
+  assert.deepEqual(buildResumeWorkflowPatch({
+    status: 'filled',
+    studentDataFolderUrl: 'https://drive.google.com/drive/folders/source',
+    cvDraftUrl: 'https://docs.google.com/document/d/draft',
+    enVersionUrl: 'https://docs.google.com/document/d/en',
+    ruVersionUrl: 'https://docs.google.com/document/d/ru',
+    kirasComments: 'ok',
+    lastResponsible: 'done',
+    lastWorkflowError: '',
+    workflowTrace: 'trace',
+    ignored: 'nope'
+  }), {
+    status: 'filled',
+    student_data_folder_url: 'https://drive.google.com/drive/folders/source',
+    cv_draft_url: 'https://docs.google.com/document/d/draft',
+    en_version_url: 'https://docs.google.com/document/d/en',
+    ru_version_url: 'https://docs.google.com/document/d/ru',
+    kiras_comments: 'ok',
+    last_responsible: 'done',
+    last_workflow_error: '',
+    workflow_trace: 'trace'
   })
   const linkedInMap = buildLinkedInEmailByClientId([
     { Id: 30, clients_id: 8, platforms_id: 16, login: 'second@example.com' },
@@ -597,7 +660,15 @@ async function runTests(): Promise<void> {
   const createdDolphinProfiles: any[] = []
   const updatedProxies: any[] = []
   const telegramBotMessages: any[] = []
+  let cvTailoringShouldFail = false
+  let cvTailoringResponseMode: 'plain' | 'json_object' = 'plain'
+  const cvTailoringCalls: any[] = []
+  const fixtureDir = path.resolve(__dirname, '..', 'test-fixtures', 'ai-tailoring')
+  const cvTailoringFixturePdf = fs.readFileSync(path.join(fixtureDir, 'Kira Samsonova React.pdf'))
+  const cvTailoringFixtureRequirements = fs.readFileSync(path.join(fixtureDir, 'AI-tailor-test-text.txt'), 'utf8')
+  const previousCvTailoringApiKey = process.env.CV_TAILORING_API_KEY
   process.env.WEB_CONSOLE_BOT_API_TOKEN = 'test-bot-token'
+  process.env.CV_TAILORING_API_KEY = 'test-cv-tailoring-key'
   const fakeDolphinProvisioningApi = {
     async getProfile(profileId: number) {
       assert.equal(profileId, 123456789)
@@ -692,6 +763,37 @@ async function runTests(): Promise<void> {
       }
     },
     telegramAdapter: createFakeTdlibAdapter(),
+    cvTailoringFetch: async (url: string, init: any) => {
+      const formData = init.body
+      const cv = formData.get('cv')
+      const cvBytes = Buffer.from(await cv.arrayBuffer())
+      cvTailoringCalls.push({
+        url,
+        method: init.method,
+        apiKey: init.headers?.['x-api-key'],
+        cvFileName: cv.name,
+        cvType: cv.type,
+        cvBytes,
+        jobRequirements: formData.get('jobRequirements')
+      })
+      if (cvTailoringShouldFail) {
+        return new Response('Tailoring unavailable', { status: 503 })
+      }
+      if (cvTailoringResponseMode === 'json_object') {
+        return new Response(JSON.stringify({ url: 'https://tailered-cv.example/result/from-json-object' }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json'
+          }
+        })
+      }
+      return new Response('https://tailered-cv.example/result/kira-samsonova-react', {
+        status: 200,
+        headers: {
+          'content-type': 'text/plain'
+        }
+      })
+    },
     telegramBotApi: {
       async sendMessage(input: any) {
         if (input.text === 'fail telegram') {
@@ -775,6 +877,13 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.linkedInEmail, 'client-one.linkedin@example.com')
     assert.equal(result.body.platformAccounts[0].password, '***')
 
+    result = await request(server.baseUrl, '/api/bot/status', {
+      headers: { 'X-Bot-Api-Token': 'test-bot-token' }
+    })
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.ok, true)
+    assert.equal(result.body.service, 'web-console-backend')
+
     result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/client', {
       headers: { 'X-Bot-Api-Token': 'test-bot-token' }
     })
@@ -812,6 +921,7 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.success, true)
     assert.equal(result.body.client.googleFolder, 'https://drive.google.com/drive/folders/updated')
+    assert.equal(noco.calls.some((call: string) => call.startsWith('patch:mhiysd8l0f33bny')), false)
 
     result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
       method: 'PATCH',
@@ -844,6 +954,234 @@ async function runTests(): Promise<void> {
     })
     assert.equal(result.response.status, 404, JSON.stringify(result.body))
     assert.equal(result.body.error, 'CLIENT_NOT_FOUND')
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/status', {
+      headers: { 'X-Bot-Api-Token': 'test-bot-token' }
+    })
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.found, true)
+    assert.equal(result.body.client.name, 'Client One')
+    assert.equal(result.body.workflow.status, "collection student's data")
+    assert.match(result.body.message, /Responsible: student/)
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1003/resume/status', {
+      headers: { 'X-Bot-Api-Token': 'test-bot-token' }
+    })
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.client.name, 'Newest Client')
+    assert.equal(result.body.workflow.status, "collection student's data")
+    assert.equal(noco.calls.includes('create:mhiysd8l0f33bny'), true)
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/9999/resume/status', {
+      headers: { 'X-Bot-Api-Token': 'test-bot-token' }
+    })
+    assert.equal(result.response.status, 404, JSON.stringify(result.body))
+    assert.equal(result.body.found, false)
+
+    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reset-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
+      body: JSON.stringify({})
+    })
+    assert.equal(result.response.status, 403, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'resume_reset_test_disabled')
+
+    const previousResumeTestMode = process.env.RESUME_WORKFLOW_TEST_MODE
+    const previousProviderRefs = process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
+    const previousKiraUserIds = process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS
+    const previousKiraNotifyChatId = process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID
+    const previousFakeDataMode = process.env.RESUME_WORKFLOW_FAKE_DATA_MODE
+    process.env.RESUME_WORKFLOW_TEST_MODE = 'true'
+    process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '1:12'
+    process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
+    process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
+    process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
+    try {
+      const botHeaders = { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' }
+      const studentHeaders = {
+        ...botHeaders,
+        'X-Telegram-User-Id': '100',
+        'X-Telegram-Username': 'client_one',
+        'X-Telegram-Chat-Id': '1001',
+        'X-Telegram-Chat-Type': 'supergroup'
+      }
+      const newestStudentHeaders = {
+        ...botHeaders,
+        'X-Telegram-User-Id': '101',
+        'X-Telegram-Username': 'newest_student',
+        'X-Telegram-Chat-Id': '1003',
+        'X-Telegram-Chat-Type': 'supergroup'
+      }
+      const kiraHeaders = {
+        ...botHeaders,
+        'X-Telegram-User-Id': '343610488',
+        'X-Telegram-Username': 'kira_manual',
+        'X-Telegram-Chat-Id': '343610488',
+        'X-Telegram-Chat-Type': 'private'
+      }
+      const providerHeaders = {
+        ...botHeaders,
+        'X-Telegram-User-Id': '8222949251',
+        'X-Telegram-Username': 'veu_support',
+        'X-Telegram-Chat-Id': '8222949251',
+        'X-Telegram-Chat-Type': 'private'
+      }
+      const resumeByChat = async (headers: Record<string, string>, chatId = '1001') => request(server.baseUrl, `/api/bot/telegram/chats/${chatId}/resume`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({})
+      })
+
+      result = await resumeByChat(newestStudentHeaders, '1003')
+      assert.equal(result.response.status, 422, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'resume_required_data_missing')
+      assert.deepEqual(result.body.missingFields, ['Education', 'English level'])
+
+      result = await resumeByChat(studentHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, "collection Kira's comments")
+      assert.equal(result.body.workflow.studentDataFolderUrl, 'https://drive.google.com/drive/folders/test-student-data')
+      assert.equal(result.body.transitions.at(-1), "collection student's data -> collection Kira's comments")
+      assert.equal(result.body.notifications.at(-1).kind, 'private_kira')
+      assert.equal(telegramBotMessages.at(-1).chatId, '343610488')
+
+      result = await resumeByChat(providerHeaders)
+      assert.equal(result.response.status, 403, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'forbidden')
+
+      result = await resumeByChat(kiraHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Draft in process')
+      assert.equal(result.body.notifications.at(-1).kind, 'private_provider')
+      assert.equal(telegramBotMessages.at(-1).chatId, '8222949251')
+
+      result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
+        headers: providerHeaders
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.deepEqual(result.body.tasks.map((task: any) => task.clientName), ['Client One'])
+      assert.equal(result.body.tasks[0].expectedStatus, 'Draft in process')
+      const workflowId = result.body.tasks[0].id
+
+      result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
+        headers: studentHeaders
+      })
+      assert.equal(result.response.status, 403, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'forbidden')
+
+      result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}/advance`, {
+        method: 'POST',
+        headers: providerHeaders,
+        body: JSON.stringify({ expectedStatus: 'Draft in process' })
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Draft in approve by Kira')
+      assert.equal(result.body.workflow.cvDraftUrl, 'https://docs.google.com/document/d/test-draft')
+
+      result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
+        headers: kiraHeaders
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.deepEqual(result.body.tasks.map((task: any) => task.clientName), ['Client One'])
+      assert.equal(result.body.tasks[0].expectedStatus, 'Draft in approve by Kira')
+      assert.match(result.body.message, /^Kira resume tasks:/)
+
+      result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}`, {
+        headers: kiraHeaders
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Draft in approve by Kira')
+
+      result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}/advance`, {
+        method: 'POST',
+        headers: providerHeaders,
+        body: JSON.stringify({ expectedStatus: 'Draft in process' })
+      })
+      assert.equal(result.response.status, 409, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'resume_workflow_stale_status')
+
+      result = await resumeByChat(kiraHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Draft in approve by student')
+      assert.equal(result.body.notifications.at(-1).kind, 'common_chat')
+      assert.match(telegramBotMessages.at(-1).text, /@client_one/)
+
+      result = await resumeByChat(studentHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'English version in progress')
+
+      result = await resumeByChat(providerHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'English version in approve by Kira')
+      assert.equal(result.body.workflow.enVersionUrl, 'https://docs.google.com/document/d/test-english-version')
+
+      result = await resumeByChat(kiraHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'English version in approve by student')
+
+      result = await resumeByChat(studentHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Russian version in process')
+
+      result = await resumeByChat(providerHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Russian version in approve by Kira')
+      assert.equal(result.body.workflow.ruVersionUrl, 'https://docs.google.com/document/d/test-russian-version')
+
+      result = await resumeByChat(kiraHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Russian version in approve by student')
+
+      result = await resumeByChat(studentHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'moved to filling')
+      assert(result.body.notifications.some((notification: any) => notification.kind === 'hh_summary'))
+      assert(result.body.notifications.some((notification: any) => notification.kind === 'private_provider'))
+
+      result = await resumeByChat(providerHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.completed, true)
+      assert.equal(result.body.workflow.status, 'filled')
+      assert.equal(result.body.transitions.at(-1), 'moved to filling -> filled')
+      assert.match(result.body.message, /Resume workflow is completed/)
+
+      result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reset-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
+        body: JSON.stringify({})
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, "collection student's data")
+      assert.equal(result.body.workflow.cvDraftUrl, '')
+      assert.equal(result.body.workflow.enVersionUrl, '')
+      assert.equal(result.body.workflow.ruVersionUrl, '')
+    } finally {
+      if (previousResumeTestMode === undefined) {
+        delete process.env.RESUME_WORKFLOW_TEST_MODE
+      } else {
+        process.env.RESUME_WORKFLOW_TEST_MODE = previousResumeTestMode
+      }
+      if (previousProviderRefs === undefined) {
+        delete process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
+      } else {
+        process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = previousProviderRefs
+      }
+      if (previousKiraUserIds === undefined) {
+        delete process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS
+      } else {
+        process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = previousKiraUserIds
+      }
+      if (previousKiraNotifyChatId === undefined) {
+        delete process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID
+      } else {
+        process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = previousKiraNotifyChatId
+      }
+      if (previousFakeDataMode === undefined) {
+        delete process.env.RESUME_WORKFLOW_FAKE_DATA_MODE
+      } else {
+        process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = previousFakeDataMode
+      }
+    }
 
     result = await request(server.baseUrl, '/api/client/profile-options', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200)
@@ -1049,6 +1387,112 @@ async function runTests(): Promise<void> {
     }, adminForTelegramLogin.cookie)
     assert.equal(result.response.status, 400, JSON.stringify(result.body))
     assert.equal(result.body.error, 'telegram_invalid_username')
+
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'Kira Samsonova React.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: cvTailoringFixturePdf.toString('base64'),
+        jobRequirements: cvTailoringFixtureRequirements
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.url, 'https://tailered-cv.example/result/kira-samsonova-react')
+    assert.equal(cvTailoringCalls.at(-1).url, 'https://tailered-cv.onrender.com/cv-from-pdf')
+    assert.equal(cvTailoringCalls.at(-1).method, 'POST')
+    assert.equal(cvTailoringCalls.at(-1).apiKey, 'test-cv-tailoring-key')
+    assert.equal(cvTailoringCalls.at(-1).cvFileName, 'Kira Samsonova React.pdf')
+    assert.equal(cvTailoringCalls.at(-1).cvType, 'application/pdf')
+    assert.equal(cvTailoringCalls.at(-1).cvBytes.length > 0, true)
+    assert.deepEqual(cvTailoringCalls.at(-1).cvBytes.subarray(0, 4), Buffer.from('%PDF'))
+    assert.equal(cvTailoringCalls.at(-1).jobRequirements, cvTailoringFixtureRequirements)
+
+    cvTailoringResponseMode = 'json_object'
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'Kira Samsonova React.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: cvTailoringFixturePdf.toString('base64'),
+        jobRequirements: cvTailoringFixtureRequirements
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.url, 'https://tailered-cv.example/result/from-json-object')
+    cvTailoringResponseMode = 'plain'
+
+    const configuredCvTailoringApiKey = process.env.CV_TAILORING_API_KEY
+    delete process.env.CV_TAILORING_API_KEY
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'Kira Samsonova React.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: cvTailoringFixturePdf.toString('base64'),
+        jobRequirements: cvTailoringFixtureRequirements
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 503, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'cv_tailoring_not_configured')
+    process.env.CV_TAILORING_API_KEY = configuredCvTailoringApiKey
+
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'Kira Samsonova React.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: cvTailoringFixturePdf.toString('base64'),
+        jobRequirements: ''
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'cv_tailoring_missing_job_requirements')
+
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'resume.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: Buffer.from('not a pdf').toString('base64'),
+        jobRequirements: cvTailoringFixtureRequirements
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'cv_tailoring_invalid_pdf')
+
+    cvTailoringShouldFail = true
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'Kira Samsonova React.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: cvTailoringFixturePdf.toString('base64'),
+        jobRequirements: cvTailoringFixtureRequirements
+      })
+    }, adminForTelegramLogin.cookie)
+    assert.equal(result.response.status, 502, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'cv_tailoring_api_failed')
+    assert.equal(result.body.status, 503)
+    cvTailoringShouldFail = false
+
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'Kira Samsonova React.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: cvTailoringFixturePdf.toString('base64'),
+        jobRequirements: cvTailoringFixtureRequirements
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 403)
 
     result = await request(server.baseUrl, '/api/admin/clients/1/telegram/send', {
       method: 'POST',
@@ -1322,6 +1766,17 @@ async function runTests(): Promise<void> {
       body: JSON.stringify({ targetClientId: 1, platformAccountId: 17, username: '@client_partner', text: 'blocked' })
     }, providerLogin.cookie)
     assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'Kira Samsonova React.pdf',
+        mimeType: 'application/pdf',
+        dataBase64: cvTailoringFixturePdf.toString('base64'),
+        jobRequirements: cvTailoringFixtureRequirements
+      })
+    }, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/admin/clients/1/telegram/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1433,6 +1888,11 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 401)
   } finally {
     await server.close()
+    if (previousCvTailoringApiKey === undefined) {
+      delete process.env.CV_TAILORING_API_KEY
+    } else {
+      process.env.CV_TAILORING_API_KEY = previousCvTailoringApiKey
+    }
   }
 }
 

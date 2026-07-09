@@ -148,6 +148,12 @@ export const api = {
       body: JSON.stringify(payload)
     })
   },
+  adminCvTailorFromPdf(payload = {}) {
+    return request('/api/admin/cv-tailor/from-pdf', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
   adminClientTelegramSend(clientId, payload = {}) {
     return request(`/api/admin/clients/${encodeURIComponent(clientId)}/telegram/send`, {
       method: 'POST',
