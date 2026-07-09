@@ -46,10 +46,15 @@ npm run orchestrator
 
 ## Current Dirty-File Policy
 
-- `TODO.md` may contain user notes; do not edit or revert it unless asked.
+- `TODO.md` was an obsolete scratch file with sensitive-looking notes and should
+  stay removed. Do not recreate scratch files with credentials or personal data.
 - `docs/phone-inventory-for-later.json` is local inventory; leave it uncommitted
   unless a phone-inventory task needs it.
 - Do not run Noco/Dolphin apply jobs during architecture/doc cleanup.
+- Before any live Noco schema or relation change, run `npm run
+  noco:full-backup:apply`, document the intended old/new state, then run `npm
+  run noco:contract-check` before and after the change. Treat relation type,
+  column type/name, FK, and delete operations as production migrations.
 
 ## Where To Look
 

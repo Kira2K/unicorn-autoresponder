@@ -41,6 +41,38 @@ They come from the Telegram/TDLib admin work on 2026-07-05.
 6. Re-read through the same API path the UI uses.
 7. Only then run a live action such as sending a Telegram message.
 
+## Schema Change Protocol
+
+NocoDB schema is a production API contract. Treat these as schema changes:
+
+- relation type changes
+- column type/title/name changes
+- FK creation/deletion
+- relation creation/deletion
+- table/column deletion
+- primary/display field changes
+
+Before any schema change:
+
+1. Run `npm run noco:full-backup:apply`.
+2. Write down the target table, column/relation, old state, desired state, why,
+   and rollback path.
+3. Run `npm run noco:contract-check`.
+4. Prefer a dry-run report. If there is no rollback path, do not apply.
+
+After any schema change:
+
+1. Run `npm run noco:contract-check`.
+2. Re-check the feature endpoint that depends on the changed table.
+3. Run another `npm run noco:full-backup:apply` if the change is kept.
+
+Current web-console contract assumptions:
+
+- `platform_accounts.rel_platformAccounts_client` must be a `bt` relation to
+  `clients`.
+- `platform_accounts.clients_id` must exist and be a `ForeignKey`.
+- `where=(clients_id,eq,<clientId>)` must work for `platform_accounts` records.
+
 ## Current Telegram Fields
 
 On `platform_accounts`:
@@ -65,6 +97,15 @@ Invoke-RestMethod http://127.0.0.1:4300/api/admin/telegram/senders -WebSession $
 
 If a direct Node script must read Noco/Dolphin, run it with explicit network
 approval in Codex. Otherwise a network failure can look like a feature bug.
+
+For Noco schema/API contract validation:
+
+```powershell
+npm run noco:contract-check
+```
+
+This command is read-only against NocoDB. It writes a local report under
+`logs/nocodb-contract-check/`.
 
 ## Commit Hygiene
 
