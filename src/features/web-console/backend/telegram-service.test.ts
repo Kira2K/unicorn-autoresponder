@@ -170,6 +170,61 @@ async function runTests(): Promise<void> {
   })
   result = await phoneOnlyService.connect(1, { accountId: 103 })
   assert.equal(result.status, 'needs_code')
+
+  const multiAccounts = [
+    {
+      ...account,
+      id: 201,
+      accountLabel: 'Kira Telegram Ru',
+      phone: '+79990001111',
+      telegramSessionStatus: '',
+      telegramTdlibDbPath: '',
+      telegramLastActive: '',
+      telegramEventLog: ''
+    },
+    {
+      ...account,
+      id: 202,
+      accountLabel: 'Kira Telegram En',
+      phone: '+79990002222',
+      telegramSessionStatus: '',
+      telegramTdlibDbPath: '',
+      telegramLastActive: '',
+      telegramEventLog: ''
+    }
+  ]
+  const multiRepository = {
+    ...repository,
+    async getTelegramPlatformAccountsForClient(clientId: number) {
+      assert.equal(clientId, 1)
+      return multiAccounts
+    },
+    async updateTelegramPlatformAccount(_clientId: number, accountId: number, patch: Record<string, unknown>) {
+      const target = multiAccounts.find(candidate => Number(candidate.id) === Number(accountId))
+      if (!target) throw new Error(`Missing Telegram account ${accountId}`)
+      Object.assign(target, {
+        telegramSessionStatus: patch.telegram_session_status ?? target.telegramSessionStatus,
+        telegramTdlibDbPath: patch.telegram_tdlib_db_path ?? target.telegramTdlibDbPath,
+        telegramLastActive: patch.telegram_last_active ?? target.telegramLastActive,
+        telegramEventLog: patch.telegram_event_log ?? target.telegramEventLog
+      })
+      return target
+    }
+  }
+  const multiService = createTelegramService({
+    repository: multiRepository,
+    adapter: createFakeTdlibAdapter(),
+    proxyResolver: async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
+  })
+  const firstConnected = await multiService.connect(1, { accountId: 201, code: '12345' })
+  const secondNeedsCode = await multiService.connect(1, { accountId: 202 })
+  assert.equal(firstConnected.status, 'active')
+  assert.equal(secondNeedsCode.status, 'needs_code')
+  assert.match(multiAccounts[0].telegramTdlibDbPath, /storage[\\/]tdlib[\\/]1[\\/]201/)
+  assert.match(multiAccounts[1].telegramTdlibDbPath, /storage[\\/]tdlib[\\/]1[\\/]202/)
+  assert.notEqual(multiAccounts[0].telegramTdlibDbPath, multiAccounts[1].telegramTdlibDbPath)
+  assert.equal(multiAccounts[0].telegramSessionStatus, 'active')
+  assert.equal(multiAccounts[1].telegramSessionStatus, 'needs_code')
 }
 
 runTests()

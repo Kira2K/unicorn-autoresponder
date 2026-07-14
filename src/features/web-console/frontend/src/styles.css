@@ -704,6 +704,52 @@ body {
   margin-bottom: 10px;
 }
 
+.telegram-account-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.telegram-account-tab {
+  min-height: 44px;
+  max-width: 220px;
+  border: 1px solid var(--surface-border, #d7dde7);
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.telegram-account-tab.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.telegram-account-tab span,
+.telegram-account-tab small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telegram-account-tab span {
+  font-weight: 700;
+}
+
+.telegram-account-tab small {
+  color: #64748b;
+}
+
 .telegram-mode-toggle {
   min-height: 38px;
   border: 1px solid #f59e0b;

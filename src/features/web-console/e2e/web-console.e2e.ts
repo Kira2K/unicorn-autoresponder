@@ -141,11 +141,23 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByText('Test LinkedIn Edited').count(), 0)
 
     await page.getByTestId('telegram-card').waitFor()
+    assert.equal(await page.locator('[data-testid^="telegram-account-tab-"]').count(), 2)
+    await page.getByTestId('telegram-account-tab-102').getByText('Kira Telegram Ru', { exact: false }).waitFor()
+    await page.getByTestId('telegram-account-tab-104').getByText('Kira Telegram En', { exact: false }).waitFor()
     await page.getByTestId('telegram-phone').fill('+79990001122')
     await page.getByTestId('telegram-connect-button').click()
     await page.getByTestId('telegram-code').waitFor()
     await page.getByTestId('telegram-code').fill('12345')
     await page.getByTestId('telegram-connect-button').click()
+    await page.getByTestId('telegram-status').getByText('active', { exact: false }).waitFor()
+    await page.getByTestId('telegram-account-tab-104').click()
+    await page.getByTestId('telegram-status').getByText('disconnected', { exact: false }).waitFor()
+    await page.getByTestId('telegram-connect-button').click()
+    await page.getByTestId('telegram-code').waitFor()
+    await page.getByTestId('telegram-code').fill('12345')
+    await page.getByTestId('telegram-connect-button').click()
+    await page.getByTestId('telegram-status').getByText('active', { exact: false }).waitFor()
+    await page.getByTestId('telegram-account-tab-102').click()
     await page.getByTestId('telegram-status').getByText('active', { exact: false }).waitFor()
     await page.getByTestId('telegram-open-button').click()
     await page.getByTestId('telegram-workspace').waitFor()
@@ -204,6 +216,10 @@ async function runTests(): Promise<void> {
       await page.getByTestId('save-account-button').click()
       await page.getByTestId('account-save-message').getByText('Account added', { exact: false }).waitFor()
       await page.getByTestId('accounts-table').getByText(label, { exact: true }).waitFor()
+      if (platformLabel === 'telegram_ru') {
+        assert.equal(await page.locator('[data-testid^="telegram-account-tab-"]').count(), 3)
+        await page.getByTestId('telegram-status').getByText('disconnected', { exact: false }).waitFor()
+      }
     }
 
     assert.equal(await page.getByTestId('account-form').count(), 0)

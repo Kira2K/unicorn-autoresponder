@@ -68,26 +68,8 @@ const accountError = ref('')
 const profileEditorOpen = ref('')
 const profileEditing = ref(false)
 const accountEditorOpen = ref(false)
-const telegramStatus = ref(null)
-const telegramError = ref('')
-const telegramLoading = ref(false)
-const telegramCode = ref('')
-const telegramPassword = ref('')
-const telegramPhone = ref('')
-const telegramOpen = ref(false)
-const telegramPanelOpen = ref('')
-const telegramFolders = ref([])
-const telegramList = ref('main')
-const telegramSearch = ref('')
-const telegramDialogs = ref([])
-const telegramMessages = ref([])
-const telegramSelectedChatId = ref('')
-const telegramMessageText = ref('')
-const telegramCopiedUsername = ref('')
-const telegramWriteEnabled = ref(false)
-const telegramRenameFirstName = ref('')
-const telegramRenameLastName = ref('')
-const telegramRenameMessage = ref('')
+const selectedTelegramAccountId = ref(null)
+const telegramStateByAccount = ref({})
 const adminTelegramModalOpen = ref(false)
 const adminTelegramSenders = ref([])
 const adminTelegramSenderKey = ref('')
@@ -128,7 +110,11 @@ const telegramAccounts = computed(() => accountRows.value.filter(account => {
   const value = `${account.platform || ''} ${account.accountLabel || ''}`.toLowerCase()
   return value.includes('telegram') || value.includes('phone_en')
 }))
-const selectedTelegramAccount = computed(() => telegramAccounts.value[0] || null)
+const selectedTelegramAccount = computed(() =>
+  telegramAccounts.value.find(account => Number(account.id) === Number(selectedTelegramAccountId.value)) ||
+  telegramAccounts.value[0] ||
+  null
+)
 const editingAccount = computed(() => Boolean(accountForm.value.id))
 const dryRunText = computed(() => {
   if (!dryRunResult.value) return ''
@@ -152,26 +138,30 @@ const adminCanOpenDolphinProfiles = computed(() =>
   isAdmin.value && dolphinProfileStatus.value?.action === 'open_existing' && (dolphinProfileStatus.value?.existingProfiles || []).length > 0
 )
 const hasActiveDolphinLease = computed(() => dolphinLeaseSecondsLeft.value > 0)
-const telegramTargetPayload = computed(() => ({
-  ...(isAdmin.value && dashboard.value?.client?.id ? { targetClientId: dashboard.value.client.id } : {}),
-  ...(selectedTelegramAccount.value?.id ? { platformAccountId: selectedTelegramAccount.value.id } : {})
-}))
+const currentTelegramState = computed(() =>
+  selectedTelegramAccount.value ? ensureTelegramState(selectedTelegramAccount.value) : createTelegramState()
+)
+const telegramTargetPayload = computed(() => telegramTargetPayloadFor(selectedTelegramAccount.value))
 const telegramDotClass = computed(() => {
-  const status = telegramStatus.value?.status || selectedTelegramAccount.value?.telegramSessionStatus || 'disconnected'
+  const status = telegramStatusLabel.value
   if (status === 'active') return 'status-dot green'
   if (['needs_code', 'needs_password', 'connecting'].includes(status)) return 'status-dot yellow'
   return 'status-dot red'
 })
-const telegramStatusLabel = computed(() => telegramStatus.value?.status || selectedTelegramAccount.value?.telegramSessionStatus || 'disconnected')
+const telegramStatusLabel = computed(() =>
+  currentTelegramState.value.status?.status ||
+  selectedTelegramAccount.value?.telegramSessionStatus ||
+  'disconnected'
+)
 const telegramSelectedFolderTitle = computed(() => {
-  const selected = telegramFolders.value.find(folder => folder.id === telegramList.value)
+  const selected = currentTelegramState.value.folders.find(folder => folder.id === currentTelegramState.value.list)
   return selected?.title || 'All chats'
 })
 const telegramSelectedDialog = computed(() =>
-  telegramDialogs.value.find(dialog => dialog.id === telegramSelectedChatId.value) || null
+  currentTelegramState.value.dialogs.find(dialog => dialog.id === currentTelegramState.value.selectedChatId) || null
 )
-const telegramModeLabel = computed(() => telegramWriteEnabled.value ? 'Writing enabled' : 'Read-only')
-const telegramModeTitle = computed(() => telegramWriteEnabled.value
+const telegramModeLabel = computed(() => currentTelegramState.value.writeEnabled ? 'Writing enabled' : 'Read-only')
+const telegramModeTitle = computed(() => currentTelegramState.value.writeEnabled
   ? 'Click to return Telegram to read-only mode.'
   : "in readonly mode you can't send messages, but also doesn't trigger unread messages status"
 )
@@ -527,26 +517,72 @@ function resetAccountForm() {
   accountError.value = ''
 }
 
+function createTelegramState(account = null) {
+  return {
+    status: null,
+    error: '',
+    loading: false,
+    code: '',
+    password: '',
+    phone: account ? (account.phone || account.foreignNumber || '') : '',
+    open: false,
+    panelOpen: '',
+    folders: [],
+    list: 'main',
+    search: '',
+    dialogs: [],
+    messages: [],
+    selectedChatId: '',
+    messageText: '',
+    copiedUsername: '',
+    writeEnabled: false,
+    renameFirstName: '',
+    renameLastName: '',
+    renameMessage: ''
+  }
+}
+
+function ensureTelegramState(account) {
+  const accountId = String(account.id)
+  if (!telegramStateByAccount.value[accountId]) {
+    telegramStateByAccount.value = {
+      ...telegramStateByAccount.value,
+      [accountId]: createTelegramState(account)
+    }
+  }
+  return telegramStateByAccount.value[accountId]
+}
+
+function syncTelegramAccounts(preferredAccountId = selectedTelegramAccountId.value) {
+  const accountIds = new Set(telegramAccounts.value.map(account => String(account.id)))
+  const nextState = {}
+  for (const account of telegramAccounts.value) {
+    const accountId = String(account.id)
+    nextState[accountId] = telegramStateByAccount.value[accountId] || createTelegramState(account)
+  }
+  telegramStateByAccount.value = nextState
+
+  const preferred = preferredAccountId && accountIds.has(String(preferredAccountId))
+    ? Number(preferredAccountId)
+    : telegramAccounts.value[0]?.id ?? null
+  selectedTelegramAccountId.value = preferred
+}
+
+function selectTelegramAccount(account) {
+  selectedTelegramAccountId.value = account?.id ?? null
+  if (account) ensureTelegramState(account)
+}
+
+function telegramTargetPayloadFor(account) {
+  return {
+    ...(isAdmin.value && dashboard.value?.client?.id ? { targetClientId: dashboard.value.client.id } : {}),
+    ...(account?.id ? { platformAccountId: account.id } : {})
+  }
+}
+
 function resetTelegramUi() {
-  telegramStatus.value = null
-  telegramError.value = ''
-  telegramCode.value = ''
-  telegramPassword.value = ''
-  telegramPhone.value = ''
-  telegramOpen.value = false
-  telegramPanelOpen.value = ''
-  telegramFolders.value = []
-  telegramList.value = 'main'
-  telegramSearch.value = ''
-  telegramDialogs.value = []
-  telegramMessages.value = []
-  telegramSelectedChatId.value = ''
-  telegramMessageText.value = ''
-  telegramCopiedUsername.value = ''
-  telegramWriteEnabled.value = false
-  telegramRenameFirstName.value = ''
-  telegramRenameLastName.value = ''
-  telegramRenameMessage.value = ''
+  selectedTelegramAccountId.value = null
+  telegramStateByAccount.value = {}
 }
 
 function closeProfileEditor() {
@@ -649,8 +685,10 @@ async function loadDashboard() {
       providerDolphinEmail.value = ''
       ownProxy.value = false
     }
+    if (isClient.value || isAdmin.value) {
+      syncTelegramAccounts()
+    }
     if ((isClient.value || isAdmin.value) && selectedTelegramAccount.value) {
-      telegramPhone.value = selectedTelegramAccount.value.phone || selectedTelegramAccount.value.foreignNumber || ''
       await refreshTelegramStatus()
     }
   } catch (caught) {
@@ -661,79 +699,89 @@ async function loadDashboard() {
 }
 
 async function refreshTelegramStatus() {
-  if (!selectedTelegramAccount.value) return
-  telegramLoading.value = true
-  telegramError.value = ''
+  const account = selectedTelegramAccount.value
+  if (!account) return
+  const state = ensureTelegramState(account)
+  state.loading = true
+  state.error = ''
   try {
-    telegramStatus.value = await api.telegramStatus(telegramTargetPayload.value)
+    state.status = await api.telegramStatus(telegramTargetPayloadFor(account))
   } catch (caught) {
-    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+    state.error = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
-    telegramLoading.value = false
+    state.loading = false
   }
 }
 
 async function connectTelegram() {
-  if (!selectedTelegramAccount.value) return
-  telegramLoading.value = true
-  telegramError.value = ''
+  const account = selectedTelegramAccount.value
+  if (!account) return
+  const state = ensureTelegramState(account)
+  state.loading = true
+  state.error = ''
   try {
-    telegramStatus.value = await api.telegramConnect({
-      ...telegramTargetPayload.value,
-      phone: telegramPhone.value || selectedTelegramAccount.value.phone || selectedTelegramAccount.value.foreignNumber || '',
-      code: telegramCode.value || undefined,
-      password: telegramPassword.value || undefined
+    state.status = await api.telegramConnect({
+      ...telegramTargetPayloadFor(account),
+      phone: state.phone || account.phone || account.foreignNumber || '',
+      code: state.code || undefined,
+      password: state.password || undefined
     })
-    if (telegramStatus.value.status === 'active') {
-      telegramCode.value = ''
-      telegramPassword.value = ''
+    if (state.status.status === 'active') {
+      state.code = ''
+      state.password = ''
     }
   } catch (caught) {
-    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+    state.error = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
-    telegramLoading.value = false
+    state.loading = false
   }
 }
 
 async function disconnectTelegram() {
-  if (!selectedTelegramAccount.value) return
-  telegramLoading.value = true
-  telegramError.value = ''
+  const account = selectedTelegramAccount.value
+  if (!account) return
+  const state = ensureTelegramState(account)
+  state.loading = true
+  state.error = ''
   try {
-    telegramStatus.value = await api.telegramDisconnect(telegramTargetPayload.value)
-    telegramOpen.value = false
-    telegramDialogs.value = []
-    telegramMessages.value = []
+    state.status = await api.telegramDisconnect(telegramTargetPayloadFor(account))
+    state.open = false
+    state.dialogs = []
+    state.messages = []
   } catch (caught) {
-    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+    state.error = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
-    telegramLoading.value = false
+    state.loading = false
   }
 }
 
 async function openTelegram() {
-  telegramOpen.value = true
-  telegramPanelOpen.value = 'telegram'
-  telegramWriteEnabled.value = false
+  const state = currentTelegramState.value
+  state.open = true
+  state.panelOpen = 'telegram'
+  state.writeEnabled = false
   await loadTelegramFolders()
   await loadTelegramDialogs()
 }
 
 function hideTelegram() {
-  telegramOpen.value = false
-  telegramPanelOpen.value = ''
+  const state = currentTelegramState.value
+  state.open = false
+  state.panelOpen = ''
 }
 
 async function loadTelegramFolders() {
-  if (!selectedTelegramAccount.value) return
+  const account = selectedTelegramAccount.value
+  if (!account) return
+  const state = ensureTelegramState(account)
   try {
-    const result = await api.telegramFolders(telegramTargetPayload.value)
-    telegramFolders.value = result.folders || []
-    if (!telegramFolders.value.some(folder => folder.id === telegramList.value)) {
-      telegramList.value = telegramFolders.value[0]?.id || 'main'
+    const result = await api.telegramFolders(telegramTargetPayloadFor(account))
+    state.folders = result.folders || []
+    if (!state.folders.some(folder => folder.id === state.list)) {
+      state.list = state.folders[0]?.id || 'main'
     }
   } catch {
-    telegramFolders.value = [
+    state.folders = [
       { id: 'main', title: 'All chats', type: 'main' },
       { id: 'archive', title: 'Archive', type: 'archive' }
     ]
@@ -741,77 +789,85 @@ async function loadTelegramFolders() {
 }
 
 function telegramDialogParams() {
-  const folderValue = telegramList.value || 'main'
+  const state = currentTelegramState.value
+  const folderValue = state.list || 'main'
   const folderMatch = folderValue.match(/^folder:(\d+)$/)
   return {
     ...telegramTargetPayload.value,
     list: folderMatch ? 'folder' : folderValue,
     folderId: folderMatch ? Number(folderMatch[1]) : undefined,
-    query: telegramSearch.value.trim() || undefined,
+    query: state.search.trim() || undefined,
     limit: 50
   }
 }
 
 async function loadTelegramDialogs() {
-  if (!selectedTelegramAccount.value) return
-  telegramLoading.value = true
-  telegramError.value = ''
+  const account = selectedTelegramAccount.value
+  if (!account) return
+  const state = ensureTelegramState(account)
+  state.loading = true
+  state.error = ''
   try {
     const result = await api.telegramDialogs(telegramDialogParams())
-    telegramDialogs.value = result.dialogs || []
-    if (!telegramDialogs.value.some(dialog => dialog.id === telegramSelectedChatId.value)) {
-      telegramSelectedChatId.value = ''
-      telegramMessages.value = []
+    state.dialogs = result.dialogs || []
+    if (!state.dialogs.some(dialog => dialog.id === state.selectedChatId)) {
+      state.selectedChatId = ''
+      state.messages = []
       resetTelegramRenameForm()
     }
-    if (!telegramSearch.value.trim() && !telegramSelectedChatId.value && telegramDialogs.value[0]) {
-      telegramSelectedChatId.value = telegramDialogs.value[0].id
+    if (!state.search.trim() && !state.selectedChatId && state.dialogs[0]) {
+      state.selectedChatId = state.dialogs[0].id
     }
-    if (telegramSelectedChatId.value) await loadTelegramMessages()
+    if (state.selectedChatId) await loadTelegramMessages()
   } catch (caught) {
-    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+    state.error = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
-    telegramLoading.value = false
+    state.loading = false
   }
 }
 
 async function changeTelegramList() {
-  telegramSelectedChatId.value = ''
-  telegramMessages.value = []
+  const state = currentTelegramState.value
+  state.selectedChatId = ''
+  state.messages = []
   resetTelegramRenameForm()
   await loadTelegramDialogs()
 }
 
 async function loadTelegramMessages() {
-  if (!selectedTelegramAccount.value || !telegramSelectedChatId.value) return
+  const account = selectedTelegramAccount.value
+  const state = currentTelegramState.value
+  if (!account || !state.selectedChatId) return
   const result = await api.telegramMessages({
-    ...telegramTargetPayload.value,
-    chatId: telegramSelectedChatId.value,
+    ...telegramTargetPayloadFor(account),
+    chatId: state.selectedChatId,
     limit: 50
   })
-  telegramMessages.value = result.messages || []
+  state.messages = result.messages || []
 }
 
 async function selectTelegramDialog(dialog) {
-  telegramSelectedChatId.value = dialog.id
+  currentTelegramState.value.selectedChatId = dialog.id
   resetTelegramRenameForm(dialog)
   await loadTelegramMessages()
 }
 
 function toggleTelegramWriteMode() {
-  telegramWriteEnabled.value = !telegramWriteEnabled.value
+  const state = currentTelegramState.value
+  state.writeEnabled = !state.writeEnabled
 }
 
 function resetTelegramRenameForm(dialog = telegramSelectedDialog.value) {
-  telegramRenameMessage.value = ''
+  const state = currentTelegramState.value
+  state.renameMessage = ''
   if (!dialog?.isPrivate) {
-    telegramRenameFirstName.value = ''
-    telegramRenameLastName.value = ''
+    state.renameFirstName = ''
+    state.renameLastName = ''
     return
   }
   const parts = String(dialog.title || '').trim().split(/\s+/).filter(Boolean)
-  telegramRenameFirstName.value = parts[0] || ''
-  telegramRenameLastName.value = parts.slice(1).join(' ')
+  state.renameFirstName = parts[0] || ''
+  state.renameLastName = parts.slice(1).join(' ')
 }
 
 async function copyTelegramUsername(username, event) {
@@ -822,60 +878,65 @@ async function copyTelegramUsername(username, event) {
   } catch {
     // Copy status still confirms which handle the user selected.
   }
-  telegramCopiedUsername.value = username
+  currentTelegramState.value.copiedUsername = username
 }
 
 async function sendTelegramMessage() {
-  const text = telegramMessageText.value.trim()
-  if (!text || !telegramSelectedChatId.value) return
-  if (!telegramWriteEnabled.value) {
-    telegramError.value = 'Telegram is read-only. Enable writing before sending.'
+  const account = selectedTelegramAccount.value
+  const state = currentTelegramState.value
+  const text = state.messageText.trim()
+  if (!account || !text || !state.selectedChatId) return
+  if (!state.writeEnabled) {
+    state.error = 'Telegram is read-only. Enable writing before sending.'
     return
   }
-  telegramLoading.value = true
-  telegramError.value = ''
+  state.loading = true
+  state.error = ''
   try {
     await api.telegramSend({
-      ...telegramTargetPayload.value,
-      chatId: telegramSelectedChatId.value,
+      ...telegramTargetPayloadFor(account),
+      chatId: state.selectedChatId,
       text,
-      allowWrite: telegramWriteEnabled.value
+      allowWrite: state.writeEnabled
     })
-    telegramMessageText.value = ''
+    state.messageText = ''
     await loadTelegramMessages()
   } catch (caught) {
-    telegramError.value = caught instanceof Error ? caught.message : String(caught || '')
+    state.error = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
-    telegramLoading.value = false
+    state.loading = false
   }
 }
 
 async function renameTelegramContact() {
   if (!telegramSelectedDialog.value?.isPrivate) return
-  const firstName = telegramRenameFirstName.value.trim()
+  const account = selectedTelegramAccount.value
+  const state = currentTelegramState.value
+  const firstName = state.renameFirstName.trim()
   if (!firstName) {
-    telegramRenameMessage.value = 'First name is required'
+    state.renameMessage = 'First name is required'
     return
   }
-  telegramLoading.value = true
-  telegramError.value = ''
-  telegramRenameMessage.value = ''
+  if (!account) return
+  state.loading = true
+  state.error = ''
+  state.renameMessage = ''
   try {
     const result = await api.telegramRenameContact({
-      ...telegramTargetPayload.value,
-      chatId: telegramSelectedChatId.value,
+      ...telegramTargetPayloadFor(account),
+      chatId: state.selectedChatId,
       firstName,
-      lastName: telegramRenameLastName.value.trim() || undefined
+      lastName: state.renameLastName.trim() || undefined
     })
     const updated = result.dialog
-    telegramDialogs.value = telegramDialogs.value.map(dialog =>
+    state.dialogs = state.dialogs.map(dialog =>
       dialog.id === updated.id ? { ...dialog, ...updated } : dialog
     )
-    telegramRenameMessage.value = 'Saved on Telegram'
+    state.renameMessage = 'Saved on Telegram'
   } catch (caught) {
-    telegramRenameMessage.value = caught instanceof Error ? caught.message : String(caught || '')
+    state.renameMessage = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
-    telegramLoading.value = false
+    state.loading = false
   }
 }
 
@@ -915,6 +976,7 @@ async function logout() {
     englishLevels.value = []
     platforms.value = []
     resetAccountForm()
+    resetTelegramUi()
     profileEditing.value = false
     profileEditorOpen.value = ''
     accountEditorOpen.value = false
@@ -984,10 +1046,13 @@ async function saveAccount() {
       accountError.value = 'Choose a platform'
       return
     }
+    const previousTelegramIds = new Set(telegramAccounts.value.map(account => Number(account.id)))
     const wasEditing = editingAccount.value
     dashboard.value = wasEditing
       ? await api.updatePlatformAccount(accountForm.value.id, payload)
       : await api.createPlatformAccount(payload)
+    const newTelegramAccount = telegramAccounts.value.find(account => !previousTelegramIds.has(Number(account.id)))
+    syncTelegramAccounts(newTelegramAccount?.id ?? selectedTelegramAccountId.value)
     resetAccountForm()
     accountEditorOpen.value = false
     accountMessage.value = wasEditing ? 'Account updated' : 'Account added'
@@ -1006,6 +1071,11 @@ async function deleteAccount(account) {
   try {
     const deletedOpenAccount = accountForm.value.id === account.id
     dashboard.value = await api.deletePlatformAccount(account.id)
+    syncTelegramAccounts(
+      Number(selectedTelegramAccountId.value) === Number(account.id)
+        ? telegramAccounts.value[0]?.id
+        : selectedTelegramAccountId.value
+    )
     if (deletedOpenAccount) {
       resetAccountForm()
       accountEditorOpen.value = false
@@ -1653,10 +1723,23 @@ onUnmounted(() => {
               <span :class="telegramDotClass" :title="telegramStatusLabel"></span>
             </div>
           </template>
-          <template #subtitle>{{ selectedTelegramAccount ? selectedTelegramAccount.accountLabel : 'No Telegram account row' }}</template>
+          <template #subtitle>{{ telegramAccounts.length ? `${telegramAccounts.length} Telegram account${telegramAccounts.length === 1 ? '' : 's'}` : 'No Telegram account row' }}</template>
           <template #content>
-            <Message v-if="telegramError" severity="error" :closable="false" data-testid="telegram-error">
-              {{ telegramError }}
+            <div v-if="telegramAccounts.length > 1" class="telegram-account-tabs" data-testid="telegram-account-tabs">
+              <button
+                v-for="account in telegramAccounts"
+                :key="account.id"
+                type="button"
+                :class="['telegram-account-tab', { active: selectedTelegramAccount?.id === account.id }]"
+                :data-testid="`telegram-account-tab-${account.id}`"
+                @click="selectTelegramAccount(account)"
+              >
+                <span>{{ account.accountLabel || account.platform }}</span>
+                <small>{{ account.phone || account.foreignNumber || account.login || account.platform }}</small>
+              </button>
+            </div>
+            <Message v-if="currentTelegramState.error" severity="error" :closable="false" data-testid="telegram-error">
+              {{ currentTelegramState.error }}
             </Message>
             <div v-if="selectedTelegramAccount" class="telegram-panel">
               <Message severity="info" :closable="false" data-testid="telegram-beta-message">
@@ -1664,20 +1747,20 @@ onUnmounted(() => {
               </Message>
               <div class="telegram-status-row">
                 <span data-testid="telegram-status">Status: {{ telegramStatusLabel }}</span>
-                <Button icon="pi pi-refresh" label="Refresh" size="small" severity="secondary" :loading="telegramLoading" data-testid="telegram-refresh-button" @click="refreshTelegramStatus" />
+                <Button icon="pi pi-refresh" label="Refresh" size="small" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-refresh-button" @click="refreshTelegramStatus" />
               </div>
               <div class="telegram-connect-row">
-                <InputText v-model="telegramPhone" placeholder="Phone" data-testid="telegram-phone" />
-                <InputText v-if="telegramStatusLabel === 'needs_code'" v-model="telegramCode" placeholder="Code" data-testid="telegram-code" />
-                <Password v-if="telegramStatusLabel === 'needs_password'" v-model="telegramPassword" placeholder="Cloud password" toggle-mask :feedback="false" data-testid="telegram-password" />
-                <Button label="Connect Telegram" icon="pi pi-link" :loading="telegramLoading" data-testid="telegram-connect-button" @click="connectTelegram" />
-                <Button label="Disconnect" icon="pi pi-times" severity="danger" outlined :loading="telegramLoading" data-testid="telegram-disconnect-button" @click="disconnectTelegram" />
+                <InputText v-model="currentTelegramState.phone" placeholder="Phone" data-testid="telegram-phone" />
+                <InputText v-if="telegramStatusLabel === 'needs_code'" v-model="currentTelegramState.code" placeholder="Code" data-testid="telegram-code" />
+                <Password v-if="telegramStatusLabel === 'needs_password'" v-model="currentTelegramState.password" placeholder="Cloud password" toggle-mask :feedback="false" data-testid="telegram-password" />
+                <Button label="Connect Telegram" icon="pi pi-link" :loading="currentTelegramState.loading" data-testid="telegram-connect-button" @click="connectTelegram" />
+                <Button label="Disconnect" icon="pi pi-times" severity="danger" outlined :loading="currentTelegramState.loading" data-testid="telegram-disconnect-button" @click="disconnectTelegram" />
               </div>
               <div v-if="telegramStatusLabel === 'active'" class="telegram-open-row">
-                <Button v-if="!telegramOpen" label="Open Telegram" icon="pi pi-comments" severity="info" data-testid="telegram-open-button" @click="openTelegram" />
+                <Button v-if="!currentTelegramState.open" label="Open Telegram" icon="pi pi-comments" severity="info" data-testid="telegram-open-button" @click="openTelegram" />
                 <Button v-else label="Hide Telegram" icon="pi pi-chevron-up" severity="secondary" outlined data-testid="telegram-hide-button" @click="hideTelegram" />
               </div>
-              <Accordion v-if="telegramOpen" v-model:value="telegramPanelOpen" class="telegram-accordion" data-testid="telegram-accordion">
+              <Accordion v-if="currentTelegramState.open" v-model:value="currentTelegramState.panelOpen" class="telegram-accordion" data-testid="telegram-accordion">
                 <AccordionPanel value="telegram">
                   <AccordionHeader>
                     <span class="accordion-title">
@@ -1690,33 +1773,33 @@ onUnmounted(() => {
                     <div class="telegram-toolbar">
                       <button
                         type="button"
-                        :class="['telegram-mode-toggle', { enabled: telegramWriteEnabled }]"
+                        :class="['telegram-mode-toggle', { enabled: currentTelegramState.writeEnabled }]"
                         :title="telegramModeTitle"
                         data-testid="telegram-write-toggle"
                         @click="toggleTelegramWriteMode"
                       >
-                        <i :class="telegramWriteEnabled ? 'pi pi-lock-open' : 'pi pi-lock'"></i>
+                        <i :class="currentTelegramState.writeEnabled ? 'pi pi-lock-open' : 'pi pi-lock'"></i>
                         <span>{{ telegramModeLabel }}</span>
                       </button>
-                      <select v-model="telegramList" class="native-select telegram-folder-select" data-testid="telegram-folder-select" @change="changeTelegramList">
-                        <option v-for="folder in telegramFolders" :key="folder.id" :value="folder.id">
+                      <select v-model="currentTelegramState.list" class="native-select telegram-folder-select" data-testid="telegram-folder-select" @change="changeTelegramList">
+                        <option v-for="folder in currentTelegramState.folders" :key="folder.id" :value="folder.id">
                           {{ folder.title }}
                         </option>
                       </select>
                       <form class="telegram-search-form" data-testid="telegram-search-form" @submit.prevent="loadTelegramDialogs">
-                        <InputText v-model="telegramSearch" placeholder="Search chats" data-testid="telegram-search-input" />
-                        <Button type="submit" icon="pi pi-search" severity="secondary" :loading="telegramLoading" data-testid="telegram-search-button" />
+                        <InputText v-model="currentTelegramState.search" placeholder="Search chats" data-testid="telegram-search-input" />
+                        <Button type="submit" icon="pi pi-search" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-search-button" />
                       </form>
-                      <Button icon="pi pi-refresh" severity="secondary" outlined :loading="telegramLoading" data-testid="telegram-dialogs-refresh-button" @click="loadTelegramDialogs" />
+                      <Button icon="pi pi-refresh" severity="secondary" outlined :loading="currentTelegramState.loading" data-testid="telegram-dialogs-refresh-button" @click="loadTelegramDialogs" />
                     </div>
                     <section class="telegram-workspace" data-testid="telegram-workspace">
                       <aside class="telegram-dialogs">
                         <div
-                          v-for="dialog in telegramDialogs"
+                          v-for="dialog in currentTelegramState.dialogs"
                           :key="dialog.id"
                           role="button"
                           tabindex="0"
-                          :class="['telegram-dialog', { active: telegramSelectedChatId === dialog.id }]"
+                          :class="['telegram-dialog', { active: currentTelegramState.selectedChatId === dialog.id }]"
                           @click="selectTelegramDialog(dialog)"
                           @keydown.enter.prevent="selectTelegramDialog(dialog)"
                           @keydown.space.prevent="selectTelegramDialog(dialog)"
@@ -1739,26 +1822,26 @@ onUnmounted(() => {
                           </span>
                           <small v-if="dialog.unreadCount">{{ dialog.unreadCount }}</small>
                         </div>
-                        <p v-if="!telegramDialogs.length" class="telegram-empty">No chats</p>
-                        <p v-if="telegramCopiedUsername" class="telegram-copy-status" data-testid="telegram-copy-status">
-                          Copied {{ telegramCopiedUsername }}
+                        <p v-if="!currentTelegramState.dialogs.length" class="telegram-empty">No chats</p>
+                        <p v-if="currentTelegramState.copiedUsername" class="telegram-copy-status" data-testid="telegram-copy-status">
+                          Copied {{ currentTelegramState.copiedUsername }}
                         </p>
                       </aside>
                       <div class="telegram-chat">
                         <form v-if="telegramSelectedDialog?.isPrivate" class="telegram-contact-form" data-testid="telegram-contact-form" @submit.prevent="renameTelegramContact">
-                          <InputText v-model="telegramRenameFirstName" placeholder="First name" data-testid="telegram-contact-first-name" />
-                          <InputText v-model="telegramRenameLastName" placeholder="Last name" data-testid="telegram-contact-last-name" />
-                          <Button type="submit" icon="pi pi-save" label="Save name" size="small" severity="secondary" :loading="telegramLoading" data-testid="telegram-contact-save-button" />
-                          <span v-if="telegramRenameMessage" class="telegram-contact-status" data-testid="telegram-contact-status">{{ telegramRenameMessage }}</span>
+                          <InputText v-model="currentTelegramState.renameFirstName" placeholder="First name" data-testid="telegram-contact-first-name" />
+                          <InputText v-model="currentTelegramState.renameLastName" placeholder="Last name" data-testid="telegram-contact-last-name" />
+                          <Button type="submit" icon="pi pi-save" label="Save name" size="small" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-contact-save-button" />
+                          <span v-if="currentTelegramState.renameMessage" class="telegram-contact-status" data-testid="telegram-contact-status">{{ currentTelegramState.renameMessage }}</span>
                         </form>
                         <div class="telegram-messages">
-                          <div v-for="message in telegramMessages" :key="message.id" :class="['telegram-message', { outgoing: message.outgoing }]">
+                          <div v-for="message in currentTelegramState.messages" :key="message.id" :class="['telegram-message', { outgoing: message.outgoing }]">
                             {{ message.text }}
                           </div>
                         </div>
                         <form class="telegram-send-row" @submit.prevent="sendTelegramMessage">
-                          <InputText v-model="telegramMessageText" :placeholder="telegramWriteEnabled ? 'Message' : 'Read-only mode'" :disabled="!telegramWriteEnabled" data-testid="telegram-message-input" />
-                          <Button type="submit" icon="pi pi-send" label="Send" :disabled="!telegramWriteEnabled" :loading="telegramLoading" data-testid="telegram-send-button" />
+                          <InputText v-model="currentTelegramState.messageText" :placeholder="currentTelegramState.writeEnabled ? 'Message' : 'Read-only mode'" :disabled="!currentTelegramState.writeEnabled" data-testid="telegram-message-input" />
+                          <Button type="submit" icon="pi pi-send" label="Send" :disabled="!currentTelegramState.writeEnabled" :loading="currentTelegramState.loading" data-testid="telegram-send-button" />
                         </form>
                       </div>
                     </section>

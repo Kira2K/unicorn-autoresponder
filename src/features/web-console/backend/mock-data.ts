@@ -110,6 +110,16 @@ const mockPlatformAccounts = [
     clients_id: 1
   },
   {
+    Id: 104,
+    platform: 'telegram_en',
+    account_label: 'Kira Telegram En',
+    login: '@kira_auto_en',
+    phone: '+79990002233',
+    email: '',
+    password: 'phone number from related HH',
+    clients_id: 1
+  },
+  {
     Id: 201,
     platform: 'email_en',
     account_label: 'Latest Email En',
