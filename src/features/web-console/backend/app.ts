@@ -34,7 +34,9 @@ const {
   publicWorkflow,
   resetResumeWorkflowForTest,
   resumeWorkflow,
-  resumeWorkflowById
+  resumeWorkflowById,
+  saveKiraCommentsFromChat,
+  saveResumeTaskInputFromChat
 } = require('../../../integrations/telegram/resume-workflow.ts') as {
   getProviderTaskById(workflowId: number, repository: WebConsoleRepository, actor?: any): Promise<any>
   getProviderTasks(repository: WebConsoleRepository, actor?: any): Promise<any>
@@ -43,6 +45,8 @@ const {
   resetResumeWorkflowForTest(chatId: string, repository: WebConsoleRepository): Promise<any>
   resumeWorkflow(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
   resumeWorkflowById(workflowId: number, repository: WebConsoleRepository, options?: any): Promise<any>
+  saveKiraCommentsFromChat(repository: WebConsoleRepository, actor?: any, comments?: string): Promise<any>
+  saveResumeTaskInputFromChat(repository: WebConsoleRepository, actor?: any, text?: string): Promise<any>
 }
 const { sendTelegramMessage } = require('../../../integrations/telegram/messenger.ts') as {
   sendTelegramMessage(to: string, message: string, options?: { parseMode?: false | 'html' | 'md' | 'markdown' }): Promise<void>
@@ -589,6 +593,25 @@ function createWebConsoleApp(options: {
   async function sendResumeNotifications(result: any): Promise<string[]> {
     const warnings: string[] = []
     const notifications = Array.isArray(result?.notifications) ? result.notifications : []
+    const notificationTimeoutMs = Math.max(1000, Number(process.env.RESUME_WORKFLOW_NOTIFICATION_TIMEOUT_MS || 5000))
+
+    async function withNotificationTimeout<T>(action: Promise<T>, notification: any): Promise<T> {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        return await Promise.race([
+          action,
+          new Promise<T>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error(`notification timed out after ${notificationTimeoutMs}ms`))
+            }, notificationTimeoutMs)
+          })
+        ])
+      } catch (error) {
+        throw error
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }
 
     function notificationWarning(notification: any, error: any): string {
       const message = error instanceof Error ? error.message : String(error)
@@ -605,7 +628,10 @@ function createWebConsoleApp(options: {
       try {
         if (notification.kind === 'hh_summary') {
           if (summaryLogsChannelId) {
-            await sendSummaryTelegramMessage(summaryLogsChannelId, notification.text, { parseMode: false })
+            await withNotificationTimeout(
+              sendSummaryTelegramMessage(summaryLogsChannelId, notification.text, { parseMode: false }),
+              notification
+            )
           }
           continue
         }
@@ -615,10 +641,13 @@ function createWebConsoleApp(options: {
           continue
         }
 
-        await telegramBotApi.sendMessage({
-          chatId: notification.chatId,
-          text: notification.text
-        })
+        await withNotificationTimeout(
+          telegramBotApi.sendMessage({
+            chatId: notification.chatId,
+            text: notification.text
+          }),
+          notification
+        )
       } catch (error: any) {
         warnings.push(notificationWarning(notification, error))
       }
@@ -760,14 +789,11 @@ function createWebConsoleApp(options: {
 
   app.patch('/api/bot/telegram/chats/:chatId/google-folder', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const chatId = String(req.params.chatId ?? '').trim()
-      const googleFolder = validateGoogleFolder(req.body?.googleFolder)
-      const client = await repository.updateGoogleFolderByTelegramChatId(chatId, googleFolder)
-      if (!client) {
-        res.status(404).json({ success: false, error: 'CLIENT_NOT_FOUND', chatId })
-        return
-      }
-      res.json({ success: true, client: publicTelegramClient(client) })
+      res.status(410).json({
+        success: false,
+        error: 'google_folder_telegram_edit_disabled',
+        message: 'Google folder editing from Telegram is disabled. Edit the root Google folder in Noco/Admin Console.'
+      })
     } catch (error) {
       next(error)
     }
@@ -778,7 +804,8 @@ function createWebConsoleApp(options: {
       const chatId = String(req.params.chatId ?? '').trim()
       const result = await resumeWorkflow(chatId, repository, {
         actor: botActorFromRequest(req),
-        expectedStatus: req.body?.expectedStatus
+        expectedStatus: req.body?.expectedStatus,
+        studentDataFolderUrl: req.body?.studentDataFolderUrl
       })
       const notificationWarnings = await sendResumeNotifications(result)
       res.status(result.found ? 200 : 404).json(publicResumeResult(result, { notificationWarnings }))
@@ -827,6 +854,30 @@ function createWebConsoleApp(options: {
       }
       const result = await getProviderTaskById(workflowId, repository, botActorFromRequest(req))
       res.status(result.workflow ? 200 : 404).json({
+        ...result,
+        workflow: result.workflow ? publicWorkflow(result.workflow) : undefined
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/bot/telegram/resume/task-input', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await saveResumeTaskInputFromChat(repository, botActorFromRequest(req), req.body?.text)
+      res.json({
+        ...result,
+        workflow: result.workflow ? publicWorkflow(result.workflow) : undefined
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/bot/telegram/resume/kira-comments', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await saveKiraCommentsFromChat(repository, botActorFromRequest(req), req.body?.comments)
+      res.json({
         ...result,
         workflow: result.workflow ? publicWorkflow(result.workflow) : undefined
       })

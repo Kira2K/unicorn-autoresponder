@@ -61,7 +61,7 @@ const DEFAULT_VISIBLE_RESUME_E2E_CONFIG: VisibleResumeE2eConfig = {
   testChatId: '-5216637594',
   studentAccountId: 473,
   providerAccountRef: '102:473',
-  kiraUserId: '7586552066',
+  kiraUserId: '343610488',
   kiraUsername: 'Kira_arbeitet',
   providerUserId: '8222949251',
   providerUsername: 'veu_support'
@@ -266,7 +266,7 @@ function providerActorHeaders(config: VisibleResumeE2eConfig, token: string): Re
   })
 }
 
-async function ensureTestClientData(repository: any, config: VisibleResumeE2eConfig): Promise<string[]> {
+async function ensureTestClientData(repository: any, config: VisibleResumeE2eConfig, googleFolder: string): Promise<string[]> {
   const setup: string[] = []
   let client = await repository.getClientById(config.testClientId)
 
@@ -290,6 +290,8 @@ async function ensureTestClientData(repository: any, config: VisibleResumeE2eCon
     setup.push(`English level already set: ${client.englishLevel || client.englishLevelId}.`)
   }
 
+  setup.push(normalizeText(client.googleFolder) ? 'Root Google folder already set.' : 'Root Google folder is not set; the workflow will wait for Noco data.')
+
   return setup
 }
 
@@ -298,7 +300,7 @@ async function resetWorkflow(repository: any, config: VisibleResumeE2eConfig): P
   if (!workflow) throw new Error(`CV workflow for chat ${config.testChatId} was not found.`)
   return await repository.patchResumeWorkflow(workflow.id, {
     status: "collection student's data",
-    studentDataFolderUrl: '',
+    studentDataFolderUrl: normalizeText(workflow.studentDataFolderUrl),
     cvDraftUrl: '',
     enVersionUrl: '',
     ruVersionUrl: '',
@@ -687,7 +689,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
   const googleFolder = options.googleFolder || `https://drive.google.com/drive/folders/visible-resume-e2e-${Date.now()}`
   const waitTimeoutMs = Number(options.waitTimeoutMs ?? 180000)
   const pollIntervalMs = Number(options.pollIntervalMs ?? 3000)
-  const setup = await retryTransient('ensure test client data', () => ensureTestClientData(repository, config))
+  const setup = await retryTransient('ensure test client data', () => ensureTestClientData(repository, config, googleFolder))
   const reset = await retryTransient('reset workflow', () => resetWorkflow(repository, config))
   const initialOffset = options.skipBotPreflight ? 0 : await newestUpdateOffset(botApi)
   const steps: VisibleResumeE2eStep[] = []
@@ -735,20 +737,6 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
 
   try {
     const discoveredStudentUserId = String((steps[steps.length - 1] as any).userId || '')
-
-    steps.push(await sendStudentCommand({
-      repository,
-      telegramService,
-      config,
-      command: `/change_google_folder ${googleFolder}`,
-      expectedStatus: "collection student's data",
-      reply: /Google folder updated/i,
-      observedUpdates: observed.updates,
-      observedSends: observed.sends,
-      studentUserId: discoveredStudentUserId,
-      pollIntervalMs,
-      timeoutMs: waitTimeoutMs
-    }))
 
     steps.push(await sendStudentCommand({
       repository,
@@ -901,21 +889,13 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       telegramService,
       config,
       command: '/resume',
-      expectedStatus: 'moved to filling',
-      reply: /moved to filling/i,
+      expectedStatus: 'filled',
+      reply: /workflow is completed|filled/i,
       observedUpdates: observed.updates,
       observedSends: observed.sends,
       studentUserId: discoveredStudentUserId,
       pollIntervalMs,
       timeoutMs: waitTimeoutMs
-    }))
-    steps.push(await advanceProvider({
-      baseUrl: server.baseUrl,
-      token,
-      config,
-      workflowId,
-      expectedStatus: 'moved to filling',
-      nextStatus: 'filled'
     }))
 
     const finalWorkflow: any = await retryTransient('final workflow read', () => repository.getResumeWorkflowByTelegramChatId(config.testChatId, { ensure: true }))

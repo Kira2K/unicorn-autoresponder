@@ -34,6 +34,7 @@ type ResumeWorkflowRecord = {
   clientName: string
   clientMarket?: string
   clientTelegramUsername?: string
+  clientGoogleFolder?: string
   commonChatId?: string
   education?: string
   englishLevel?: string
@@ -89,6 +90,7 @@ type ResumeWorkflowRepository = {
 type ResumeWorkflowOptions = {
   actor?: ResumeActorInput
   expectedStatus?: string
+  studentDataFolderUrl?: string
 }
 
 type ResumeWorkflowResult = {
@@ -269,7 +271,7 @@ function displayResponsibility(status: string): string {
 function nextActionForStatus(status: string): string {
   switch (status) {
     case "collection student's data":
-      return 'Next: student should provide the experience/source data folder.'
+      return 'Next: student should complete the required profile details in the Console. The bot will verify the root Google folder from Noco.'
     case "collection Kira's comments":
       return "Next: Kira should add comments for the provider."
     case 'Draft in process':
@@ -297,6 +299,30 @@ function nextActionForStatus(status: string): string {
   }
 }
 
+function studentApprovalDetails(record: ResumeWorkflowRecord): string {
+  const status = statusText(record)
+  const link = status === 'Draft in approve by student'
+    ? normalizeText(record.cvDraftUrl)
+    : status === 'English version in approve by student'
+      ? normalizeText(record.enVersionUrl)
+      : status === 'Russian version in approve by student'
+        ? normalizeText(record.ruVersionUrl)
+        : ''
+  if (!link) return ''
+  const label = status === 'Draft in approve by student'
+    ? 'Draft CV'
+    : status === 'English version in approve by student'
+      ? 'English CV version'
+      : 'Russian CV version'
+  return [
+    `${label}: ${link}`,
+    'Please review the file above.',
+    'To approve it, send:',
+    '/resume I approve',
+    'After that I will move the resume workflow to the next step.'
+  ].join('\n')
+}
+
 function statusInstruction(record: ResumeWorkflowRecord): string {
   const status = statusText(record)
   if (status === 'filled') {
@@ -316,7 +342,8 @@ function statusInstruction(record: ResumeWorkflowRecord): string {
   return [
     `Resume workflow status for ${record.clientName}: ${status}`,
     `Responsible: ${displayResponsibility(status)}`,
-    nextActionForStatus(status)
+    nextActionForStatus(status),
+    studentApprovalDetails(record)
   ].filter(Boolean).join('\n')
 }
 
@@ -344,6 +371,25 @@ function resolveActorForWorkflow(input: ResumeActorInput | undefined, workflow?:
     chatType: normalizeText(input?.chatType)
   }
 
+  const configuredRole = (): ResumeActorRole => {
+    if (userId && envIdSet('RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS', DEFAULT_KIRA_USER_IDS).has(userId)) {
+      return 'kira'
+    }
+    if (userId && envIdSet('RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS', DEFAULT_PROVIDER_USER_IDS).has(userId)) {
+      return 'provider'
+    }
+    return 'unknown'
+  }
+  const configuredActorRole = configuredRole()
+
+  if (!workflow && configuredActorRole !== 'unknown') {
+    return { ...actorBase, role: configuredActorRole }
+  }
+
+  if (workflow && statusResponsibility(statusText(workflow)) !== 'student' && configuredActorRole !== 'unknown') {
+    return { ...actorBase, role: configuredActorRole }
+  }
+
   if (workflow) {
     const expectedStudentUsername = normalizeUsername(workflow.clientTelegramUsername)
     const studentUserIds = parseStudentUserIdMap().get(Number(workflow.clientId)) ?? new Set<string>()
@@ -363,11 +409,8 @@ function resolveActorForWorkflow(input: ResumeActorInput | undefined, workflow?:
     }
   }
 
-  if (userId && envIdSet('RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS', DEFAULT_KIRA_USER_IDS).has(userId)) {
-    return { ...actorBase, role: 'kira' }
-  }
-  if (userId && envIdSet('RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS', DEFAULT_PROVIDER_USER_IDS).has(userId)) {
-    return { ...actorBase, role: 'provider' }
+  if (configuredActorRole !== 'unknown') {
+    return { ...actorBase, role: configuredActorRole }
   }
 
   if (workflow) {
@@ -469,18 +512,35 @@ function ensureRequiredClientData(record: ResumeWorkflowRecord): void {
   )
 }
 
+function normalizeOptionalUrl(value: unknown): string {
+  const url = normalizeText(value)
+  if (!url) return ''
+  if (!/^https?:\/\//i.test(url)) {
+    throw Object.assign(new Error('Please send a valid Google folder link after /resume.'), {
+      code: 'invalid_student_data_folder_url'
+    })
+  }
+  return url
+}
+
 function missingAdvanceFields(record: ResumeWorkflowRecord, fakeDataMode = resumeWorkflowFakeDataMode()): string[] {
-  if (fakeDataMode) return []
   switch (statusText(record)) {
     case "collection student's data":
-      return normalizeText(record.studentDataFolderUrl) ? [] : ['student_data_folder_url']
+      return [
+        normalizeText(record.clientGoogleFolder) ? undefined : 'root_google_folder',
+        normalizeText(record.studentDataFolderUrl) ? undefined : 'student_data_folder_url'
+      ].filter((item): item is string => Boolean(item))
     case "collection Kira's comments":
+      if (fakeDataMode) return []
       return normalizeText(record.kirasComments) ? [] : ['kiras_comments']
     case 'Draft in process':
+      if (fakeDataMode) return []
       return normalizeText(record.cvDraftUrl) ? [] : ['cv_draft_url']
     case 'English version in progress':
+      if (fakeDataMode) return []
       return normalizeText(record.enVersionUrl) ? [] : ['en_version_url']
     case 'Russian version in process':
+      if (fakeDataMode) return []
       return normalizeText(record.ruVersionUrl) ? [] : ['ru_version_url']
     default:
       return []
@@ -503,7 +563,6 @@ function plannedPatch(record: ResumeWorkflowRecord, fakeDataMode: boolean): Resu
       if (missingAdvanceFields(record, fakeDataMode).length) return null
       return {
         status: "collection Kira's comments",
-        studentDataFolderUrl: valueOrFake(record.studentDataFolderUrl, fake.studentDataFolderUrl, fakeDataMode),
         lastResponsible: 'Kira'
       }
     case "collection Kira's comments":
@@ -545,7 +604,7 @@ function plannedPatch(record: ResumeWorkflowRecord, fakeDataMode: boolean): Resu
     case 'Russian version in approve by Kira':
       return { status: 'Russian version in approve by student', lastResponsible: 'student' }
     case 'Russian version in approve by student':
-      return { status: 'moved to filling', lastResponsible: 'provider' }
+      return { status: 'filled', lastResponsible: 'done' }
     case 'moved to filling':
       return { status: 'filled', lastResponsible: 'done' }
     default:
@@ -569,21 +628,48 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWor
   const mention = clientMention(record)
   const intro = `${mention}, resume workflow for ${clientMarketLabel(record)} moved to "${status}".`
   const action = nextActionForStatus(status)
-  const text = [intro, action].filter(Boolean).join('\n')
+
+  if (status === 'filled') {
+    const chatId = defaultKiraNotifyChatId()
+    if (!chatId) return null
+    const text = [
+      `Resume workflow for ${clientMarketLabel(record)} is filled.`,
+      record.enVersionUrl ? `English version: ${record.enVersionUrl}` : undefined,
+      record.ruVersionUrl ? `Russian version: ${record.ruVersionUrl}` : undefined
+    ].filter(Boolean).join('\n')
+    return { kind: 'private_kira', chatId, text }
+  }
 
   if (responsible === 'student') {
     const chatId = normalizeId(record.commonChatId)
     if (!chatId) return null
+    const text = [intro, action, studentApprovalDetails(record)].filter(Boolean).join('\n')
     return { kind: 'common_chat', chatId, text }
   }
   if (responsible === 'kira') {
     const chatId = defaultKiraNotifyChatId()
     if (!chatId) return null
+    const text = [
+      intro,
+      action,
+      '',
+      'Open /open_my_tasks to process this task.',
+      '',
+      providerTaskMessage(record)
+    ].filter(Boolean).join('\n')
     return { kind: 'private_kira', chatId, text }
   }
   if (responsible === 'provider') {
     const chatId = defaultProviderNotifyChatId()
     if (!chatId) return null
+    const text = [
+      intro,
+      action,
+      '',
+      'Open /open_my_tasks to process this task.',
+      '',
+      providerTaskMessage(record)
+    ].filter(Boolean).join('\n')
     return { kind: 'private_provider', chatId, text }
   }
 
@@ -630,11 +716,14 @@ function providerTaskFromWorkflow(workflow: ResumeWorkflowRecord): ResumeProvide
 
 function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
   const missing = missingAdvanceFields(workflow)
+  const explicitSourceFolder = normalizeText(workflow.studentDataFolderUrl)
+  const rootGoogleFolder = normalizeText(workflow.clientGoogleFolder)
   const rows = [
-    `Client: ${workflow.clientName}`,
+    `Student: ${workflow.clientName}`,
     workflow.clientMarket ? `Market: ${workflow.clientMarket}` : undefined,
     `Status: ${statusText(workflow)}`,
-    workflow.studentDataFolderUrl ? `Source data: ${workflow.studentDataFolderUrl}` : undefined,
+    rootGoogleFolder ? `Root Google folder: ${rootGoogleFolder}` : undefined,
+    explicitSourceFolder && explicitSourceFolder !== rootGoogleFolder ? `Source data folder: ${explicitSourceFolder}` : undefined,
     workflow.kirasComments ? `Kira comments: ${workflow.kirasComments}` : undefined,
     workflow.cvDraftUrl ? `Draft: ${workflow.cvDraftUrl}` : undefined,
     workflow.enVersionUrl ? `EN: ${workflow.enVersionUrl}` : undefined,
@@ -643,6 +732,22 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
   ].filter(Boolean)
 
   return rows.join('\n')
+}
+
+function missingDataInstruction(workflow: ResumeWorkflowRecord): string {
+  const missing = missingAdvanceFields(workflow)
+  if (statusText(workflow) === "collection student's data" && missing.includes('root_google_folder')) {
+    return `@veu_support pls add ${workflow.clientName}'s root Google folder in Noco clients.google_folder`
+  }
+  if (statusText(workflow) === "collection student's data" && missing.includes('student_data_folder_url')) {
+    const rootFolder = normalizeText(workflow.clientGoogleFolder)
+    return [
+      'Please add your self-presentation and resume/source files to the correct Google folder.',
+      rootFolder ? `Main/root Google folder: ${rootFolder}` : undefined,
+      'Then send /resume <link to the self-presentation/source-data folder>.'
+    ].filter(Boolean).join('\n')
+  }
+  return 'No status change yet. Add the required data in Noco/Admin Console, then run the command again.'
 }
 
 function taskReplyMarkup(workflow: ResumeWorkflowRecord) {
@@ -715,6 +820,22 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
   ensureExpectedStatus(workflow, options.expectedStatus)
   ensureActorCanAdvance(workflow, actor)
 
+  const suppliedStudentDataFolderUrl = before === "collection student's data" && actor.role === 'student'
+    ? normalizeOptionalUrl(options.studentDataFolderUrl)
+    : ''
+  if (
+    suppliedStudentDataFolderUrl &&
+    before === "collection student's data" &&
+    actor.role === 'student' &&
+    !normalizeText(workflow.studentDataFolderUrl)
+  ) {
+    workflow = await repository.patchResumeWorkflow(workflow.id, {
+      studentDataFolderUrl: suppliedStudentDataFolderUrl,
+      lastWorkflowError: '',
+      workflowTrace: appendTrace(workflow, 'student_data_folder_url saved', actor)
+    })
+  }
+
   const patch = plannedPatch(workflow, resumeWorkflowFakeDataMode())
   const transitions: string[] = []
   if (patch) {
@@ -744,7 +865,7 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
       : [
           statusInstruction(workflow),
           '',
-          'No status change yet. Add the required data in Noco/Admin Console, then run the command again.'
+          missingDataInstruction(workflow)
         ].join('\n')
   }
 }
@@ -839,16 +960,20 @@ async function getProviderTasks(repository: ResumeWorkflowRepository, actorInput
     throw new Error('Repository does not support provider resume tasks.')
   }
 
-  const tasks = (await repository.getProviderResumeTasks())
+  const workflows = (await repository.getProviderResumeTasks())
     .filter(workflow => actorCanAccessTaskWorkflow(workflow, actor))
-    .map(providerTaskFromWorkflow)
+  const tasks = workflows.map(providerTaskFromWorkflow)
   const title = taskActorTitle(actor)
 
   return {
     actor,
     tasks,
     message: tasks.length
-      ? [`${title} resume tasks:`, ...tasks.map((task, index) => `${index + 1}. ${task.message}`)].join('\n')
+      ? [
+          `${title} resume tasks:`,
+          '',
+          ...workflows.map((workflow, index) => `${index + 1}.\n${providerTaskMessage(workflow)}`)
+        ].join('\n')
       : `No ${title.toLowerCase()} resume tasks are waiting right now.`,
     replyMarkup: tasks.length ? taskListReplyMarkup(tasks) : undefined
   }
@@ -878,6 +1003,143 @@ async function getProviderTaskById(workflowId: number, repository: ResumeWorkflo
   }
 }
 
+async function saveKiraCommentsFromChat(repository: ResumeWorkflowRepository, actorInput: ResumeActorInput | undefined, comments: string): Promise<ProviderTaskListResult & { workflow?: ResumeWorkflowRecord }> {
+  const actor = resolveGlobalActor(actorInput)
+  ensureTaskActor(actor)
+  if (actor.role !== 'kira') {
+    throw Object.assign(new Error('Only Kira can add Kira comments from chat.'), { code: 'forbidden' })
+  }
+  if (!repository.getProviderResumeTasks) {
+    throw new Error('Repository does not support provider resume tasks.')
+  }
+
+  const text = normalizeText(comments)
+  if (!text) {
+    throw Object.assign(new Error('Kira comments text is required.'), { code: 'missing_kira_comments' })
+  }
+
+  const commentTasks = (await repository.getProviderResumeTasks())
+    .filter(workflow => actorCanAccessTaskWorkflow(workflow, actor))
+    .filter(workflow => statusText(workflow) === "collection Kira's comments")
+
+  if (!commentTasks.length) {
+    return {
+      actor,
+      tasks: [],
+      message: 'No Kira resume task is waiting for comments right now.'
+    }
+  }
+
+  if (commentTasks.length > 1) {
+    return {
+      actor,
+      tasks: commentTasks.map(providerTaskFromWorkflow),
+      message: 'More than one Kira resume task is waiting for comments. Open a specific task first.',
+      replyMarkup: taskListReplyMarkup(commentTasks.map(providerTaskFromWorkflow))
+    }
+  }
+
+  const workflow = commentTasks[0]
+  const updated = await repository.patchResumeWorkflow(workflow.id, {
+    kirasComments: text,
+    lastWorkflowError: '',
+    workflowTrace: appendTrace(workflow, 'Kira comments saved from Telegram chat', actor)
+  })
+
+  return {
+    actor,
+    workflow: updated,
+    tasks: [providerTaskFromWorkflow(updated)],
+    message: [
+      `Kira comments saved for ${updated.clientName}.`,
+      '',
+      providerTaskMessage(updated)
+    ].join('\n'),
+    replyMarkup: taskReplyMarkup(updated)
+  }
+}
+
+function providerLinkRequirement(workflow: ResumeWorkflowRecord): {
+  field: 'cvDraftUrl' | 'enVersionUrl' | 'ruVersionUrl'
+  label: string
+  trace: string
+} | null {
+  switch (statusText(workflow)) {
+    case 'Draft in process':
+      return { field: 'cvDraftUrl', label: 'Draft link', trace: 'CV draft link saved from Telegram chat' }
+    case 'English version in progress':
+      return { field: 'enVersionUrl', label: 'English version link', trace: 'English version link saved from Telegram chat' }
+    case 'Russian version in process':
+      return { field: 'ruVersionUrl', label: 'Russian version link', trace: 'Russian version link saved from Telegram chat' }
+    default:
+      return null
+  }
+}
+
+async function saveProviderLinkFromChat(repository: ResumeWorkflowRepository, actorInput: ResumeActorInput | undefined, link: string): Promise<ProviderTaskListResult & { workflow?: ResumeWorkflowRecord }> {
+  const actor = resolveGlobalActor(actorInput)
+  ensureTaskActor(actor)
+  if (actor.role !== 'provider') {
+    throw Object.assign(new Error('Only provider can add resume links from chat.'), { code: 'forbidden' })
+  }
+  if (!repository.getProviderResumeTasks) {
+    throw new Error('Repository does not support provider resume tasks.')
+  }
+
+  const url = normalizeOptionalUrl(link)
+  if (!url) {
+    throw Object.assign(new Error('Resume link is required.'), { code: 'missing_provider_resume_link' })
+  }
+
+  const linkTasks = (await repository.getProviderResumeTasks())
+    .filter(workflow => actorCanAccessTaskWorkflow(workflow, actor))
+    .filter(workflow => providerLinkRequirement(workflow))
+
+  if (!linkTasks.length) {
+    return {
+      actor,
+      tasks: [],
+      message: 'No provider resume task is waiting for a link right now.'
+    }
+  }
+
+  if (linkTasks.length > 1) {
+    return {
+      actor,
+      tasks: linkTasks.map(providerTaskFromWorkflow),
+      message: 'More than one provider resume task is waiting for a link. Open a specific task first.',
+      replyMarkup: taskListReplyMarkup(linkTasks.map(providerTaskFromWorkflow))
+    }
+  }
+
+  const workflow = linkTasks[0]
+  const requirement = providerLinkRequirement(workflow)!
+  const updated = await repository.patchResumeWorkflow(workflow.id, {
+    [requirement.field]: url,
+    lastWorkflowError: '',
+    workflowTrace: appendTrace(workflow, requirement.trace, actor)
+  })
+
+  return {
+    actor,
+    workflow: updated,
+    tasks: [providerTaskFromWorkflow(updated)],
+    message: [
+      `${requirement.label} saved for ${updated.clientName}.`,
+      '',
+      providerTaskMessage(updated)
+    ].join('\n'),
+    replyMarkup: taskReplyMarkup(updated)
+  }
+}
+
+async function saveResumeTaskInputFromChat(repository: ResumeWorkflowRepository, actorInput: ResumeActorInput | undefined, text: string): Promise<ProviderTaskListResult & { workflow?: ResumeWorkflowRecord }> {
+  const actor = resolveGlobalActor(actorInput)
+  if (actor.role === 'kira') return await saveKiraCommentsFromChat(repository, actorInput, text)
+  if (actor.role === 'provider') return await saveProviderLinkFromChat(repository, actorInput, text)
+  throw Object.assign(new Error('Only Kira or provider can add resume task data from private chat.'), { code: 'forbidden' })
+}
+
 module.exports = {
   DEFAULT_KIRA_PLATFORM_REFS,
   DEFAULT_KIRA_USER_IDS,
@@ -905,6 +1167,9 @@ module.exports = {
   resumeWorkflowFakeDataMode,
   resumeWorkflow,
   resumeWorkflowById,
+  saveKiraCommentsFromChat,
+  saveProviderLinkFromChat,
+  saveResumeTaskInputFromChat,
   statusInstruction,
   statusResponsibility,
   statusText

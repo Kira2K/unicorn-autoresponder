@@ -918,42 +918,9 @@ async function runTests(): Promise<void> {
       headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
       body: JSON.stringify({ googleFolder: 'https://drive.google.com/drive/folders/updated' })
     })
-    assert.equal(result.response.status, 200, JSON.stringify(result.body))
-    assert.equal(result.body.success, true)
-    assert.equal(result.body.client.googleFolder, 'https://drive.google.com/drive/folders/updated')
+    assert.equal(result.response.status, 410, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'google_folder_telegram_edit_disabled')
     assert.equal(noco.calls.some((call: string) => call.startsWith('patch:mhiysd8l0f33bny')), false)
-
-    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
-      body: JSON.stringify({ googleFolder: '' })
-    })
-    assert.equal(result.response.status, 400, JSON.stringify(result.body))
-    assert.equal(result.body.error, 'invalid_google_folder')
-
-    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
-      body: JSON.stringify({ googleFolder: 'drive-folder-without-url' })
-    })
-    assert.equal(result.response.status, 400, JSON.stringify(result.body))
-    assert.equal(result.body.error, 'invalid_google_folder')
-
-    result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/google-folder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
-      body: JSON.stringify({ googleFolder: `https://${'a'.repeat(2049)}` })
-    })
-    assert.equal(result.response.status, 400, JSON.stringify(result.body))
-    assert.equal(result.body.error, 'invalid_google_folder')
-
-    result = await request(server.baseUrl, '/api/bot/telegram/chats/9999/google-folder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },
-      body: JSON.stringify({ googleFolder: 'https://drive.google.com/drive/folders/missing' })
-    })
-    assert.equal(result.response.status, 404, JSON.stringify(result.body))
-    assert.equal(result.body.error, 'CLIENT_NOT_FOUND')
 
     result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/status', {
       headers: { 'X-Bot-Api-Token': 'test-bot-token' }
@@ -1026,10 +993,10 @@ async function runTests(): Promise<void> {
         'X-Telegram-Chat-Id': '8222949251',
         'X-Telegram-Chat-Type': 'private'
       }
-      const resumeByChat = async (headers: Record<string, string>, chatId = '1001') => request(server.baseUrl, `/api/bot/telegram/chats/${chatId}/resume`, {
+      const resumeByChat = async (headers: Record<string, string>, chatId = '1001', body: Record<string, unknown> = {}) => request(server.baseUrl, `/api/bot/telegram/chats/${chatId}/resume`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({})
+        body: JSON.stringify(body)
       })
 
       result = await resumeByChat(newestStudentHeaders, '1003')
@@ -1039,8 +1006,17 @@ async function runTests(): Promise<void> {
 
       result = await resumeByChat(studentHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, "collection student's data")
+      assert.equal(result.body.workflow.studentDataFolderUrl, '')
+      assert.deepEqual(result.body.transitions, [])
+      assert.match(result.body.message, /self-presentation\/source-data folder/)
+
+      result = await resumeByChat(studentHeaders, '1001', {
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/student-source'
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, "collection Kira's comments")
-      assert.equal(result.body.workflow.studentDataFolderUrl, 'https://drive.google.com/drive/folders/test-student-data')
+      assert.equal(result.body.workflow.studentDataFolderUrl, 'https://drive.google.com/drive/folders/student-source')
       assert.equal(result.body.transitions.at(-1), "collection student's data -> collection Kira's comments")
       assert.equal(result.body.notifications.at(-1).kind, 'private_kira')
       assert.equal(telegramBotMessages.at(-1).chatId, '343610488')
@@ -1134,15 +1110,10 @@ async function runTests(): Promise<void> {
 
       result = await resumeByChat(studentHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
-      assert.equal(result.body.workflow.status, 'moved to filling')
-      assert(result.body.notifications.some((notification: any) => notification.kind === 'hh_summary'))
-      assert(result.body.notifications.some((notification: any) => notification.kind === 'private_provider'))
-
-      result = await resumeByChat(providerHeaders)
-      assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.completed, true)
       assert.equal(result.body.workflow.status, 'filled')
-      assert.equal(result.body.transitions.at(-1), 'moved to filling -> filled')
+      assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> filled')
+      assert(result.body.notifications.some((notification: any) => notification.kind === 'private_kira'))
       assert.match(result.body.message, /Resume workflow is completed/)
 
       result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reset-test', {

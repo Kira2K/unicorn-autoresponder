@@ -25,6 +25,7 @@ function makeRepository() {
     clientName: 'Тест',
     clientMarket: 'EN',
     clientTelegramUsername: '@Kira_arbeitet',
+    clientGoogleFolder: '',
     commonChatId: '-5216637594',
     education: client.education,
     englishLevel: client.englishLevel,
@@ -46,6 +47,7 @@ function makeRepository() {
     workflow.englishLevel = client.englishLevel
     workflow.englishLevelId = client.englishLevelId
     workflow.clientTelegramUsername = client.telegramPersonalChatId
+    workflow.clientGoogleFolder = client.googleFolder
     workflow.commonChatId = client.commonChatId
     workflow.clientMarket = client.market
   }
@@ -76,7 +78,7 @@ function makeRepository() {
     async updateGoogleFolderByTelegramChatId(chatId: string, googleFolder: string) {
       if (String(chatId) !== client.commonChatId) return null
       client.googleFolder = googleFolder
-      workflow.studentDataFolderUrl = googleFolder
+      syncClientFields()
       return client
     },
     async getResumeWorkflowByTelegramChatId(chatId: string) {
@@ -129,7 +131,7 @@ function makeVisibleTelegramHarness() {
           message_id: Number(message.id),
           text: input.text,
           chat: { id: Number(input.chatId), type: 'supergroup' },
-          from: { id: 7586552066, username: 'Kira_arbeitet' }
+          from: { id: 343610488, username: 'Kira_arbeitet' }
         }
       })
       return { accountId: input.accountId, message }
@@ -171,6 +173,8 @@ function makeVisibleTelegramHarness() {
 
 async function runTests() {
   const repository = makeRepository()
+  repository.client.googleFolder = 'https://drive.google.com/drive/folders/visible-root-test'
+  repository.workflow.studentDataFolderUrl = 'https://drive.google.com/drive/folders/visible-fake-test'
   const harness = makeVisibleTelegramHarness()
   const result = await runVisibleResumeE2e({
     repository,
@@ -188,14 +192,13 @@ async function runTests() {
   assert.equal(result.final.studentDataFolderUrl, 'https://drive.google.com/drive/folders/visible-fake-test')
   assert.deepEqual(harness.studentSends, [
     '/whoami',
-    '/change_google_folder https://drive.google.com/drive/folders/visible-fake-test',
     '/resume',
     '/resume',
     '/resume',
     '/resume'
   ])
   const commonChatText = (harness.messagesByChat.get('-5216637594') || []).map((message: any) => message.text).join('\n')
-  assert.match(commonChatText, /Google folder updated/)
+  assert.doesNotMatch(commonChatText, /Google folder updated/)
   assert.match(commonChatText, /Draft in approve by student/)
   assert.match(commonChatText, /English version in approve by student/)
   assert.match(commonChatText, /Russian version in approve by student/)

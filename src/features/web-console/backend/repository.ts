@@ -236,6 +236,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): 
     clientName,
     clientMarket: clientMarket || undefined,
     clientTelegramUsername: normalizeText((client as any)?.telegram_personal_chat_id ?? (client as any)?.telegramPersonalChatId) || undefined,
+    clientGoogleFolder: normalizeText((client as any)?.google_folder ?? (client as any)?.googleFolder) || undefined,
     commonChatId: normalizeText((client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId) || undefined,
     education: normalizeText((client as any)?.education) || undefined,
     englishLevel,

@@ -25,12 +25,14 @@ type SupportBotApiClient = {
   backendStatus(): Promise<{ ok: boolean; service?: string; checkedAt?: string }>
   findClient(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; chatId: string; client?: { id: number; name: string; chatId: string; googleFolder: string } }>
   updateGoogleFolder(chatId: string, googleFolder: string, actor?: SupportBotActor): Promise<{ success: boolean; error?: string; chatId?: string; client?: { id: number; name: string; chatId: string; googleFolder: string } }>
-  resume(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
+  resume(chatId: string, actor?: SupportBotActor, options?: { studentDataFolderUrl?: string }): Promise<{ found: boolean; message: string }>
   resumeStatus(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
   resumeResetTest(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
   providerTasks(actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
   providerTask(workflowId: number, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
   advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; workflow?: { status?: string } }>
+  saveKiraComments(comments: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
+  saveResumeTaskInput(text: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
 }
 
 const BACKEND_UNAVAILABLE_MESSAGE = 'Sorry, no backend. Please try again later.'
@@ -185,11 +187,11 @@ function createSupportBotApiClient(options: {
         body: JSON.stringify({ googleFolder, actor })
       })
     },
-    async resume(chatId: string, actor?: SupportBotActor) {
+    async resume(chatId: string, actor?: SupportBotActor, options: { studentDataFolderUrl?: string } = {}) {
       return await request(`/api/bot/telegram/chats/${encodeURIComponent(chatId)}/resume`, {
         method: 'POST',
         headers: actorHeaders(actor),
-        body: JSON.stringify({ actor })
+        body: JSON.stringify({ actor, studentDataFolderUrl: options.studentDataFolderUrl })
       })
     },
     async resumeStatus(chatId: string, actor?: SupportBotActor) {
@@ -220,6 +222,20 @@ function createSupportBotApiClient(options: {
         headers: actorHeaders(actor),
         body: JSON.stringify({ actor, expectedStatus })
       })
+    },
+    async saveKiraComments(comments: string, actor?: SupportBotActor) {
+      return await request('/api/bot/telegram/resume/kira-comments', {
+        method: 'POST',
+        headers: actorHeaders(actor),
+        body: JSON.stringify({ actor, comments })
+      })
+    },
+    async saveResumeTaskInput(text: string, actor?: SupportBotActor) {
+      return await request('/api/bot/telegram/resume/task-input', {
+        method: 'POST',
+        headers: actorHeaders(actor),
+        body: JSON.stringify({ actor, text })
+      })
     }
   }
 }
@@ -234,12 +250,30 @@ function usernameFromMessage(message: any): string {
 
 function isOpenTasksText(text: string): boolean {
   const normalized = text.trim().toLowerCase()
-  return normalized === 'open my tasks' || normalized === '/open_my_tasks' || normalized === '/tasks'
+  const name = commandName(text)
+  return normalized === 'open my tasks' || name === '/open_my_tasks' || name === '/tasks'
 }
 
 function isCommandsText(text: string): boolean {
   const normalized = text.trim().toLowerCase()
-  return normalized === '/commands' || normalized === '/help' || normalized === 'show all my commands'
+  const name = commandName(text)
+  return name === '/commands' || name === '/help' || normalized === 'show all my commands'
+}
+
+function isStudentApprovalText(text: string): boolean {
+  const normalized = text.trim().toLowerCase().replace(/[.!]+$/g, '')
+  return [
+    'i approve',
+    'approve',
+    'approved',
+    'ok',
+    'looks good',
+    'да',
+    'одобряю',
+    'согласен',
+    'согласна',
+    'подтверждаю'
+  ].includes(normalized)
 }
 
 function supportBotCommandsText(options: { includeTaskCommands?: boolean } = {}): string {
@@ -248,7 +282,6 @@ function supportBotCommandsText(options: { includeTaskCommands?: boolean } = {})
     '/backend_status - check if the backend is alive.',
     '/whoami - show this chat ID and your Telegram user ID.',
     '/student - show the student linked to this group.',
-    '/change_google_folder <url> - save your source-data Google folder.',
     '/resume - move the resume workflow one step when it is your turn.',
     '/resume_status - show the current resume workflow status.'
   ]
@@ -309,7 +342,22 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
     return await handleOpenTasks(actor, api)
   }
 
-  if (!text.startsWith('/')) return null
+  if (!text.startsWith('/')) {
+    if (actor.chatType !== 'private') {
+      if (!isStudentApprovalText(text)) return null
+      return await withBackendStatusMessage(async () => {
+        const result = await api.resume(chatId, actor)
+        return result.message
+      })
+    }
+    return await withBackendStatusMessage(async () => {
+      const result = await api.saveResumeTaskInput(text, actor)
+      return {
+        text: result.message,
+        replyMarkup: result.replyMarkup
+      }
+    })
+  }
 
   if (name === '/whoami') {
     return [
@@ -343,28 +391,17 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
   }
 
   if (name === '/change_google_folder') {
-    const googleFolder = commandArgument(text)
-    if (!googleFolder) return 'Google folder value is required.'
-    return await withBackendStatusMessage(async () => {
-      const result = await api.updateGoogleFolder(chatId, googleFolder, actor)
-      if (!result.success || !result.client) {
-        return [
-          'No student found for this Telegram chat.',
-          '',
-          `Chat ID: ${chatId}`,
-          'Please link this chat ID to a student in NocoDB/Admin Console.'
-        ].join('\n')
-      }
-      return [
-        `Google folder updated for ${result.client.name}.`,
-        `New value: ${result.client.googleFolder}`
-      ].join('\n')
-    })
+    return 'Google folder editing from Telegram is disabled. Please edit the root Google folder in Noco/Admin Console.'
   }
 
   if (name === '/resume') {
+    if (actor.chatType === 'private') {
+      return 'Please operate resume tasks via /open_my_tasks.'
+    }
     return await withBackendStatusMessage(async () => {
-      const result = await api.resume(chatId, actor)
+      const result = await api.resume(chatId, actor, {
+        studentDataFolderUrl: commandArgument(text)
+      })
       return result.message
     })
   }
@@ -446,7 +483,12 @@ async function handleSupportBotGroupAdd(update: any, api: SupportBotApiClient): 
     const studentName = result.found && result.client?.name
       ? result.client.name
       : String(chatMemberUpdate?.chat?.title ?? 'there').trim() || 'there'
-    return `Hello ${studentName}, I'm a unicorn support bot!\nSend /commands to see what I can do.`
+    return [
+      `Hello ${studentName}, I'm a unicorn support bot!`,
+      'Please complete the required profile details about yourself in the Console.',
+      'Add self-presentation and resume files to your Google folder when this stage asks for them.',
+      'Send /commands to see what I can do.'
+    ].join('\n')
   })
 }
 
@@ -465,6 +507,19 @@ async function sendBotResponse(
     replyMarkup: response.replyMarkup,
     parseMode: response.parseMode
   })
+}
+
+async function answerCallbackQueryQuietly(
+  botApi: ReturnType<typeof createTelegramBotApi>,
+  input: { callbackQueryId: string; text?: string }
+): Promise<void> {
+  try {
+    await botApi.answerCallbackQuery(input)
+  } catch (error: any) {
+    const message = String(error?.message ?? '').toLowerCase()
+    if (message.includes('query is too old') || message.includes('query id is invalid')) return
+    throw error
+  }
 }
 
 async function runSupportBot(options: {
@@ -500,7 +555,7 @@ async function runSupportBot(options: {
 
         if (callbackQuery?.id) {
           const response = await handleSupportBotCallback(callbackQuery, apiClient)
-          await botApi.answerCallbackQuery({ callbackQueryId: String(callbackQuery.id) })
+          await answerCallbackQueryQuietly(botApi, { callbackQueryId: String(callbackQuery.id) })
           const chatId = String(callbackQuery.message?.chat?.id ?? callbackQuery.from?.id ?? '').trim()
           if (response && chatId) await sendBotResponse(botApi, chatId, response)
           continue
@@ -510,9 +565,10 @@ async function runSupportBot(options: {
         const response = await handleSupportBotMessage(message, apiClient)
         if (response) await sendBotResponse(botApi, String(message.chat.id), response)
       } catch (error: any) {
+        console.error(error instanceof Error ? error.stack || error.message : String(error))
         const chatId = String(chatMemberUpdate?.chat?.id ?? callbackQuery?.message?.chat?.id ?? callbackQuery?.from?.id ?? message?.chat?.id ?? '').trim()
         if (callbackQuery?.id) {
-          await botApi.answerCallbackQuery({
+          await answerCallbackQueryQuietly(botApi, {
             callbackQueryId: String(callbackQuery.id),
             text: error?.message || 'Telegram bot command failed.'
           }).catch(() => undefined)
