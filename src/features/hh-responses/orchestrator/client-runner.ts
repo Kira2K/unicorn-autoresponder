@@ -3,6 +3,7 @@ const {
   extractParserErrorCodesFromLogs,
   getAutoResponderParserErrors,
   getAutoResponderRecentUrls,
+  getAutoResponderRecoverableVacancyFailureCount,
   getAutoResponderStopReason,
   getAutoResponderSuccessCount,
   getManualVacancies,
@@ -59,6 +60,7 @@ const {
   AUTOMATION_LOCK_TAG,
   AUTO_RESPONDER_WATCH_MS,
   DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN,
+  ORCHESTRATOR_IDLE_TIMEOUT_MS,
   ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
   ORCHESTRATOR_RESPONSE_LIMIT
 } = require('./config.ts')
@@ -251,6 +253,8 @@ async function collectAutoResponderRunData(
     pageResult.page
   )
   const responseCount = await getAutoResponderSuccessCount(pageResult.page)
+  const recoverableVacancyFailureCount =
+    await getAutoResponderRecoverableVacancyFailureCount(pageResult.page)
   const parserLogs: ParserLogEntry[] = await getParserLogs(pageResult.page)
   const structuredParserErrors: ParserErrorEntry[] =
     await getAutoResponderParserErrors(pageResult.page)
@@ -295,6 +299,7 @@ async function collectAutoResponderRunData(
     parserErrorLogsCount,
     parserErrorCodes,
     parserLastErrorCode,
+    recoverableVacancyFailureCount,
     recentUrls
   }
 
@@ -316,7 +321,7 @@ async function collectAutoResponderRunData(
     status,
     runStartedAt,
     'auto responder data collected',
-    `responses ${responseCount}, viewed ${vacancyTransitionCount}, manual ${manualVacancies.length}, parser errors ${parserErrorLogsCount}, parser codes ${parserErrorCodes.join(', ') || 'n/a'}, stop reason ${stopReason?.reason ?? 'n/a'}`
+    `responses ${responseCount}, viewed ${vacancyTransitionCount}, manual ${manualVacancies.length}, recoverable vacancy skips ${recoverableVacancyFailureCount}, parser errors ${parserErrorLogsCount}, parser codes ${parserErrorCodes.join(', ') || 'n/a'}, stop reason ${stopReason?.reason ?? 'n/a'}`
   )
 
   return {
@@ -728,20 +733,29 @@ async function runClientOrchestrator(
       const autoResponderResult = await waitForAutoResponderToFinish(
         pageResult.page,
         AUTO_RESPONDER_WATCH_MS,
-        pageResult.isBrowserDisconnected
+        pageResult.isBrowserDisconnected,
+        ORCHESTRATOR_IDLE_TIMEOUT_MS
       )
 
       let nextStatus = {
         ...currentStatus,
         autoResponderFinished: autoResponderResult.finished,
-        autoResponderWatchTimedOut: autoResponderResult.timedOut
+        autoResponderWatchTimedOut: autoResponderResult.timedOut,
+        autoResponderIdleTimedOut: autoResponderResult.idleTimedOut,
+        autoResponderIdleTimeoutMs: autoResponderResult.idleTimeoutMs,
+        autoResponderLastProgress: autoResponderResult.lastProgress
       }
       nextStatus = addLifecycleEvent(
         nextStatus,
         runStartedAt,
-        autoResponderResult.finished
+        autoResponderResult.idleTimedOut
+          ? 'auto responder idle timeout'
+          : autoResponderResult.finished
           ? 'auto responder finished itself'
-          : 'auto responder watch timeout'
+          : 'auto responder watch timeout',
+        autoResponderResult.idleTimedOut
+          ? autoResponderResult.lastProgress
+          : undefined
       )
 
       if (

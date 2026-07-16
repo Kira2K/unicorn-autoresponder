@@ -22,6 +22,10 @@ function createDefaultPreflightDependencies() {
 
 const dependencies = createDefaultPreflightDependencies()
 
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 function resetPreflightDependenciesForTests(): void {
   Object.assign(dependencies, createDefaultPreflightDependencies())
 }
@@ -236,7 +240,19 @@ async function assertPreexistingDolphinProfileLimit(): Promise<void> {
     runningProfileIds.length
   ) {
     await dependencies.cleanupPreexistingDolphinProfiles(runningProfileIds)
-    runningProfileIds = dependencies.getRunningDolphinBrowserProfileIds()
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+      runningProfileIds = dependencies.getRunningDolphinBrowserProfileIds()
+
+      if (runningProfileIds.length <= MAX_PREEXISTING_DOLPHIN_PROFILES) {
+        break
+      }
+
+      console.warn(
+        `Preflight Dolphin cleanup: ${runningProfileIds.length} profile(s) still visible ` +
+          `after cleanup attempt ${attempt}/10; waiting before final limit check`
+      )
+      await wait(1000)
+    }
   }
 
   if (runningProfileIds.length > MAX_PREEXISTING_DOLPHIN_PROFILES) {

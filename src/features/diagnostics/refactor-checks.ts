@@ -288,7 +288,10 @@ assert.equal(
   'mock-comtek'
 )
 
-const indexSource = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8')
+const indexSource = fs.readFileSync(
+  path.join(__dirname, '..', 'hh-responses', 'browser-responder', 'index.js'),
+  'utf8'
+)
 assert.match(indexSource, /blockedCompanies/)
 assert.match(indexSource, /COMPANY_STOP_LIST_SKIPPED/)
 assert.ok(
@@ -297,7 +300,7 @@ assert.ok(
 )
 
 const autoResponderControlSource = fs.readFileSync(
-  path.join(__dirname, 'auto-responder', 'control.ts'),
+  path.join(__dirname, '..', 'hh-responses', 'auto-responder', 'control.ts'),
   'utf8'
 )
 assert.match(autoResponderControlSource, /settings\.blockedCompanies/)

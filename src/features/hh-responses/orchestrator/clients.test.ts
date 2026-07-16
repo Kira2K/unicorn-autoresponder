@@ -2,8 +2,22 @@ const assert = require('node:assert/strict')
 
 const {
   attachHHAuthCredentials,
-  attachHHAuthCredentialsBestEffort
-} = require('./clients.ts')
+  attachHHAuthCredentialsBestEffort,
+  excludeClients
+} = require('./clients.ts') as {
+  attachHHAuthCredentials: Function
+  attachHHAuthCredentialsBestEffort: Function
+  excludeClients(
+    clients: ClientAutomationData[],
+    options: {
+      clientNames?: string[]
+      clientIds?: string[]
+    }
+  ): {
+    clients: ClientAutomationData[]
+    excluded: ClientAutomationData[]
+  }
+}
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
 type ClientHHAuthCredentials = import('./types.ts').ClientHHAuthCredentials
@@ -78,9 +92,33 @@ async function testBestEffortAttachSkipsOnlyBrokenClients(): Promise<void> {
   assert.match(String(result.skipped[0].error), /No HH credentials for -200/)
 }
 
+function testExcludeClientsByNameAndId(): void {
+  const result = excludeClients(
+    [
+      makeClient({ clientName: 'Kira', commonChatId: '-100' }),
+      makeClient({ clientName: 'Good', commonChatId: '-200' }),
+      makeClient({ clientName: 'Also Disabled', commonChatId: '-300' })
+    ],
+    {
+      clientNames: ['Kira'],
+      clientIds: ['-300']
+    }
+  )
+
+  assert.deepEqual(
+    result.clients.map(client => client.clientName),
+    ['Good']
+  )
+  assert.deepEqual(
+    result.excluded.map(client => client.commonChatId),
+    ['-100', '-300']
+  )
+}
+
 async function main(): Promise<void> {
   await testStrictAttachStillThrows()
   await testBestEffortAttachSkipsOnlyBrokenClients()
+  testExcludeClientsByNameAndId()
 
   console.log('orchestrator client selection tests passed')
 }

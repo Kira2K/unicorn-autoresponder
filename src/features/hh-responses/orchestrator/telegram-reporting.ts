@@ -22,7 +22,15 @@ type ManualVacancy = import('./types.ts').ManualVacancy
 type OrchestratorStatus = import('./types.ts').OrchestratorStatus
 type ParserLogEntry = import('./types.ts').ParserLogEntry
 
-const CAPTCHA_REPAIR_MENTION = '@kiraSamsonova нужно починить капчу'
+const CAPTCHA_REPAIR_MENTION = '@veu_support нужно починить капчу'
+const AUTH_REPAIR_MENTION = '@veu_support нужно проверить HH авторизацию'
+
+type TelegramDeliveryResult = {
+  channel: string
+  sent: boolean
+  skipped: boolean
+  error?: string
+}
 
 function truncateText(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
@@ -316,6 +324,7 @@ function formatClientErrorLog(status: OrchestratorStatus): string {
     `Responses remaining: ${status.responsesRemaining ?? 'n/a'}`,
     `Viewed vacancies: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual vacancies: ${status.manualVacanciesCount ?? 'n/a'}`,
+    `Recoverable vacancy skips: ${status.recoverableVacancyFailureCount ?? 0}`,
     formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup),
     formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
@@ -353,6 +362,7 @@ function formatClientLifecycleLog(status: OrchestratorStatus): string {
     `Responses: ${status.responseCount ?? 'n/a'}`,
     `Viewed: ${status.vacancyTransitionCount ?? 'n/a'}`,
     `Manual: ${status.manualVacanciesCount ?? 'n/a'}`,
+    `Recoverable skips: ${status.recoverableVacancyFailureCount ?? 0}`,
     formatManualVacanciesCleanupBrief(status.manualVacanciesCleanup),
     formatAuthStatusForTelegram(status),
     formatParserErrorCodesForTelegram(status),
@@ -519,7 +529,7 @@ function formatHumanStopReason(status: OrchestratorStatus): string {
   }
 
   if (classification === 'auth_required') {
-    return 'HH запросил авторизацию'
+    return `HH запросил авторизацию; ${AUTH_REPAIR_MENTION}`
   }
 
   switch (status.autoResponderStopReason) {
@@ -579,10 +589,30 @@ function formatCaptchaProfilesSummary(
   ].join('\n')
 }
 
+function formatAuthProfilesSummary(
+  results: OrchestratorStatus[]
+): string | undefined {
+  const authProfiles = results
+    .filter(status => classifyClientRun(status) === 'auth_required')
+    .map(status => `${status.clientName}${status.market ? ` / ${status.market}` : ''}`)
+
+  if (authProfiles.length === 0) {
+    return undefined
+  }
+
+  return [
+    `auth failed for profiles ${authProfiles
+      .map(escapeTelegramHtml)
+      .join(', ')}`,
+    escapeTelegramHtml(AUTH_REPAIR_MENTION)
+  ].join('\n')
+}
+
 function formatRunSummaryLog(results: OrchestratorStatus[]): string {
   const successful = results.filter(status => !hasClientFailure(status))
   const failed = results.filter(hasClientFailure)
   const captchaSummary = formatCaptchaProfilesSummary(results)
+  const authSummary = formatAuthProfilesSummary(results)
   const responseCount = results.reduce(
     (sum, status) => sum + (status.responseCount ?? 0),
     0
@@ -610,6 +640,7 @@ function formatRunSummaryLog(results: OrchestratorStatus[]): string {
       `🟢 Ок: ${successful.length}`,
       `🔴 Нужно проверить: ${failed.length}`,
       captchaSummary,
+      authSummary,
       `Откликов всего: ${responseCount}`,
       `Ручных вакансий всего: ${manualCount}`,
       '',
@@ -621,10 +652,29 @@ function formatRunSummaryLog(results: OrchestratorStatus[]): string {
   )
 }
 
-async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
+async function sendRunSummaryLog(
+  results: OrchestratorStatus[]
+): Promise<TelegramDeliveryResult> {
   if (!SUMMARY_LOGS_CHANNEL_ID) {
-    return
+    const delivery = {
+      channel: 'summary',
+      sent: false,
+      skipped: true
+    }
+    writeLocalRunLog({
+      kind: 'run-summary-send-skipped',
+      reason: 'summary_logs_channel_id_missing',
+      delivery
+    })
+
+    return delivery
   }
+
+  writeLocalRunLog({
+    kind: 'run-summary-send-started',
+    channelId: SUMMARY_LOGS_CHANNEL_ID,
+    resultsCount: results.length
+  })
 
   try {
     await sendTelegramMessage(
@@ -634,10 +684,35 @@ async function sendRunSummaryLog(results: OrchestratorStatus[]): Promise<void> {
         parseMode: 'html'
       }
     )
+    const delivery = {
+      channel: 'summary',
+      sent: true,
+      skipped: false
+    }
+    writeLocalRunLog({
+      kind: 'run-summary-sent',
+      delivery
+    })
+
+    return delivery
   } catch (error: unknown) {
+    const delivery = {
+      channel: 'summary',
+      sent: false,
+      skipped: false,
+      error: getErrorMessage(error)
+    }
     console.error(
       `Failed to send run summary to Telegram: ${getErrorMessage(error)}`
     )
+    writeLocalRunLog({
+      kind: 'run-summary-send-failed',
+      delivery,
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+
+    return delivery
   }
 }
 
@@ -748,6 +823,7 @@ async function sendManualVacanciesToTelegram(
 module.exports = {
   addLifecycleEvent,
   formatCaptchaProfilesSummary,
+  formatAuthProfilesSummary,
   formatRunSummaryLog,
   formatAuthCheckBrief,
   formatManualVacanciesCleanupBrief,

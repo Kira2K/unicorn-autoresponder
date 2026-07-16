@@ -21,7 +21,8 @@
         parserErrors: STORAGE_PREFIX + 'parser_errors',
         recentUrls: STORAGE_PREFIX + 'recent_urls',
         modalRetry: STORAGE_PREFIX + 'modal_retry',
-        manualReturnState: STORAGE_PREFIX + 'manual_return_state'
+        manualReturnState: STORAGE_PREFIX + 'manual_return_state',
+        recoverableVacancyFailures: STORAGE_PREFIX + 'recoverable_vacancy_failures'
     };
 
     // Важные селекторы, используемые в скрипте
@@ -71,6 +72,7 @@
     const MANUAL_RETURN_MAX_ATTEMPTS = 8;
     const STUCK_VACANCY_TIMEOUT_MS = 90 * 1000;
     const STUCK_VACANCY_TIMEOUT_CODE = 'STUCK_ON_VACANCY_TIMEOUT';
+    const MAX_CONSECUTIVE_RECOVERABLE_VACANCY_FAILURES = 5;
 
     // Безопасные и предсказуемые значения конфигурации
     const toNum = (v, fallback) => {
@@ -170,6 +172,16 @@
         },
         clearParserErrors: () => sessionStorage.removeItem(KEYS.parserErrors),
         clearRecentUrls: () => sessionStorage.removeItem(KEYS.recentUrls),
+        getRecoverableVacancyFailureCount: () => {
+            const count = Number(sessionStorage.getItem(KEYS.recoverableVacancyFailures) || '0');
+            return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+        },
+        incrementRecoverableVacancyFailureCount: () => {
+            const nextCount = StateManager.getRecoverableVacancyFailureCount() + 1;
+            sessionStorage.setItem(KEYS.recoverableVacancyFailures, String(nextCount));
+            return nextCount;
+        },
+        clearRecoverableVacancyFailureCount: () => sessionStorage.removeItem(KEYS.recoverableVacancyFailures),
         getRecentUrls: () => {
             try {
                 const parsed = JSON.parse(sessionStorage.getItem(KEYS.recentUrls) || '[]');
@@ -416,6 +428,33 @@
         }
         console.log(`[HH-AR] ${msg}`);
     };
+
+    function handleRecoverableVacancyFailure(code, details = '') {
+        const count = StateManager.incrementRecoverableVacancyFailureCount();
+        StateManager.addParserError(
+            'RECOVERABLE_VACANCY_SKIPPED',
+            `${code}: ${details || 'recoverable vacancy failure'}`
+        );
+        log(
+            `Recoverable vacancy failure ${count}/${MAX_CONSECUTIVE_RECOVERABLE_VACANCY_FAILURES}: ${code}. Skipping vacancy and continuing.`,
+            true
+        );
+
+        if (count >= MAX_CONSECUTIVE_RECOVERABLE_VACANCY_FAILURES) {
+            StateManager.setStopReason(
+                'vacancy_recovery_limit_exceeded',
+                `${count} consecutive recoverable vacancy failures; last code ${code}`,
+                true
+            );
+            StateManager.setRunning(false);
+            StateManager.releaseInstanceLock(TAB_ID);
+            setStatus('error');
+            return false;
+        }
+
+        setStatus('running', 'Recovering after broken vacancy...');
+        return true;
+    }
 
     StateManager.rememberUrl(location.href, 'script-load');
 
@@ -1933,6 +1972,7 @@
             StateManager.clearStopReason();
             StateManager.clearParserErrors();
             StateManager.clearRecentUrls();
+            StateManager.clearRecoverableVacancyFailureCount();
             StateManager.rememberUrl(location.href, 'start-loop');
         } else {
             StateManager.rememberUrl(location.href, 'resume-loop');
@@ -1967,6 +2007,7 @@
             log('На странице вакансии — продолжаю обработку тут.');
             const res = await processVacancy();
             if (res === 'OK') {
+                StateManager.clearRecoverableVacancyFailureCount();
                 log('Отклик отправлен. Завершаю цикл для корректного возврата.');
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
@@ -1980,11 +2021,13 @@
                 isLoopActive = false;
                 return;
             } else if (res === 'SKIPPED_RESUME_VISIBILITY') {
+                StateManager.clearRecoverableVacancyFailureCount();
                 log('Вакансия пропущена из-за требования изменить видимость резюме. Возвращаюсь к списку.');
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
                 return;
             } else if (res === 'COMPANY_STOP_LIST_SKIPPED') {
+                StateManager.clearRecoverableVacancyFailureCount();
                 log('Вакансия пропущена по stop-list компании. Возвращаюсь к списку.');
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
@@ -2008,7 +2051,14 @@
             } else if (res === 'AUTH_REQUIRED') {
                 isLoopActive = false;
                 return;
-            } else if (res === 'NO_APPLY_RETURNED' || res === 'ERROR_NO_MODAL' || res === 'NO_CONFIRM') {
+            } else if (res === 'NO_APPLY_RETURNED') {
+                isLoopActive = false;
+                if (!handleRecoverableVacancyFailure(res, 'Open vacancy had no apply button and returned to list.')) {
+                    return;
+                }
+                setStatus('running', 'Recovering after broken vacancy...');
+                return;
+            } else if (res === 'ERROR_NO_MODAL' || res === 'NO_CONFIRM') {
                 log(`Обработка завершилась с кодом ${res}. Завершаю цикл.`, true);
                 isLoopActive = false;
                 StateManager.addParserError(res, 'Ошибка при обработке открытой страницы вакансии');
@@ -2043,6 +2093,7 @@
             const result = await processVacancy(btn);
 
             if (result === 'OK') {
+                StateManager.clearRecoverableVacancyFailureCount();
                 count++;
                 log(`Отклик #${count} отправлен.`);
                 await actionPause();
@@ -2068,11 +2119,13 @@
                 isLoopActive = false;
                 return;
             } else if (result === 'SKIPPED_RESUME_VISIBILITY') {
+                StateManager.clearRecoverableVacancyFailureCount();
                 log('Вакансия пропущена из-за требования изменить видимость резюме. Выход из цикла, ожидаю возврат через watchdog.');
                 isLoopActive = false;
                 setStatus('running', 'Возврат к списку...');
                 return;
             } else if (result === 'COMPANY_STOP_LIST_SKIPPED') {
+                StateManager.clearRecoverableVacancyFailureCount();
                 log('Вакансия пропущена по stop-list компании.');
                 await actionPause();
             } else if (result === 'AUTH_REQUIRED') {
@@ -2082,6 +2135,13 @@
                 log('Не нашёл форму отклика, перезагружаю вакансию и повторю один раз.', true);
                 isLoopActive = false;
                 setStatus('running', 'Повтор после reload...');
+                return;
+            } else if (result === 'NO_APPLY_RETURNED') {
+                isLoopActive = false;
+                if (!handleRecoverableVacancyFailure(result, 'List vacancy had no apply button and returned to list.')) {
+                    return;
+                }
+                setStatus('running', 'Recovering after broken vacancy...');
                 return;
             } else {
                 log(`Ошибка при обработке: ${result}`, true);

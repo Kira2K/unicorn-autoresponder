@@ -33,6 +33,7 @@ function parseMarketEnv(value: string | undefined): 'Ru' | 'En' {
 }
 
 const DEFAULT_WATCH_MS = 15 * 60 * 1000
+const DEFAULT_ORCHESTRATOR_IDLE_TIMEOUT_MS = 10 * 60 * 1000
 const hasExplicitOrchestratorWatchMs =
   process.env.ORCHESTRATOR_WATCH_MS !== undefined &&
   String(process.env.ORCHESTRATOR_WATCH_MS).trim() !== ''
@@ -56,6 +57,18 @@ const AUTO_RESPONDER_WATCH_MS = hasExplicitOrchestratorWatchMs
     ? undefined
     : Number(process.env.ORCHESTRATOR_WATCH_MS)
   : DEFAULT_WATCH_MS
+const ORCHESTRATOR_SUPERVISED = parseBooleanEnv(
+  process.env.ORCHESTRATOR_SUPERVISED,
+  false
+)
+const parsedOrchestratorIdleTimeoutMs = Number(
+  process.env.ORCHESTRATOR_IDLE_TIMEOUT_MS ?? DEFAULT_ORCHESTRATOR_IDLE_TIMEOUT_MS
+)
+const ORCHESTRATOR_IDLE_TIMEOUT_MS = Number.isFinite(
+  parsedOrchestratorIdleTimeoutMs
+)
+  ? Math.max(0, Math.floor(parsedOrchestratorIdleTimeoutMs))
+  : DEFAULT_ORCHESTRATOR_IDLE_TIMEOUT_MS
 const DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT = 180
 const ORCHESTRATOR_RESPONSE_LIMIT =
   process.env.ORCHESTRATOR_RESPONSE_LIMIT === undefined ||
@@ -63,8 +76,16 @@ const ORCHESTRATOR_RESPONSE_LIMIT =
     ? DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT
     : Number(process.env.ORCHESTRATOR_RESPONSE_LIMIT)
 const DEFAULT_ORCHESTRATOR_CONCURRENCY = 1
+const DEFAULT_SUPERVISED_ORCHESTRATOR_CONCURRENCY = 3
+const hasExplicitOrchestratorConcurrency =
+  process.env.ORCHESTRATOR_CONCURRENCY !== undefined &&
+  String(process.env.ORCHESTRATOR_CONCURRENCY).trim() !== ''
 const parsedOrchestratorConcurrency = Number(
-  process.env.ORCHESTRATOR_CONCURRENCY ?? DEFAULT_ORCHESTRATOR_CONCURRENCY
+  hasExplicitOrchestratorConcurrency
+    ? process.env.ORCHESTRATOR_CONCURRENCY
+    : ORCHESTRATOR_SUPERVISED
+    ? DEFAULT_SUPERVISED_ORCHESTRATOR_CONCURRENCY
+    : DEFAULT_ORCHESTRATOR_CONCURRENCY
 )
 const ORCHESTRATOR_CONCURRENCY = Number.isFinite(parsedOrchestratorConcurrency)
   ? Math.max(1, Math.floor(parsedOrchestratorConcurrency))
@@ -98,6 +119,8 @@ module.exports = {
   AUTOMATION_LOCK_STATUS_NAME: 'Автоотклики, не трогай',
   AUTOMATION_LOCK_TAG: 'Автоотклики, не трогай',
   AUTO_RESPONDER_WATCH_MS,
+  ORCHESTRATOR_SUPERVISED,
+  ORCHESTRATOR_IDLE_TIMEOUT_MS,
   AUTH_CHECK_PARSER_ERROR_CODES: new Set([
     'AUTH_REQUIRED',
     'auth_required',
@@ -106,7 +129,9 @@ module.exports = {
   CLIENT_START_DELAY_MS,
   CONNECT_OVER_CDP_TIMEOUT_MS: 60000,
   DEFAULT_CLIENT_START_DELAY_MS,
+  DEFAULT_ORCHESTRATOR_IDLE_TIMEOUT_MS,
   DEFAULT_ORCHESTRATOR_CONCURRENCY,
+  DEFAULT_SUPERVISED_ORCHESTRATOR_CONCURRENCY,
   DEFAULT_ORCHESTRATOR_RESPONSE_LIMIT,
   DEFAULT_WATCH_MS,
   HAS_EXPLICIT_ORCHESTRATOR_RESPONSE_LIMIT: hasExplicitOrchestratorResponseLimit,
@@ -154,6 +179,8 @@ module.exports = {
   HH_AUTO_RESPONDER_PARSER_ERRORS_KEY:
     HH_AUTO_RESPONDER_STORAGE_KEYS.parserErrors,
   HH_AUTO_RESPONDER_RECENT_URLS_KEY: HH_AUTO_RESPONDER_STORAGE_KEYS.recentUrls,
+  HH_AUTO_RESPONDER_RECOVERABLE_VACANCY_FAILURES_KEY:
+    HH_AUTO_RESPONDER_STORAGE_KEYS.recoverableVacancyFailures,
   HH_AUTO_RESPONDER_RUNNING_KEY: HH_AUTO_RESPONDER_STORAGE_KEYS.isRunning,
   HH_AUTO_RESPONDER_SETTINGS_KEY: HH_AUTO_RESPONDER_STORAGE_KEYS.settings,
   HH_AUTO_RESPONDER_STOP_REASON_KEY: HH_AUTO_RESPONDER_STORAGE_KEYS.stopReason,

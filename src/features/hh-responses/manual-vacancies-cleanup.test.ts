@@ -74,10 +74,37 @@ function testForcedManualReturnIsNotParserError(): void {
   assert.equal(source.includes("addParserError('MANUAL_RETURN_FORCED'"), false)
 }
 
+function testNoApplyReturnedIsRecoverable(): void {
+  const source = fs.readFileSync(
+    path.join(__dirname, 'browser-responder/index.js'),
+    'utf8'
+  )
+
+  assert.equal(
+    source.includes("res === 'NO_APPLY_RETURNED' || res === 'ERROR_NO_MODAL'"),
+    false
+  )
+  assert.match(
+    source,
+    /res === 'NO_APPLY_RETURNED'[\s\S]*handleRecoverableVacancyFailure\(res/
+  )
+  assert.match(
+    source,
+    /result === 'NO_APPLY_RETURNED'[\s\S]*handleRecoverableVacancyFailure\(result/
+  )
+  assert.match(
+    source,
+    /MAX_CONSECUTIVE_RECOVERABLE_VACANCY_FAILURES = 5/
+  )
+  assert.match(source, /'vacancy_recovery_limit_exceeded'/)
+  assert.match(source, /'RECOVERABLE_VACANCY_SKIPPED'/)
+}
+
 async function main(): Promise<void> {
   await testAlreadyClosedPageSkipsImmediately()
   await testClosedPageDuringVacancyCheckReturnsFast()
   testForcedManualReturnIsNotParserError()
+  testNoApplyReturnedIsRecoverable()
 
   console.log('manual vacancies cleanup tests passed')
 }

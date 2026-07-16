@@ -230,6 +230,23 @@ function testRunClassification(): void {
   assert.equal(isClientRunSuccessful(noNewTargetsBelowLimit), true)
   assert.equal(classifyClientRun(timeoutBelowLimit), 'normal_timeout')
   assert.equal(isClientRunSuccessful(timeoutBelowLimit), true)
+  assert.equal(
+    classifyClientRun(
+      makeStatus({
+        autoResponderStopReason: 'orchestrator_idle_timeout',
+        autoResponderIdleTimedOut: true
+      })
+    ),
+    'scraper_error'
+  )
+  assert.equal(
+    classifyClientRun(
+      makeStatus({
+        autoResponderStopReason: 'vacancy_recovery_limit_exceeded'
+      })
+    ),
+    'scraper_error'
+  )
 }
 
 function testTimeoutClassificationNeedsHealthyCleanup(): void {

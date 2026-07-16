@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict')
 
 const {
+  formatAuthProfilesSummary,
   formatCaptchaProfilesSummary,
   formatRunSummaryLog,
   hasClientFailure
@@ -38,7 +39,7 @@ function testSingleThrownCaptchaSummary(): void {
     ]),
     [
       'captcha found for profiles Кира / Ru',
-      '@kiraSamsonova нужно починить капчу'
+      '@veu_support нужно починить капчу'
     ].join('\n')
   )
 }
@@ -60,7 +61,7 @@ function testMultipleCaptchaSummary(): void {
     ]),
     [
       'captcha found for profiles Кира / Ru, Мария Андреева / Ru',
-      '@kiraSamsonova нужно починить капчу'
+      '@veu_support нужно починить капчу'
     ].join('\n')
   )
 }
@@ -71,7 +72,33 @@ function testRunSummaryIncludesCaptchaBlock(): void {
   ])
 
   assert.match(summary, /captcha found for profiles Кира \/ Ru/)
-  assert.match(summary, /@kiraSamsonova нужно починить капчу/)
+  assert.match(summary, /@veu_support нужно починить капчу/)
+}
+
+function testRunSummaryIncludesAuthSupportBlock(): void {
+  const status = makeStatus({
+    error: 'HH auth validation failed: logged_out',
+    opened: false,
+    startButtonClicked: false,
+    authBeforeStart: {
+      state: 'logged_out',
+      checkedAt: '2026-07-16T00:00:00.000Z',
+      url: 'https://hh.ru',
+      title: 'HH',
+      signals: {}
+    }
+  })
+  const summary = formatRunSummaryLog([status])
+
+  assert.equal(
+    formatAuthProfilesSummary([status]),
+    [
+      'auth failed for profiles Кира / Ru',
+      '@veu_support нужно проверить HH авторизацию'
+    ].join('\n')
+  )
+  assert.match(summary, /auth failed for profiles Кира \/ Ru/)
+  assert.match(summary, /@veu_support нужно проверить HH авторизацию/)
 }
 
 function testTimerReachedIsOkEvenWhenResponseLimitNotMet(): void {
@@ -129,6 +156,7 @@ testNoCaptchaSummary()
 testSingleThrownCaptchaSummary()
 testMultipleCaptchaSummary()
 testRunSummaryIncludesCaptchaBlock()
+testRunSummaryIncludesAuthSupportBlock()
 testTimerReachedIsOkEvenWhenResponseLimitNotMet()
 testAcceptedTerminalStopsAreGreenDots()
 

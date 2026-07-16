@@ -9,7 +9,9 @@ const HH_AUTO_RESPONDER_STORAGE_KEYS = {
   logs: `${HH_AUTO_RESPONDER_STORAGE_PREFIX}logs`,
   stopReason: `${HH_AUTO_RESPONDER_STORAGE_PREFIX}stop_reason`,
   parserErrors: `${HH_AUTO_RESPONDER_STORAGE_PREFIX}parser_errors`,
-  recentUrls: `${HH_AUTO_RESPONDER_STORAGE_PREFIX}recent_urls`
+  recentUrls: `${HH_AUTO_RESPONDER_STORAGE_PREFIX}recent_urls`,
+  recoverableVacancyFailures:
+    `${HH_AUTO_RESPONDER_STORAGE_PREFIX}recoverable_vacancy_failures`
 }
 
 module.exports = {

@@ -67,17 +67,55 @@ function testExplicitWatchCanBeDisabled(): void {
   assert.equal(config.AUTO_RESPONDER_WATCH_MS, undefined)
 }
 
-function testOrchestratorConcurrencyDefaultsToOne(): void {
+function testSupervisedAndIdleTimeoutConfig(): void {
   const config = loadConfig({
+    ORCHESTRATOR_SUPERVISED: 'true',
+    ORCHESTRATOR_IDLE_TIMEOUT_MS: '12345'
+  })
+
+  assert.equal(config.ORCHESTRATOR_SUPERVISED, true)
+  assert.equal(config.ORCHESTRATOR_IDLE_TIMEOUT_MS, 12345)
+}
+
+function testIdleTimeoutDefaultsToTenMinutes(): void {
+  const config = loadConfig({
+    ORCHESTRATOR_IDLE_TIMEOUT_MS: undefined
+  })
+
+  assert.equal(
+    config.ORCHESTRATOR_IDLE_TIMEOUT_MS,
+    config.DEFAULT_ORCHESTRATOR_IDLE_TIMEOUT_MS
+  )
+}
+
+function testOrchestratorConcurrencyDefaultsToOneWhenUnsupervised(): void {
+  const config = loadConfig({
+    ORCHESTRATOR_SUPERVISED: undefined,
     ORCHESTRATOR_CONCURRENCY: undefined
   })
 
   assert.equal(config.ORCHESTRATOR_CONCURRENCY, 1)
 }
 
+function testSupervisedOrchestratorConcurrencyDefaultsToThree(): void {
+  const config = loadConfig({
+    ORCHESTRATOR_SUPERVISED: 'true',
+    ORCHESTRATOR_CONCURRENCY: undefined
+  })
+
+  assert.equal(
+    config.ORCHESTRATOR_CONCURRENCY,
+    config.DEFAULT_SUPERVISED_ORCHESTRATOR_CONCURRENCY
+  )
+  assert.equal(config.ORCHESTRATOR_CONCURRENCY, 3)
+}
+
 function testOrchestratorConcurrencyIsPositiveInteger(): void {
   assert.equal(
-    loadConfig({ ORCHESTRATOR_CONCURRENCY: '2.8' }).ORCHESTRATOR_CONCURRENCY,
+    loadConfig({
+      ORCHESTRATOR_SUPERVISED: 'true',
+      ORCHESTRATOR_CONCURRENCY: '2.8'
+    }).ORCHESTRATOR_CONCURRENCY,
     2
   )
   assert.equal(
@@ -93,7 +131,10 @@ function testOrchestratorConcurrencyIsPositiveInteger(): void {
 testResponseLimitDoesNotDisableDefaultWatch()
 testExplicitWatchStillOverridesDefaultWatch()
 testExplicitWatchCanBeDisabled()
-testOrchestratorConcurrencyDefaultsToOne()
+testSupervisedAndIdleTimeoutConfig()
+testIdleTimeoutDefaultsToTenMinutes()
+testOrchestratorConcurrencyDefaultsToOneWhenUnsupervised()
+testSupervisedOrchestratorConcurrencyDefaultsToThree()
 testOrchestratorConcurrencyIsPositiveInteger()
 
 console.log('orchestrator config tests passed')

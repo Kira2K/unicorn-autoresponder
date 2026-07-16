@@ -1,4 +1,5 @@
 require('dotenv').config({ quiet: true })
+const fs = require('node:fs')
 
 const {
   createAppDb
@@ -14,12 +15,28 @@ const {
   attachHHAuthCredentials,
   attachHHAuthCredentialsBestEffort,
   attachBlockedCompanies,
+  applyConfiguredClientExclusions,
   getConfiguredAutomationTargetOptions,
   getConfiguredClientIds,
   getConfiguredClientNames,
   selectClientsByCommonChatIds,
   selectClientsByUniqueNames
-} = require('../orchestrator/clients.ts')
+} = require('../orchestrator/clients.ts') as {
+  attachHHAuthCredentials: Function
+  attachHHAuthCredentialsBestEffort: Function
+  attachBlockedCompanies: Function
+  applyConfiguredClientExclusions(clients: ClientAutomationData[]): {
+    clients: ClientAutomationData[]
+    excluded: ClientAutomationData[]
+    excludedNames: string[]
+    excludedIds: string[]
+  }
+  getConfiguredAutomationTargetOptions: Function
+  getConfiguredClientIds: Function
+  getConfiguredClientNames: Function
+  selectClientsByCommonChatIds: Function
+  selectClientsByUniqueNames: Function
+}
 const { runClientOrchestrator } = require('../orchestrator/client-runner.ts')
 const {
   isClientReportSuccessful,
@@ -43,7 +60,9 @@ const {
   EXTERNAL_TIMEOUT_PROFILE_BUFFER_MS,
   LOCAL_RUN_LOG_FILE,
   ORCHESTRATOR_CONCURRENCY,
+  ORCHESTRATOR_IDLE_TIMEOUT_MS,
   ORCHESTRATOR_RESPONSE_LIMIT,
+  ORCHESTRATOR_SUPERVISED,
   ORCHESTRATOR_WORK_WITH_MARKET
 } = require('../orchestrator/config.ts')
 const {
@@ -61,6 +80,7 @@ const RUN_CLEANUP_TIMEOUT_MS = Number(
 )
 let runExitLogged = false
 let latestRunSummaryStatuses: OrchestratorStatus[] = []
+let latestRunSummaryDelivery: unknown
 
 function writeRunExitLog(options: {
   exitCode: number
@@ -79,6 +99,7 @@ function writeRunExitLog(options: {
     reason: options.reason,
     resultsCount: options.resultsCount,
     startedProfileIds: getStartedProfileIds(),
+    latestRunSummaryDelivery,
     error: options.error ? getErrorMessage(options.error) : undefined,
     errorStack: options.error ? getErrorStack(options.error) : undefined
   })
@@ -95,11 +116,12 @@ async function sendRunSummaryLogWithTimeout(
   reason = 'final'
 ): Promise<void> {
   try {
-    await withTimeout(
+    const delivery = await withTimeout(
       sendRunSummaryLog(results),
       RUN_REPORT_TIMEOUT_MS,
       `Run summary Telegram report timed out after ${RUN_REPORT_TIMEOUT_MS}ms`
     )
+    latestRunSummaryDelivery = delivery
   } catch (error: unknown) {
     console.error(`Failed to send run summary: ${getErrorMessage(error)}`)
     writeLocalRunLog({
@@ -110,6 +132,120 @@ async function sendRunSummaryLogWithTimeout(
       errorStack: getErrorStack(error)
     })
   }
+}
+
+function readContinuationCompletedClientIds(): Set<string> {
+  const continuationLog = process.env.ORCHESTRATOR_CONTINUE_FROM_LOG?.trim()
+
+  if (!continuationLog) {
+    return new Set()
+  }
+
+  const completedClientIds = new Set<string>()
+  const lines = fs.readFileSync(continuationLog, 'utf8').split(/\r?\n/)
+
+  for (const line of lines) {
+    if (!line.trim()) {
+      continue
+    }
+
+    try {
+      const record = JSON.parse(line)
+      const status = record?.kind === 'client-final-status'
+        ? record.status
+        : undefined
+      const commonChatId = status?.commonChatId
+
+      if (typeof commonChatId === 'string' && commonChatId.trim()) {
+        completedClientIds.add(commonChatId)
+      }
+    } catch {
+      // Ignore corrupt historical lines; the current run will still log preflight.
+    }
+  }
+
+  writeLocalRunLog({
+    kind: 'run-continuation-loaded',
+    continuationLog,
+    completedClientIds: [...completedClientIds]
+  })
+
+  return completedClientIds
+}
+
+function applyContinuationFilter(
+  clients: ClientAutomationData[]
+): {
+  clients: ClientAutomationData[]
+  skipped: ClientAutomationData[]
+} {
+  const completedClientIds = readContinuationCompletedClientIds()
+
+  if (!completedClientIds.size) {
+    return {
+      clients,
+      skipped: []
+    }
+  }
+
+  const keptClients: ClientAutomationData[] = []
+  const skipped: ClientAutomationData[] = []
+
+  for (const client of clients) {
+    if (completedClientIds.has(client.commonChatId)) {
+      skipped.push(client)
+      continue
+    }
+
+    keptClients.push(client)
+  }
+
+  writeLocalRunLog({
+    kind: 'run-continuation-filtered',
+    skippedClients: skipped.map(client => ({
+      clientName: client.clientName,
+      commonChatId: client.commonChatId,
+      market: client.market
+    })),
+    remainingClients: keptClients.length
+  })
+
+  return {
+    clients: keptClients,
+    skipped
+  }
+}
+
+function prepareSelectedClients(
+  clients: ClientAutomationData[]
+): ClientAutomationData[] {
+  const exclusions = applyConfiguredClientExclusions(clients)
+  if (exclusions.excluded.length) {
+    console.warn(
+      `Excluding clients: ${exclusions.excluded
+        .map(client => `${client.clientName}/${client.commonChatId}`)
+        .join(', ')}`
+    )
+  }
+  writeLocalRunLog({
+    kind: 'run-client-selection-preflight',
+    requestedClients: clients.map(client => ({
+      clientName: client.clientName,
+      commonChatId: client.commonChatId,
+      market: client.market
+    })),
+    excludedNames: exclusions.excludedNames,
+    excludedIds: exclusions.excludedIds,
+    excludedClients: exclusions.excluded.map(client => ({
+      clientName: client.clientName,
+      commonChatId: client.commonChatId,
+      market: client.market
+    }))
+  })
+
+  const continuation = applyContinuationFilter(exclusions.clients)
+
+  return continuation.clients
 }
 
 async function sendRunCheckpointLogWithTimeout(
@@ -371,6 +507,8 @@ async function runClientsOrchestrator(
     localRunLogFile: LOCAL_RUN_LOG_FILE,
     market: ORCHESTRATOR_WORK_WITH_MARKET,
     responseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+    supervised: ORCHESTRATOR_SUPERVISED,
+    idleTimeoutMs: ORCHESTRATOR_IDLE_TIMEOUT_MS,
     watchMs: AUTO_RESPONDER_WATCH_MS,
     watchTimerDisabled: AUTO_RESPONDER_WATCH_MS === undefined,
     clientStartDelayMs: CLIENT_START_DELAY_MS,
@@ -480,7 +618,9 @@ async function runSelectedClientsOrchestrator(
   const allClients: ClientAutomationData[] =
     await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
   const selectedClients = await attachHHAuthCredentials(
-    attachBlockedCompanies(selectClientsByUniqueNames(allClients, clientNames)),
+    attachBlockedCompanies(
+      prepareSelectedClients(selectClientsByUniqueNames(allClients, clientNames))
+    ),
     db
   )
 
@@ -494,7 +634,9 @@ async function runSelectedClientIdsOrchestrator(
   const allClients: ClientAutomationData[] =
     await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
   const selectedClients = await attachHHAuthCredentials(
-    attachBlockedCompanies(selectClientsByCommonChatIds(allClients, clientIds)),
+    attachBlockedCompanies(
+      prepareSelectedClients(selectClientsByCommonChatIds(allClients, clientIds))
+    ),
     db
   )
 
@@ -505,7 +647,9 @@ async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
   const db = createAppDb()
   const credentialAttachResult = await attachHHAuthCredentialsBestEffort(
     attachBlockedCompanies(
-      await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
+      prepareSelectedClients(
+        await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
+      )
     ),
     db
   )

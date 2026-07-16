@@ -2,6 +2,7 @@ const { isAutoResponderUrl } = require('../shared/hh-url.ts')
 const {
   HH_AUTO_RESPONDER_MANUAL_LIST_KEY,
   HH_AUTO_RESPONDER_RECENT_URLS_KEY,
+  HH_AUTO_RESPONDER_RECOVERABLE_VACANCY_FAILURES_KEY,
   HH_AUTO_RESPONDER_STOP_REASON_KEY,
   HH_AUTO_RESPONDER_SUCCESSFUL_RESPONSES_KEY
 } = require('../orchestrator/config.ts')
@@ -182,7 +183,42 @@ async function getAutoResponderSuccessCount(
   return 0
 }
 
+async function getAutoResponderRecoverableVacancyFailureCount(
+  page: BrowserPageLike
+): Promise<number> {
+  if (page.isClosed() || !isAutoResponderUrl(page.url())) {
+    return 0
+  }
+
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    try {
+      await waitForDomContentLoaded(page)
+
+      return await page.evaluate((recoverableFailuresKey: string) => {
+        const value = Number(
+          sessionStorage.getItem(recoverableFailuresKey) || '0'
+        )
+
+        return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+      }, HH_AUTO_RESPONDER_RECOVERABLE_VACANCY_FAILURES_KEY)
+    } catch (error: any) {
+      if (page.isClosed() || isPageClosedError(error)) {
+        return 0
+      }
+
+      if (!isExecutionContextDestroyedError(error)) {
+        throw error
+      }
+    }
+
+    await wait(500)
+  }
+
+  return 0
+}
+
 module.exports = {
+  getAutoResponderRecoverableVacancyFailureCount,
   getAutoResponderRecentUrls,
   getAutoResponderStopReason,
   getAutoResponderSuccessCount,

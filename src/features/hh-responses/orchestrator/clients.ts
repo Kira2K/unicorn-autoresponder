@@ -25,6 +25,14 @@ function getConfiguredClientIds(): string[] {
   return parseCommaSeparatedEnv(process.env.ORCHESTRATOR_CLIENT_IDS)
 }
 
+function getConfiguredExcludedClientNames(): string[] {
+  return parseCommaSeparatedEnv(process.env.ORCHESTRATOR_EXCLUDE_CLIENT_NAMES)
+}
+
+function getConfiguredExcludedClientIds(): string[] {
+  return parseCommaSeparatedEnv(process.env.ORCHESTRATOR_EXCLUDE_CLIENT_IDS)
+}
+
 function getConfiguredAutomationTargetOptions(): AutomationTargetOptions {
   return {
     market: ORCHESTRATOR_WORK_WITH_MARKET
@@ -118,6 +126,61 @@ function selectClientsByCommonChatIds(
   return selectedClients
 }
 
+function excludeClients(
+  clients: ClientAutomationData[],
+  options: {
+    clientNames?: string[]
+    clientIds?: string[]
+  }
+): {
+  clients: ClientAutomationData[]
+  excluded: ClientAutomationData[]
+} {
+  const excludedNames = new Set(options.clientNames ?? [])
+  const excludedIds = new Set(options.clientIds ?? [])
+  const keptClients: ClientAutomationData[] = []
+  const excludedClients: ClientAutomationData[] = []
+
+  for (const client of clients) {
+    if (
+      excludedNames.has(client.clientName) ||
+      excludedIds.has(client.commonChatId)
+    ) {
+      excludedClients.push(client)
+      continue
+    }
+
+    keptClients.push(client)
+  }
+
+  return {
+    clients: keptClients,
+    excluded: excludedClients
+  }
+}
+
+function applyConfiguredClientExclusions(
+  clients: ClientAutomationData[]
+): {
+  clients: ClientAutomationData[]
+  excluded: ClientAutomationData[]
+  excludedNames: string[]
+  excludedIds: string[]
+} {
+  const excludedNames = getConfiguredExcludedClientNames()
+  const excludedIds = getConfiguredExcludedClientIds()
+  const result = excludeClients(clients, {
+    clientNames: excludedNames,
+    clientIds: excludedIds
+  })
+
+  return {
+    ...result,
+    excludedNames,
+    excludedIds
+  }
+}
+
 function selectClientsByUniqueNames(
   allClients: ClientAutomationData[],
   clientNames: string[]
@@ -153,6 +216,10 @@ module.exports = {
   getConfiguredAutomationTargetOptions,
   getConfiguredClientIds,
   getConfiguredClientNames,
+  getConfiguredExcludedClientIds,
+  getConfiguredExcludedClientNames,
+  excludeClients,
+  applyConfiguredClientExclusions,
   attachBlockedCompanies,
   selectClientsByCommonChatIds,
   selectClientsByUniqueNames

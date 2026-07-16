@@ -23,8 +23,10 @@ const KNOWN_STOP_REASONS = new Set<KnownAutoResponderStopReason>([
   'manual_targets_only',
   'user_stop',
   'orchestrator_stop_after_watch',
+  'orchestrator_idle_timeout',
   'hh_response_daily_limit_exceeded',
   'vacancy_processing_error',
+  'vacancy_recovery_limit_exceeded',
   'auth_required',
   'captcha_detected',
   'selector_missing',
@@ -38,6 +40,7 @@ const KNOWN_PARSER_CODES = new Set<KnownParserErrorCode>([
   'SKIPPED_COMPANY_STOP_LIST',
   'ERROR_NO_MODAL',
   'STUCK_ON_VACANCY_TIMEOUT',
+  'RECOVERABLE_VACANCY_SKIPPED',
   'RESUME_LOOP_DETECTED',
   'selector_missing',
   'captcha_detected',
@@ -271,7 +274,8 @@ function evaluateResponseRequirement(status: OrchestratorStatus): {
   if (
     status.autoResponderStopReason === 'manual_targets_only' ||
     status.autoResponderStopReason === 'no_new_targets' ||
-    status.autoResponderStopReason === 'orchestrator_stop_after_watch'
+    status.autoResponderStopReason === 'orchestrator_stop_after_watch' ||
+    status.autoResponderStopReason === 'orchestrator_idle_timeout'
   ) {
     return {
       requiredResponseLimit,
@@ -475,6 +479,13 @@ function classifyClientRun(status: OrchestratorStatus): ClientRunClassification 
   }
 
   if (
+    /auth validation failed|auth required|logged_out/i.test(errorText) ||
+    status.authBeforeStart?.state === 'logged_out'
+  ) {
+    return 'auth_required'
+  }
+
+  if (
     status.error?.includes('Browser CDP connection was closed') ||
     status.error?.includes('Page was closed while auto responder was running')
   ) {
@@ -511,6 +522,10 @@ function classifyClientRun(status: OrchestratorStatus): ClientRunClassification 
 
   if (stopReason === 'orchestrator_stop_after_watch') {
     return isStopReasonNormal(status) ? 'normal_timeout' : 'scraper_error'
+  }
+
+  if (stopReason === 'orchestrator_idle_timeout') {
+    return 'scraper_error'
   }
 
   if (isStopReasonNormal(status)) {

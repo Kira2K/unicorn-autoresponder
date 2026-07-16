@@ -55,8 +55,10 @@ export type KnownAutoResponderStopReason =
   | 'manual_targets_only'
   | 'user_stop'
   | 'orchestrator_stop_after_watch'
+  | 'orchestrator_idle_timeout'
   | 'hh_response_daily_limit_exceeded'
   | 'vacancy_processing_error'
+  | 'vacancy_recovery_limit_exceeded'
   | 'auth_required'
   | 'captcha_detected'
   | 'selector_missing'
@@ -69,6 +71,7 @@ export type KnownParserErrorCode =
   | 'SKIPPED_COMPANY_STOP_LIST'
   | 'ERROR_NO_MODAL'
   | 'STUCK_ON_VACANCY_TIMEOUT'
+  | 'RECOVERABLE_VACANCY_SKIPPED'
   | 'RESUME_LOOP_DETECTED'
   | 'selector_missing'
   | 'captcha_detected'
@@ -113,6 +116,9 @@ export type OrchestratorStatus = {
   stopButtonClicked?: boolean
   autoResponderFinished?: boolean
   autoResponderWatchTimedOut?: boolean
+  autoResponderIdleTimedOut?: boolean
+  autoResponderIdleTimeoutMs?: number
+  autoResponderLastProgress?: string
   autoResponderStopReason?: string
   autoResponderStopReasonDetails?: string
   requiredResponseLimit?: number
@@ -130,6 +136,7 @@ export type OrchestratorStatus = {
   parserErrorLogsCount?: number
   parserErrorCodes?: string[]
   parserLastErrorCode?: string
+  recoverableVacancyFailureCount?: number
   recentUrls?: RecentUrlEntry[]
   manualVacanciesCleanup?: ManualVacanciesCleanupResult
   authBeforeStart?: HhAuthCheck
