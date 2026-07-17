@@ -188,7 +188,7 @@ async function runTests() {
   })
 
   assert.equal(result.ok, true)
-  assert.equal(result.final.status, 'filled')
+  assert.equal(result.final.status, 'moved to filling')
   assert.equal(result.final.studentDataFolderUrl, 'https://drive.google.com/drive/folders/visible-fake-test')
   assert.deepEqual(harness.studentSends, [
     '/whoami',
@@ -199,9 +199,9 @@ async function runTests() {
   ])
   const commonChatText = (harness.messagesByChat.get('-5216637594') || []).map((message: any) => message.text).join('\n')
   assert.doesNotMatch(commonChatText, /Google folder updated/)
-  assert.match(commonChatText, /Draft in approve by student/)
-  assert.match(commonChatText, /English version in approve by student/)
-  assert.match(commonChatText, /Russian version in approve by student/)
+  assert.match(commonChatText, /черновик на согласовании у ученика/)
+  assert.match(commonChatText, /английская версия на согласовании у ученика/)
+  assert.match(commonChatText, /русская версия на согласовании у ученика/)
   assert.equal(result.steps.some((step: any) => step.step === 'provider_tasks' && step.status === 'Draft in process'), true)
 
   console.log('visible resume e2e tests passed')

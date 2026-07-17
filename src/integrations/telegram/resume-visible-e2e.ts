@@ -536,14 +536,14 @@ async function discoverStudentActor(input: {
     telegramService: input.telegramService,
     config: input.config,
     command: '/whoami',
-    reply: /User ID:/i,
+    reply: /ID пользователя:/i,
     observedUpdates: input.observedUpdates,
     observedSends: input.observedSends,
     pollIntervalMs: input.pollIntervalMs,
     timeoutMs: input.timeoutMs
   })
   const text = step.replyMatched || ''
-  const userId = text.match(/User ID:\s*([^\s]+)/i)?.[1]
+  const userId = text.match(/ID пользователя:\s*([^\s]+)/i)?.[1]
   const username = text.match(/Username:\s*@?([A-Za-z0-9_]+)/i)?.[1]
   if (!userId || !/^\d+$/.test(userId)) {
     throw new Error(`Could not discover numeric student Telegram user id from /whoami reply: ${text}`)
@@ -631,6 +631,19 @@ async function advanceProvider(input: {
   }
 }
 
+function visibleStatusLabel(status: string): string {
+  switch (status) {
+    case 'Draft in approve by student':
+      return 'черновик на согласовании у ученика'
+    case 'English version in approve by student':
+      return 'английская версия на согласовании у ученика'
+    case 'Russian version in approve by student':
+      return 'русская версия на согласовании у ученика'
+    default:
+      return status
+  }
+}
+
 async function waitForStudentPrompt(input: {
   telegramService: any
   config: VisibleResumeE2eConfig
@@ -654,14 +667,15 @@ async function waitForStudentPrompt(input: {
       await wait(input.pollIntervalMs)
       continue
     }
+    const statusLabel = visibleStatusLabel(input.status)
     const prompt = findIncomingText(
       messages,
-      new RegExp(`@?${input.config.kiraUsername}.*${input.status.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'),
+      new RegExp(`@?${input.config.kiraUsername}.*${statusLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'),
       input.baselineIds
     ) || findObservedBotSend({
       sends: input.observedSends || [],
       chatId: input.config.testChatId,
-      expected: new RegExp(`@?${input.config.kiraUsername}.*${input.status.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'),
+      expected: new RegExp(`@?${input.config.kiraUsername}.*${statusLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'),
       afterIndex: Number(input.baselineSendIndex || 0)
     })
     if (prompt) return prompt
@@ -744,7 +758,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       config,
       command: '/resume',
       expectedStatus: "collection Kira's comments",
-      reply: /collection Kira's comments/i,
+      reply: /сбор комментариев Киры/i,
       observedUpdates: observed.updates,
       observedSends: observed.sends,
       studentUserId: discoveredStudentUserId,
@@ -800,7 +814,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       config,
       command: '/resume',
       expectedStatus: 'English version in progress',
-      reply: /English version in progress/i,
+      reply: /английская версия в работе/i,
       observedUpdates: observed.updates,
       observedSends: observed.sends,
       studentUserId: discoveredStudentUserId,
@@ -845,7 +859,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       config,
       command: '/resume',
       expectedStatus: 'Russian version in process',
-      reply: /Russian version in process/i,
+      reply: /русская версия в работе/i,
       observedUpdates: observed.updates,
       observedSends: observed.sends,
       studentUserId: discoveredStudentUserId,
@@ -889,8 +903,8 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       telegramService,
       config,
       command: '/resume',
-      expectedStatus: 'filled',
-      reply: /workflow is completed|filled/i,
+      expectedStatus: 'moved to filling',
+      reply: /передано на заполнение/i,
       observedUpdates: observed.updates,
       observedSends: observed.sends,
       studentUserId: discoveredStudentUserId,
@@ -899,7 +913,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
     }))
 
     const finalWorkflow: any = await retryTransient('final workflow read', () => repository.getResumeWorkflowByTelegramChatId(config.testChatId, { ensure: true }))
-    if (finalWorkflow.status !== 'filled') throw new Error(`Final status is ${finalWorkflow.status}, expected filled.`)
+    if (finalWorkflow.status !== 'moved to filling') throw new Error(`Final status is ${finalWorkflow.status}, expected moved to filling.`)
     if (finalWorkflow.studentDataFolderUrl !== googleFolder) {
       throw new Error(`Final student_data_folder_url mismatch. Expected ${googleFolder}, got ${finalWorkflow.studentDataFolderUrl}`)
     }

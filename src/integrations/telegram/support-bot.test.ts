@@ -149,31 +149,31 @@ async function runTests() {
     },
     async resume(chatId: string, _actor?: any, options?: any) {
       lastResumeOptions = options
-      return { found: true, chatId, message: 'Resume workflow status for Client One: filled' }
+      return { found: true, chatId, message: 'Статус резюме для Client One: заполнено' }
     },
     async resumeStatus(chatId: string) {
-      return { found: true, chatId, message: 'Resume workflow status for Client One: Draft in process' }
+      return { found: true, chatId, message: 'Статус резюме для Client One: черновик в работе' }
     },
     async resumeResetTest(chatId: string) {
-      return { found: true, chatId, message: 'Resume test workflow reset for Client One.' }
+      return { found: true, chatId, message: 'Тестовый workflow резюме для Client One сброшен.' }
     },
     async providerTasks() {
-      return { message: 'Provider resume tasks:\n1. Client One: Draft in process', replyMarkup: { inline_keyboard: [] } }
+      return { message: 'Задачи подрядчика по резюме:\n1. Client One: черновик в работе', replyMarkup: { inline_keyboard: [] } }
     },
     async providerTask() {
       return { message: 'Client: Client One', replyMarkup: { inline_keyboard: [] } }
     },
     async advanceWorkflow() {
-      return { found: true, message: 'Resume workflow status for Client One: Draft in approve by Kira' }
+      return { found: true, message: 'Статус резюме для Client One: черновик на проверке у Киры' }
     },
     async saveKiraComments(comments: string) {
-      return { message: `Kira comments saved for Client One.\n\n${comments}`, replyMarkup: { inline_keyboard: [] } }
+      return { message: `Комментарии Киры для Client One сохранены.\n\n${comments}`, replyMarkup: { inline_keyboard: [] } }
     },
     async saveResumeTaskInput(text: string, actor?: any) {
       if (actor?.userId === '8222949251') {
-        return { message: `Draft link saved for Client One.\n\n${text}`, replyMarkup: { inline_keyboard: [] } }
+        return { message: `Ссылка на черновик для Client One сохранена.\n\n${text}`, replyMarkup: { inline_keyboard: [] } }
       }
-      return { message: `Kira comments saved for Client One.\n\n${text}`, replyMarkup: { inline_keyboard: [] } }
+      return { message: `Комментарии Киры для Client One сохранены.\n\n${text}`, replyMarkup: { inline_keyboard: [] } }
     }
   }
 
@@ -183,19 +183,19 @@ async function runTests() {
       chat: { id: -5216637594, type: 'supergroup' },
       from: { id: 42, username: 'tester' }
     }, foundApi)),
-    'Chat ID: -5216637594\nChat type: supergroup\nUser ID: 42\nUsername: @tester'
+    'ID чата: -5216637594\nТип чата: supergroup\nID пользователя: 42\nUsername: @tester'
   )
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -5216637594 } }, foundApi)),
-    'Backend: ok'
+    'Бэкенд: работает'
   )
   assert.match(
     responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -5216637594 } }, foundApi)),
-    /\/resume - move the resume workflow/
+    /\/resume - продвинуть резюме/
   )
   assert.match(
     responseText(await handleSupportBotMessage({ text: '/commands@veu_support_bot', chat: { id: -5216637594 } }, foundApi)),
-    /\/resume - move the resume workflow/
+    /\/resume - продвинуть резюме/
   )
   assert.doesNotMatch(
     responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -5216637594 } }, foundApi)),
@@ -203,15 +203,15 @@ async function runTests() {
   )
   assert.doesNotMatch(
     responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -5216637594 } }, foundApi)),
-    /\/open_my_tasks - private Kira\/Provider queue/
+    /\/open_my_tasks - личная очередь задач/
   )
   assert.match(
     responseText(await handleSupportBotMessage({ text: '/help', chat: { id: -5216637594 } }, foundApi)),
-    /Commands only work when this chat or Telegram account is linked/
+    /Команды работают только если/
   )
   assert.match(
     responseText(await handleSupportBotMessage({ text: 'show all my commands', chat: { id: -5216637594 } }, foundApi)),
-    /\/resume_status - show the current resume workflow status/
+    /\/resume_status - показать текущий статус резюме/
   )
   assert.match(
     responseText(await handleSupportBotMessage({
@@ -219,7 +219,7 @@ async function runTests() {
       chat: { id: 8222949251, type: 'private' },
       from: { id: 8222949251, username: 'veu_support' }
     }, foundApi)),
-    /\/open_my_tasks - private Kira\/Provider queue/
+    /\/open_my_tasks - личная очередь задач/
   )
   const regularPrivateApi = {
     ...foundApi,
@@ -236,23 +236,37 @@ async function runTests() {
       chat: { id: 42, type: 'private' },
       from: { id: 42, username: 'regular_user' }
     }, regularPrivateApi)),
-    /\/open_my_tasks - private Kira\/Provider queue/
+    /\/open_my_tasks - личная очередь задач/
+  )
+  assert.equal(
+    responseText(await handleSupportBotMessage({ text: '/start', chat: { id: -5216637594, type: 'supergroup' } }, foundApi)),
+    [
+      'Привет, Client One! Я бот поддержки Very Evil Unicorn! 🦄',
+      '',
+      'Бот сейчас в бета-версии, поэтому часть функций может меняться.',
+      'Отправь /commands, чтобы посмотреть список команд.'
+    ].join('\n')
   )
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/student', chat: { id: -5216637594, type: 'supergroup' } }, foundApi)),
-    'Student found: Client One'
+    [
+      'Ученик найден: Client One',
+      '',
+      'Бот сейчас в бета-версии, поэтому часть функций может меняться.',
+      'Отправь /commands, чтобы посмотреть список команд.'
+    ].join('\n')
   )
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/change_google_folder https://drive.google.com/drive/folders/abc', chat: { id: -5216637594 } }, foundApi)),
-    'Google folder editing from Telegram is disabled. Please edit the root Google folder in Noco/Admin Console.'
+    'Редактирование Google-папки из Telegram отключено. Измени корневую Google-папку в админке Noco.'
   )
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/change_google_folder', chat: { id: -5216637594 } }, foundApi)),
-    'Google folder editing from Telegram is disabled. Please edit the root Google folder in Noco/Admin Console.'
+    'Редактирование Google-папки из Telegram отключено. Измени корневую Google-папку в админке Noco.'
   )
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/resume', chat: { id: -5216637594 } }, foundApi)),
-    'Resume workflow status for Client One: filled'
+    'Статус резюме для Client One: заполнено'
   )
   assert.equal(lastResumeOptions?.studentDataFolderUrl, '')
   assert.equal(
@@ -261,7 +275,7 @@ async function runTests() {
       chat: { id: -5216637594, type: 'supergroup' },
       from: { id: 100, username: 'student_user' }
     }, foundApi)),
-    'Resume workflow status for Client One: filled'
+    'Статус резюме для Client One: заполнено'
   )
   assert.equal(lastResumeOptions?.studentDataFolderUrl, 'https://drive.google.com/drive/folders/student-source')
   assert.equal(
@@ -270,7 +284,7 @@ async function runTests() {
       chat: { id: -5216637594, type: 'supergroup' },
       from: { id: 100, username: 'student_user' }
     }, foundApi)),
-    'Resume workflow status for Client One: filled'
+    'Статус резюме для Client One: заполнено'
   )
   assert.equal(
     responseText(await handleSupportBotMessage({
@@ -278,29 +292,29 @@ async function runTests() {
       chat: { id: 8222949251, type: 'private' },
       from: { id: 8222949251, username: 'veu_support' }
     }, foundApi)),
-    'Please operate resume tasks via /open_my_tasks.'
+    'Работай с задачами по резюме через /open_my_tasks.'
   )
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/resume_status', chat: { id: -5216637594 } }, foundApi)),
-    'Resume workflow status for Client One: Draft in process'
+    'Статус резюме для Client One: черновик в работе'
   )
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/resume_reset_test', chat: { id: -5216637594 } }, foundApi)),
-    'Resume test workflow reset for Client One.'
+    'Тестовый workflow резюме для Client One сброшен.'
   )
   const groupTasksResponse = await handleSupportBotMessage({
     text: 'open my tasks',
     chat: { id: -5216637594, type: 'supergroup' },
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
-  assert.match(responseText(groupTasksResponse), /private chat/)
+  assert.match(responseText(groupTasksResponse), /личном чате/)
 
   const privateTasksResponse = await handleSupportBotMessage({
     text: '/open_my_tasks@veu_support_bot',
     chat: { id: 8222949251, type: 'private' },
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
-  assert.equal(responseText(privateTasksResponse), 'Provider resume tasks:\n1. Client One: Draft in process')
+  assert.equal(responseText(privateTasksResponse), 'Задачи подрядчика по резюме:\n1. Client One: черновик в работе')
   assert.deepEqual(privateTasksResponse.replyMarkup, { inline_keyboard: [] })
 
   const privateCommentResponse = await handleSupportBotMessage({
@@ -308,7 +322,7 @@ async function runTests() {
     chat: { id: 343610488, type: 'private' },
     from: { id: 343610488, username: 'Kira_arbeitet' }
   }, foundApi)
-  assert.match(responseText(privateCommentResponse), /Kira comments saved/)
+  assert.match(responseText(privateCommentResponse), /Комментарии Киры/)
   assert.deepEqual(privateCommentResponse.replyMarkup, { inline_keyboard: [] })
 
   const privateProviderDraftResponse = await handleSupportBotMessage({
@@ -316,7 +330,7 @@ async function runTests() {
     chat: { id: 8222949251, type: 'private' },
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
-  assert.match(responseText(privateProviderDraftResponse), /Draft link saved/)
+  assert.match(responseText(privateProviderDraftResponse), /Ссылка на черновик/)
   assert.deepEqual(privateProviderDraftResponse.replyMarkup, { inline_keyboard: [] })
 
   const callbackResponse = await handleSupportBotCallback({
@@ -324,7 +338,7 @@ async function runTests() {
     message: { chat: { id: 8222949251, type: 'private' } },
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
-  assert.match(responseText(callbackResponse), /Draft in approve by Kira/)
+  assert.match(responseText(callbackResponse), /черновик на проверке у Киры/)
 
   assert.equal(
     responseText(await handleSupportBotGroupAdd({
@@ -335,10 +349,12 @@ async function runTests() {
       }
     }, foundApi)),
     [
-      "Hello Client One, I'm a unicorn support bot!",
-      'Please complete the required profile details about yourself in the Console.',
-      'Add self-presentation and resume files to your Google folder when this stage asks for them.',
-      'Send /commands to see what I can do.'
+      'Привет, Client One! Я бот поддержки Very Evil Unicorn! 🦄',
+      '',
+      'Бот сейчас в бета-версии, поэтому часть функций может меняться.',
+      'Отправь /commands, чтобы посмотреть список команд.',
+      '',
+      'Статус резюме для Client One: черновик в работе'
     ].join('\n')
   )
   assert.equal(await handleSupportBotGroupAdd({
@@ -381,10 +397,12 @@ async function runTests() {
   assert.deepEqual(runnerAllowedUpdates, SUPPORT_BOT_ALLOWED_UPDATES)
   assert.equal(runnerSentMessages.at(-1).chatId, '-5216637594')
   assert.equal(runnerSentMessages.at(-1).text, [
-    "Hello Client One, I'm a unicorn support bot!",
-    'Please complete the required profile details about yourself in the Console.',
-    'Add self-presentation and resume files to your Google folder when this stage asks for them.',
-    'Send /commands to see what I can do.'
+    'Привет, Client One! Я бот поддержки Very Evil Unicorn! 🦄',
+    '',
+    'Бот сейчас в бета-версии, поэтому часть функций может меняться.',
+    'Отправь /commands, чтобы посмотреть список команд.',
+    '',
+    'Статус резюме для Client One: черновик в работе'
   ].join('\n'))
 
   const notFoundApi = {
@@ -395,18 +413,18 @@ async function runTests() {
       return { success: false, error: 'CLIENT_NOT_FOUND', chatId }
     },
     async resume(chatId: string) {
-      return { found: false, chatId, message: 'No student found for this Telegram chat.' }
+      return { found: false, chatId, message: 'Для этого Telegram-чата ученик не найден.' }
     },
     async resumeStatus(chatId: string) {
-      return { found: false, chatId, message: 'No student found for this Telegram chat.' }
+      return { found: false, chatId, message: 'Для этого Telegram-чата ученик не найден.' }
     },
     async resumeResetTest(chatId: string) {
-      return { found: false, chatId, message: 'No student found for this Telegram chat.' }
+      return { found: false, chatId, message: 'Для этого Telegram-чата ученик не найден.' }
     }
   }
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/student', chat: { id: -999 } }, notFoundApi)),
-    'No student found for this Telegram chat.\n\nChat ID: -999\nPlease link this chat ID to a student in NocoDB/Admin Console.'
+    'Для этого Telegram-чата ученик не найден.\n\nID чата: -999\nПривяжи этот ID чата к ученику в админке NocoDB.'
   )
   assert.equal(await handleSupportBotMessage({ text: 'hello', chat: { id: -999 } }, notFoundApi), null)
 
@@ -497,7 +515,7 @@ async function runTests() {
   process.env.RESUME_WORKFLOW_TEST_MODE = 'true'
   process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
   process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
-  process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251'
+  process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251,315110920'
   process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
   process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '102:473'
   process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'false'
@@ -535,7 +553,7 @@ async function runTests() {
     assert.equal(missingSourceResult.workflow.status, "collection student's data")
     assert.deepEqual(missingSourceResult.transitions, [])
     assert.equal(missingSourceRepository.workflowRecord.studentDataFolderUrl, '')
-    assert.match(missingSourceResult.message, /@veu_support pls add Test's root Google folder in Noco clients\.google_folder/)
+    assert.match(missingSourceResult.message, /@veu_support пожалуйста, добавьте корневую Google-папку ученика Test/)
     assert.deepEqual(missingAdvanceFields(missingSourceRepository.workflowRecord), ['root_google_folder', 'student_data_folder_url'])
 
     const nocoFolderRepository = makeWorkflowRepository(makeWorkflow({
@@ -545,7 +563,7 @@ async function runTests() {
     assert.equal(nocoFolderResult.workflow.status, "collection student's data")
     assert.deepEqual(nocoFolderResult.transitions, [])
     assert.equal(nocoFolderRepository.workflowRecord.studentDataFolderUrl, '')
-    assert.match(nocoFolderResult.message, /send \/resume <link to the self-presentation\/source-data folder>/)
+    assert.match(nocoFolderResult.message, /отправь \/resume <ссылка на папку с самопрезентацией\/исходными данными>/)
 
     const suppliedStudentFolderResult = await resumeWorkflow('-5216637594', nocoFolderRepository, {
       actor: studentActor,
@@ -560,10 +578,10 @@ async function runTests() {
       studentDataFolderUrl: 'https://drive.google.com/drive/folders/manual-source'
     }))
     const missingKiraTask = await getProviderTaskById(98, missingKiraCommentRepository, manualKiraActor)
-    assert.match(missingKiraTask.message, /Required before processing: kiras_comments/)
+    assert.match(missingKiraTask.message, /Отправь комментарий Киры следующим сообщением/)
     assert.deepEqual(
       missingKiraTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
-      ['Back to tasks']
+      ['Назад к задачам']
     )
     const missingKiraResult = await resumeWorkflowById(98, missingKiraCommentRepository, { actor: manualKiraActor })
     assert.equal(missingKiraResult.workflow.status, "collection Kira's comments")
@@ -576,10 +594,10 @@ async function runTests() {
       'Please prepare the first draft.'
     )
     assert.equal(missingKiraCommentRepository.workflowRecord.kirasComments, 'Please prepare the first draft.')
-    assert.match(savedKiraCommentsResult.message, /Kira comments saved for Test/)
+    assert.match(savedKiraCommentsResult.message, /Комментарии Киры для Test сохранены/)
     assert.deepEqual(
       savedKiraCommentsResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
-      ['Process next step', 'Back to tasks']
+      ['Перейти к следующему шагу', 'Назад к задачам']
     )
 
     const missingDraftRepository = makeWorkflowRepository(makeWorkflow({
@@ -588,10 +606,10 @@ async function runTests() {
       kirasComments: 'Please prepare the draft.'
     }))
     const missingDraftTask = await getProviderTaskById(98, missingDraftRepository, providerActor)
-    assert.match(missingDraftTask.message, /Required before processing: cv_draft_url/)
+    assert.match(missingDraftTask.message, /Отправь ссылку на черновик следующим сообщением/)
     assert.deepEqual(
       missingDraftTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
-      ['Back to tasks']
+      ['Назад к задачам']
     )
     const missingDraftResult = await resumeWorkflowById(98, missingDraftRepository, { actor: providerActor })
     assert.equal(missingDraftResult.workflow.status, 'Draft in process')
@@ -604,10 +622,11 @@ async function runTests() {
       'https://drive.google.com/drive/folders/draft-from-provider'
     )
     assert.equal(missingDraftRepository.workflowRecord.cvDraftUrl, 'https://drive.google.com/drive/folders/draft-from-provider')
-    assert.match(savedProviderDraftResult.message, /Draft link saved for Test/)
+    assert.match(savedProviderDraftResult.message, /Ссылка на черновик для Test сохранена/)
+    assert.match(savedProviderDraftResult.message, /Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу»/)
     assert.deepEqual(
       savedProviderDraftResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
-      ['Process next step', 'Back to tasks']
+      ['Перейти к следующему шагу', 'Назад к задачам']
     )
 
     const missingEnglishVersionRepository = makeWorkflowRepository(makeWorkflow({
@@ -616,16 +635,19 @@ async function runTests() {
       kirasComments: 'Please prepare the draft.',
       cvDraftUrl: 'https://drive.google.com/drive/folders/draft-from-provider'
     }))
+    const missingEnglishTask = await getProviderTaskById(98, missingEnglishVersionRepository, providerActor)
+    assert.match(missingEnglishTask.message, /Отправь ссылку на английскую версию следующим сообщением/)
     const savedProviderEnglishResult = await saveProviderLinkFromChat(
       missingEnglishVersionRepository,
       providerActor,
       'https://drive.google.com/drive/folders/cv-eng-from-provider'
     )
     assert.equal(missingEnglishVersionRepository.workflowRecord.enVersionUrl, 'https://drive.google.com/drive/folders/cv-eng-from-provider')
-    assert.match(savedProviderEnglishResult.message, /English version link saved for Test/)
+    assert.match(savedProviderEnglishResult.message, /Ссылка на английскую версию для Test сохранена/)
+    assert.match(savedProviderEnglishResult.message, /Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу»/)
     assert.deepEqual(
       savedProviderEnglishResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
-      ['Process next step', 'Back to tasks']
+      ['Перейти к следующему шагу', 'Назад к задачам']
     )
 
     const missingRussianVersionRepository = makeWorkflowRepository(makeWorkflow({
@@ -635,17 +657,89 @@ async function runTests() {
       cvDraftUrl: 'https://drive.google.com/drive/folders/draft-from-provider',
       enVersionUrl: 'https://drive.google.com/drive/folders/cv-eng-from-provider'
     }))
+    const missingRussianTask = await getProviderTaskById(98, missingRussianVersionRepository, providerActor)
+    assert.match(missingRussianTask.message, /Отправь ссылку на русскую версию следующим сообщением/)
     const savedProviderRussianResult = await saveProviderLinkFromChat(
       missingRussianVersionRepository,
       providerActor,
       'https://drive.google.com/drive/folders/cv-ru-from-provider'
     )
     assert.equal(missingRussianVersionRepository.workflowRecord.ruVersionUrl, 'https://drive.google.com/drive/folders/cv-ru-from-provider')
-    assert.match(savedProviderRussianResult.message, /Russian version link saved for Test/)
+    assert.match(savedProviderRussianResult.message, /Ссылка на русскую версию для Test сохранена/)
+    assert.match(savedProviderRussianResult.message, /Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу»/)
     assert.deepEqual(
       savedProviderRussianResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
-      ['Process next step', 'Back to tasks']
+      ['Перейти к следующему шагу', 'Назад к задачам']
     )
+
+    const sparseDraftRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in process',
+      studentDataFolderUrl: '',
+      kirasComments: '',
+      cvDraftUrl: 'https://drive.google.com/drive/folders/seeded-draft'
+    }))
+    const sparseDraftResult = await resumeWorkflowById(98, sparseDraftRepository, { actor: providerActor })
+    assert.equal(sparseDraftResult.workflow.status, 'Draft in approve by Kira')
+    assert.deepEqual(sparseDraftResult.transitions, ['Draft in process -> Draft in approve by Kira'])
+
+    const sparseEnglishRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'English version in progress',
+      studentDataFolderUrl: '',
+      kirasComments: '',
+      cvDraftUrl: '',
+      enVersionUrl: 'https://drive.google.com/drive/folders/seeded-en'
+    }))
+    const sparseEnglishTask = await getProviderTaskById(98, sparseEnglishRepository, providerActor)
+    assert.doesNotMatch(sparseEnglishTask.message, /исходными данными|комментарии Киры|черновик/)
+    assert.deepEqual(
+      sparseEnglishTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
+      ['Перейти к следующему шагу', 'Назад к задачам']
+    )
+    const sparseEnglishResult = await resumeWorkflowById(98, sparseEnglishRepository, { actor: providerActor })
+    assert.equal(sparseEnglishResult.workflow.status, 'English version in approve by Kira')
+    assert.deepEqual(sparseEnglishResult.transitions, ['English version in progress -> English version in approve by Kira'])
+
+    const sparseRussianRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'Russian version in process',
+      studentDataFolderUrl: '',
+      kirasComments: '',
+      cvDraftUrl: '',
+      enVersionUrl: '',
+      ruVersionUrl: 'https://drive.google.com/drive/folders/seeded-ru'
+    }))
+    const sparseRussianTask = await getProviderTaskById(98, sparseRussianRepository, providerActor)
+    assert.doesNotMatch(sparseRussianTask.message, /исходными данными|комментарии Киры|черновик|английскую/)
+    assert.deepEqual(
+      sparseRussianTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
+      ['Перейти к следующему шагу', 'Назад к задачам']
+    )
+    const sparseRussianResult = await resumeWorkflowById(98, sparseRussianRepository, { actor: providerActor })
+    assert.equal(sparseRussianResult.workflow.status, 'Russian version in approve by Kira')
+    assert.deepEqual(sparseRussianResult.transitions, ['Russian version in process -> Russian version in approve by Kira'])
+
+    const sparseEnglishApprovalRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'English version in approve by student',
+      studentDataFolderUrl: '',
+      kirasComments: '',
+      cvDraftUrl: '',
+      enVersionUrl: 'https://drive.google.com/drive/folders/seeded-en'
+    }))
+    const sparseEnglishApprovalResult = await resumeWorkflowById(98, sparseEnglishApprovalRepository, { actor: studentActor })
+    assert.equal(sparseEnglishApprovalResult.workflow.status, 'Russian version in process')
+    assert.deepEqual(sparseEnglishApprovalResult.transitions, ['English version in approve by student -> Russian version in process'])
+
+    const missingApprovalLinkRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'Russian version in approve by student',
+      studentDataFolderUrl: '',
+      kirasComments: '',
+      cvDraftUrl: '',
+      enVersionUrl: '',
+      ruVersionUrl: ''
+    }))
+    const missingApprovalLinkResult = await resumeWorkflowById(98, missingApprovalLinkRepository, { actor: studentActor })
+    assert.equal(missingApprovalLinkResult.workflow.status, 'Russian version in approve by student')
+    assert.deepEqual(missingApprovalLinkResult.transitions, [])
+    assert.match(missingApprovalLinkResult.message, /Отправь ссылку на русскую версию следующим сообщением/)
 
     process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
     assert.equal(resumeWorkflowFakeDataMode(), true)
@@ -668,7 +762,7 @@ async function runTests() {
       { actor: studentActor, after: 'Russian version in process', notification: 'private_provider' },
       { actor: providerActor, after: 'Russian version in approve by Kira', notification: 'private_kira' },
       { actor: manualKiraActor, after: 'Russian version in approve by student', notification: 'common_chat' },
-      { actor: studentActor, after: 'filled', notification: 'private_kira' }
+      { actor: studentActor, after: 'moved to filling', notification: 'private_kira' }
     ]
 
     let lastResult: any
@@ -677,27 +771,38 @@ async function runTests() {
       assert.equal(lastResult.workflow.status, step.after)
       if (step.notification) {
         assert.equal(lastResult.notifications.some((item: any) => item.kind === step.notification), true)
-        if ((step.notification === 'private_kira' || step.notification === 'private_provider') && step.after !== 'filled') {
+        if ((step.notification === 'private_kira' || step.notification === 'private_provider') && step.after !== 'moved to filling') {
           const notification = lastResult.notifications.find((item: any) => item.kind === step.notification)
-          assert.match(notification.text, /Open \/open_my_tasks to process this task/)
-          assert.match(notification.text, /Student: Test/)
+          if (step.notification === 'private_kira') {
+            assert.match(notification.text, /^Кира, резюме/)
+          }
+          if (step.notification === 'private_provider') {
+            assert.match(notification.text, /^Юля, резюме/)
+          }
+          assert.doesNotMatch(notification.text, /^@student_user, резюме/)
+          assert.match(notification.text, /Открой \/open_my_tasks, чтобы обработать эту задачу/)
+          assert.match(notification.text, /Ученик: Test/)
+          if (step.notification === 'private_provider') {
+            assert.deepEqual(notification.chatIds, ['8222949251', '315110920'])
+          }
         }
         if (step.after === 'Draft in approve by student') {
           const notification = lastResult.notifications.find((item: any) => item.kind === 'common_chat')
-          assert.match(notification.text, /Draft CV: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
-          assert.match(notification.text, /To approve it, send:\n\/resume I approve/)
-          assert.match(notification.text, /After that I will move the resume workflow to the next step/)
+          assert.match(notification.text, /^@student_user, резюме/)
+          assert.match(notification.text, /Черновик CV: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
+          assert.match(notification.text, /Чтобы согласовать, отправь:\n\/resume I approve/)
+          assert.match(notification.text, /После этого я переведу резюме на следующий шаг/)
         }
-        if (step.after === 'filled') {
+        if (step.after === 'moved to filling') {
           const notification = lastResult.notifications.find((item: any) => item.kind === 'private_kira')
-          assert.match(notification.text, /Resume workflow for Test EN is filled/)
-          assert.match(notification.text, /English version:/)
-          assert.match(notification.text, /Russian version:/)
+          assert.match(notification.text, /Резюме для Test EN передано на заполнение/)
+          assert.match(notification.text, /Английская версия:/)
+          assert.match(notification.text, /Русская версия:/)
         }
       }
     }
 
-    assert.equal(lastResult.completed, true)
+    assert.equal(lastResult.completed, false)
     assert.equal(repository.workflowRecord.studentDataFolderUrl, 'https://drive.google.com/drive/folders/manual-source')
     assert.equal(repository.workflowRecord.cvDraftUrl, 'https://docs.google.com/document/d/test-draft')
     assert.equal(repository.workflowRecord.enVersionUrl, 'https://docs.google.com/document/d/test-english-version')
@@ -708,7 +813,9 @@ async function runTests() {
     assert.match(repository.workflowRecord.workflowTrace, /kira/)
 
     const fillingPatch = repository.patches.find((patch: any) => patch.status === 'moved to filling')
-    assert.equal(Boolean(fillingPatch), false)
+    assert.equal(Boolean(fillingPatch), true)
+    const filledPatch = repository.patches.find((patch: any) => patch.status === 'filled')
+    assert.equal(Boolean(filledPatch), false)
     const beforeFilled = makeWorkflow({
       status: 'Draft in process'
     })
@@ -742,17 +849,17 @@ async function runTests() {
       () => getProviderTasks(makeWorkflowRepository(beforeFilled), studentActor),
       (error: any) => {
         assert.equal(error.code, 'forbidden')
-        assert.match(error.message, /Only configured Kira or provider/)
+        assert.match(error.message, /Telegram-аккаунты Киры или подрядчика/)
         return true
       }
     )
     const providerTasks = await getProviderTasks(makeWorkflowRepository(beforeFilled), providerActor)
     assert.equal(providerTasks.tasks.length, 1)
     assert.equal(providerTasks.tasks[0].clientName, 'Test')
-    assert.match(providerTasks.message, /^Provider resume tasks:/)
-    assert.match(providerTasks.message, /Student: Test/)
-    assert.match(providerTasks.message, /Status: Draft in process/)
-    assert.match(providerTasks.message, /Market: EN/)
+    assert.match(providerTasks.message, /^Задачи подрядчика по резюме:/)
+    assert.match(providerTasks.message, /Ученик: Test/)
+    assert.match(providerTasks.message, /Статус: черновик в работе/)
+    assert.match(providerTasks.message, /Маркет: EN/)
     const kiraTaskRows = [
       makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in approve by Kira' }),
       makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Kira Client', status: 'English version in approve by Kira' }),
@@ -768,16 +875,16 @@ async function runTests() {
       }
     }
     const kiraTasks = await getProviderTasks(kiraTaskRepository, manualKiraActor)
-    assert.match(kiraTasks.message, /^Kira resume tasks:/)
-    assert.match(kiraTasks.message, /Student: Test/)
-    assert.match(kiraTasks.message, /Status: Draft in approve by Kira/)
+    assert.match(kiraTasks.message, /^Задачи Киры по резюме:/)
+    assert.match(kiraTasks.message, /Ученик: Test/)
+    assert.match(kiraTasks.message, /Статус: черновик на проверке у Киры/)
     assert.deepEqual(kiraTasks.tasks.map((task: any) => task.clientName), ['Test', 'Other Kira Client'])
     const unavailableProviderTaskForKira = await getProviderTaskById(100, kiraTaskRepository, manualKiraActor)
     assert.equal(unavailableProviderTaskForKira.workflow, undefined)
-    assert.match(unavailableProviderTaskForKira.message, /not available/)
+    assert.match(unavailableProviderTaskForKira.message, /больше недоступна/)
     const openedKiraTask = await getProviderTaskById(98, kiraTaskRepository, manualKiraActor)
     assert.equal(openedKiraTask.workflow.status, 'Draft in approve by Kira')
-    assert.match(openedKiraTask.message, /Status: Draft in approve by Kira/)
+    assert.match(openedKiraTask.message, /Статус: черновик на проверке у Киры/)
     const kiraAdvanceRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Draft in approve by Kira',
       cvDraftUrl: 'https://docs.google.com/document/d/test-draft'
@@ -787,9 +894,9 @@ async function runTests() {
       expectedStatus: 'Draft in approve by Kira'
     })
     assert.equal(kiraAdvanceResult.workflow.status, 'Draft in approve by student')
-    assert.match(kiraAdvanceResult.message, /Draft CV: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
-    assert.match(kiraAdvanceResult.message, /To approve it, send:\n\/resume I approve/)
-    assert.match(kiraAdvanceResult.message, /After that I will move the resume workflow to the next step/)
+    assert.match(kiraAdvanceResult.message, /Черновик CV: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
+    assert.match(kiraAdvanceResult.message, /Чтобы согласовать, отправь:\n\/resume I approve/)
+    assert.match(kiraAdvanceResult.message, /После этого я переведу резюме на следующий шаг/)
     const mixedProviderTasks = await getProviderTasks({
       async getProviderResumeTasks() {
         return [
@@ -807,7 +914,7 @@ async function runTests() {
       ),
       (error: any) => {
         assert.equal(error.code, 'forbidden')
-        assert.match(error.message, /not assigned/)
+        assert.match(error.message, /аккаунт подрядчика не назначен/)
         return true
       }
     )

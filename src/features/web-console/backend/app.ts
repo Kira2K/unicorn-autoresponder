@@ -619,9 +619,9 @@ function createWebConsoleApp(options: {
         (notification.kind === 'private_provider' || notification.kind === 'private_kira') &&
         /bot can't initiate conversation with a user/i.test(message)
       ) {
-        return `${notification.kind} notification failed: ask this Telegram user to open @veu_support_bot and send /start once.`
+        return `${notification.kind}: не удалось отправить уведомление. Попроси этого пользователя открыть @veu_support_bot и один раз отправить /start.`
       }
-      return `${notification.kind} notification failed: ${message}`
+      return `${notification.kind}: не удалось отправить уведомление: ${message}`
     }
 
     for (const notification of notifications) {
@@ -636,18 +636,24 @@ function createWebConsoleApp(options: {
           continue
         }
 
-        if (!notification.chatId) {
-          warnings.push(`Notification ${notification.kind} skipped: missing chat id.`)
+        const notificationChatIds = Array.isArray(notification.chatIds)
+          ? notification.chatIds.map((item: unknown) => String(item ?? '').trim()).filter(Boolean)
+          : [String(notification.chatId ?? '').trim()].filter(Boolean)
+
+        if (!notificationChatIds.length) {
+          warnings.push(`Уведомление ${notification.kind} пропущено: не указан chat id.`)
           continue
         }
 
-        await withNotificationTimeout(
-          telegramBotApi.sendMessage({
-            chatId: notification.chatId,
-            text: notification.text
-          }),
-          notification
-        )
+        for (const chatId of notificationChatIds) {
+          await withNotificationTimeout(
+            telegramBotApi.sendMessage({
+              chatId,
+              text: notification.text
+            }),
+            notification
+          )
+        }
       } catch (error: any) {
         warnings.push(notificationWarning(notification, error))
       }
@@ -792,7 +798,7 @@ function createWebConsoleApp(options: {
       res.status(410).json({
         success: false,
         error: 'google_folder_telegram_edit_disabled',
-        message: 'Google folder editing from Telegram is disabled. Edit the root Google folder in Noco/Admin Console.'
+        message: 'Редактирование Google-папки из Telegram отключено. Измени корневую Google-папку в админке Noco.'
       })
     } catch (error) {
       next(error)

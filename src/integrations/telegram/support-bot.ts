@@ -35,7 +35,7 @@ type SupportBotApiClient = {
   saveResumeTaskInput(text: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
 }
 
-const BACKEND_UNAVAILABLE_MESSAGE = 'Sorry, no backend. Please try again later.'
+const BACKEND_UNAVAILABLE_MESSAGE = 'Бэкенд сейчас недоступен. Попробуй позже.'
 const SUPPORT_BOT_ALLOWED_UPDATES = ['message', 'callback_query', 'my_chat_member']
 
 function normalizeCommandText(value: unknown): string {
@@ -278,19 +278,19 @@ function isStudentApprovalText(text: string): boolean {
 
 function supportBotCommandsText(options: { includeTaskCommands?: boolean } = {}): string {
   const lines = [
-    "Here's what I can do:",
-    '/backend_status - check if the backend is alive.',
-    '/whoami - show this chat ID and your Telegram user ID.',
-    '/student - show the student linked to this group.',
-    '/resume - move the resume workflow one step when it is your turn.',
-    '/resume_status - show the current resume workflow status.'
+    'Вот что я умею:',
+    '/backend_status - проверить, работает ли бэкенд.',
+    '/whoami - показать ID этого чата и твой Telegram user ID.',
+    '/student - показать ученика, привязанного к этому чату.',
+    '/resume - продвинуть резюме на следующий шаг, если сейчас твоя очередь.',
+    '/resume_status - показать текущий статус резюме.'
   ]
 
   if (options.includeTaskCommands) {
-    lines.push('/open_my_tasks - private Kira/Provider queue for resume tasks.')
+    lines.push('/open_my_tasks - личная очередь задач для Киры/подрядчика.')
   }
 
-  lines.push('', 'Commands only work when this chat or Telegram account is linked to the right student or role.')
+  lines.push('', 'Команды работают только если этот чат или Telegram-аккаунт привязан к нужному ученику или роли.')
   return lines.join('\n')
 }
 
@@ -314,7 +314,7 @@ async function handleCommands(actor: SupportBotActor, api: SupportBotApiClient):
 
 async function handleOpenTasks(actor: SupportBotActor, api: SupportBotApiClient): Promise<SupportBotResponse> {
   if (actor.chatType !== 'private') {
-    return 'Open my tasks is private. Please open a private chat with this bot and send /open_my_tasks there.'
+    return '/open_my_tasks работает только в личном чате. Открой личный чат с ботом и отправь там /open_my_tasks.'
   }
 
   return await withBackendStatusMessage(async () => {
@@ -361,9 +361,9 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
 
   if (name === '/whoami') {
     return [
-      `Chat ID: ${chatId}`,
-      `Chat type: ${chatType}`,
-      `User ID: ${userIdFromMessage(message)}`,
+      `ID чата: ${chatId}`,
+      `Тип чата: ${chatType}`,
+      `ID пользователя: ${userIdFromMessage(message)}`,
       usernameFromMessage(message) ? `Username: @${usernameFromMessage(message)}` : undefined
     ].filter(Boolean).join('\n')
   }
@@ -371,7 +371,7 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
   if (name === '/backend_status') {
     return await withBackendStatusMessage(async () => {
       const result = await api.backendStatus()
-      return result.ok ? 'Backend: ok' : 'Backend: not ok'
+      return result.ok ? 'Бэкенд: работает' : 'Бэкенд: не отвечает'
     })
   }
 
@@ -380,23 +380,36 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
       const result = await api.findClient(chatId, actor)
       if (!result.found || !result.client) {
         return [
-          'No student found for this Telegram chat.',
+          'Для этого Telegram-чата ученик не найден.',
           '',
-          `Chat ID: ${chatId}`,
-          'Please link this chat ID to a student in NocoDB/Admin Console.'
+          `ID чата: ${chatId}`,
+          'Привяжи этот ID чата к ученику в админке NocoDB.'
         ].join('\n')
       }
-      return `Student found: ${result.client.name}`
+      if (name === '/start') {
+        return [
+          `Привет, ${result.client.name}! Я бот поддержки Very Evil Unicorn! 🦄`,
+          '',
+          'Бот сейчас в бета-версии, поэтому часть функций может меняться.',
+          'Отправь /commands, чтобы посмотреть список команд.'
+        ].join('\n')
+      }
+      return [
+        `Ученик найден: ${result.client.name}`,
+        '',
+        'Бот сейчас в бета-версии, поэтому часть функций может меняться.',
+        'Отправь /commands, чтобы посмотреть список команд.'
+      ].join('\n')
     })
   }
 
   if (name === '/change_google_folder') {
-    return 'Google folder editing from Telegram is disabled. Please edit the root Google folder in Noco/Admin Console.'
+    return 'Редактирование Google-папки из Telegram отключено. Измени корневую Google-папку в админке Noco.'
   }
 
   if (name === '/resume') {
     if (actor.chatType === 'private') {
-      return 'Please operate resume tasks via /open_my_tasks.'
+      return 'Работай с задачами по резюме через /open_my_tasks.'
     }
     return await withBackendStatusMessage(async () => {
       const result = await api.resume(chatId, actor, {
@@ -438,7 +451,7 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
 
   const workflowId = Number(parts[2])
   if (!Number.isFinite(workflowId) || workflowId <= 0) {
-    return 'This resume action is invalid. Please refresh your tasks.'
+    return 'Это действие по резюме недействительно. Обнови список задач.'
   }
 
   if (parts[1] === 'open') {
@@ -483,11 +496,14 @@ async function handleSupportBotGroupAdd(update: any, api: SupportBotApiClient): 
     const studentName = result.found && result.client?.name
       ? result.client.name
       : String(chatMemberUpdate?.chat?.title ?? 'there').trim() || 'there'
+    const resumeStatus = await api.resumeStatus(chatId)
     return [
-      `Hello ${studentName}, I'm a unicorn support bot!`,
-      'Please complete the required profile details about yourself in the Console.',
-      'Add self-presentation and resume files to your Google folder when this stage asks for them.',
-      'Send /commands to see what I can do.'
+      `Привет, ${studentName}! Я бот поддержки Very Evil Unicorn! 🦄`,
+      '',
+      'Бот сейчас в бета-версии, поэтому часть функций может меняться.',
+      'Отправь /commands, чтобы посмотреть список команд.',
+      '',
+      resumeStatus.message
     ].join('\n')
   })
 }
@@ -570,13 +586,13 @@ async function runSupportBot(options: {
         if (callbackQuery?.id) {
           await answerCallbackQueryQuietly(botApi, {
             callbackQueryId: String(callbackQuery.id),
-            text: error?.message || 'Telegram bot command failed.'
+            text: error?.message || 'Команда Telegram-бота завершилась с ошибкой.'
           }).catch(() => undefined)
         }
         if (chatId) {
           await botApi.sendMessage({
             chatId,
-            text: error?.message || 'Telegram bot command failed.'
+            text: error?.message || 'Команда Telegram-бота завершилась с ошибкой.'
           })
         }
       }

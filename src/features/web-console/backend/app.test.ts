@@ -929,7 +929,7 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.found, true)
     assert.equal(result.body.client.name, 'Client One')
     assert.equal(result.body.workflow.status, "collection student's data")
-    assert.match(result.body.message, /Responsible: student/)
+    assert.match(result.body.message, /Ответственный: ученик/)
 
     result = await request(server.baseUrl, '/api/bot/telegram/chats/1003/resume/status', {
       headers: { 'X-Bot-Api-Token': 'test-bot-token' }
@@ -955,11 +955,15 @@ async function runTests(): Promise<void> {
 
     const previousResumeTestMode = process.env.RESUME_WORKFLOW_TEST_MODE
     const previousProviderRefs = process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
+    const previousProviderUserIds = process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS
+    const previousProviderNotifyChatId = process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID
     const previousKiraUserIds = process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS
     const previousKiraNotifyChatId = process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID
     const previousFakeDataMode = process.env.RESUME_WORKFLOW_FAKE_DATA_MODE
     process.env.RESUME_WORKFLOW_TEST_MODE = 'true'
     process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '1:12'
+    process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251,315110920'
+    process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
     process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
     process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
     process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
@@ -999,6 +1003,34 @@ async function runTests(): Promise<void> {
         body: JSON.stringify(body)
       })
 
+      process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'false'
+      await noco.patchRecord('mhiysd8l0f33bny', 98, {
+        status: 'English version in progress',
+        student_data_folder_url: '',
+        cv_draft_url: '',
+        kiras_comments: '',
+        en_version_url: 'https://drive.google.com/drive/folders/seeded-en',
+        ru_version_url: ''
+      })
+      result = await resumeByChat(providerHeaders)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'English version in approve by Kira')
+      assert.equal(result.body.workflow.enVersionUrl, 'https://drive.google.com/drive/folders/seeded-en')
+      assert.deepEqual(result.body.transitions, ['English version in progress -> English version in approve by Kira'])
+      assert.doesNotMatch(result.body.message, /самопрезентацией|комментарии Киры|черновик/)
+      await noco.patchRecord('mhiysd8l0f33bny', 98, {
+        status: "collection student's data",
+        student_data_folder_url: '',
+        cv_draft_url: '',
+        en_version_url: '',
+        ru_version_url: '',
+        kiras_comments: '',
+        last_responsible: 'student',
+        last_workflow_error: '',
+        workflow_trace: ''
+      })
+      process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
+
       result = await resumeByChat(newestStudentHeaders, '1003')
       assert.equal(result.response.status, 422, JSON.stringify(result.body))
       assert.equal(result.body.error, 'resume_required_data_missing')
@@ -1009,7 +1041,7 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.workflow.status, "collection student's data")
       assert.equal(result.body.workflow.studentDataFolderUrl, '')
       assert.deepEqual(result.body.transitions, [])
-      assert.match(result.body.message, /self-presentation\/source-data folder/)
+      assert.match(result.body.message, /самопрезентацией\/исходными данными/)
 
       result = await resumeByChat(studentHeaders, '1001', {
         studentDataFolderUrl: 'https://drive.google.com/drive/folders/student-source'
@@ -1029,7 +1061,8 @@ async function runTests(): Promise<void> {
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Draft in process')
       assert.equal(result.body.notifications.at(-1).kind, 'private_provider')
-      assert.equal(telegramBotMessages.at(-1).chatId, '8222949251')
+      assert.deepEqual(result.body.notifications.at(-1).chatIds, ['8222949251', '315110920'])
+      assert.deepEqual(telegramBotMessages.slice(-2).map((message: any) => message.chatId), ['8222949251', '315110920'])
 
       result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
         headers: providerHeaders
@@ -1060,7 +1093,7 @@ async function runTests(): Promise<void> {
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.deepEqual(result.body.tasks.map((task: any) => task.clientName), ['Client One'])
       assert.equal(result.body.tasks[0].expectedStatus, 'Draft in approve by Kira')
-      assert.match(result.body.message, /^Kira resume tasks:/)
+      assert.match(result.body.message, /^Задачи Киры по резюме:/)
 
       result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}`, {
         headers: kiraHeaders
@@ -1110,11 +1143,11 @@ async function runTests(): Promise<void> {
 
       result = await resumeByChat(studentHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
-      assert.equal(result.body.completed, true)
-      assert.equal(result.body.workflow.status, 'filled')
-      assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> filled')
+      assert.equal(result.body.completed, false)
+      assert.equal(result.body.workflow.status, 'moved to filling')
+      assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> moved to filling')
       assert(result.body.notifications.some((notification: any) => notification.kind === 'private_kira'))
-      assert.match(result.body.message, /Resume workflow is completed/)
+      assert.match(result.body.message, /передано на заполнение/)
 
       result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reset-test', {
         method: 'POST',
@@ -1136,6 +1169,16 @@ async function runTests(): Promise<void> {
         delete process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
       } else {
         process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = previousProviderRefs
+      }
+      if (previousProviderUserIds === undefined) {
+        delete process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS
+      } else {
+        process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = previousProviderUserIds
+      }
+      if (previousProviderNotifyChatId === undefined) {
+        delete process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID
+      } else {
+        process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = previousProviderNotifyChatId
       }
       if (previousKiraUserIds === undefined) {
         delete process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS
