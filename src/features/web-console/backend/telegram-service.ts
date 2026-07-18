@@ -33,13 +33,7 @@ type AdminTelegramAttachmentInput = {
 }
 
 function isTelegramAccount(account: WebPlatformAccount): boolean {
-  const value = `${account.platform || ''} ${account.accountLabel || ''}`.toLowerCase()
-  return (
-    value.includes('telegram') ||
-    value.includes('tg_') ||
-    value.includes('telegram_') ||
-    value.includes('phone_en')
-  )
+  return account.isTelegramAccount === true
 }
 
 function createError(code: string, message: string) {

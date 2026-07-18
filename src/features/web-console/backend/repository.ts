@@ -209,6 +209,23 @@ function toProviderClientRow(record: NocoRecord, linkedInEmail = ''): ProviderCl
   }
 }
 
+function telegramPlatformIds(platforms: NocoRecord[]): Set<number> {
+  const telegramPlatformLabels = new Set(['telegram_ru', 'telegram_en'])
+  return new Set(platforms
+    .filter(platform => {
+      const canonicalValues = [platform.label, platform.platform, platform.name]
+        .map(value => normalizeStatusText(value).replace(/\s+/g, '_'))
+      return canonicalValues.some(value => telegramPlatformLabels.has(value))
+    })
+    .map(platform => Number(platform.Id))
+    .filter(id => Number.isFinite(id) && id > 0))
+}
+
+function isTelegramPlatformAccount(account: NocoRecord, platformIds: Set<number>): boolean {
+  const platformId = accountPlatformId(account)
+  return platformId !== null && platformIds.has(platformId)
+}
+
 function cvProcessingClientId(record: NocoRecord): number | null {
   const id = linkedId(record.client) ?? linkedId(record.clients) ?? Number(record.clients_id)
   return Number.isFinite(id) && id > 0 ? id : null
@@ -280,12 +297,13 @@ function maskSecret(value: unknown, fullAccess: boolean): string | undefined {
   return fullAccess ? text : '***'
 }
 
-function toPlatformAccount(record: NocoRecord, fullAccess: boolean): WebPlatformAccount {
+function toPlatformAccount(record: NocoRecord, fullAccess: boolean, telegramIds: Set<number> = new Set()): WebPlatformAccount {
   return {
     id: Number(record.Id),
     clientId: accountClientId(record) || undefined,
     platform: normalizeText(record.platform || linkedName(record.rel_platformAccounts_platform)),
     platformId: accountPlatformId(record) || undefined,
+    isTelegramAccount: isTelegramPlatformAccount(record, telegramIds),
     accountLabel: normalizeText(record.account_label || record.label || record.platform || linkedLabel(record.rel_platformAccounts_platform)),
     login: normalizeText(record.login),
     phone: normalizeText(record.phone || record.phone_en),
@@ -492,11 +510,12 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
   }
 
   async function dashboardForClient(client: NocoRecord, fullAccess = false): Promise<ClientDashboard> {
+    const telegramIds = telegramPlatformIds(await fetchPlatforms())
     const clientPlatformAccounts = (await fetchPlatformAccountsForClient(Number(client.Id)))
       .sort((a, b) => Number(a.Id) - Number(b.Id))
     const linkedInEmailByClientId = buildLinkedInEmailByClientId(clientPlatformAccounts)
     const platformAccounts = clientPlatformAccounts
-      .map(account => toPlatformAccount(account, fullAccess))
+      .map(account => toPlatformAccount(account, fullAccess, telegramIds))
 
     return {
       client: toClient(client),
@@ -769,36 +788,24 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async getTelegramPlatformAccountsForClient(clientId: number): Promise<WebPlatformAccount[]> {
+      const telegramIds = telegramPlatformIds(await fetchPlatforms())
       return (await fetchPlatformAccountsForClient(clientId))
-        .map(account => toPlatformAccount(account, true))
-        .filter(account => {
-          const value = `${account.platform} ${account.accountLabel}`.toLowerCase()
-          return (
-            value.includes('telegram') ||
-            value.includes('tg_') ||
-            value.includes('telegram_') ||
-            value.includes('phone_en')
-          )
-        })
+        .filter(account => isTelegramPlatformAccount(account, telegramIds))
+        .map(account => toPlatformAccount(account, true, telegramIds))
     },
 
     async listActiveTelegramSenders() {
       const clients = await fetchClients()
+      const telegramIds = telegramPlatformIds(await fetchPlatforms())
       const clientsById = new Map(clients.map(client => [Number(client.Id), toClient(client)]))
       return (await fetchPlatformAccounts())
-        .map(account => toPlatformAccount(account, true))
+        .filter(account => isTelegramPlatformAccount(account, telegramIds))
+        .map(account => toPlatformAccount(account, true, telegramIds))
         .filter(account => {
-          const value = `${account.platform} ${account.accountLabel}`.toLowerCase()
           return (
             account.telegramSessionStatus === 'active' &&
             Boolean(account.telegramTdlibDbPath) &&
-            Boolean(account.clientId) &&
-            (
-              value.includes('telegram') ||
-              value.includes('tg_') ||
-              value.includes('telegram_') ||
-              value.includes('phone_en')
-            )
+            Boolean(account.clientId)
           )
         })
         .map(account => {
@@ -831,7 +838,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       if (Object.keys(safePatch).length) {
         await nocoClient.patchRecord(TABLES.platformAccounts.id, Number(accountId), safePatch)
       }
-      return toPlatformAccount(await getOwnedPlatformAccount(clientId, accountId), true)
+      const telegramIds = telegramPlatformIds(await fetchPlatforms())
+      return toPlatformAccount(await getOwnedPlatformAccount(clientId, accountId), true, telegramIds)
     },
 
     async createDolphinProfileBinding(input: {
@@ -864,6 +872,7 @@ module.exports = {
   profileId,
   profileLocale,
   isLinkedInPlatformAccount,
+  isTelegramPlatformAccount,
   LINKEDIN_PLATFORM_ID,
   linkedStatusMatches,
   normalizeId,
@@ -875,6 +884,7 @@ module.exports = {
   cvProcessingClientId,
   toClient,
   toPlatformAccount,
+  telegramPlatformIds,
   toProviderClientRow,
   toResumeWorkflow
 }

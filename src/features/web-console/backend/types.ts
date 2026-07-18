@@ -37,6 +37,7 @@ export type WebPlatformAccount = {
   clientId?: number
   platform: string
   platformId?: number
+  isTelegramAccount: boolean
   accountLabel: string
   login: string
   phone: string

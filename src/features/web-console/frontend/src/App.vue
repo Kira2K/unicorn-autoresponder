@@ -106,10 +106,7 @@ const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
 const isClient = computed(() => session.value?.role === 'client')
 const accountRows = computed(() => dashboard.value?.platformAccounts || [])
-const telegramAccounts = computed(() => accountRows.value.filter(account => {
-  const value = `${account.platform || ''} ${account.accountLabel || ''}`.toLowerCase()
-  return value.includes('telegram') || value.includes('phone_en')
-}))
+const telegramAccounts = computed(() => accountRows.value.filter(account => account.isTelegramAccount === true))
 const selectedTelegramAccount = computed(() =>
   telegramAccounts.value.find(account => Number(account.id) === Number(selectedTelegramAccountId.value)) ||
   telegramAccounts.value[0] ||

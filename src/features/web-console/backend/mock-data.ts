@@ -107,7 +107,9 @@ const mockPlatformAccounts = [
     phone: '',
     email: '',
     password: 'phone number from related HH',
-    clients_id: 1
+    clients_id: 1,
+    platforms_id: 2,
+    rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
   },
   {
     Id: 104,
@@ -117,7 +119,21 @@ const mockPlatformAccounts = [
     phone: '+79990002233',
     email: '',
     password: 'phone number from related HH',
-    clients_id: 1
+    clients_id: 1,
+    platforms_id: 4,
+    rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
+  },
+  {
+    Id: 105,
+    platform: 'phone',
+    account_label: 'phone_en',
+    login: '',
+    phone: '+79990002233',
+    email: '',
+    password: 'not-a-telegram-account',
+    clients_id: 1,
+    platforms_id: 7,
+    rel_platformAccounts_platform: { Id: 7, name: 'phone', label: 'phone_en' }
   },
   {
     Id: 201,
@@ -163,7 +179,9 @@ const mockPlatformAccounts = [
 
 const mockPlatforms = [
   { Id: 1, label: 'hh_ru', name: 'hh' },
-  { Id: 2, label: 'telegram_ru', name: 'telegram' },
+  { Id: 2, label: 'telegram_ru' },
+  { Id: 4, label: 'telegram_en' },
+  { Id: 7, label: 'phone_en', name: 'phone' },
   { Id: 3, label: 'email_en', name: 'email' },
   { Id: 16, label: 'linkedin', name: 'linkedin' }
 ]

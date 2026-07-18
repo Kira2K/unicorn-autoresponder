@@ -219,6 +219,24 @@ function createFixtureNocoClient() {
       rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
     },
     {
+      Id: 18,
+      platform: 'phone_en',
+      account_label: 'phone_en telegram-looking label',
+      phone: '+79990003344',
+      telegram_session_status: 'active',
+      telegram_tdlib_db_path: 'stale-phone-session',
+      rel_platformAccounts_client: { Id: 1 },
+      rel_platformAccounts_platform: { Id: 7, name: 'phone', label: 'phone_en' }
+    },
+    {
+      Id: 19,
+      platform: 'telegram_en',
+      account_label: 'Completely custom label',
+      phone: '+79990005566',
+      rel_platformAccounts_client: { Id: 1 },
+      rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
+    },
+    {
       Id: 11,
       platform: 'email_en',
       account_label: 'Newest Email',
@@ -257,7 +275,9 @@ function createFixtureNocoClient() {
   ]
   const platforms: Array<Record<string, any> & { Id: number }> = [
     { Id: 1, label: 'hh_ru', name: 'hh' },
-    { Id: 2, label: 'telegram_ru', name: 'telegram' },
+    { Id: 2, label: 'telegram_ru' },
+    { Id: 4, label: 'telegram_en' },
+    { Id: 7, label: 'phone_en', name: 'phone' },
     { Id: 16, label: 'linkedin', name: 'linkedin' }
   ]
   const englishLevels: Array<Record<string, any> & { Id: number }> = [
@@ -635,6 +655,13 @@ async function runTests(): Promise<void> {
 
   const noco = createFixtureNocoClient()
   const repository = createWebConsoleRepository({ nocoClient: noco })
+  const telegramAccounts = await repository.getTelegramPlatformAccountsForClient(1)
+  assert.deepEqual(telegramAccounts.map((account: any) => account.id), [17, 19])
+  assert.equal(telegramAccounts.every((account: any) => account.isTelegramAccount), true)
+  const clientDashboard = await repository.getClientDashboard(1, { fullAccess: true })
+  assert.equal(clientDashboard.platformAccounts.find((account: any) => account.id === 18)?.isTelegramAccount, false)
+  assert.equal(clientDashboard.platformAccounts.find((account: any) => account.id === 19)?.isTelegramAccount, true)
+  assert.equal((await repository.listActiveTelegramSenders()).some((sender: any) => sender.accountId === 18), false)
   const preparedJudoshark = await prepareJudosharkClientIfNeeded(repository, await repository.getClientById(9))
   assert.equal(preparedJudoshark.firstName, 'Test')
   assert.equal(preparedJudoshark.lastName, 'User')

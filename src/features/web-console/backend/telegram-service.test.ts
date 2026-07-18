@@ -12,6 +12,8 @@ async function runTests(): Promise<void> {
     id: 102,
     clientId: 1,
     platform: 'telegram_ru',
+    platformId: 2,
+    isTelegramAccount: true,
     accountLabel: 'Kira Telegram',
     login: '@kira',
     phone: '+79990001122',
@@ -140,6 +142,8 @@ async function runTests(): Promise<void> {
     id: 103,
     platform: 'phone_en',
     accountLabel: 'Kira phone_en',
+    platformId: 7,
+    isTelegramAccount: false,
     phone: '',
     foreignNumber: '+995500000004',
     telegramSessionStatus: '',
@@ -168,8 +172,13 @@ async function runTests(): Promise<void> {
     adapter: createFakeTdlibAdapter(),
     proxyResolver: async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
   })
-  result = await phoneOnlyService.connect(1, { accountId: 103 })
-  assert.equal(result.status, 'needs_code')
+  await assert.rejects(
+    () => phoneOnlyService.connect(1, { accountId: 103 }),
+    (error: any) => {
+      assert.equal(error.code, 'telegram_account_not_found')
+      return true
+    }
+  )
 
   const multiAccounts = [
     {
