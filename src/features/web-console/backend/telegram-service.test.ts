@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 const { createFakeTdlibAdapter } = require('../../../integrations/telegram/tdlib-client.ts') as {
   createFakeTdlibAdapter(): any
 }
@@ -24,6 +27,10 @@ async function runTests(): Promise<void> {
     telegramEventLog: ''
   }
   const repository = {
+    async getClientById(clientId: number) {
+      assert.equal(clientId, 1)
+      return { id: 1, clientName: 'Kira', market: 'Ru', primaryStack: 'Frontend' }
+    },
     async getTelegramPlatformAccountsForClient(clientId: number) {
       assert.equal(clientId, 1)
       return [account]
@@ -96,6 +103,15 @@ async function runTests(): Promise<void> {
 
   const adminSenders = await service.listAdminSenders()
   assert.equal(adminSenders.senders.length, 1)
+
+  const patchesBeforeScan = patches.length
+  const scanned = await service.scanAdminDialogs(1, { accountId: 102, days: 1 })
+  assert.equal(scanned.accountResult.outcome, 'complete')
+  assert.equal(scanned.accountResult.lists.main.complete, true)
+  assert.equal(scanned.accountResult.lists.archive.complete, true)
+  assert.equal(scanned.rows.length, 3)
+  assert.equal(scanned.rows.every((row: any) => row.clientId === 1 && row.accountId === 102), true)
+  assert.equal(patches.length, patchesBeforeScan, 'read-only admin scanning must not update stored account status')
 
   const adminSent = await service.sendToUsername(1, {
     accountId: 102,
@@ -234,6 +250,89 @@ async function runTests(): Promise<void> {
   assert.notEqual(multiAccounts[0].telegramTdlibDbPath, multiAccounts[1].telegramTdlibDbPath)
   assert.equal(multiAccounts[0].telegramSessionStatus, 'active')
   assert.equal(multiAccounts[1].telegramSessionStatus, 'needs_code')
+
+  const scanRoots = Array.from({ length: 4 }, () => fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-service-scan-')))
+  const scanAccounts = scanRoots.map((dbPath, index) => ({
+    ...account,
+    id: 301 + index,
+    accountLabel: `Scan ${index + 1}`,
+    telegramSessionStatus: 'active',
+    telegramTdlibDbPath: dbPath
+  }))
+  let activeScans = 0
+  let maxActiveScans = 0
+  let releaseScans!: () => void
+  const scanGate = new Promise<void>(resolve => { releaseScans = resolve })
+  const scanAdapter = {
+    ...createFakeTdlibAdapter(),
+    async scanDialogs() {
+      activeScans += 1
+      maxActiveScans = Math.max(maxActiveScans, activeScans)
+      await scanGate
+      activeScans -= 1
+      return {
+        dialogs: [], outcome: 'complete', stage: 'complete', discoveredCount: 0, matchedCount: 0, durationMs: 1,
+        lists: { main: { complete: true, discovered: 0 }, archive: { complete: true, discovered: 0 } }
+      }
+    }
+  }
+  const scanService = createTelegramService({
+    repository: {
+      ...repository,
+      async getTelegramPlatformAccountsForClient() { return scanAccounts },
+      async getClientById() { return { id: 1, clientName: 'Concurrency', market: 'En', primaryStack: 'Backend' } }
+    },
+    adapter: scanAdapter,
+    proxyResolver: async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
+  })
+  try {
+    const scans = scanAccounts.map(candidate => scanService.scanAdminDialogs(1, { accountId: candidate.id, days: 1 }))
+    const deadline = Date.now() + 1000
+    while (maxActiveScans < 3 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5))
+    assert.equal(maxActiveScans, 3, 'exhaustive scans must be limited to three globally per service')
+    releaseScans()
+    const results = await Promise.all(scans)
+    assert.equal(results.every((item: any) => item.accountResult.outcome === 'complete'), true)
+  } finally {
+    releaseScans()
+    for (const scanRoot of scanRoots) fs.rmSync(scanRoot, { recursive: true, force: true })
+  }
+
+  const failedScanRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-service-scan-failure-'))
+  try {
+    const failedAccount = { ...account, id: 401, telegramSessionStatus: 'active', telegramTdlibDbPath: failedScanRoot }
+    const failedService = createTelegramService({
+      repository: {
+        ...repository,
+        async getTelegramPlatformAccountsForClient() { return [failedAccount] },
+        async getClientById() { return { id: 1, clientName: 'Failure' } }
+      },
+      adapter: {
+        ...createFakeTdlibAdapter(),
+        async scanDialogs() { throw new Error('secret proxy host and database path') }
+      },
+      proxyResolver: async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
+    })
+    const failure = await failedService.scanAdminDialogs(1, { accountId: 401, days: 1 })
+    assert.equal(failure.accountResult.outcome, 'failed')
+    assert.equal(failure.accountResult.error.code, 'telegram_proxy_unavailable')
+    assert.equal(String(failure.accountResult.error.message).includes('secret'), false)
+
+    const resolverFailureService = createTelegramService({
+      repository: {
+        ...repository,
+        async getTelegramPlatformAccountsForClient() { return [failedAccount] },
+        async getClientById() { return { id: 1, clientName: 'Resolver failure' } }
+      },
+      adapter: createFakeTdlibAdapter(),
+      proxyResolver: async () => { throw new Error('external profile lookup failed') }
+    })
+    const resolverFailure = await resolverFailureService.scanAdminDialogs(1, { accountId: 401, days: 1 })
+    assert.equal(resolverFailure.accountResult.error.code, 'telegram_proxy_unavailable')
+    assert.equal(resolverFailure.accountResult.stage, 'proxy_resolve')
+  } finally {
+    fs.rmSync(failedScanRoot, { recursive: true, force: true })
+  }
 }
 
 runTests()

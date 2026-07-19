@@ -112,9 +112,45 @@ body {
 }
 
 .lease-card,
-.verification-card {
+.verification-card,
+.admin-dialogs-card {
   border-color: #bae6fd;
 }
+
+.admin-dialogs-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; text-align: left; }
+.admin-dialog-account-coverage { margin-left: 12px; font-weight: 700; color: #334155; }
+.admin-dialog-filters { display: grid; grid-template-columns: minmax(130px, .65fr) repeat(2, minmax(160px, 1fr)) auto; gap: 12px; align-items: end; margin-bottom: 16px; }
+.admin-dialog-filter-actions { display: flex; gap: 8px; }
+.admin-dialog-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; color: #60708a; }
+.admin-dialog-status-message { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-dialog-empty { margin: 16px 0 0; color: #60708a; }
+.admin-dialog-table-wrap { overflow-x: auto; }
+.admin-dialog-table-wrap.stale { opacity: .72; }
+.admin-dialog-table { width: 100%; border-collapse: collapse; }
+.admin-dialog-table th,
+.admin-dialog-table td { padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: middle; }
+.admin-dialog-table th { color: #60708a; font-size: .8rem; text-transform: uppercase; }
+.admin-dialog-table td small { display: block; margin-top: 3px; color: #60708a; }
+.admin-dialog-history-row td { padding: 0 10px 14px; background: #f8fafc; }
+.admin-dialog-history-loading { padding: 12px; color: #60708a; }
+.admin-dialog-messages { display: grid; gap: 8px; padding: 12px; max-height: 420px; overflow-y: auto; }
+.admin-dialog-messages article { max-width: 78%; padding: 9px 12px; border-radius: 8px; background: #fff; border: 1px solid #e2e8f0; }
+.admin-dialog-messages article.outgoing { justify-self: end; background: #e0f2fe; }
+.admin-dialog-messages p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-dialog-diagnostics { margin-top: 16px; border: 1px solid #dbe3ee; border-radius: 8px; background: #f8fafc; }
+.admin-dialog-diagnostics summary { padding: 12px 14px; font-weight: 700; cursor: pointer; }
+.admin-dialog-diagnostics-list { display: grid; gap: 8px; padding: 0 12px 12px; }
+.admin-dialog-diagnostics-list article { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }
+.admin-dialog-diagnostics-list header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.admin-dialog-diagnostics-list p { margin: 5px 0 0; color: #60708a; overflow-wrap: anywhere; }
+.admin-dialog-outcome { flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: .75rem; font-weight: 700; text-transform: capitalize; }
+.admin-dialog-outcome.outcome-loaded,
+.admin-dialog-outcome.outcome-complete { background: #dcfce7; color: #166534; }
+.admin-dialog-outcome.outcome-partial { background: #fef3c7; color: #92400e; }
+.admin-dialog-outcome.outcome-failed,
+.admin-dialog-outcome.outcome-unprocessed { background: #fee2e2; color: #991b1b; }
+.admin-dialog-diagnostic-error { color: #b91c1c !important; }
+.admin-dialog-request-summary { display: block; padding: 0 14px 12px; color: #60708a; }
 
 .lease-panel {
   display: grid;
@@ -628,6 +664,10 @@ body {
 }
 
 @media (max-width: 760px) {
+  .admin-dialog-filters { grid-template-columns: 1fr; }
+  .admin-dialog-filter-actions { justify-content: flex-end; }
+  .admin-dialog-status-message,
+  .admin-dialog-diagnostics-list header { align-items: flex-start; flex-direction: column; }
   .app-shell {
     padding: 12px;
   }

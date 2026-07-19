@@ -91,7 +91,7 @@ export const api = {
       body: JSON.stringify(payload)
     })
   },
-  telegramDialogs(params = {}) {
+  telegramDialogs(params = {}, options = {}) {
     const query = new URLSearchParams()
     if (params.targetClientId) query.set('targetClientId', params.targetClientId)
     if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
@@ -99,7 +99,9 @@ export const api = {
     if (params.folderId) query.set('folderId', params.folderId)
     if (params.query) query.set('query', params.query)
     if (params.limit) query.set('limit', params.limit)
-    return request(`/api/telegram/dialogs${query.toString() ? `?${query}` : ''}`)
+    return request(`/api/telegram/dialogs${query.toString() ? `?${query}` : ''}`, {
+      signal: options.signal
+    })
   },
   telegramFolders(params = {}) {
     const query = new URLSearchParams()
@@ -107,13 +109,15 @@ export const api = {
     if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
     return request(`/api/telegram/folders${query.toString() ? `?${query}` : ''}`)
   },
-  telegramMessages(params = {}) {
+  telegramMessages(params = {}, options = {}) {
     const query = new URLSearchParams()
     if (params.targetClientId) query.set('targetClientId', params.targetClientId)
     if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
     if (params.chatId) query.set('chatId', params.chatId)
     if (params.limit) query.set('limit', params.limit)
-    return request(`/api/telegram/messages${query.toString() ? `?${query}` : ''}`)
+    return request(`/api/telegram/messages${query.toString() ? `?${query}` : ''}`, {
+      signal: options.signal
+    })
   },
   telegramSend(payload = {}) {
     return request('/api/telegram/send', {
@@ -139,8 +143,17 @@ export const api = {
     if (payload.targetClientId) query.set('targetClientId', payload.targetClientId)
     return request(`/api/telegram/disconnect${query.toString() ? `?${query}` : ''}`, { method: 'DELETE' })
   },
-  adminTelegramSenders() {
-    return request('/api/admin/telegram/senders')
+  adminTelegramSenders(options = {}) {
+    return request('/api/admin/telegram/senders', { signal: options.signal })
+  },
+  adminTelegramDialogScan(params = {}, options = {}) {
+    const query = new URLSearchParams()
+    query.set('days', params.days ?? 1)
+    if (params.targetClientId) query.set('targetClientId', params.targetClientId)
+    if (params.platformAccountId) query.set('platformAccountId', params.platformAccountId)
+    return request(`/api/admin/telegram/dialogs/scan?${query}`, {
+      signal: options.signal
+    })
   },
   adminTelegramSend(payload = {}) {
     return request('/api/admin/telegram/send', {

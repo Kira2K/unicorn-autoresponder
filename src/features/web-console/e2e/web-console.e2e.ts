@@ -6,6 +6,7 @@ const { chromium } = require('playwright')
 
 const ROOT = path.resolve(__dirname, '../../../..')
 const ARTIFACT_DIR = path.join(ROOT, 'tmp', 'web-console-e2e')
+const TDLIB_E2E_ROOT = path.join(ARTIFACT_DIR, `tdlib-${process.pid}-${Date.now()}`)
 const AI_TAILOR_FIXTURE_DIR = path.join(ROOT, 'src', 'features', 'web-console', 'test-fixtures', 'ai-tailoring')
 const AI_TAILOR_PDF = path.join(AI_TAILOR_FIXTURE_DIR, 'Kira Samsonova React.pdf')
 const AI_TAILOR_JOB_REQUIREMENTS = fs.readFileSync(path.join(AI_TAILOR_FIXTURE_DIR, 'AI-tailor-test-text.txt'), 'utf8')
@@ -55,6 +56,7 @@ async function runTests(): Promise<void> {
     WEB_CONSOLE_USE_MOCK_DATA: 'true',
     WEB_CONSOLE_DOLPHIN_LEASE_DRY_RUN: 'true',
     DOLPHIN_SHARED_USER_LEASE_MS: '15000',
+    TELEGRAM_TDLIB_ROOT: TDLIB_E2E_ROOT,
     WEB_CONSOLE_HOST: '127.0.0.1',
     WEB_CONSOLE_PORT: String(API_PORT)
   })
@@ -84,10 +86,33 @@ async function runTests(): Promise<void> {
     await page.getByTestId('login-page').waitFor()
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '01-login.png'), fullPage: true })
 
+    let initialClientStatusSeen = false
+    let initialClientStatusPending = false
+    let releaseInitialClientStatus!: () => void
+    const initialClientStatusGate = new Promise<void>(resolve => { releaseInitialClientStatus = resolve })
+    const slowInitialClientStatus = async (route: any) => {
+      if (initialClientStatusSeen) {
+        await route.continue()
+        return
+      }
+      initialClientStatusSeen = true
+      initialClientStatusPending = true
+      await initialClientStatusGate
+      initialClientStatusPending = false
+      await route.continue()
+    }
+    await page.route('**/api/telegram/status?*', slowInitialClientStatus)
     await page.getByTestId('email-input').fill('client@example.com')
     await page.locator('input[type="password"]').fill('1234')
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
+    const clientStatusRouteDeadline = Date.now() + 2000
+    while (!initialClientStatusSeen && Date.now() < clientStatusRouteDeadline) await wait(10)
+    assert.equal(initialClientStatusSeen, true)
+    assert.equal(initialClientStatusPending, true, 'client dashboard must render while live Telegram status is pending')
+    releaseInitialClientStatus()
+    while (initialClientStatusPending) await wait(10)
+    await page.unroute('**/api/telegram/status?*', slowInitialClientStatus)
     await assertText(page, 'Test')
     assert.equal(await page.getByTestId('profile-form').isVisible(), false)
     await page.getByTestId('profile-details-accordion-header').waitFor()
@@ -161,6 +186,32 @@ async function runTests(): Promise<void> {
     await page.getByTestId('telegram-status').getByText('active', { exact: false }).waitFor()
     await page.getByTestId('telegram-open-button').click()
     await page.getByTestId('telegram-workspace').waitFor()
+    let lateClientHistorySeen = false
+    const delayedClientHistory = async (route: any) => {
+      const chatId = new URL(route.request().url()).searchParams.get('chatId')
+      if (chatId === 'reporting-chat') {
+        lateClientHistorySeen = true
+        await wait(600)
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ messages: [{ id: 'late-client', text: 'Late client history must be ignored' }] })
+        }).catch(() => {})
+        return
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ messages: [{ id: 'fresh-client', text: 'Fresh client history' }] })
+      })
+    }
+    await page.route('**/api/telegram/messages?*', delayedClientHistory)
+    await page.getByTestId('telegram-workspace').getByText('Current reporting chat', { exact: false }).click()
+    while (!lateClientHistorySeen) await wait(10)
+    await page.getByTestId('telegram-workspace').getByText('Client messages', { exact: false }).click()
+    await page.getByTestId('telegram-workspace').getByText('Fresh client history', { exact: false }).waitFor()
+    await page.waitForTimeout(700)
+    assert.equal(await page.getByText('Late client history must be ignored', { exact: false }).count(), 0)
+    await page.unroute('**/api/telegram/messages?*', delayedClientHistory)
+    await page.getByTestId('telegram-workspace').getByText('Current reporting chat', { exact: false }).click()
     await page.getByTestId('telegram-search-input').fill('client')
     await page.getByTestId('telegram-search-button').click()
     await page.getByTestId('telegram-workspace').getByText('Client messages', { exact: false }).waitFor()
@@ -327,13 +378,233 @@ async function runTests(): Promise<void> {
     await page.getByTestId('logout-button').click()
     await page.getByTestId('login-page').waitFor()
 
+    let initialAdminDialogPending = false
+    let initialAdminDialogSeen = false
+    let initialAdminStatusPending = false
+    let initialAdminStatusSeen = false
+    const slowInitialAdminSenders = async (route: any) => {
+      initialAdminDialogSeen = true
+      initialAdminDialogPending = true
+      await wait(1200)
+      initialAdminDialogPending = false
+      await route.continue()
+    }
+    const slowInitialAdminStatus = async (route: any) => {
+      const url = new URL(route.request().url())
+      if (!url.searchParams.has('targetClientId')) return await route.continue()
+      initialAdminStatusSeen = true
+      initialAdminStatusPending = true
+      await wait(1200)
+      initialAdminStatusPending = false
+      await route.continue()
+    }
+    const addCurrentAdminTelegramAccount = async (route: any) => {
+      const response = await route.fetch()
+      const dashboard = await response.json()
+      dashboard.platformAccounts = [
+        ...(dashboard.platformAccounts || []),
+        {
+          id: 999001,
+          clientId: dashboard.client?.id,
+          platform: 'telegram',
+          isTelegramAccount: true,
+          accountLabel: 'E2E current-client Telegram',
+          login: '@e2e_current_client',
+          phone: '',
+          email: ''
+        }
+      ]
+      await route.fulfill({ response, json: dashboard })
+    }
+    await page.route('**/api/admin/latest-client', addCurrentAdminTelegramAccount)
+    await page.route('**/api/admin/telegram/senders', slowInitialAdminSenders)
+    await page.route('**/api/telegram/status?*', slowInitialAdminStatus)
     await page.getByTestId('email-input').fill('unicornveryevil@gmail.com')
     await page.locator('input[type="password"]').fill('101010')
     await page.getByTestId('login-button').click()
     await page.getByTestId('admin-dashboard').waitFor()
+    await assertText(page, 'Latest Admin Client')
+    await page.waitForTimeout(100)
+    assert.equal(initialAdminDialogSeen, true)
+    assert.equal(initialAdminDialogPending, true)
+    assert.equal(initialAdminStatusSeen, true)
+    assert.equal(initialAdminStatusPending, true)
+    await page.getByTestId('get-verification-code-button').waitFor()
+    await page.getByTestId('admin-dialogs-loading').waitFor()
     assert.equal(await page.getByTestId('telegram-card').count(), 0)
     assert.equal(await page.getByTestId('own-proxy-panel').count(), 0)
     assert.equal(await page.getByTestId('open-dolphin-admin-button').count(), 0)
+    await page.getByTestId('admin-dialogs-card').waitFor()
+    assert.equal(await page.getByTestId('admin-dialog-days').inputValue(), '1')
+    await page.getByTestId('admin-dialogs-table').waitFor()
+    await page.getByTestId('admin-dialog-account-coverage').getByText(/Accounts loaded: \d+\/\d+.*Complete: \d+\/\d+/).waitFor()
+    await page.unroute('**/api/admin/telegram/senders', slowInitialAdminSenders)
+    await page.unroute('**/api/telegram/status?*', slowInitialAdminStatus)
+    await page.unroute('**/api/admin/latest-client', addCurrentAdminTelegramAccount)
+
+    await page.getByTestId('admin-dialog-market').selectOption({ index: 1 })
+    await page.getByTestId('admin-dialog-stack').selectOption({ index: 1 })
+    await page.getByTestId('admin-dialog-apply').click()
+    await page.getByTestId('admin-dialogs-table').waitFor()
+    await page.locator('[data-testid^="admin-dialog-messages-"]').first().click()
+    await page.getByTestId('admin-dialogs-table').getByText('Telegram session is ready.', { exact: false }).first().waitFor()
+    await page.getByTestId('admin-dialog-reset').click()
+    assert.equal(await page.getByTestId('admin-dialog-days').inputValue(), '1')
+    await page.getByTestId('admin-dialogs-table').waitFor()
+    await page.getByTestId('admin-dialogs-toggle').click()
+    assert.equal(await page.getByTestId('admin-dialog-filters').count(), 0)
+    await page.getByTestId('admin-dialogs-toggle').click()
+    await page.getByTestId('admin-dialog-filters').waitFor()
+
+    let delayedHistorySeen = false
+    const delayedHistory = async (route: any) => {
+      delayedHistorySeen = true
+      await wait(600)
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ messages: [{ id: 'late', text: 'Late history must stay collapsed', date: new Date().toISOString() }] })
+      }).catch(() => {})
+    }
+    await page.route('**/api/telegram/messages?*', delayedHistory)
+    const historyButton = page.locator('[data-testid^="admin-dialog-messages-"]').first()
+    await historyButton.click()
+    while (!delayedHistorySeen) await wait(10)
+    await historyButton.click()
+    await page.waitForTimeout(700)
+    assert.equal(await page.getByText('Late history must stay collapsed', { exact: false }).count(), 0)
+    await historyButton.getByText('Load messages', { exact: false }).waitFor()
+    await page.unroute('**/api/telegram/messages?*', delayedHistory)
+
+    let scenario = 'fresh'
+    let delayedCatalogSeen = false
+    let eagerHistoryRequests = 0
+    const scenarioSenders = async (route: any) => {
+      const definitions: Record<string, any[]> = {
+        slow: [{ clientId: 101, clientName: 'Stale client', accountId: 101, accountLabel: 'Stale account', market: 'Ru', stack: 'Frontend' }],
+        fresh: [{ clientId: 102, clientName: 'Fresh client', accountId: 102, accountLabel: 'Fresh account', market: 'En', stack: 'Backend' }],
+        partial: [
+          { clientId: 201, clientName: 'Partial client', accountId: 201, accountLabel: 'Snapshot account', market: 'Ru', stack: 'Frontend' },
+          { clientId: 202, clientName: 'Failed client', accountId: 202, accountLabel: 'Failed account', market: 'Ru', stack: 'Frontend' }
+        ],
+        zero: [{ clientId: 301, clientName: 'Empty client', accountId: 301, accountLabel: 'Empty account', market: 'En', stack: 'Go' }],
+        failed: [{ clientId: 401, clientName: 'Unavailable client', accountId: 401, accountLabel: 'Unavailable account', market: 'En', stack: 'Go' }]
+      }
+      if (scenario === 'transport') {
+        return await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Temporary sender catalog failure.' }) })
+      }
+      if (scenario === 'slow') {
+        delayedCatalogSeen = true
+        await wait(600)
+      }
+      return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ senders: definitions[scenario] || definitions.fresh }) }).catch(() => {})
+    }
+    const scenarioDialogs = async (route: any) => {
+      const url = new URL(route.request().url())
+      const clientId = Number(url.searchParams.get('targetClientId'))
+      if (clientId < 100) return await route.continue()
+      if ([202, 401].includes(clientId)) {
+        return await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'telegram_connecting' }) })
+      }
+      if (clientId === 301) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ accountId: clientId, dialogs: [] }) })
+      const list = url.searchParams.get('list') || 'main'
+      const title = clientId === 101 ? 'Stale dialog' : clientId === 102 ? 'Fresh dialog' : 'Snapshot kept'
+      return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        accountId: clientId,
+        dialogs: [{ id: `${clientId}-${list}`, title, chatList: list, lastMessageAt: new Date().toISOString() }]
+      }) })
+    }
+    const scenarioScan = async (route: any) => {
+      const url = new URL(route.request().url())
+      const clientId = Number(url.searchParams.get('targetClientId'))
+      const base = {
+        clientId,
+        clientName: clientId === 201 ? 'Partial client' : clientId === 202 ? 'Failed client' : `Client ${clientId}`,
+        accountId: clientId,
+        accountLabel: `Account ${clientId}`,
+        discoveredCount: 2,
+        matchedCount: 0,
+        durationMs: 25
+      }
+      if (clientId === 201) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        rows: [],
+        accountResult: {
+          ...base,
+          outcome: 'partial',
+          stage: 'chat_load_archive',
+          lists: { main: { complete: true, discovered: 2 }, archive: { complete: false, discovered: 0 } },
+          error: { code: 'telegram_dialog_scan_timeout', message: 'Telegram dialog scan exceeded its configured deadline.', stage: 'chat_load_archive' }
+        }
+      }) })
+      if ([202, 401].includes(clientId)) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        rows: [],
+        accountResult: {
+          ...base,
+          outcome: 'failed',
+          stage: 'authorization',
+          lists: { main: { complete: false, discovered: 0 }, archive: { complete: false, discovered: 0 } },
+          error: { code: 'telegram_connecting', message: 'The stored Telegram session is still initializing.', stage: 'authorization' }
+        }
+      }) })
+      const empty = clientId === 301
+      return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        rows: empty ? [] : [{ clientId, clientName: base.clientName, accountId: clientId, accountLabel: base.accountLabel, chatId: `${clientId}-complete`, dialogTitle: clientId === 101 ? 'Stale dialog' : 'Fresh dialog', lastMessageAt: new Date().toISOString() }],
+        accountResult: {
+          ...base,
+          outcome: 'complete',
+          stage: 'complete',
+          matchedCount: empty ? 0 : 1,
+          lists: { main: { complete: true, discovered: 1 }, archive: { complete: true, discovered: 1 } }
+        }
+      }) })
+    }
+    const countEagerHistory = async (route: any) => {
+      eagerHistoryRequests += 1
+      await route.continue()
+    }
+    await page.route('**/api/admin/telegram/senders', scenarioSenders)
+    await page.route('**/api/telegram/dialogs?*', scenarioDialogs)
+    await page.route('**/api/admin/telegram/dialogs/scan?*', scenarioScan)
+    await page.route('**/api/telegram/messages?*', countEagerHistory)
+
+    scenario = 'slow'
+    await page.getByTestId('admin-dialog-days').fill('2')
+    await page.getByTestId('admin-dialog-apply').click()
+    while (!delayedCatalogSeen) await wait(10)
+    scenario = 'fresh'
+    await page.getByTestId('admin-dialog-reset').click()
+    await page.getByTestId('admin-dialog-account-coverage').getByText(/Complete: 1\/1/).waitFor()
+    await page.getByText('Fresh dialog', { exact: true }).waitFor()
+    await page.waitForTimeout(700)
+    assert.equal(await page.getByText('Stale dialog', { exact: true }).count(), 0)
+    assert.equal(eagerHistoryRequests, 0, 'admin collection must not eagerly load message history')
+
+    scenario = 'partial'
+    await page.getByTestId('admin-dialog-apply').click()
+    await page.getByTestId('admin-dialogs-partial-error').getByText(/Accounts loaded: 1\/2.*Complete: 0\/2.*1 partial.*1 failed/).waitFor()
+    await page.getByText('Snapshot kept', { exact: true }).first().waitFor()
+    await page.getByTestId('admin-dialog-diagnostics').locator('summary').click()
+    await page.getByText('chat_load_archive', { exact: false }).waitFor()
+    await page.locator('[data-testid^="admin-dialog-retry-"]').first().waitFor()
+
+    scenario = 'transport'
+    await page.getByTestId('admin-dialog-apply').click()
+    await page.getByTestId('admin-dialogs-error').getByText('Showing the last successful results.', { exact: false }).waitFor()
+    await page.getByText('Snapshot kept', { exact: true }).first().waitFor()
+    await page.getByTestId('admin-dialog-account-coverage').getByText('stale', { exact: false }).waitFor()
+
+    scenario = 'zero'
+    await page.getByTestId('admin-dialog-apply').click()
+    await page.getByTestId('admin-dialogs-empty').getByText('All 1 accounts loaded; no dialogs matched this period.', { exact: false }).waitFor()
+
+    scenario = 'failed'
+    await page.getByTestId('admin-dialog-apply').click()
+    await page.getByTestId('admin-dialogs-total-failure').getByText('Dialog data could not be loaded', { exact: false }).waitFor()
+    assert.equal(await page.getByText('no dialogs matched this period', { exact: false }).count(), 0)
+
+    await page.unroute('**/api/admin/telegram/senders', scenarioSenders)
+    await page.unroute('**/api/telegram/dialogs?*', scenarioDialogs)
+    await page.unroute('**/api/admin/telegram/dialogs/scan?*', scenarioScan)
+    await page.unroute('**/api/telegram/messages?*', countEagerHistory)
     await page.getByTestId('admin-ai-tailor-open-button').click()
     await page.getByTestId('admin-ai-tailor-dialog').waitFor()
     await page.getByTestId('admin-ai-tailor-dialog').getByText('[Beta] CV AI-tailoring', { exact: false }).waitFor()
@@ -410,6 +681,9 @@ async function runTests(): Promise<void> {
     if (browser) await browser.close()
     await stopProcess(frontend)
     await stopProcess(backend)
+    if (path.dirname(path.resolve(TDLIB_E2E_ROOT)) === path.resolve(ARTIFACT_DIR)) {
+      fs.rmSync(TDLIB_E2E_ROOT, { recursive: true, force: true })
+    }
   }
 }
 

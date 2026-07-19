@@ -84,6 +84,17 @@ const adminTelegramAlwaysVerify = ref(true)
 const adminTelegramLoading = ref(false)
 const adminTelegramStatus = ref('')
 const adminTelegramError = ref('')
+const adminDialogsOpen = ref(true)
+const adminDialogFilters = ref({ days: 1, market: '', stack: '' })
+const adminDialogRows = ref([])
+const adminDialogAccounts = ref({ total: 0, loaded: 0, complete: 0, partial: 0, failed: 0, unprocessed: 0 })
+const adminDialogAccountResults = ref([])
+const adminDialogRequest = ref(null)
+const adminDialogsLoading = ref(false)
+const adminDialogsError = ref('')
+const adminDialogsStale = ref(false)
+const adminDialogsHasResult = ref(false)
+const adminDialogHistory = ref({})
 const adminAiTailorModalOpen = ref(false)
 const adminAiTailorFile = ref(null)
 const adminAiTailorFileName = ref('')
@@ -99,6 +110,13 @@ const adminLinkedChatStatus = ref('')
 const adminLinkedChatError = ref('')
 let telegramPollTimer = null
 let countdownTimer = null
+let adminDialogRequestGeneration = 0
+let adminDialogRequestController = null
+const adminDialogHistoryControllers = new Map()
+const adminDialogHistoryGenerations = new Map()
+const adminDialogRetryControllers = new Map()
+const telegramHistoryControllers = new Map()
+const telegramHistoryGenerations = new Map()
 const SECURE_DNS_WARNING_KEY = 'webConsole.secureDnsWarningAccepted'
 const REQUIRED_DATA_WARNING_PREFIX = 'webConsole.requiredDolphinDataWarning'
 
@@ -208,6 +226,471 @@ const adminTelegramVerifyTitle = computed(() => adminTelegramAlwaysVerify.value
   ? 'ask to verify every message'
   : 'check for enable verification'
 )
+const adminDialogMarketOptions = computed(() => {
+  const values = new Set(adminTelegramSenders.value.map(sender => sender.market || 'No market'))
+  return [...values].sort((left, right) => String(left).localeCompare(String(right)))
+})
+
+const adminDialogStackOptions = computed(() => {
+  const values = new Set(
+    adminTelegramSenders.value
+      .filter(sender => !adminDialogFilters.value.market || (sender.market || 'No market') === adminDialogFilters.value.market)
+      .map(sender => sender.stack || 'No stack')
+  )
+  return [...values].sort((left, right) => String(left).localeCompare(String(right)))
+})
+
+const adminDialogCoverageText = computed(() => {
+  const accounts = adminDialogAccounts.value
+  if (adminDialogsLoading.value && !accounts.total) return 'Loading accounts...'
+  const details = `Accounts loaded: ${accounts.loaded}/${accounts.total} | Complete: ${accounts.complete}/${accounts.total}`
+  const problems = [
+    accounts.partial ? `${accounts.partial} partial` : '',
+    accounts.failed ? `${accounts.failed} failed` : '',
+    accounts.unprocessed ? `${accounts.unprocessed} not processed` : ''
+  ].filter(Boolean)
+  const text = [details, ...problems].join(' | ')
+  return adminDialogsStale.value ? `${text} | stale` : text
+})
+
+const adminDialogCollectionIncomplete = computed(() => {
+  const accounts = adminDialogAccounts.value
+  return adminDialogsHasResult.value && accounts.total > 0 && !adminDialogsLoading.value && accounts.complete < accounts.total
+})
+
+const adminDialogTotalFailure = computed(() => {
+  const accounts = adminDialogAccounts.value
+  return adminDialogsHasResult.value &&
+    !adminDialogsLoading.value &&
+    accounts.total > 0 &&
+    accounts.failed === accounts.total &&
+    !adminDialogRows.value.length
+})
+
+function isAbortError(caught) {
+  return caught?.name === 'AbortError' || caught?.code === 'ABORT_ERR'
+}
+
+function adminDialogSenderKey(sender) {
+  return `${sender.clientId}:${sender.accountId}`
+}
+
+function adminDialogMarket(sender) {
+  return sender.market || 'No market'
+}
+
+function adminDialogStack(sender) {
+  return sender.stack || 'No stack'
+}
+
+function selectedAdminDialogSenders(senders) {
+  return senders.filter(sender =>
+    (!adminDialogFilters.value.market || adminDialogMarket(sender) === adminDialogFilters.value.market) &&
+    (!adminDialogFilters.value.stack || adminDialogStack(sender) === adminDialogFilters.value.stack)
+  )
+}
+
+function adminDialogDiagnosticLabel(result) {
+  const client = result.clientName || (result.clientId ? `Client ${result.clientId}` : 'Unknown client')
+  const account = result.accountLabel || (result.accountId ? `Account ${result.accountId}` : 'Unknown account')
+  return `${client} | ${account}`
+}
+
+function adminDialogDiagnosticError(result) {
+  const detail = result.error && typeof result.error === 'object' ? result.error : {}
+  const code = detail.code || result.code || ''
+  const message = detail.message || result.message || (typeof result.error === 'string' ? result.error : '')
+  return [code, message].filter(Boolean).join(': ')
+}
+
+function adminDialogDiagnosticListState(result, list) {
+  const nested = result.lists?.[list]
+  const complete = nested?.complete
+  if (complete === true) return `${list}: complete`
+  if (complete === false) return `${list}: incomplete`
+  return ''
+}
+
+function safeAdminDialogRequestError(caught) {
+  const code = caught?.body?.error || caught?.code || 'telegram_dialog_snapshot_failed'
+  const messages = {
+    telegram_auth_code_required: 'The stored Telegram session requires a new authorization code.',
+    telegram_password_required: 'The stored Telegram session requires its cloud password.',
+    telegram_proxy_unavailable: 'The assigned Telegram proxy is unavailable.',
+    telegram_connecting: 'The stored Telegram session is still initializing.',
+    telegram_tdlib_timeout: 'TDLib did not answer before the request timeout.',
+    telegram_dialog_snapshot_timeout: 'The lightweight dialog snapshot exceeded 45 seconds.',
+    telegram_dialog_scan_timeout: 'Telegram dialog scanning exceeded its configured deadline.'
+  }
+  return {
+    code,
+    message: messages[code] || 'Telegram dialog data could not be loaded.'
+  }
+}
+
+function cancelAdminDialogHistory(key) {
+  adminDialogHistoryControllers.get(key)?.abort()
+  adminDialogHistoryControllers.delete(key)
+  adminDialogHistoryGenerations.set(key, (adminDialogHistoryGenerations.get(key) || 0) + 1)
+}
+
+function cancelAllAdminDialogHistories(clear = false) {
+  for (const controller of adminDialogHistoryControllers.values()) controller.abort()
+  adminDialogHistoryControllers.clear()
+  for (const key of adminDialogHistoryGenerations.keys()) {
+    adminDialogHistoryGenerations.set(key, (adminDialogHistoryGenerations.get(key) || 0) + 1)
+  }
+  if (clear) adminDialogHistory.value = {}
+}
+
+function cancelAdminDialogCollection() {
+  adminDialogRequestController?.abort()
+  adminDialogRequestController = null
+  for (const controller of adminDialogRetryControllers.values()) controller.abort()
+  adminDialogRetryControllers.clear()
+  adminDialogRequestGeneration += 1
+  adminDialogsLoading.value = false
+}
+
+function adminDialogRowKey(row) {
+  return `${row.clientId}:${row.accountId}:${row.chatId}`
+}
+
+function formatAdminDialogDate(value) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString()
+}
+
+function updateAdminDialogCounts() {
+  const results = adminDialogAccountResults.value
+  adminDialogAccounts.value = {
+    total: results.length,
+    loaded: results.filter(result => result.snapshotComplete || result.outcome === 'complete').length,
+    complete: results.filter(result => result.outcome === 'complete').length,
+    partial: results.filter(result => result.outcome === 'partial').length,
+    failed: results.filter(result => result.outcome === 'failed').length,
+    unprocessed: results.filter(result => result.outcome === 'pending').length
+  }
+}
+
+function setAdminDialogAccountResult(sender, patch) {
+  const key = adminDialogSenderKey(sender)
+  const existingIndex = adminDialogAccountResults.value.findIndex(result => adminDialogSenderKey(result) === key)
+  const base = existingIndex >= 0
+    ? adminDialogAccountResults.value[existingIndex]
+    : {
+        clientId: sender.clientId,
+        clientName: sender.clientName,
+        accountId: sender.accountId,
+        accountLabel: sender.accountLabel,
+        market: sender.market,
+        stack: sender.stack,
+        outcome: 'pending',
+        stage: 'snapshot'
+      }
+  const next = { ...base, ...patch }
+  const results = [...adminDialogAccountResults.value]
+  if (existingIndex >= 0) results.splice(existingIndex, 1, next)
+  else results.push(next)
+  adminDialogAccountResults.value = results
+  updateAdminDialogCounts()
+  return next
+}
+
+function mergeAdminDialogRows(sender, rows, replaceAccountRows = false) {
+  const accountKey = adminDialogSenderKey(sender)
+  const retained = replaceAccountRows
+    ? adminDialogRows.value.filter(row => adminDialogSenderKey(row) !== accountKey)
+    : adminDialogRows.value
+  const byKey = new Map(retained.map(row => [adminDialogRowKey(row), row]))
+  for (const row of rows) byKey.set(adminDialogRowKey(row), row)
+  adminDialogRows.value = [...byKey.values()].sort((left, right) =>
+    String(right.lastMessageAt || '').localeCompare(String(left.lastMessageAt || '')) ||
+    String(left.clientName || '').localeCompare(String(right.clientName || '')) ||
+    Number(left.accountId) - Number(right.accountId) ||
+    String(left.chatId).localeCompare(String(right.chatId))
+  )
+}
+
+function snapshotRows(sender, dialogs, cutoffMs) {
+  return dialogs
+    .filter(dialog => dialog.lastMessageAt && Date.parse(dialog.lastMessageAt) >= cutoffMs)
+    .map(dialog => ({
+      clientId: sender.clientId,
+      clientName: sender.clientName,
+      accountId: sender.accountId,
+      accountLabel: sender.accountLabel,
+      market: sender.market,
+      stack: sender.stack,
+      chatId: String(dialog.id),
+      dialogTitle: String(dialog.title || dialog.id),
+      lastMessageAt: dialog.lastMessageAt
+    }))
+}
+
+async function runAdminDialogPool(items, limit, worker, signal) {
+  let cursor = 0
+  async function runWorker() {
+    while (!signal?.aborted) {
+      const index = cursor++
+      if (index >= items.length) return
+      await worker(items[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => runWorker()))
+}
+
+async function requestAdminDialogSnapshot(params, parentSignal) {
+  const controller = new AbortController()
+  let timedOut = false
+  const abortFromParent = () => controller.abort()
+  parentSignal?.addEventListener('abort', abortFromParent, { once: true })
+  const timer = window.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, 45000)
+  try {
+    return await api.telegramDialogs(params, { signal: controller.signal })
+  } catch (caught) {
+    if (timedOut) {
+      throw Object.assign(new Error('Telegram dialog snapshot exceeded 45 seconds.'), { code: 'telegram_dialog_snapshot_timeout' })
+    }
+    throw caught
+  } finally {
+    window.clearTimeout(timer)
+    parentSignal?.removeEventListener('abort', abortFromParent)
+  }
+}
+
+async function loadAdminDialogSnapshot(sender, generation, controller) {
+  const base = {
+    targetClientId: sender.clientId,
+    platformAccountId: sender.accountId,
+    limit: 50
+  }
+  setAdminDialogAccountResult(sender, { stage: 'snapshot', outcome: 'pending', error: undefined })
+  const responses = []
+  const cutoffMs = Date.now() - Number(adminDialogFilters.value.days) * 86_400_000
+  for (const list of ['main', 'archive']) {
+    try {
+      const value = await requestAdminDialogSnapshot({ ...base, list }, controller.signal)
+      responses.push({ status: 'fulfilled', value })
+      if (!controller.signal.aborted && generation === adminDialogRequestGeneration) {
+        mergeAdminDialogRows(sender, snapshotRows(sender, value.dialogs || [], cutoffMs))
+      }
+    } catch (reason) {
+      responses.push({ status: 'rejected', reason })
+    }
+    if (controller.signal.aborted || generation !== adminDialogRequestGeneration) return
+  }
+  if (controller.signal.aborted || generation !== adminDialogRequestGeneration) return
+  const rows = []
+  let discoveredCount = 0
+  for (const response of responses) {
+    if (response.status !== 'fulfilled') continue
+    const dialogs = response.value.dialogs || []
+    discoveredCount += dialogs.length
+    rows.push(...snapshotRows(sender, dialogs, cutoffMs))
+  }
+  mergeAdminDialogRows(sender, rows)
+  const successfulLists = responses.filter(response => response.status === 'fulfilled').length
+  const snapshotComplete = successfulLists === 2
+  const firstFailure = responses.find(response => response.status === 'rejected')
+  setAdminDialogAccountResult(sender, {
+    snapshotComplete,
+    snapshotLists: {
+      main: responses[0].status === 'fulfilled',
+      archive: responses[1].status === 'fulfilled'
+    },
+    outcome: snapshotComplete ? 'loaded' : successfulLists ? 'partial' : 'failed',
+    stage: snapshotComplete ? 'snapshot_complete' : 'snapshot',
+    discoveredCount,
+    matchedCount: rows.length,
+    ...(firstFailure ? { error: safeAdminDialogRequestError(firstFailure.reason) } : { error: undefined })
+  })
+}
+
+async function loadAdminDialogScan(sender, generation, controller) {
+  const current = adminDialogAccountResults.value.find(result => adminDialogSenderKey(result) === adminDialogSenderKey(sender))
+  setAdminDialogAccountResult(sender, {
+    outcome: current?.snapshotComplete ? 'loaded' : current?.outcome || 'pending',
+    stage: 'scan'
+  })
+  try {
+    const result = await api.adminTelegramDialogScan({
+      targetClientId: sender.clientId,
+      platformAccountId: sender.accountId,
+      days: adminDialogFilters.value.days
+    }, { signal: controller.signal })
+    if (controller.signal.aborted || generation !== adminDialogRequestGeneration) return
+    const scan = result.accountResult || {}
+    mergeAdminDialogRows(sender, result.rows || [], scan.outcome === 'complete')
+    const snapshotAvailable = Boolean(current?.snapshotComplete || current?.outcome === 'partial')
+    const outcome = scan.outcome === 'complete'
+      ? 'complete'
+      : scan.outcome === 'failed' && !snapshotAvailable
+        ? 'failed'
+        : 'partial'
+    setAdminDialogAccountResult(sender, {
+      ...scan,
+      snapshotComplete: Boolean(current?.snapshotComplete),
+      snapshotLists: current?.snapshotLists,
+      outcome
+    })
+  } catch (caught) {
+    if (isAbortError(caught) || controller.signal.aborted || generation !== adminDialogRequestGeneration) return
+    const snapshotAvailable = Boolean(current?.snapshotComplete || current?.outcome === 'partial')
+    setAdminDialogAccountResult(sender, {
+      outcome: snapshotAvailable ? 'partial' : 'failed',
+      stage: 'scan',
+      error: safeAdminDialogRequestError(caught)
+    })
+  }
+}
+
+async function loadAdminDialogs() {
+  if (!isAdmin.value) return
+  cancelAdminDialogCollection()
+  const days = Number(adminDialogFilters.value.days)
+  if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+    adminDialogsError.value = 'Activity days must be greater than 0 and at most 3650.'
+    adminDialogsStale.value = adminDialogsHasResult.value
+    return
+  }
+  cancelAllAdminDialogHistories(true)
+  const generation = ++adminDialogRequestGeneration
+  const controller = new AbortController()
+  adminDialogRequestController = controller
+  const startedAt = Date.now()
+  adminDialogsLoading.value = true
+  adminDialogsError.value = ''
+  adminDialogsStale.value = adminDialogsHasResult.value
+  try {
+    const catalog = await api.adminTelegramSenders({ signal: controller.signal })
+    if (controller.signal.aborted || generation !== adminDialogRequestGeneration || !isAdmin.value) return
+    adminTelegramSenders.value = catalog.senders || []
+    const senders = selectedAdminDialogSenders(adminTelegramSenders.value)
+    adminDialogRows.value = []
+    adminDialogAccountResults.value = senders.map(sender => ({
+      clientId: sender.clientId,
+      clientName: sender.clientName,
+      accountId: sender.accountId,
+      accountLabel: sender.accountLabel,
+      market: sender.market,
+      stack: sender.stack,
+      outcome: 'pending',
+      stage: 'snapshot'
+    }))
+    adminDialogsHasResult.value = true
+    adminDialogsStale.value = false
+    updateAdminDialogCounts()
+    await runAdminDialogPool(senders, 3, sender => loadAdminDialogSnapshot(sender, generation, controller), controller.signal)
+    if (!controller.signal.aborted && generation === adminDialogRequestGeneration) {
+      await runAdminDialogPool(senders, 3, sender => loadAdminDialogScan(sender, generation, controller), controller.signal)
+    }
+    if (!controller.signal.aborted && generation === adminDialogRequestGeneration) {
+      adminDialogRequest.value = { durationMs: Date.now() - startedAt }
+    }
+  } catch (caught) {
+    if (generation !== adminDialogRequestGeneration || !isAdmin.value || isAbortError(caught)) return
+    adminDialogsStale.value = adminDialogsHasResult.value
+    adminDialogsError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    if (generation === adminDialogRequestGeneration) {
+      adminDialogsLoading.value = false
+      if (adminDialogRequestController === controller) adminDialogRequestController = null
+      updateAdminDialogCounts()
+    }
+  }
+}
+
+async function resetAdminDialogFilters() {
+  adminDialogFilters.value = { days: 1, market: '', stack: '' }
+  await loadAdminDialogs()
+}
+
+function changeAdminDialogMarket() {
+  if (adminDialogFilters.value.stack && !adminDialogStackOptions.value.includes(adminDialogFilters.value.stack)) {
+    adminDialogFilters.value.stack = ''
+  }
+}
+
+function toggleAdminDialogsCard() {
+  adminDialogsOpen.value = !adminDialogsOpen.value
+  if (!adminDialogsOpen.value) {
+    cancelAdminDialogCollection()
+    cancelAllAdminDialogHistories()
+  }
+}
+
+async function retryAdminDialogAccount(result) {
+  const sender = adminTelegramSenders.value.find(candidate => adminDialogSenderKey(candidate) === adminDialogSenderKey(result))
+  if (!sender || !isAdmin.value) return
+  const key = adminDialogSenderKey(sender)
+  adminDialogRetryControllers.get(key)?.abort()
+  const controller = new AbortController()
+  adminDialogRetryControllers.set(key, controller)
+  const generation = adminDialogRequestGeneration
+  try {
+    await loadAdminDialogSnapshot(sender, generation, controller)
+    if (!controller.signal.aborted && generation === adminDialogRequestGeneration) {
+      await loadAdminDialogScan(sender, generation, controller)
+    }
+  } finally {
+    if (adminDialogRetryControllers.get(key) === controller) adminDialogRetryControllers.delete(key)
+  }
+}
+async function toggleAdminDialogMessages(row) {
+  const key = adminDialogRowKey(row)
+  const current = adminDialogHistory.value[key]
+  if (current?.open) {
+    cancelAdminDialogHistory(key)
+    adminDialogHistory.value = { ...adminDialogHistory.value, [key]: { ...current, open: false, loading: false } }
+    return
+  }
+  if (current?.loaded && !current.error) {
+    adminDialogHistory.value = { ...adminDialogHistory.value, [key]: { ...current, open: true } }
+    return
+  }
+  cancelAdminDialogHistory(key)
+  const generation = (adminDialogHistoryGenerations.get(key) || 0) + 1
+  adminDialogHistoryGenerations.set(key, generation)
+  const controller = new AbortController()
+  adminDialogHistoryControllers.set(key, controller)
+  adminDialogHistory.value = {
+    ...adminDialogHistory.value,
+    [key]: { open: true, loading: true, loaded: false, messages: current?.messages || [], error: '' }
+  }
+  try {
+    const result = await api.telegramMessages({
+      targetClientId: row.clientId,
+      platformAccountId: row.accountId,
+      chatId: row.chatId,
+      limit: 50
+    }, { signal: controller.signal })
+    const state = adminDialogHistory.value[key]
+    if (!isAdmin.value || generation !== adminDialogHistoryGenerations.get(key) || adminDialogHistoryControllers.get(key) !== controller || !state?.open) return
+    adminDialogHistory.value = {
+      ...adminDialogHistory.value,
+      [key]: { open: true, loading: false, loaded: true, messages: result.messages || [], error: '' }
+    }
+  } catch (caught) {
+    if (isAbortError(caught) || generation !== adminDialogHistoryGenerations.get(key) || adminDialogHistoryControllers.get(key) !== controller) return
+    adminDialogHistory.value = {
+      ...adminDialogHistory.value,
+      [key]: { open: true, loading: false, loaded: false, messages: [], error: caught instanceof Error ? caught.message : String(caught || '') }
+    }
+  } finally {
+    if (adminDialogHistoryControllers.get(key) === controller) adminDialogHistoryControllers.delete(key)
+  }
+}
+
+async function retryAdminDialogMessages(row) {
+  const key = adminDialogRowKey(row)
+  cancelAdminDialogHistory(key)
+  adminDialogHistory.value = { ...adminDialogHistory.value, [key]: { open: false, loaded: false, messages: [] } }
+  await toggleAdminDialogMessages(row)
+}
 const adminAiTailorVerifyTitle = computed(() => adminAiTailorAlwaysVerify.value
   ? 'ask to verify every tailoring request'
   : 'check for enable verification'
@@ -566,6 +1049,10 @@ function syncTelegramAccounts(preferredAccountId = selectedTelegramAccountId.val
 }
 
 function selectTelegramAccount(account) {
+  const previousAccountId = selectedTelegramAccountId.value
+  if (previousAccountId && Number(previousAccountId) !== Number(account?.id)) {
+    cancelTelegramHistoryForAccount(previousAccountId)
+  }
   selectedTelegramAccountId.value = account?.id ?? null
   if (account) ensureTelegramState(account)
 }
@@ -578,8 +1065,25 @@ function telegramTargetPayloadFor(account) {
 }
 
 function resetTelegramUi() {
+  cancelAllTelegramHistories()
   selectedTelegramAccountId.value = null
   telegramStateByAccount.value = {}
+}
+
+function cancelTelegramHistoryForAccount(accountId) {
+  const key = String(accountId || '')
+  if (!key) return
+  telegramHistoryControllers.get(key)?.abort()
+  telegramHistoryControllers.delete(key)
+  telegramHistoryGenerations.set(key, (telegramHistoryGenerations.get(key) || 0) + 1)
+}
+
+function cancelAllTelegramHistories() {
+  for (const controller of telegramHistoryControllers.values()) controller.abort()
+  telegramHistoryControllers.clear()
+  for (const key of telegramHistoryGenerations.keys()) {
+    telegramHistoryGenerations.set(key, (telegramHistoryGenerations.get(key) || 0) + 1)
+  }
 }
 
 function closeProfileEditor() {
@@ -685,8 +1189,11 @@ async function loadDashboard() {
     if (isClient.value || isAdmin.value) {
       syncTelegramAccounts()
     }
-    if ((isClient.value || isAdmin.value) && selectedTelegramAccount.value) {
-      await refreshTelegramStatus()
+    if (isAdmin.value) {
+      void loadAdminDialogs()
+      if (selectedTelegramAccount.value) void refreshTelegramStatus()
+    } else if (isClient.value && selectedTelegramAccount.value) {
+      void refreshTelegramStatus()
     }
   } catch (caught) {
     setError(caught)
@@ -740,6 +1247,7 @@ async function disconnectTelegram() {
   const state = ensureTelegramState(account)
   state.loading = true
   state.error = ''
+  cancelTelegramHistoryForAccount(account.id)
   try {
     state.status = await api.telegramDisconnect(telegramTargetPayloadFor(account))
     state.open = false
@@ -762,6 +1270,7 @@ async function openTelegram() {
 }
 
 function hideTelegram() {
+  if (selectedTelegramAccount.value) cancelTelegramHistoryForAccount(selectedTelegramAccount.value.id)
   const state = currentTelegramState.value
   state.open = false
   state.panelOpen = ''
@@ -802,6 +1311,7 @@ async function loadTelegramDialogs() {
   const account = selectedTelegramAccount.value
   if (!account) return
   const state = ensureTelegramState(account)
+  cancelTelegramHistoryForAccount(account.id)
   state.loading = true
   state.error = ''
   try {
@@ -825,6 +1335,7 @@ async function loadTelegramDialogs() {
 
 async function changeTelegramList() {
   const state = currentTelegramState.value
+  if (selectedTelegramAccount.value) cancelTelegramHistoryForAccount(selectedTelegramAccount.value.id)
   state.selectedChatId = ''
   state.messages = []
   resetTelegramRenameForm()
@@ -835,12 +1346,33 @@ async function loadTelegramMessages() {
   const account = selectedTelegramAccount.value
   const state = currentTelegramState.value
   if (!account || !state.selectedChatId) return
-  const result = await api.telegramMessages({
-    ...telegramTargetPayloadFor(account),
-    chatId: state.selectedChatId,
-    limit: 50
-  })
-  state.messages = result.messages || []
+  const accountKey = String(account.id)
+  const chatId = state.selectedChatId
+  cancelTelegramHistoryForAccount(account.id)
+  const generation = (telegramHistoryGenerations.get(accountKey) || 0) + 1
+  telegramHistoryGenerations.set(accountKey, generation)
+  const controller = new AbortController()
+  telegramHistoryControllers.set(accountKey, controller)
+  try {
+    const result = await api.telegramMessages({
+      ...telegramTargetPayloadFor(account),
+      chatId,
+      limit: 50
+    }, { signal: controller.signal })
+    if (
+      generation !== telegramHistoryGenerations.get(accountKey) ||
+      telegramHistoryControllers.get(accountKey) !== controller ||
+      Number(selectedTelegramAccount.value?.id) !== Number(account.id) ||
+      state.selectedChatId !== chatId ||
+      !state.open
+    ) return
+    state.messages = result.messages || []
+  } catch (caught) {
+    if (isAbortError(caught) || generation !== telegramHistoryGenerations.get(accountKey)) return
+    state.error = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    if (telegramHistoryControllers.get(accountKey) === controller) telegramHistoryControllers.delete(accountKey)
+  }
 }
 
 async function selectTelegramDialog(dialog) {
@@ -951,6 +1483,8 @@ async function login() {
 }
 
 async function logout() {
+  cancelAdminDialogCollection()
+  cancelAllAdminDialogHistories(true)
   loading.value = true
   error.value = ''
   try {
@@ -970,6 +1504,13 @@ async function logout() {
     dolphinLeaseError.value = ''
     verificationCode.value = null
     verificationCodeError.value = ''
+    adminDialogRows.value = []
+    adminDialogAccounts.value = { total: 0, loaded: 0, complete: 0, partial: 0, failed: 0, unprocessed: 0 }
+    adminDialogAccountResults.value = []
+    adminDialogRequest.value = null
+    adminDialogsError.value = ''
+    adminDialogsStale.value = false
+    adminDialogsHasResult.value = false
     englishLevels.value = []
     platforms.value = []
     resetAccountForm()
@@ -1190,6 +1731,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (countdownTimer) window.clearInterval(countdownTimer)
+  cancelAdminDialogCollection()
+  cancelAllAdminDialogHistories(true)
+  cancelAllTelegramHistories()
 })
 </script>
 
@@ -1426,6 +1970,72 @@ onUnmounted(() => {
           </div>
         </template>
       </Dialog>
+
+      <Card v-if="isAdmin" class="admin-dialogs-card" data-testid="admin-dialogs-card">
+        <template #title>
+          <button type="button" class="admin-dialogs-toggle" data-testid="admin-dialogs-toggle" :aria-expanded="adminDialogsOpen ? 'true' : 'false'" @click="toggleAdminDialogsCard">
+            <span>Telegram dialogs</span><i :class="adminDialogsOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i>
+          </button>
+        </template>
+        <template #subtitle>
+          <span data-testid="admin-dialogs-count">{{ `${adminDialogRows.length} dialogs available` }}</span>
+          <span class="admin-dialog-account-coverage" data-testid="admin-dialog-account-coverage">
+            {{ adminDialogCoverageText }}
+          </span>
+        </template>
+        <template v-if="adminDialogsOpen" #content>
+          <form class="admin-dialog-filters" data-testid="admin-dialog-filters" @submit.prevent="loadAdminDialogs">
+            <label class="field"><span>Activity in days</span><InputText v-model.number="adminDialogFilters.days" type="number" min="0.01" max="3650" step="0.01" data-testid="admin-dialog-days" /></label>
+            <label class="field"><span>Market</span><select v-model="adminDialogFilters.market" class="native-select" data-testid="admin-dialog-market" @change="changeAdminDialogMarket"><option value="">All markets</option><option v-for="market in adminDialogMarketOptions" :key="market" :value="market">{{ market }}</option></select></label>
+            <label class="field"><span>Stack</span><select v-model="adminDialogFilters.stack" class="native-select" data-testid="admin-dialog-stack"><option value="">All stacks</option><option v-for="stack in adminDialogStackOptions" :key="stack" :value="stack">{{ stack }}</option></select></label>
+            <div class="admin-dialog-filter-actions"><Button type="button" label="Reset" severity="secondary" outlined data-testid="admin-dialog-reset" @click="resetAdminDialogFilters" /><Button type="submit" label="Apply" icon="pi pi-filter" data-testid="admin-dialog-apply" /></div>
+          </form>
+          <Message v-if="adminDialogsError" severity="error" :closable="false" data-testid="admin-dialogs-error">
+            <div class="admin-dialog-status-message">
+              <span><strong>Could not refresh dialog data.</strong> {{ adminDialogsError }}<template v-if="adminDialogsStale"> Showing the last successful results.</template></span>
+              <Button label="Retry" icon="pi pi-refresh" size="small" severity="secondary" data-testid="admin-dialogs-retry" @click="loadAdminDialogs" />
+            </div>
+          </Message>
+          <div v-if="adminDialogsLoading" class="admin-dialog-loading" data-testid="admin-dialogs-loading"><ProgressSpinner aria-label="Loading Telegram dialogs" /><span>{{ adminDialogCoverageText }}</span></div>
+          <template v-if="adminDialogsHasResult">
+            <Message v-if="adminDialogTotalFailure" severity="error" :closable="false" data-testid="admin-dialogs-total-failure">Dialog data could not be loaded. Open account diagnostics for the failing stage and reason.</Message>
+            <Message v-else-if="adminDialogCollectionIncomplete" severity="warn" :closable="false" data-testid="admin-dialogs-partial-error">{{ adminDialogCoverageText }}</Message>
+            <p v-if="!adminDialogsLoading && adminDialogAccounts.total === 0" class="admin-dialog-empty" data-testid="admin-dialogs-empty">No active Telegram accounts match these filters.</p>
+            <p v-else-if="!adminDialogsLoading && !adminDialogRows.length && !adminDialogTotalFailure && adminDialogAccounts.complete === adminDialogAccounts.total" class="admin-dialog-empty" data-testid="admin-dialogs-empty">All {{ adminDialogAccounts.total }} accounts loaded; no dialogs matched this period.</p>
+            <p v-else-if="!adminDialogsLoading && !adminDialogRows.length && adminDialogCollectionIncomplete && !adminDialogTotalFailure" class="admin-dialog-empty" data-testid="admin-dialogs-empty">No dialogs were returned by the accounts that responded.</p>
+          </template>
+          <div v-if="adminDialogRows.length" :class="['admin-dialog-table-wrap', { stale: adminDialogsStale }]">
+            <table class="admin-dialog-table" data-testid="admin-dialogs-table">
+              <thead><tr><th>Dialog</th><th>Student / account</th><th>Market</th><th>Stack</th><th>Latest activity</th><th></th></tr></thead>
+              <tbody>
+                <template v-for="row in adminDialogRows" :key="adminDialogRowKey(row)">
+                  <tr><td>{{ row.dialogTitle }}</td><td><strong>{{ row.clientName }}</strong><small>{{ row.accountLabel }}</small></td><td>{{ row.market || '—' }}</td><td>{{ row.stack || '—' }}</td><td>{{ formatAdminDialogDate(row.lastMessageAt) }}</td><td><Button :label="adminDialogHistory[adminDialogRowKey(row)]?.open ? 'Collapse' : 'Load messages'" size="small" severity="secondary" :loading="adminDialogHistory[adminDialogRowKey(row)]?.loading" :data-testid="`admin-dialog-messages-${row.clientId}-${row.accountId}-${row.chatId}`" @click="toggleAdminDialogMessages(row)" /></td></tr>
+                  <tr v-if="adminDialogHistory[adminDialogRowKey(row)]?.open" class="admin-dialog-history-row"><td colspan="6">
+                    <Message v-if="adminDialogHistory[adminDialogRowKey(row)].error" severity="error" :closable="false">{{ adminDialogHistory[adminDialogRowKey(row)].error }} <Button label="Retry" size="small" text @click="retryAdminDialogMessages(row)" /></Message>
+                    <p v-else-if="adminDialogHistory[adminDialogRowKey(row)].loading" class="admin-dialog-history-loading">Loading messages…</p>
+                    <div v-else-if="!adminDialogHistory[adminDialogRowKey(row)].loading" class="admin-dialog-messages"><p v-if="!adminDialogHistory[adminDialogRowKey(row)].messages.length">No messages found.</p><article v-for="message in adminDialogHistory[adminDialogRowKey(row)].messages" :key="message.id" :class="{ outgoing: message.outgoing }"><small>{{ formatAdminDialogDate(message.date) }} · {{ message.outgoing ? 'Outgoing' : 'Incoming' }}</small><p>{{ message.text || '[Unsupported message]' }}</p></article></div>
+                  </td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <details v-if="adminDialogsHasResult && adminDialogAccountResults.length" class="admin-dialog-diagnostics" data-testid="admin-dialog-diagnostics">
+            <summary>Account diagnostics ({{ adminDialogAccountResults.length }})</summary>
+            <div class="admin-dialog-diagnostics-list">
+              <article v-for="(result, index) in adminDialogAccountResults" :key="`${result.clientId || 'client'}:${result.accountId || index}`" :data-testid="`admin-dialog-diagnostic-${index}`">
+                <header><strong>{{ adminDialogDiagnosticLabel(result) }}</strong><span :class="['admin-dialog-outcome', `outcome-${result.outcome || 'unknown'}`]">{{ result.outcome || 'unknown' }}</span></header>
+                <p><span v-if="result.stage">Stage: {{ result.stage }}</span><span v-if="Number.isFinite(Number(result.durationMs))"> · {{ Number(result.durationMs) }} ms</span></p>
+                <p v-if="result.authorizationState || result.connectionState"><span v-if="result.authorizationState">Authorization: {{ result.authorizationState }}</span><span v-if="result.connectionState"> · Connection: {{ result.connectionState }}</span></p>
+                <p v-if="Number.isFinite(Number(result.discoveredCount)) || Number.isFinite(Number(result.matchedCount))"><span v-if="Number.isFinite(Number(result.discoveredCount))">Discovered: {{ Number(result.discoveredCount) }}</span><span v-if="Number.isFinite(Number(result.matchedCount))"> · Matched: {{ Number(result.matchedCount) }}</span></p>
+                <p v-if="adminDialogDiagnosticListState(result, 'main') || adminDialogDiagnosticListState(result, 'archive')">{{ [adminDialogDiagnosticListState(result, 'main'), adminDialogDiagnosticListState(result, 'archive')].filter(Boolean).join(' · ') }}</p>
+                <p v-if="adminDialogDiagnosticError(result)" class="admin-dialog-diagnostic-error">{{ adminDialogDiagnosticError(result) }}</p>
+                <Button v-if="!adminDialogsLoading && ['partial', 'failed'].includes(result.outcome)" label="Retry account" icon="pi pi-refresh" size="small" severity="secondary" :data-testid="`admin-dialog-retry-${result.clientId}-${result.accountId}`" @click="retryAdminDialogAccount(result)" />
+              </article>
+            </div>
+            <small v-if="adminDialogRequest?.durationMs !== undefined" class="admin-dialog-request-summary">Collection finished in {{ adminDialogRequest.durationMs }} ms.</small>
+          </details>
+        </template>
+      </Card>
 
       <Card v-if="isAdmin" class="verification-card">
         <template #title>Dolphin verification code</template>

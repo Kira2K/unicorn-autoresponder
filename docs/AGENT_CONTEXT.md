@@ -20,6 +20,7 @@ Read this first in future sessions to avoid rediscovering the repo.
 | Dolphin profile start/stop/preflight/locks | `src/integrations/dolphin` |
 | Noco jobs, backups, health gates | `src/integrations/noco` |
 | Telegram reports/tools | `src/integrations/telegram` |
+| TDLib accounts and admin dialog collection | `docs/TELEGRAM_ADMIN_DIALOG_BACKEND.md` |
 | Diagnostics | `src/features/diagnostics` |
 | Generated/local run evidence | `logs/` |
 
@@ -65,3 +66,6 @@ npm run orchestrator
   `runtime.ts`, `profiles.ts`, and local Dolphin API output.
 - Telegram reporting: HH report text in `src/features/hh-responses`, transport
   in `src/integrations/telegram`.
+- TDLib-backed client/admin Telegram: read
+  `docs/TELEGRAM_ADMIN_DIALOG_BACKEND.md` before changing proxy, session, or
+  dialog collection behavior.

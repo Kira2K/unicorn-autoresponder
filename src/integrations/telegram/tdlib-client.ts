@@ -28,6 +28,34 @@ type TelegramDialog = {
   username?: string
   userId?: string
   isPrivate?: boolean
+  lastMessageAt?: string
+}
+
+type TelegramDialogScanStage = 'authorization' | 'chat_load_main' | 'chat_load_archive' | 'chat_hydrate' | 'complete'
+
+type TelegramDialogScanListResult = {
+  complete: boolean
+  discovered: number
+  stalled?: boolean
+  truncated?: boolean
+}
+
+type TelegramDialogScanResult = {
+  dialogs: TelegramDialog[]
+  outcome: 'complete' | 'partial'
+  stage: TelegramDialogScanStage
+  discoveredCount: number
+  matchedCount: number
+  durationMs: number
+  lists: {
+    main: TelegramDialogScanListResult
+    archive: TelegramDialogScanListResult
+  }
+  error?: {
+    code: string
+    message: string
+    stage: TelegramDialogScanStage
+  }
 }
 
 type TelegramMessage = {
@@ -60,6 +88,7 @@ type TelegramAdapter = {
   status(input: TelegramAccountRef): Promise<TelegramConnectResult>
   folders(input: TelegramAccountRef): Promise<Array<{ id: string; title: string; type: string }>>
   dialogs(input: TelegramAccountRef & { list?: string; folderId?: number; query?: string; limit?: number }): Promise<TelegramDialog[]>
+  scanDialogs(input: TelegramAccountRef & { cutoffAt: string; signal?: AbortSignal; maxChats?: number; hydrationConcurrency?: number }): Promise<TelegramDialogScanResult>
   messages(input: TelegramAccountRef & { chatId: string; limit?: number }): Promise<TelegramMessage[]>
   send(input: TelegramAccountRef & { chatId: string; text: string }): Promise<TelegramMessage>
   sendToUsername(input: TelegramAccountRef & { username: string; text: string; attachments?: TelegramAttachment[] }): Promise<{ chatId: string; messages: TelegramMessage[] }>
@@ -92,6 +121,11 @@ function tdlibAuthTimeoutMs(): number {
 function tdlibSendTimeoutMs(): number {
   const value = Number(process.env.TELEGRAM_TDLIB_SEND_TIMEOUT_MS)
   return Number.isFinite(value) && value > 0 ? value : 120000
+}
+
+function tdlibDialogScanTimeoutMs(): number {
+  const value = Number(process.env.TELEGRAM_TDLIB_DIALOG_SCAN_TIMEOUT_MS)
+  return Number.isFinite(value) && value > 0 ? value : 60000
 }
 
 function createMissingProxyResult(input: TelegramAccountRef): TelegramConnectResult {
@@ -135,10 +169,11 @@ function createFakeTdlibAdapter(): TelegramAdapter {
       ]
     },
     async dialogs(input) {
+      const now = Date.now()
       const dialogs = [
-        { id: 'reporting-chat', title: 'Current reporting chat', unreadCount: 0, chatList: 'main' },
-        { id: 'client-chat', title: 'Client messages', unreadCount: 2, chatList: 'main', username: '@client_partner', userId: '901', isPrivate: true },
-        { id: 'archived-chat', title: 'Archived lead', unreadCount: 0, chatList: 'archive' }
+        { id: 'reporting-chat', title: 'Current reporting chat', unreadCount: 0, chatList: 'main', lastMessageAt: new Date(now).toISOString() },
+        { id: 'client-chat', title: 'Client messages', unreadCount: 2, chatList: 'main', username: '@client_partner', userId: '901', isPrivate: true, lastMessageAt: new Date(now - 1000).toISOString() },
+        { id: 'archived-chat', title: 'Archived lead', unreadCount: 0, chatList: 'archive', lastMessageAt: new Date(now - 2000).toISOString() }
       ]
       const list = input.list || 'main'
       const query = String(input.query || '').trim().toLowerCase()
@@ -146,6 +181,42 @@ function createFakeTdlibAdapter(): TelegramAdapter {
         .filter(dialog => query || list === 'folder' || dialog.chatList === list)
         .filter(dialog => !query || dialog.title.toLowerCase().includes(query))
         .slice(0, input.limit || 50)
+    },
+    async scanDialogs(input) {
+      const startedAt = Date.now()
+      const cutoffMs = Date.parse(input.cutoffAt)
+      const dialogs = [
+        { id: 'reporting-chat', title: 'Current reporting chat', unreadCount: 0, chatList: 'main', lastMessageAt: new Date().toISOString() },
+        { id: 'client-chat', title: 'Client messages', unreadCount: 2, chatList: 'main', lastMessageAt: new Date(Date.now() - 1000).toISOString() },
+        { id: 'archived-chat', title: 'Archived lead', unreadCount: 0, chatList: 'archive', lastMessageAt: new Date(Date.now() - 2000).toISOString() }
+      ].filter(dialog => !Number.isFinite(cutoffMs) || Date.parse(dialog.lastMessageAt) >= cutoffMs)
+      if (input.signal?.aborted) {
+        return {
+          dialogs: [],
+          outcome: 'partial',
+          stage: 'authorization',
+          discoveredCount: 0,
+          matchedCount: 0,
+          durationMs: Date.now() - startedAt,
+          lists: {
+            main: { complete: false, discovered: 0 },
+            archive: { complete: false, discovered: 0 }
+          },
+          error: { code: 'telegram_dialog_scan_cancelled', message: 'Telegram dialog scan was cancelled.', stage: 'authorization' }
+        }
+      }
+      return {
+        dialogs,
+        outcome: 'complete',
+        stage: 'complete',
+        discoveredCount: 3,
+        matchedCount: dialogs.length,
+        durationMs: Date.now() - startedAt,
+        lists: {
+          main: { complete: true, discovered: 2 },
+          archive: { complete: true, discovered: 1 }
+        }
+      }
     },
     async messages(input) {
       const messages = sentMessages.get(input.chatId) || []
@@ -223,9 +294,10 @@ function messageText(content: any): string {
   return String(content._ || '')
 }
 
-function createRealTdlibAdapter(): TelegramAdapter {
-  const tdl = require('tdl')
-  const { getTdjson } = require('prebuilt-tdlib')
+function createRealTdlibAdapter(dependencies: { tdl?: any; getTdjson?: () => any } = {}): TelegramAdapter {
+  const tdl = dependencies.tdl || require('tdl')
+  const { getTdjson: installedGetTdjson } = require('prebuilt-tdlib')
+  const getTdjson = dependencies.getTdjson || installedGetTdjson
   tdl.configure({ tdjson: getTdjson() })
   const clients = new Map<string, any>()
   const authStates = new Map<string, TelegramSessionStatus>()
@@ -364,6 +436,7 @@ function createRealTdlibAdapter(): TelegramAdapter {
           return
         }
         for (const update of earlyUpdates) handleDeliveryUpdate(update)
+        if (settled) return
         timer = setTimeout(() => {
           settle(
             reject,
@@ -416,7 +489,10 @@ function createRealTdlibAdapter(): TelegramAdapter {
       chatList,
       username: username || undefined,
       userId: userId || undefined,
-      isPrivate: chat?.type?._ === 'chatTypePrivate'
+      isPrivate: chat?.type?._ === 'chatTypePrivate',
+      lastMessageAt: chat?.last_message?.date
+        ? new Date(Number(chat.last_message.date) * 1000).toISOString()
+        : undefined
     }
   }
 
@@ -538,6 +614,196 @@ function createRealTdlibAdapter(): TelegramAdapter {
     return { timedOut: false }
   }
 
+  function scanFailure(code: string, message: string, stage: TelegramDialogScanStage): Error {
+    return Object.assign(new Error(message), { code, stage })
+  }
+
+  function isChatListEnd(error: any): boolean {
+    return Number(error?.code) === 404 || /\b404\b|not found|all chats/i.test(String(error?.message || ''))
+  }
+
+  async function withScanBoundary<T>(
+    operation: Promise<T>,
+    deadlineAt: number,
+    signal: AbortSignal | undefined,
+    stage: TelegramDialogScanStage
+  ): Promise<T> {
+    if (signal?.aborted) throw scanFailure('telegram_dialog_scan_cancelled', 'Telegram dialog scan was cancelled.', stage)
+    const remainingMs = deadlineAt - Date.now()
+    if (remainingMs <= 0) throw scanFailure('telegram_dialog_scan_timeout', 'Telegram dialog scan exceeded its deadline.', stage)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let abortHandler: (() => void) | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(scanFailure('telegram_dialog_scan_timeout', 'Telegram dialog scan exceeded its deadline.', stage)), remainingMs)
+    })
+    const cancelled = new Promise<never>((_, reject) => {
+      if (!signal) return
+      abortHandler = () => reject(scanFailure('telegram_dialog_scan_cancelled', 'Telegram dialog scan was cancelled.', stage))
+      signal.addEventListener('abort', abortHandler, { once: true })
+    })
+    try {
+      return await Promise.race([operation, timeout, cancelled])
+    } finally {
+      if (timer) clearTimeout(timer)
+      if (signal && abortHandler) signal.removeEventListener('abort', abortHandler)
+    }
+  }
+
+  function tdlibListName(value: any): 'main' | 'archive' | null {
+    const type = value?._
+    if (type === 'chatListMain') return 'main'
+    if (type === 'chatListArchive') return 'archive'
+    return null
+  }
+
+  function positionListName(position: any): 'main' | 'archive' | null {
+    return tdlibListName(position?.list || position?.chat_list)
+  }
+
+  function positionIsVisible(position: any): boolean {
+    const order = position?.order
+    return order !== undefined && order !== null && String(order) !== '0'
+  }
+
+  function scanDialogFromChat(chat: any, chatList: 'main' | 'archive'): TelegramDialog {
+    return {
+      id: String(chat.id),
+      title: String(chat.title || chat.id),
+      unreadCount: Number(chat.unread_count) || 0,
+      chatList,
+      isPrivate: chat?.type?._ === 'chatTypePrivate',
+      lastMessageAt: chat?.last_message?.date
+        ? new Date(Number(chat.last_message.date) * 1000).toISOString()
+        : undefined
+    }
+  }
+
+  async function hydrateScannedDialogs(
+    client: any,
+    memberships: Array<[number, 'main' | 'archive']>,
+    chatCache: Map<number, any>,
+    concurrency: number,
+    deadlineAt: number,
+    signal: AbortSignal | undefined
+  ): Promise<{ dialogs: TelegramDialog[]; error?: TelegramDialogScanResult['error'] }> {
+    const dialogs: TelegramDialog[] = []
+    let cursor = 0
+    let firstError: TelegramDialogScanResult['error'] | undefined
+    async function worker(): Promise<void> {
+      while (true) {
+        const index = cursor++
+        if (index >= memberships.length) return
+        const [chatId, list] = memberships[index]
+        try {
+          if (signal?.aborted) throw scanFailure('telegram_dialog_scan_cancelled', 'Telegram dialog scan was cancelled.', 'chat_hydrate')
+          const cached = chatCache.get(chatId)
+          const chat = cached?.id && cached?.title
+            ? cached
+            : await withScanBoundary(
+                client.invoke({ _: 'getChat', chat_id: chatId }),
+                deadlineAt,
+                signal,
+                'chat_hydrate'
+              )
+          if (!chat?.id) throw scanFailure('telegram_dialog_hydration_failed', 'TDLib returned incomplete chat metadata.', 'chat_hydrate')
+          dialogs.push(scanDialogFromChat(chat, list))
+        } catch (error: any) {
+          if (!firstError) {
+            firstError = {
+              code: String(error?.code || 'telegram_dialog_hydration_failed'),
+              message: error?.code === 'telegram_dialog_scan_cancelled'
+                ? 'Telegram dialog scan was cancelled.'
+                : error?.code === 'telegram_dialog_scan_timeout'
+                  ? 'Telegram dialog metadata hydration exceeded its deadline.'
+                  : 'Some Telegram dialog metadata could not be loaded.',
+              stage: 'chat_hydrate'
+            }
+          }
+          if (error?.code === 'telegram_dialog_scan_cancelled' || error?.code === 'telegram_dialog_scan_timeout') return
+        }
+      }
+    }
+    const workerCount = Math.max(1, Math.min(Math.floor(concurrency) || 8, memberships.length || 1))
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+    return { dialogs, error: firstError }
+  }
+
+  async function loadScannedChatList(
+    client: any,
+    list: 'main' | 'archive',
+    ids: Set<number>,
+    capacity: number,
+    deadlineAt: number,
+    signal: AbortSignal | undefined
+  ): Promise<{ result: TelegramDialogScanListResult; error?: TelegramDialogScanResult['error'] }> {
+    const stage: TelegramDialogScanStage = list === 'main' ? 'chat_load_main' : 'chat_load_archive'
+    if (capacity <= 0) {
+      return {
+        result: { complete: false, discovered: 0, truncated: true },
+        error: { code: 'telegram_dialog_chat_limit', message: 'The 5,000-chat safety limit was reached.', stage }
+      }
+    }
+    const chatList = list === 'main' ? { _: 'chatListMain' } : { _: 'chatListArchive' }
+    const refreshIds = async () => {
+      const chats: any = await withScanBoundary(
+        client.invoke({ _: 'getChats', chat_list: chatList, limit: capacity }),
+        deadlineAt,
+        signal,
+        stage
+      )
+      for (const value of chats?.chat_ids || []) {
+        const chatId = Number(value)
+        if (Number.isFinite(chatId)) ids.add(chatId)
+      }
+    }
+    try {
+      await refreshIds()
+      let stalledBatches = 0
+      while (true) {
+        if (ids.size >= capacity) {
+          return {
+            result: { complete: false, discovered: ids.size, truncated: true },
+            error: { code: 'telegram_dialog_chat_limit', message: 'The 5,000-chat safety limit was reached.', stage }
+          }
+        }
+        const before = ids.size
+        try {
+          await withScanBoundary(
+            client.invoke({ _: 'loadChats', chat_list: chatList, limit: 100 }),
+            deadlineAt,
+            signal,
+            stage
+          )
+        } catch (error: any) {
+          if (isChatListEnd(error)) return { result: { complete: true, discovered: ids.size } }
+          throw error
+        }
+        await refreshIds()
+        stalledBatches = ids.size === before ? stalledBatches + 1 : 0
+        if (stalledBatches >= 2) {
+          return {
+            result: { complete: false, discovered: ids.size, stalled: true },
+            error: { code: 'telegram_dialog_scan_stalled', message: `TDLib stopped adding ${list} chats before reporting completion.`, stage }
+          }
+        }
+      }
+    } catch (error: any) {
+      const code = String(error?.code || 'telegram_dialog_chat_list_failed')
+      return {
+        result: { complete: false, discovered: ids.size },
+        error: {
+          code,
+          message: code === 'telegram_dialog_scan_cancelled'
+            ? 'Telegram dialog scan was cancelled.'
+            : code === 'telegram_dialog_scan_timeout'
+              ? `Telegram ${list} chat loading exceeded its deadline.`
+              : `Telegram ${list} chats could not be loaded completely.`,
+          stage
+        }
+      }
+    }
+  }
+
   return {
     async connect(input) {
       const dbPath = input.dbPath || tdlibDbPath(input)
@@ -626,6 +892,130 @@ function createRealTdlibAdapter(): TelegramAdapter {
       const chats = await client.invoke({ _: 'getChats', chat_list: chatList, limit: input.limit || 50 })
       const listName = input.list === 'archive' ? 'archive' : input.list === 'folder' ? `folder:${input.folderId}` : 'main'
       return await Promise.all((chats.chat_ids || []).map((chatId: number) => dialogFromChat(client, chatId, listName)))
+    },
+    async scanDialogs(input) {
+      const startedAt = Date.now()
+      const deadlineAt = startedAt + tdlibDialogScanTimeoutMs()
+      const maxChats = Math.max(1, Math.min(Math.floor(Number(input.maxChats) || 5000), 5000))
+      const hydrationConcurrency = Math.max(1, Math.min(Math.floor(Number(input.hydrationConcurrency) || 8), 16))
+      const client = await withScanBoundary(
+        Promise.resolve().then(() => getClient(input)),
+        deadlineAt,
+        input.signal,
+        'authorization'
+      )
+      try {
+        await withScanBoundary(
+          loginWithSuppliedValues(client, { ...input, dbPath: input.dbPath || tdlibDbPath(input) }),
+          deadlineAt,
+          input.signal,
+          'authorization'
+        )
+      } catch (error: any) {
+        if (error?.code === 'telegram_dialog_scan_cancelled' || error?.code === 'telegram_dialog_scan_timeout') throw error
+        const state = authStates.get(key(input))
+        if (state === 'needs_code') throw scanFailure('telegram_auth_code_required', 'The stored Telegram session requires a new authorization code.', 'authorization')
+        if (state === 'needs_password') throw scanFailure('telegram_password_required', 'The stored Telegram session requires its cloud password.', 'authorization')
+        if (state === 'proxy_missing' || /proxy|SOCKS5/i.test(String(error?.message || ''))) {
+          throw scanFailure('telegram_proxy_unavailable', 'The assigned Telegram proxy is unavailable.', 'authorization')
+        }
+        if (/lock|database.*(?:busy|in use)|SQLITE_BUSY/i.test(String(error?.message || ''))) {
+          throw scanFailure('telegram_tdlib_database_locked', 'The local TDLib database is already in use.', 'authorization')
+        }
+        throw scanFailure('telegram_authorization_failed', 'The stored Telegram session could not restore authorization.', 'authorization')
+      }
+
+      const ids = {
+        main: new Set<number>(),
+        archive: new Set<number>()
+      }
+      const chatCache = new Map<number, any>()
+      const rememberPosition = (chatId: number, position: any) => {
+        const list = positionListName(position)
+        if (!list || !positionIsVisible(position)) return
+        ids[list].add(chatId)
+      }
+      const rememberChat = (chat: any) => {
+        const chatId = Number(chat?.id)
+        if (!Number.isFinite(chatId)) return
+        chatCache.set(chatId, { ...(chatCache.get(chatId) || {}), ...chat })
+        for (const position of chat?.positions || []) rememberPosition(chatId, position)
+      }
+      const onUpdate = (update: any) => {
+        if (update?._ === 'updateNewChat') {
+          rememberChat(update.chat)
+          return
+        }
+        if (update?._ === 'updateChatPosition') {
+          rememberPosition(Number(update.chat_id), update.position)
+          return
+        }
+        if (update?._ === 'updateChatLastMessage') {
+          const chatId = Number(update.chat_id)
+          if (!Number.isFinite(chatId)) return
+          chatCache.set(chatId, {
+            ...(chatCache.get(chatId) || {}),
+            id: chatId,
+            last_message: update.last_message
+          })
+          for (const position of update.positions || []) rememberPosition(chatId, position)
+        }
+      }
+
+      client.on?.('update', onUpdate)
+      try {
+        const main = await loadScannedChatList(client, 'main', ids.main, maxChats, deadlineAt, input.signal)
+        const remainingCapacity = Math.max(0, maxChats - ids.main.size)
+        const archive = await loadScannedChatList(client, 'archive', ids.archive, remainingCapacity, deadlineAt, input.signal)
+        const memberships = [
+          ...[...ids.main].map(chatId => [chatId, 'main'] as [number, 'main' | 'archive']),
+          ...[...ids.archive]
+            .filter(chatId => !ids.main.has(chatId))
+            .map(chatId => [chatId, 'archive'] as [number, 'main' | 'archive'])
+        ].slice(0, maxChats)
+        const hydrated = input.signal?.aborted
+          ? {
+              dialogs: [] as TelegramDialog[],
+              error: {
+                code: 'telegram_dialog_scan_cancelled',
+                message: 'Telegram dialog scan was cancelled.',
+                stage: 'chat_hydrate' as TelegramDialogScanStage
+              }
+            }
+          : await hydrateScannedDialogs(
+              client,
+              memberships,
+              chatCache,
+              hydrationConcurrency,
+              deadlineAt,
+              input.signal
+            )
+        const cutoffMs = Date.parse(input.cutoffAt)
+        const dialogs = hydrated.dialogs
+          .filter(dialog => Boolean(dialog.lastMessageAt) && (!Number.isFinite(cutoffMs) || Date.parse(String(dialog.lastMessageAt)) >= cutoffMs))
+          .sort((left, right) =>
+            String(right.lastMessageAt || '').localeCompare(String(left.lastMessageAt || '')) ||
+            String(left.id).localeCompare(String(right.id))
+          )
+        const error = main.error || archive.error || hydrated.error
+        const complete = main.result.complete && archive.result.complete && !hydrated.error
+        return {
+          dialogs,
+          outcome: complete ? 'complete' : 'partial',
+          stage: complete ? 'complete' : error?.stage || 'chat_hydrate',
+          discoveredCount: memberships.length,
+          matchedCount: dialogs.length,
+          durationMs: Date.now() - startedAt,
+          lists: {
+            main: main.result,
+            archive: archive.result
+          },
+          ...(error ? { error } : {})
+        }
+      } finally {
+        if (typeof client.off === 'function') client.off('update', onUpdate)
+        else client.removeListener?.('update', onUpdate)
+      }
     },
     async messages(input) {
       const client = await getClient(input)

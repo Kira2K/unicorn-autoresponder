@@ -24,6 +24,23 @@ const { createDefaultVerificationCodeService } = require('./dolphin-verification
 const { createTelegramService } = require('./telegram-service.ts') as {
   createTelegramService(options: { repository: WebConsoleRepository; adapter?: any; proxyResolver?: any }): TelegramService
 }
+const {
+  configuredTelegramService,
+  createTelegramGatewayController,
+  safeGatewayFailure
+} = require('./telegram-gateway.ts') as {
+  configuredTelegramService(localService: TelegramService, options?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch }): TelegramService
+  createTelegramGatewayController(options: {
+    service: TelegramService
+    env?: Record<string, string | undefined>
+    logger?: (event: Record<string, unknown>) => void
+  }): {
+    authenticate(header: unknown): { ok: true } | { ok: false; statusCode: number; body: Record<string, unknown> }
+    health(): unknown
+    execute(body: unknown, options?: { signal?: AbortSignal; requestId?: string }): Promise<unknown>
+  }
+  safeGatewayFailure(error: unknown): { statusCode: number; body: Record<string, unknown> }
+}
 const { createTelegramBotApi } = require('../../../integrations/telegram/bot-api.ts') as {
   createTelegramBotApi(options?: any): TelegramBotApi
 }
@@ -113,12 +130,13 @@ type VerificationCodeService = {
 }
 type TelegramService = {
   connect(clientId: number, input: { accountId?: number; phone?: string; code?: string; password?: string }): Promise<unknown>
-  status(clientId: number, accountId?: number): Promise<unknown>
-  folders(clientId: number, accountId?: number): Promise<unknown>
-  dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number }): Promise<unknown>
-  messages(clientId: number, input: { accountId?: number; chatId: string; limit?: number }): Promise<unknown>
+  status(clientId: number, accountId?: number, options?: { signal?: AbortSignal }): Promise<unknown>
+  folders(clientId: number, accountId?: number, options?: { signal?: AbortSignal }): Promise<unknown>
+  dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number; signal?: AbortSignal }): Promise<unknown>
+  scanAdminDialogs(clientId: number, input: { accountId: number; days: number; signal?: AbortSignal }): Promise<unknown>
+  messages(clientId: number, input: { accountId?: number; chatId: string; limit?: number; signal?: AbortSignal }): Promise<unknown>
   send(clientId: number, input: { accountId?: number; chatId: string; text: string; allowWrite?: boolean }): Promise<unknown>
-  listAdminSenders(): Promise<unknown>
+  listAdminSenders(options?: { signal?: AbortSignal }): Promise<unknown>
   sendToUsername(clientId: number, input: { accountId?: number; username: string; text: string; attachments?: Array<{ fileName: string; mimeType?: string; dataBase64: string }>; allowWrite?: boolean }): Promise<unknown>
   renameContact(clientId: number, input: { accountId?: number; chatId: string; firstName: string; lastName?: string }): Promise<unknown>
   reauth(clientId: number, accountId?: number): Promise<unknown>
@@ -433,6 +451,10 @@ function createWebConsoleApp(options: {
   dolphinTemplateProfileId?: number
   verificationCodeService?: VerificationCodeService
   telegramService?: TelegramService
+  telegramGatewayService?: TelegramService
+  telegramGatewayEnv?: Record<string, string | undefined>
+  telegramGatewayFetch?: typeof fetch
+  telegramGatewayLogger?: (event: Record<string, unknown>) => void
   telegramBotApi?: TelegramBotApi
   cvTailoringService?: CvTailoringService
   cvTailoringFetch?: typeof fetch
@@ -457,12 +479,22 @@ function createWebConsoleApp(options: {
     templateProfileId: options.dolphinTemplateProfileId ?? (useMockData ? 1 : undefined)
   })
   const verificationCodeService = options.verificationCodeService ?? createDefaultVerificationCodeService()
-  const telegramService = options.telegramService ?? createTelegramService({
+  const localTelegramService = createTelegramService({
     repository,
     adapter: options.telegramAdapter,
     proxyResolver: options.telegramProxyResolver ?? (useMockData
       ? async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
       : undefined)
+  })
+  const telegramEnvironment = options.telegramGatewayEnv ?? process.env
+  const telegramService = options.telegramService ?? configuredTelegramService(localTelegramService, {
+    env: telegramEnvironment,
+    fetchImpl: options.telegramGatewayFetch
+  })
+  const telegramGatewayController = createTelegramGatewayController({
+    service: options.telegramGatewayService ?? localTelegramService,
+    env: telegramEnvironment,
+    logger: options.telegramGatewayLogger
   })
   const telegramBotApi = options.telegramBotApi ?? createTelegramBotApi()
   const cvTailoringService = options.cvTailoringService ?? (useMockData
@@ -685,7 +717,54 @@ function createWebConsoleApp(options: {
     res.clearCookie(SESSION_COOKIE, { path: '/' })
   }
 
+  function requestAbortBoundary(req: Request, res: Response) {
+    const controller = new AbortController()
+    const abort = () => {
+      if (!res.writableEnded) controller.abort()
+    }
+    req.once('aborted', abort)
+    res.once('close', abort)
+    return {
+      signal: controller.signal,
+      dispose() {
+        req.removeListener('aborted', abort)
+        res.removeListener('close', abort)
+      }
+    }
+  }
+
+  function requireTelegramGateway(req: Request, res: Response, next: NextFunction): void {
+    const authentication = telegramGatewayController.authenticate(req.header('Authorization'))
+    if (!authentication.ok) {
+      res.status(authentication.statusCode).json(authentication.body)
+      return
+    }
+    next()
+  }
+
   app.use(attachSession)
+
+  app.get('/api/internal/telegram-gateway/health', requireTelegramGateway, (_req: Request, res: Response) => {
+    res.json(telegramGatewayController.health())
+  })
+
+  app.post('/api/internal/telegram-gateway/rpc', requireTelegramGateway, async (req: Request, res: Response) => {
+    const boundary = requestAbortBoundary(req, res)
+    try {
+      const result = await telegramGatewayController.execute(req.body, {
+        signal: boundary.signal,
+        requestId: crypto.randomUUID()
+      })
+      if (!res.writableEnded && !boundary.signal.aborted) res.json({ ok: true, result })
+    } catch (error) {
+      if (!res.writableEnded && !boundary.signal.aborted) {
+        const failure = safeGatewayFailure(error)
+        res.status(failure.statusCode).json(failure.body)
+      }
+    } finally {
+      boundary.dispose()
+    }
+  })
 
   app.get('/oauth2callback', (req: Request, res: Response) => {
     const code = String(req.query?.code ?? '').trim()
@@ -1254,15 +1333,23 @@ function createWebConsoleApp(options: {
   })
 
   app.get('/api/telegram/status', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const boundary = requestAbortBoundary(req, res)
     try {
       const clientId = telegramTargetClientId(req)
-      res.json(await telegramService.status(clientId, telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId)))
+      res.json(await telegramService.status(
+        clientId,
+        telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId),
+        { signal: boundary.signal }
+      ))
     } catch (error) {
       next(error)
+    } finally {
+      boundary.dispose()
     }
   })
 
   app.get('/api/telegram/dialogs', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const boundary = requestAbortBoundary(req, res)
     try {
       const clientId = telegramTargetClientId(req)
       const limit = Number(req.query?.limit)
@@ -1272,23 +1359,34 @@ function createWebConsoleApp(options: {
         list: String(req.query?.list ?? 'main').trim() || 'main',
         folderId: Number.isFinite(folderId) && folderId > 0 ? folderId : undefined,
         query: String(req.query?.query ?? '').trim() || undefined,
-        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined
+        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+        signal: boundary.signal
       }))
     } catch (error) {
       next(error)
+    } finally {
+      boundary.dispose()
     }
   })
 
   app.get('/api/telegram/folders', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const boundary = requestAbortBoundary(req, res)
     try {
       const clientId = telegramTargetClientId(req)
-      res.json(await telegramService.folders(clientId, telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId)))
+      res.json(await telegramService.folders(
+        clientId,
+        telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId),
+        { signal: boundary.signal }
+      ))
     } catch (error) {
       next(error)
+    } finally {
+      boundary.dispose()
     }
   })
 
   app.get('/api/telegram/messages', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const boundary = requestAbortBoundary(req, res)
     try {
       const chatId = String(req.query?.chatId ?? '').trim()
       if (!chatId) {
@@ -1300,10 +1398,13 @@ function createWebConsoleApp(options: {
       res.json(await telegramService.messages(clientId, {
         accountId: telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId),
         chatId,
-        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined
+        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+        signal: boundary.signal
       }))
     } catch (error) {
       next(error)
+    } finally {
+      boundary.dispose()
     }
   })
 
@@ -1349,10 +1450,39 @@ function createWebConsoleApp(options: {
   })
 
   app.get('/api/admin/telegram/senders', requireRole('admin'), async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+    const boundary = requestAbortBoundary(_req, res)
     try {
-      res.json(await telegramService.listAdminSenders())
+      res.json(await telegramService.listAdminSenders({ signal: boundary.signal }))
     } catch (error) {
       next(error)
+    } finally {
+      boundary.dispose()
+    }
+  })
+
+  app.get('/api/admin/telegram/dialogs/scan', requireRole('admin'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const boundary = requestAbortBoundary(req, res)
+    try {
+      const clientId = Number(req.query?.targetClientId)
+      const accountId = telegramAccountId(req.query?.platformAccountId ?? req.query?.accountId)
+      const days = Number(req.query?.days ?? 1)
+      if (!Number.isFinite(clientId) || clientId <= 0 || !accountId) {
+        res.status(400).json({ error: 'missing_admin_telegram_dialog_scan_input' })
+        return
+      }
+      if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+        res.status(400).json({ error: 'invalid_admin_telegram_dialog_days', message: 'Days must be greater than 0 and at most 3650.' })
+        return
+      }
+      res.json(await telegramService.scanAdminDialogs(clientId, {
+        accountId,
+        days,
+        signal: boundary.signal
+      }))
+    } catch (error) {
+      next(error)
+    } finally {
+      boundary.dispose()
     }
   })
 
@@ -1555,6 +1685,11 @@ function createWebConsoleApp(options: {
     }
     if ((error as any)?.code === 'telegram_tdlib_timeout' || (error as any)?.code === 'telegram_file_send_failed') {
       res.status(504).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if (String((error as any)?.code || '').startsWith('telegram_gateway_')) {
+      const failure = safeGatewayFailure(error)
+      res.status(failure.statusCode).json(failure.body)
       return
     }
     const message = error instanceof Error ? error.message : String(error)

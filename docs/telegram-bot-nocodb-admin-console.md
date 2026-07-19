@@ -3,6 +3,11 @@
 This feature connects a Telegram support bot, the web-console API, and NocoDB
 client rows.
 
+TDLib-backed client writing, the admin account sender, and admin dialog
+collection use the web console's existing TDLib adapter. See
+[TELEGRAM_ADMIN_DIALOG_BACKEND.md](./TELEGRAM_ADMIN_DIALOG_BACKEND.md) before
+changing their proxy, session, or read/write behavior.
+
 ## Overview
 
 Data flow:
