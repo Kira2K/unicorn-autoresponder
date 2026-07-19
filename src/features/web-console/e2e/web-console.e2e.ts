@@ -54,6 +54,7 @@ async function runTests(): Promise<void> {
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
   const backend = spawnProcess(process.execPath, ['src/features/web-console/backend/index.ts'], {
     WEB_CONSOLE_USE_MOCK_DATA: 'true',
+    WEB_CONSOLE_TELEGRAM_MODE: 'local',
     WEB_CONSOLE_DOLPHIN_LEASE_DRY_RUN: 'true',
     DOLPHIN_SHARED_USER_LEASE_MS: '15000',
     TELEGRAM_TDLIB_ROOT: TDLIB_E2E_ROOT,

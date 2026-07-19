@@ -732,6 +732,7 @@ async function runTests(): Promise<void> {
   }
   const app = createWebConsoleApp({
     repository,
+    telegramGatewayEnv: { WEB_CONSOLE_TELEGRAM_MODE: 'local' },
     dolphinProvisioningApi: fakeDolphinProvisioningApi,
     dolphinTemplateProfileId: 123456789,
     dolphinLeaseService: {

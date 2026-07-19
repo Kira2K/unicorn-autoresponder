@@ -38,21 +38,20 @@ async function run(): Promise<void> {
   const page = await browser.newPage()
   const startedAt = new Date().toISOString()
   try {
-    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
     if (LIVE_SCAN_ONLY) {
-      await page.evaluate(async ({ email, password }: { email: string; password: string }) => {
-        const response = await fetch('/api/auth/login', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        })
-        if (!response.ok) throw new Error(`Live admin login failed with ${response.status}`)
-      }, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
-    } else if (await page.getByTestId('login-page').count()) {
-      await page.getByTestId('email-input').fill(ADMIN_EMAIL)
-      await page.locator('input[type="password"]').fill(ADMIN_PASSWORD)
-      await page.getByTestId('login-button').click()
+      const loginResponse = await page.request.post(`${BASE_URL}/api/auth/login`, {
+        data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+        timeout: 30000
+      })
+      if (!loginResponse.ok()) throw new Error(`Live admin login failed with ${loginResponse.status()}`)
+      await page.goto(`${BASE_URL}/api/auth/me`, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    } else {
+      await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      if (await page.getByTestId('login-page').count()) {
+        await page.getByTestId('email-input').fill(ADMIN_EMAIL)
+        await page.locator('input[type="password"]').fill(ADMIN_PASSWORD)
+        await page.getByTestId('login-button').click()
+      }
     }
     if (!LIVE_SCAN_ONLY) {
       await page.getByTestId('admin-dashboard').waitFor({ timeout: 30000 })
