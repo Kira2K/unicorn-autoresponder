@@ -78,8 +78,11 @@ RPC requests use an explicit operation and account reference:
 Supported operations are `list_admin_senders`, `status`, `folders`, `dialogs`,
 `messages`, `scan_admin_dialogs`, `send`, `send_to_username`,
 `rename_contact`, `connect`, `reauth`, and `disconnect`. The server validates
-the operation and exact `clientId:accountId` allowlist before invoking the
-existing service. Sender discovery is filtered to the same allowlist.
+the operation and positive account identifiers before invoking the existing
+service. The service then resolves the account through the client's linked
+Telegram platform accounts, so mismatched, missing, and non-Telegram accounts
+are rejected without a static gateway allowlist. Newly connected accounts are
+eligible automatically.
 
 Gateway responses strip production database paths, local file paths, event
 logs, phone numbers, proxies, and passwords. Safe Telegram error codes are
@@ -90,21 +93,19 @@ ambiguous.
 
 ### Render configuration
 
-The first rollout is intentionally read-only and limited to the reconnectable
-Test account:
-
 ```dotenv
 WEB_CONSOLE_TDLIB_GATEWAY_TOKEN=<random value of at least 32 bytes>
-WEB_CONSOLE_TDLIB_GATEWAY_ACCOUNT_REFS=102:473
-WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_WRITES=false
-WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_AUTH_MUTATIONS=false
-WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_DISCONNECT=false
+WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_WRITES=true
+WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_AUTH_MUTATIONS=true
+WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_DISCONNECT=true
 ```
 
 Do not set `WEB_CONSOLE_TELEGRAM_MODE=remote` on Render. Render must construct
 the local Telegram service that owns its persistent disk. An absent, short, or
-malformed token/allowlist disables the internal gateway without affecting the
-ordinary web console.
+malformed token disables the internal gateway without affecting the ordinary
+web console. No account-reference environment variable is required: the
+gateway scope is always `all_telegram_accounts` and account ownership comes
+from Noco through the existing Telegram service.
 
 ### Local backend configuration
 
@@ -122,20 +123,22 @@ local TDLib. Plain HTTP is accepted only for localhost integration tests.
 The capability flags are independent. `ALLOW_WRITES` controls sends and contact
 renames. `ALLOW_AUTH_MUTATIONS` controls connect and reauth. Disconnect has its
 own flag because the deployed implementation removes that account's TDLib
-storage. Keep disconnect disabled unless deletion and reauthorization are
-explicitly intended.
+storage. With all three flags enabled, the gateway bearer token is a master
+credential for every current and future Telegram account; never expose it to a
+browser or reuse it for another service.
 
 ### Safe rollout
 
 1. Deploy the gateway code while Render remains in local Telegram mode.
-2. Configure the dedicated token, `102:473`, and all capability flags `false`.
-3. Verify authenticated health, sender discovery, main/archive dialogs, one
-   lazy history request, exhaustive scan, and a final dialog request.
-4. Confirm local `storage/tdlib` timestamps did not change.
-5. Add the remaining exact production account references only after Test is
-   healthy, then repeat read-only verification per account.
-6. Enable write or authorization capabilities separately. A live send still
-   requires explicit authorization; never use disconnect as a status reset.
+2. Configure the dedicated token and capability flags; do not configure an
+   account list.
+3. Verify health reports `accountScope: all_telegram_accounts` and sender
+   discovery returns every active account with usable Render storage.
+4. Verify main/archive dialogs, one lazy history request, exhaustive scan, and
+   a final dialog request for each sender.
+5. Confirm local `storage/tdlib` timestamps did not change.
+6. Keep automated verification read-only even when mutation capabilities are
+   enabled. Never use disconnect as a status reset.
 
 Gateway logs contain only request ID, operation, account reference, duration,
 and outcome. They must never include tokens, message content, usernames,
@@ -144,10 +147,12 @@ credentials, attachments, proxy data, or storage paths.
 ## Account discovery and compatibility behavior
 
 `GET /api/admin/telegram/senders` is the account catalog for the card. It uses
-`listActiveTelegramSenders`, which selects platform-account rows whose linked
-platform is `telegram_ru` or `telegram_en`, stored session status is `active`,
-and stored TDLib path is present. The service additionally checks that either
-the stored path or the existing canonical fallback path exists.
+`listActiveTelegramSenders`, which selects platform-account rows linked to a
+Telegram platform, with stored session status `active` and a stored TDLib path.
+The service additionally checks that either the stored path or the existing
+canonical fallback path exists. Future accounts therefore appear without a
+gateway configuration change once connection has created usable Render TDLib
+storage.
 
 The linked platform decides whether a row is Telegram. `account_label` is only
 a display label and may contain a legacy value such as `phone_en`; do not reject

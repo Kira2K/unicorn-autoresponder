@@ -78,7 +78,6 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   telegram_gateway_not_configured: 'The Render Telegram gateway is not configured.',
   telegram_gateway_invalid_request: 'The Telegram gateway request is invalid.',
   telegram_gateway_invalid_operation: 'The requested Telegram gateway operation is not supported.',
-  telegram_gateway_account_forbidden: 'This Telegram account is not allowed through the gateway.',
   telegram_gateway_operation_forbidden: 'This Telegram operation is disabled by the gateway configuration.',
   telegram_gateway_cancelled: 'The Telegram gateway request was cancelled.',
   telegram_gateway_timeout: 'The Render Telegram gateway did not answer before the configured timeout.',
@@ -127,23 +126,6 @@ function parseBoolean(value: unknown): boolean {
   return String(value ?? '').trim().toLowerCase() === 'true'
 }
 
-function parseAccountRefs(value: unknown): Set<string> {
-  const raw = String(value ?? '').trim()
-  if (!raw) return new Set()
-  const result = new Set<string>()
-  for (const part of raw.split(',')) {
-    const ref = part.trim()
-    const match = /^(\d+):(\d+)$/.exec(ref)
-    const clientId = positiveInteger(match?.[1])
-    const accountId = positiveInteger(match?.[2])
-    if (!clientId || !accountId) {
-      throw createGatewayError('telegram_gateway_not_configured', undefined, 503)
-    }
-    result.add(`${clientId}:${accountId}`)
-  }
-  return result
-}
-
 function constantTimeTokenEquals(expected: string, actual: string): boolean {
   const expectedBytes = Buffer.from(expected)
   const actualBytes = Buffer.from(actual)
@@ -175,7 +157,7 @@ function safeGatewayFailure(error: any): { statusCode: number; body: { error: st
     if (code === 'telegram_account_not_found') statusCode = 404
     else if (code === 'telegram_connecting' || code === 'telegram_tdlib_database_locked') statusCode = 409
     else if (code.includes('timeout')) statusCode = 504
-    else if (['telegram_readonly', 'telegram_gateway_account_forbidden', 'telegram_gateway_operation_forbidden'].includes(code)) statusCode = 403
+    else if (['telegram_readonly', 'telegram_gateway_operation_forbidden'].includes(code)) statusCode = 403
     else if (['telegram_invalid_username', 'telegram_empty_message', 'telegram_attachment_missing', 'telegram_attachment_invalid', 'telegram_gateway_invalid_request', 'telegram_gateway_invalid_operation'].includes(code)) statusCode = 400
     else statusCode = 502
   }
@@ -225,15 +207,7 @@ function createTelegramGatewayController(options: {
 }) {
   const env = options.env || process.env
   const expectedToken = String(env.WEB_CONSOLE_TDLIB_GATEWAY_TOKEN ?? '').trim()
-  let accountRefs = new Set<string>()
-  let configurationError = ''
-  try {
-    accountRefs = parseAccountRefs(env.WEB_CONSOLE_TDLIB_GATEWAY_ACCOUNT_REFS)
-  } catch {
-    configurationError = 'invalid_account_allowlist'
-  }
-  if (expectedToken.length < MIN_GATEWAY_TOKEN_LENGTH) configurationError ||= 'invalid_token'
-  if (!accountRefs.size) configurationError ||= 'empty_account_allowlist'
+  const configurationError = expectedToken.length < MIN_GATEWAY_TOKEN_LENGTH ? 'invalid_token' : ''
 
   const allowWrites = parseBoolean(env.WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_WRITES)
   const allowAuthMutations = parseBoolean(env.WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_AUTH_MUTATIONS)
@@ -256,7 +230,7 @@ function createTelegramGatewayController(options: {
     return {
       ok: true,
       service: 'telegram-gateway',
-      allowedAccounts: accountRefs.size,
+      accountScope: 'all_telegram_accounts',
       capabilities: {
         reads: true,
         writes: allowWrites,
@@ -288,10 +262,8 @@ function createTelegramGatewayController(options: {
     try {
       if (operation === 'list_admin_senders') {
         const raw = await abortableRead(service.listAdminSenders({ signal: options.signal }), options.signal)
-        const senders = Array.isArray((raw as any)?.senders) ? (raw as any).senders : []
-        const filtered = senders.filter((sender: any) => accountRefs.has(`${positiveInteger(sender?.clientId)}:${positiveInteger(sender?.accountId)}`))
         outcome = 'complete'
-        return sanitizeGatewayValue({ ...(raw as any), senders: filtered })
+        return sanitizeGatewayValue(raw)
       }
 
       const clientId = positiveInteger(body?.clientId)
@@ -300,9 +272,6 @@ function createTelegramGatewayController(options: {
         throw createGatewayError('telegram_gateway_invalid_request', undefined, 400)
       }
       accountRef = `${clientId}:${accountId}`
-      if (!accountRefs.has(accountRef)) {
-        throw createGatewayError('telegram_gateway_account_forbidden', undefined, 403)
-      }
       const input = body?.input && typeof body.input === 'object' && !Array.isArray(body.input) ? body.input : {}
       let result: unknown
       switch (operation) {
@@ -537,7 +506,6 @@ module.exports = {
   createGatewayError,
   createRemoteTelegramService,
   createTelegramGatewayController,
-  parseAccountRefs,
   safeGatewayFailure,
   sanitizeGatewayValue,
   validatedRemoteConfiguration

@@ -5,35 +5,43 @@ const {
   constantTimeTokenEquals,
   createRemoteTelegramService,
   createTelegramGatewayController,
-  parseAccountRefs,
+  safeGatewayFailure,
   sanitizeGatewayValue,
   validatedRemoteConfiguration
 } = require('./telegram-gateway.ts') as any
 const { ADMIN_EMAIL, ADMIN_PASSWORD, createWebConsoleApp } = require('./app.ts') as any
 
 const TOKEN = 'test-render-tdlib-gateway-token-1234567890'
+const TELEGRAM_ACCOUNT_REFS = new Set(['102:473', '93:399', '112:502'])
+
+function requireTelegramAccount(clientId: number, accountId: number) {
+  if (!TELEGRAM_ACCOUNT_REFS.has(`${clientId}:${accountId}`)) {
+    throw Object.assign(new Error('Telegram platform account was not found.'), { code: 'telegram_account_not_found' })
+  }
+}
 
 function fakeTelegramService(overrides: Record<string, any> = {}) {
   return {
-    async connect(clientId: number, input: any) { return { clientId, accountId: input.accountId, status: 'active', dbPath: '/render/private/db' } },
-    async status(clientId: number, accountId: number) { return { clientId, accountId, status: 'active', dbPath: '/render/private/db', eventLog: 'private' } },
-    async folders() { return { folders: [{ id: 'main', title: 'All chats', type: 'main' }] } },
-    async dialogs(clientId: number, input: any) { return { clientId, accountId: input.accountId, dialogs: [{ id: '10', title: 'Safe dialog' }], dbPath: '/render/private/db' } },
-    async scanAdminDialogs(clientId: number, input: any) { return { clientId, accountId: input.accountId, outcome: 'complete', dialogs: [] } },
-    async messages(clientId: number, input: any) { return { clientId, accountId: input.accountId, messages: [{ id: '20', chatId: input.chatId, text: 'safe message' }] } },
-    async send(clientId: number, input: any) { return { clientId, accountId: input.accountId, message: { id: '30', text: input.text } } },
+    async connect(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, status: 'active', dbPath: '/render/private/db' } },
+    async status(clientId: number, accountId: number) { requireTelegramAccount(clientId, accountId); return { clientId, accountId, status: 'active', dbPath: '/render/private/db', eventLog: 'private' } },
+    async folders(clientId: number, accountId: number) { requireTelegramAccount(clientId, accountId); return { folders: [{ id: 'main', title: 'All chats', type: 'main' }] } },
+    async dialogs(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, dialogs: [{ id: '10', title: 'Safe dialog' }], dbPath: '/render/private/db' } },
+    async scanAdminDialogs(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, outcome: 'complete', dialogs: [] } },
+    async messages(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, messages: [{ id: '20', chatId: input.chatId, text: 'safe message' }] } },
+    async send(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, message: { id: '30', text: input.text } } },
     async listAdminSenders() {
       return {
         senders: [
           { clientId: 102, clientName: 'Test', accountId: 473, accountLabel: 'telegram_en', platform: 'telegram_en', market: 'en', stack: 'PYTHON', status: 'active', phone: '+100000000', dbPath: '/render/test' },
-          { clientId: 93, clientName: 'Other', accountId: 399, accountLabel: 'telegram_ru', platform: 'telegram_ru', market: 'ru', stack: 'JAVA', status: 'active', phone: '+200000000', dbPath: '/render/other' }
+          { clientId: 93, clientName: 'Other', accountId: 399, accountLabel: 'telegram_ru', platform: 'telegram_ru', market: 'ru', stack: 'JAVA', status: 'active', phone: '+200000000', dbPath: '/render/other' },
+          { clientId: 112, clientName: 'Future', accountId: 502, accountLabel: 'telegram_en', platform: 'telegram_en', market: 'en', stack: 'AQA', status: 'active', phone: '+300000000', dbPath: '/render/future' }
         ]
       }
     },
-    async sendToUsername(clientId: number, input: any) { return { clientId, accountId: input.accountId, attachments: input.attachments, messages: [] } },
-    async renameContact(clientId: number, input: any) { return { clientId, accountId: input.accountId, dialog: { id: input.chatId, title: input.firstName } } },
-    async reauth(clientId: number, accountId: number) { return { clientId, accountId, status: 'needs_reauth', dbPath: '/render/private/db' } },
-    async disconnect(clientId: number, accountId: number) { return { clientId, accountId, status: 'disconnected', dbPath: '/render/private/db' } },
+    async sendToUsername(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, attachments: input.attachments, messages: [] } },
+    async renameContact(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, dialog: { id: input.chatId, title: input.firstName } } },
+    async reauth(clientId: number, accountId: number) { requireTelegramAccount(clientId, accountId); return { clientId, accountId, status: 'needs_reauth', dbPath: '/render/private/db' } },
+    async disconnect(clientId: number, accountId: number) { requireTelegramAccount(clientId, accountId); return { clientId, accountId, status: 'disconnected', dbPath: '/render/private/db' } },
     ...overrides
   }
 }
@@ -41,7 +49,6 @@ function fakeTelegramService(overrides: Record<string, any> = {}) {
 function gatewayEnv(extra: Record<string, string> = {}) {
   return {
     WEB_CONSOLE_TDLIB_GATEWAY_TOKEN: TOKEN,
-    WEB_CONSOLE_TDLIB_GATEWAY_ACCOUNT_REFS: '102:473',
     WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_WRITES: 'false',
     WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_AUTH_MUTATIONS: 'false',
     WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_DISCONNECT: 'false',
@@ -71,8 +78,6 @@ async function request(baseUrl: string, path: string, options: any = {}) {
 }
 
 async function run(): Promise<void> {
-  assert.deepEqual([...parseAccountRefs('102:473, 93:399')], ['102:473', '93:399'])
-  assert.throws(() => parseAccountRefs('102:473,invalid'), /gateway/i)
   assert.equal(constantTimeTokenEquals(TOKEN, TOKEN), true)
   assert.equal(constantTimeTokenEquals(TOKEN, `${TOKEN}x`), false)
   assert.deepEqual(
@@ -89,23 +94,35 @@ async function run(): Promise<void> {
   assert.deepEqual(controller.health(), {
     ok: true,
     service: 'telegram-gateway',
-    allowedAccounts: 1,
+    accountScope: 'all_telegram_accounts',
     capabilities: { reads: true, writes: false, authMutations: false, disconnect: false }
   })
+  const missingTokenController = createTelegramGatewayController({ service, env: {}, logger() {} })
+  assert.equal(missingTokenController.authenticate(`Bearer ${TOKEN}`).statusCode, 503)
 
   const catalog = await controller.execute({ operation: 'list_admin_senders' }, { requestId: 'catalog-test' })
-  assert.equal(catalog.senders.length, 1)
-  assert.equal(catalog.senders[0].clientId, 102)
-  assert.equal('phone' in catalog.senders[0], false)
-  assert.equal('dbPath' in catalog.senders[0], false)
+  assert.deepEqual(catalog.senders.map((sender: any) => `${sender.clientId}:${sender.accountId}`), ['102:473', '93:399', '112:502'])
+  assert.equal(catalog.senders.every((sender: any) => !('phone' in sender) && !('dbPath' in sender)), true)
 
   const dialogs = await controller.execute({ operation: 'dialogs', clientId: 102, accountId: 473, input: { list: 'main' } })
   assert.equal(dialogs.dialogs[0].title, 'Safe dialog')
   assert.equal('dbPath' in dialogs, false)
+  const otherDialogs = await controller.execute({ operation: 'dialogs', clientId: 93, accountId: 399 })
+  assert.equal(otherDialogs.accountId, 399)
+  const futureDialogs = await controller.execute({ operation: 'dialogs', clientId: 112, accountId: 502 })
+  assert.equal(futureDialogs.accountId, 502)
   await assert.rejects(
-    controller.execute({ operation: 'dialogs', clientId: 93, accountId: 399 }),
-    (error: any) => error.code === 'telegram_gateway_account_forbidden'
+    controller.execute({ operation: 'dialogs', clientId: 102, accountId: 399 }),
+    (error: any) => error.code === 'telegram_account_not_found'
   )
+  await assert.rejects(
+    controller.execute({ operation: 'dialogs', clientId: 700, accountId: 701 }),
+    (error: any) => error.code === 'telegram_account_not_found'
+  )
+  assert.deepEqual(safeGatewayFailure(Object.assign(new Error('private mismatch'), { code: 'telegram_account_not_found' })), {
+    statusCode: 404,
+    body: { error: 'telegram_account_not_found', message: 'Telegram platform account was not found.' }
+  })
   await assert.rejects(
     controller.execute({ operation: 'send', clientId: 102, accountId: 473, input: { chatId: '1', text: 'blocked' } }),
     (error: any) => error.code === 'telegram_gateway_operation_forbidden'
@@ -118,6 +135,24 @@ async function run(): Promise<void> {
     controller.execute({ operation: 'disconnect', clientId: 102, accountId: 473 }),
     (error: any) => error.code === 'telegram_gateway_operation_forbidden'
   )
+  const fullCapabilityController = createTelegramGatewayController({
+    service,
+    env: gatewayEnv({
+      WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_WRITES: 'true',
+      WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_AUTH_MUTATIONS: 'true',
+      WEB_CONSOLE_TDLIB_GATEWAY_ALLOW_DISCONNECT: 'true'
+    }),
+    logger() {}
+  })
+  assert.deepEqual(fullCapabilityController.health().capabilities, {
+    reads: true,
+    writes: true,
+    authMutations: true,
+    disconnect: true
+  })
+  assert.equal((await fullCapabilityController.execute({ operation: 'connect', clientId: 102, accountId: 473 })).status, 'active')
+  assert.equal((await fullCapabilityController.execute({ operation: 'reauth', clientId: 102, accountId: 473 })).status, 'needs_reauth')
+  assert.equal((await fullCapabilityController.execute({ operation: 'disconnect', clientId: 102, accountId: 473 })).status, 'disconnected')
 
   let attachmentInput: any
   let sendAttempts = 0
@@ -267,7 +302,7 @@ async function run(): Promise<void> {
       headers: { Authorization: `Bearer ${TOKEN}` }
     })
     assert.equal(health.status, 200)
-    assert.equal(health.body.allowedAccounts, 1)
+    assert.equal(health.body.accountScope, 'all_telegram_accounts')
 
     const login = await request(localServer.baseUrl, '/api/auth/login', {
       method: 'POST',
@@ -279,10 +314,9 @@ async function run(): Promise<void> {
       headers: { Cookie: login.cookie.split(';')[0] }
     })
     assert.equal(catalogResponse.status, 200)
-    assert.equal(catalogResponse.body.senders.length, 1)
-    assert.equal(catalogResponse.body.senders[0].accountId, 473)
-    assert.equal('dbPath' in catalogResponse.body.senders[0], false)
-    assert.equal('phone' in catalogResponse.body.senders[0], false)
+    assert.equal(catalogResponse.body.senders.length, 3)
+    assert.equal(catalogResponse.body.senders.some((sender: any) => sender.accountId === 502), true)
+    assert.equal(catalogResponse.body.senders.every((sender: any) => !('dbPath' in sender) && !('phone' in sender)), true)
   } finally {
     await localServer.close()
     await sourceServer.close()
