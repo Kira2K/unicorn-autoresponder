@@ -11,12 +11,13 @@ const ADMIN_PASSWORD = String(process.env.WEB_CONSOLE_LIVE_ADMIN_PASSWORD || '10
 const REQUESTED_ACCOUNT_REFS = new Set(String(process.env.WEB_CONSOLE_LIVE_ACCOUNT_REFS || '').split(',').map(value => value.trim()).filter(Boolean))
 const LIVE_CONCURRENCY = Math.max(1, Math.min(Number(process.env.WEB_CONSOLE_LIVE_CONCURRENCY) || 1, 3))
 const LIVE_SCAN_ONLY = process.env.WEB_CONSOLE_LIVE_SCAN_ONLY === 'true'
+const LIVE_REMOTE_READ_TIMEOUT_MS = Math.max(90_000, Number(process.env.WEB_CONSOLE_LIVE_REMOTE_READ_TIMEOUT_MS) || 190_000)
 
 type LiveAccountResult = {
   accountRef: string
   baseline: {
-    main: { ok: boolean; count: number; code?: string }
-    archive: { ok: boolean; count: number; code?: string }
+    main: { ok: boolean; count: number; privateOnly: boolean; code?: string }
+    archive: { ok: boolean; count: number; privateOnly: boolean; code?: string }
     history: { attempted: boolean; ok: boolean; count: number; code?: string }
   }
   scan: {
@@ -27,8 +28,9 @@ type LiveAccountResult = {
     matchedCount: number
     mainComplete: boolean
     archiveComplete: boolean
+    privateOnly: boolean
   }
-  postScan: { ok: boolean; count: number; code?: string }
+  postScan: { ok: boolean; count: number; privateOnly: boolean; code?: string }
   regression: boolean
 }
 
@@ -96,7 +98,7 @@ async function run(): Promise<void> {
         const index = cursor++
         if (index >= catalog.length) return
         const sender = catalog[index]
-        const result = await page.evaluate(async ({ clientId, accountId, scanOnly }: { clientId: number; accountId: number; scanOnly: boolean }) => {
+        const result = await page.evaluate(async ({ clientId, accountId, scanOnly, liveRemoteReadTimeoutMs }: { clientId: number; accountId: number; scanOnly: boolean; liveRemoteReadTimeoutMs: number }) => {
           const query = (extra: Record<string, string | number>) => {
             const params = new URLSearchParams({
               targetClientId: String(clientId),
@@ -120,29 +122,33 @@ async function run(): Promise<void> {
           }
           const main = scanOnly
             ? { ok: false, status: 0, body: {}, code: 'skipped' }
-            : await safeFetch(`/api/telegram/dialogs?${query({ list: 'main', limit: 50 })}`, 75000)
+            : await safeFetch(`/api/telegram/dialogs?${query({ list: 'main', limit: 50, privateOnly: 'true' })}`, 75000)
           const archive = scanOnly
             ? { ok: false, status: 0, body: {}, code: 'skipped' }
-            : await safeFetch(`/api/telegram/dialogs?${query({ list: 'archive', limit: 50 })}`, 75000)
+            : await safeFetch(`/api/telegram/dialogs?${query({ list: 'archive', limit: 50, privateOnly: 'true' })}`, 75000)
           const firstChatId = main.ok
             ? main.body?.dialogs?.[0]?.id
             : archive.ok
               ? archive.body?.dialogs?.[0]?.id
               : undefined
           const history = firstChatId
-            ? await safeFetch(`/api/telegram/messages?${query({ chatId: firstChatId, limit: 1 })}`, 45000)
+            ? await safeFetch(`/api/telegram/messages?${query({ chatId: firstChatId, limit: 1 })}`, liveRemoteReadTimeoutMs)
             : null
-          const scan = await safeFetch(`/api/admin/telegram/dialogs/scan?${query({ days: 1 })}`, 90000)
+          const scan = await safeFetch(`/api/admin/telegram/dialogs/scan?${query({ days: 1 })}`, liveRemoteReadTimeoutMs)
           const post = scanOnly
             ? { ok: false, status: 0, body: {}, code: 'skipped' }
-            : await safeFetch(`/api/telegram/dialogs?${query({ list: 'main', limit: 1 })}`, 45000)
+            : await safeFetch(`/api/telegram/dialogs?${query({ list: 'main', limit: 1, privateOnly: 'true' })}`, liveRemoteReadTimeoutMs)
           const accountResult = scan.body?.accountResult || {}
           const baselineReady = main.ok && archive.ok
+          const mainPrivateOnly = Array.isArray(main.body?.dialogs) && main.body.dialogs.every((dialog: any) => dialog?.isPrivate === true)
+          const archivePrivateOnly = Array.isArray(archive.body?.dialogs) && archive.body.dialogs.every((dialog: any) => dialog?.isPrivate === true)
+          const scanPrivateOnly = Array.isArray(scan.body?.rows) && scan.body.rows.every((row: any) => row?.isPrivate === true)
+          const postPrivateOnly = Array.isArray(post.body?.dialogs) && post.body.dialogs.every((dialog: any) => dialog?.isPrivate === true)
           return {
             accountRef: `${clientId}:${accountId}`,
             baseline: {
-              main: { ok: main.ok, count: Array.isArray(main.body?.dialogs) ? main.body.dialogs.length : 0, ...(main.code ? { code: String(main.code) } : {}) },
-              archive: { ok: archive.ok, count: Array.isArray(archive.body?.dialogs) ? archive.body.dialogs.length : 0, ...(archive.code ? { code: String(archive.code) } : {}) },
+              main: { ok: main.ok, count: Array.isArray(main.body?.dialogs) ? main.body.dialogs.length : 0, privateOnly: mainPrivateOnly, ...(main.code ? { code: String(main.code) } : {}) },
+              archive: { ok: archive.ok, count: Array.isArray(archive.body?.dialogs) ? archive.body.dialogs.length : 0, privateOnly: archivePrivateOnly, ...(archive.code ? { code: String(archive.code) } : {}) },
               history: history
                 ? { attempted: true, ok: history.ok, count: Array.isArray(history.body?.messages) ? history.body.messages.length : 0, ...(history.code ? { code: String(history.code) } : {}) }
                 : { attempted: false, ok: false, count: 0 }
@@ -154,21 +160,27 @@ async function run(): Promise<void> {
               discoveredCount: Number(accountResult.discoveredCount) || 0,
               matchedCount: Number(accountResult.matchedCount) || 0,
               mainComplete: accountResult.lists?.main?.complete === true,
-              archiveComplete: accountResult.lists?.archive?.complete === true
+              archiveComplete: accountResult.lists?.archive?.complete === true,
+              privateOnly: scanPrivateOnly
             },
             postScan: {
               ok: post.ok,
               count: Array.isArray(post.body?.dialogs) ? post.body.dialogs.length : 0,
+              privateOnly: postPrivateOnly,
               ...(post.code ? { code: String(post.code) } : {})
             },
             regression: baselineReady && (
+              !mainPrivateOnly ||
+              !archivePrivateOnly ||
               accountResult.outcome !== 'complete' ||
               accountResult.lists?.main?.complete !== true ||
               accountResult.lists?.archive?.complete !== true ||
-              !post.ok
+              !scanPrivateOnly ||
+              !post.ok ||
+              !postPrivateOnly
             )
           }
-        }, { ...sender, scanOnly: LIVE_SCAN_ONLY })
+        }, { ...sender, scanOnly: LIVE_SCAN_ONLY, liveRemoteReadTimeoutMs: LIVE_REMOTE_READ_TIMEOUT_MS })
         results.push(result)
         await writeArtifact()
       }
