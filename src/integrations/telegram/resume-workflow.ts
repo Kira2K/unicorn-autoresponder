@@ -157,7 +157,7 @@ const DEFAULT_TEST_CONFIG = {
 const DEFAULT_KIRA_USER_IDS = ['7586552066']
 const DEFAULT_PROVIDER_USER_IDS = ['8222949251']
 const DEFAULT_KIRA_PLATFORM_REFS = ['1:452']
-const DEFAULT_PROVIDER_PLATFORM_REFS = ['102:473']
+const DEFAULT_PROVIDER_PLATFORM_REFS: string[] = []
 
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim()

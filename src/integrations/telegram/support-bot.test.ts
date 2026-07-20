@@ -906,6 +906,17 @@ async function runTests() {
       }
     }, providerActor)
     assert.deepEqual(mixedProviderTasks.tasks.map((task: any) => task.clientName), ['Test'])
+    delete process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
+    const unscopedProviderTasks = await getProviderTasks({
+      async getProviderResumeTasks() {
+        return [
+          makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in process' }),
+          makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Client', status: 'Draft in process' })
+        ]
+      }
+    }, providerActor)
+    assert.deepEqual(unscopedProviderTasks.tasks.map((task: any) => task.clientName), ['Test', 'Other Client'])
+    process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '102:473'
     await assert.rejects(
       () => resumeWorkflow(
         '-5216637594',
