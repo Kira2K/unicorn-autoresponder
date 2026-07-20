@@ -171,9 +171,9 @@ function createFakeTdlibAdapter(): TelegramAdapter {
     async dialogs(input) {
       const now = Date.now()
       const dialogs = [
-        { id: 'reporting-chat', title: 'Current reporting chat', unreadCount: 0, chatList: 'main', lastMessageAt: new Date(now).toISOString() },
+        { id: 'reporting-chat', title: 'Current reporting chat', unreadCount: 0, chatList: 'main', isPrivate: false, lastMessageAt: new Date(now).toISOString() },
         { id: 'client-chat', title: 'Client messages', unreadCount: 2, chatList: 'main', username: '@client_partner', userId: '901', isPrivate: true, lastMessageAt: new Date(now - 1000).toISOString() },
-        { id: 'archived-chat', title: 'Archived lead', unreadCount: 0, chatList: 'archive', lastMessageAt: new Date(now - 2000).toISOString() }
+        { id: 'archived-chat', title: 'Archived lead', unreadCount: 0, chatList: 'archive', isPrivate: true, lastMessageAt: new Date(now - 2000).toISOString() }
       ]
       const list = input.list || 'main'
       const query = String(input.query || '').trim().toLowerCase()
@@ -186,9 +186,9 @@ function createFakeTdlibAdapter(): TelegramAdapter {
       const startedAt = Date.now()
       const cutoffMs = Date.parse(input.cutoffAt)
       const dialogs = [
-        { id: 'reporting-chat', title: 'Current reporting chat', unreadCount: 0, chatList: 'main', lastMessageAt: new Date().toISOString() },
-        { id: 'client-chat', title: 'Client messages', unreadCount: 2, chatList: 'main', lastMessageAt: new Date(Date.now() - 1000).toISOString() },
-        { id: 'archived-chat', title: 'Archived lead', unreadCount: 0, chatList: 'archive', lastMessageAt: new Date(Date.now() - 2000).toISOString() }
+        { id: 'reporting-chat', title: 'Current reporting chat', unreadCount: 0, chatList: 'main', isPrivate: false, lastMessageAt: new Date().toISOString() },
+        { id: 'client-chat', title: 'Client messages', unreadCount: 2, chatList: 'main', isPrivate: true, lastMessageAt: new Date(Date.now() - 1000).toISOString() },
+        { id: 'archived-chat', title: 'Archived lead', unreadCount: 0, chatList: 'archive', isPrivate: true, lastMessageAt: new Date(Date.now() - 2000).toISOString() }
       ].filter(dialog => !Number.isFinite(cutoffMs) || Date.parse(dialog.lastMessageAt) >= cutoffMs)
       if (input.signal?.aborted) {
         return {

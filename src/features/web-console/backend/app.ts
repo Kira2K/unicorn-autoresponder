@@ -132,7 +132,7 @@ type TelegramService = {
   connect(clientId: number, input: { accountId?: number; phone?: string; code?: string; password?: string }): Promise<unknown>
   status(clientId: number, accountId?: number, options?: { signal?: AbortSignal }): Promise<unknown>
   folders(clientId: number, accountId?: number, options?: { signal?: AbortSignal }): Promise<unknown>
-  dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number; signal?: AbortSignal }): Promise<unknown>
+  dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number; privateOnly?: boolean; signal?: AbortSignal }): Promise<unknown>
   scanAdminDialogs(clientId: number, input: { accountId: number; days: number; signal?: AbortSignal }): Promise<unknown>
   messages(clientId: number, input: { accountId?: number; chatId: string; limit?: number; signal?: AbortSignal }): Promise<unknown>
   send(clientId: number, input: { accountId?: number; chatId: string; text: string; allowWrite?: boolean }): Promise<unknown>
@@ -1360,6 +1360,7 @@ function createWebConsoleApp(options: {
         folderId: Number.isFinite(folderId) && folderId > 0 ? folderId : undefined,
         query: String(req.query?.query ?? '').trim() || undefined,
         limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+        privateOnly: String(req.query?.privateOnly ?? '').trim().toLowerCase() === 'true',
         signal: boundary.signal
       }))
     } catch (error) {

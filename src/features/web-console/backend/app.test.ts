@@ -1409,7 +1409,9 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.accountResult.outcome, 'complete')
     assert.equal(result.body.accountResult.lists.main.complete, true)
     assert.equal(result.body.accountResult.lists.archive.complete, true)
-    assert.equal(result.body.rows.some((row: any) => row.chatId === 'reporting-chat'), true)
+    assert.equal(result.body.rows.some((row: any) => row.chatId === 'client-chat'), true)
+    assert.equal(result.body.rows.some((row: any) => row.chatId === 'reporting-chat'), false)
+    assert.equal(result.body.rows.every((row: any) => row.isPrivate === true), true)
     result = await request(server.baseUrl, '/api/admin/telegram/dialogs/scan?targetClientId=1&platformAccountId=17&days=0', {}, adminForTelegramLogin.cookie)
     assert.equal(result.response.status, 400, JSON.stringify(result.body))
     assert.equal(result.body.error, 'invalid_admin_telegram_dialog_days')
@@ -1583,6 +1585,12 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.dialogs.some((dialog: any) => dialog.id === 'reporting-chat'), true)
     assert.equal(result.body.dialogs.every((dialog: any) => Boolean(dialog.lastMessageAt)), true)
+
+    result = await request(server.baseUrl, '/api/telegram/dialogs?platformAccountId=17&privateOnly=true', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.dialogs.some((dialog: any) => dialog.id === 'client-chat'), true)
+    assert.equal(result.body.dialogs.some((dialog: any) => dialog.id === 'reporting-chat'), false)
+    assert.equal(result.body.dialogs.every((dialog: any) => dialog.isPrivate === true), true)
 
     result = await request(server.baseUrl, '/api/telegram/folders?platformAccountId=17', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))

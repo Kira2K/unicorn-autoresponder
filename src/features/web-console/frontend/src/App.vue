@@ -94,6 +94,8 @@ const adminDialogsLoading = ref(false)
 const adminDialogsError = ref('')
 const adminDialogsStale = ref(false)
 const adminDialogsHasResult = ref(false)
+const adminDialogScanLoading = ref(false)
+const adminDialogRetryLoading = ref(false)
 const adminDialogHistory = ref({})
 const adminAiTailorModalOpen = ref(false)
 const adminAiTailorFile = ref(null)
@@ -112,6 +114,7 @@ let telegramPollTimer = null
 let countdownTimer = null
 let adminDialogRequestGeneration = 0
 let adminDialogRequestController = null
+let adminDialogScanController = null
 const adminDialogHistoryControllers = new Map()
 const adminDialogHistoryGenerations = new Map()
 const adminDialogRetryControllers = new Map()
@@ -243,7 +246,7 @@ const adminDialogStackOptions = computed(() => {
 const adminDialogCoverageText = computed(() => {
   const accounts = adminDialogAccounts.value
   if (adminDialogsLoading.value && !accounts.total) return 'Loading accounts...'
-  const details = `Accounts loaded: ${accounts.loaded}/${accounts.total} | Complete: ${accounts.complete}/${accounts.total}`
+  const details = `Accounts loaded: ${accounts.loaded}/${accounts.total} | Full scans: ${accounts.complete}/${accounts.total}`
   const problems = [
     accounts.partial ? `${accounts.partial} partial` : '',
     accounts.failed ? `${accounts.failed} failed` : '',
@@ -254,9 +257,14 @@ const adminDialogCoverageText = computed(() => {
 })
 
 const adminDialogCollectionIncomplete = computed(() => {
-  const accounts = adminDialogAccounts.value
-  return adminDialogsHasResult.value && accounts.total > 0 && !adminDialogsLoading.value && accounts.complete < accounts.total
+  return adminDialogsHasResult.value &&
+    !adminDialogsLoading.value &&
+    adminDialogAccountResults.value.some(result => ['partial', 'failed'].includes(result.outcome))
 })
+
+const adminDialogFullScanAvailable = computed(() =>
+  adminDialogAccountResults.value.some(result => result.snapshotComplete && result.outcome !== 'complete')
+)
 
 const adminDialogTotalFailure = computed(() => {
   const accounts = adminDialogAccounts.value
@@ -319,7 +327,7 @@ function safeAdminDialogRequestError(caught) {
     telegram_proxy_unavailable: 'The assigned Telegram proxy is unavailable.',
     telegram_connecting: 'The stored Telegram session is still initializing.',
     telegram_tdlib_timeout: 'TDLib did not answer before the request timeout.',
-    telegram_dialog_snapshot_timeout: 'The lightweight dialog snapshot exceeded 45 seconds.',
+    telegram_dialog_snapshot_timeout: 'The lightweight dialog snapshot exceeded 75 seconds.',
     telegram_dialog_scan_timeout: 'Telegram dialog scanning exceeded its configured deadline.'
   }
   return {
@@ -346,10 +354,14 @@ function cancelAllAdminDialogHistories(clear = false) {
 function cancelAdminDialogCollection() {
   adminDialogRequestController?.abort()
   adminDialogRequestController = null
+  adminDialogScanController?.abort()
+  adminDialogScanController = null
   for (const controller of adminDialogRetryControllers.values()) controller.abort()
   adminDialogRetryControllers.clear()
   adminDialogRequestGeneration += 1
   adminDialogsLoading.value = false
+  adminDialogScanLoading.value = false
+  adminDialogRetryLoading.value = false
 }
 
 function adminDialogRowKey(row) {
@@ -403,7 +415,9 @@ function mergeAdminDialogRows(sender, rows, replaceAccountRows = false) {
     ? adminDialogRows.value.filter(row => adminDialogSenderKey(row) !== accountKey)
     : adminDialogRows.value
   const byKey = new Map(retained.map(row => [adminDialogRowKey(row), row]))
-  for (const row of rows) byKey.set(adminDialogRowKey(row), row)
+  for (const row of rows) {
+    if (row?.isPrivate === true) byKey.set(adminDialogRowKey(row), row)
+  }
   adminDialogRows.value = [...byKey.values()].sort((left, right) =>
     String(right.lastMessageAt || '').localeCompare(String(left.lastMessageAt || '')) ||
     String(left.clientName || '').localeCompare(String(right.clientName || '')) ||
@@ -414,7 +428,7 @@ function mergeAdminDialogRows(sender, rows, replaceAccountRows = false) {
 
 function snapshotRows(sender, dialogs, cutoffMs) {
   return dialogs
-    .filter(dialog => dialog.lastMessageAt && Date.parse(dialog.lastMessageAt) >= cutoffMs)
+    .filter(dialog => dialog.isPrivate === true && dialog.lastMessageAt && Date.parse(dialog.lastMessageAt) >= cutoffMs)
     .map(dialog => ({
       clientId: sender.clientId,
       clientName: sender.clientName,
@@ -424,7 +438,8 @@ function snapshotRows(sender, dialogs, cutoffMs) {
       stack: sender.stack,
       chatId: String(dialog.id),
       dialogTitle: String(dialog.title || dialog.id),
-      lastMessageAt: dialog.lastMessageAt
+      lastMessageAt: dialog.lastMessageAt,
+      isPrivate: true
     }))
 }
 
@@ -448,12 +463,12 @@ async function requestAdminDialogSnapshot(params, parentSignal) {
   const timer = window.setTimeout(() => {
     timedOut = true
     controller.abort()
-  }, 45000)
+  }, 75000)
   try {
     return await api.telegramDialogs(params, { signal: controller.signal })
   } catch (caught) {
     if (timedOut) {
-      throw Object.assign(new Error('Telegram dialog snapshot exceeded 45 seconds.'), { code: 'telegram_dialog_snapshot_timeout' })
+      throw Object.assign(new Error('Telegram dialog snapshot exceeded 75 seconds.'), { code: 'telegram_dialog_snapshot_timeout' })
     }
     throw caught
   } finally {
@@ -466,7 +481,8 @@ async function loadAdminDialogSnapshot(sender, generation, controller) {
   const base = {
     targetClientId: sender.clientId,
     platformAccountId: sender.accountId,
-    limit: 50
+    limit: 50,
+    privateOnly: true
   }
   setAdminDialogAccountResult(sender, { stage: 'snapshot', outcome: 'pending', error: undefined })
   const responses = []
@@ -524,7 +540,8 @@ async function loadAdminDialogScan(sender, generation, controller) {
     }, { signal: controller.signal })
     if (controller.signal.aborted || generation !== adminDialogRequestGeneration) return
     const scan = result.accountResult || {}
-    mergeAdminDialogRows(sender, result.rows || [], scan.outcome === 'complete')
+    const privateRows = (result.rows || []).filter(row => row?.isPrivate === true)
+    mergeAdminDialogRows(sender, privateRows, scan.outcome === 'complete')
     const snapshotAvailable = Boolean(current?.snapshotComplete || current?.outcome === 'partial')
     const outcome = scan.outcome === 'complete'
       ? 'complete'
@@ -584,10 +601,7 @@ async function loadAdminDialogs() {
     adminDialogsHasResult.value = true
     adminDialogsStale.value = false
     updateAdminDialogCounts()
-    await runAdminDialogPool(senders, 3, sender => loadAdminDialogSnapshot(sender, generation, controller), controller.signal)
-    if (!controller.signal.aborted && generation === adminDialogRequestGeneration) {
-      await runAdminDialogPool(senders, 3, sender => loadAdminDialogScan(sender, generation, controller), controller.signal)
-    }
+    await runAdminDialogPool(senders, 1, sender => loadAdminDialogSnapshot(sender, generation, controller), controller.signal)
     if (!controller.signal.aborted && generation === adminDialogRequestGeneration) {
       adminDialogRequest.value = { durationMs: Date.now() - startedAt }
     }
@@ -624,6 +638,7 @@ function toggleAdminDialogsCard() {
 }
 
 async function retryAdminDialogAccount(result) {
+  if (adminDialogsLoading.value || adminDialogScanLoading.value || adminDialogRetryLoading.value) return
   const sender = adminTelegramSenders.value.find(candidate => adminDialogSenderKey(candidate) === adminDialogSenderKey(result))
   if (!sender || !isAdmin.value) return
   const key = adminDialogSenderKey(sender)
@@ -631,13 +646,36 @@ async function retryAdminDialogAccount(result) {
   const controller = new AbortController()
   adminDialogRetryControllers.set(key, controller)
   const generation = adminDialogRequestGeneration
+  adminDialogRetryLoading.value = true
   try {
     await loadAdminDialogSnapshot(sender, generation, controller)
-    if (!controller.signal.aborted && generation === adminDialogRequestGeneration) {
-      await loadAdminDialogScan(sender, generation, controller)
-    }
   } finally {
     if (adminDialogRetryControllers.get(key) === controller) adminDialogRetryControllers.delete(key)
+    if (generation === adminDialogRequestGeneration) adminDialogRetryLoading.value = false
+  }
+}
+
+async function loadAllAdminDialogs(targetResult = null) {
+  if (!isAdmin.value || adminDialogsLoading.value || adminDialogScanLoading.value || adminDialogRetryLoading.value) return
+  const candidates = targetResult ? [targetResult] : adminDialogAccountResults.value
+  const senders = candidates
+    .filter(result => result.snapshotComplete && result.outcome !== 'complete')
+    .map(result => adminTelegramSenders.value.find(sender => adminDialogSenderKey(sender) === adminDialogSenderKey(result)))
+    .filter(Boolean)
+  if (!senders.length) return
+
+  const generation = adminDialogRequestGeneration
+  const controller = new AbortController()
+  adminDialogScanController = controller
+  adminDialogScanLoading.value = true
+  try {
+    await runAdminDialogPool(senders, 1, sender => loadAdminDialogScan(sender, generation, controller), controller.signal)
+  } finally {
+    if (adminDialogScanController === controller) adminDialogScanController = null
+    if (generation === adminDialogRequestGeneration) {
+      adminDialogScanLoading.value = false
+      updateAdminDialogCounts()
+    }
   }
 }
 async function toggleAdminDialogMessages(row) {
@@ -1974,11 +2012,11 @@ onUnmounted(() => {
       <Card v-if="isAdmin" class="admin-dialogs-card" data-testid="admin-dialogs-card">
         <template #title>
           <button type="button" class="admin-dialogs-toggle" data-testid="admin-dialogs-toggle" :aria-expanded="adminDialogsOpen ? 'true' : 'false'" @click="toggleAdminDialogsCard">
-            <span>Telegram dialogs</span><i :class="adminDialogsOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i>
+            <span>Telegram private dialogs</span><i :class="adminDialogsOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i>
           </button>
         </template>
         <template #subtitle>
-          <span data-testid="admin-dialogs-count">{{ `${adminDialogRows.length} dialogs available` }}</span>
+          <span data-testid="admin-dialogs-count">{{ `${adminDialogRows.length} private dialogs available` }}</span>
           <span class="admin-dialog-account-coverage" data-testid="admin-dialog-account-coverage">
             {{ adminDialogCoverageText }}
           </span>
@@ -1990,19 +2028,31 @@ onUnmounted(() => {
             <label class="field"><span>Stack</span><select v-model="adminDialogFilters.stack" class="native-select" data-testid="admin-dialog-stack"><option value="">All stacks</option><option v-for="stack in adminDialogStackOptions" :key="stack" :value="stack">{{ stack }}</option></select></label>
             <div class="admin-dialog-filter-actions"><Button type="button" label="Reset" severity="secondary" outlined data-testid="admin-dialog-reset" @click="resetAdminDialogFilters" /><Button type="submit" label="Apply" icon="pi pi-filter" data-testid="admin-dialog-apply" /></div>
           </form>
+          <div class="admin-dialog-collection-actions">
+            <p>Recent snapshot: up to 50 main and 50 archived private dialogs per account. Message history stays unloaded.</p>
+            <Button
+              :label="adminDialogAccounts.total > 0 && adminDialogAccounts.complete === adminDialogAccounts.total ? 'All dialogs loaded' : 'Load all dialogs'"
+              icon="pi pi-list"
+              severity="secondary"
+              :loading="adminDialogScanLoading"
+              :disabled="adminDialogsLoading || adminDialogRetryLoading || !adminDialogFullScanAvailable"
+              data-testid="admin-dialog-load-all"
+              @click="loadAllAdminDialogs()"
+            />
+          </div>
           <Message v-if="adminDialogsError" severity="error" :closable="false" data-testid="admin-dialogs-error">
             <div class="admin-dialog-status-message">
               <span><strong>Could not refresh dialog data.</strong> {{ adminDialogsError }}<template v-if="adminDialogsStale"> Showing the last successful results.</template></span>
               <Button label="Retry" icon="pi pi-refresh" size="small" severity="secondary" data-testid="admin-dialogs-retry" @click="loadAdminDialogs" />
             </div>
           </Message>
-          <div v-if="adminDialogsLoading" class="admin-dialog-loading" data-testid="admin-dialogs-loading"><ProgressSpinner aria-label="Loading Telegram dialogs" /><span>{{ adminDialogCoverageText }}</span></div>
+          <div v-if="adminDialogsLoading || adminDialogScanLoading || adminDialogRetryLoading" class="admin-dialog-loading" data-testid="admin-dialogs-loading"><ProgressSpinner aria-label="Loading Telegram private dialogs" /><span>{{ adminDialogScanLoading ? 'Loading complete private dialog lists, one account at a time...' : adminDialogRetryLoading ? 'Retrying account snapshot...' : adminDialogCoverageText }}</span></div>
           <template v-if="adminDialogsHasResult">
-            <Message v-if="adminDialogTotalFailure" severity="error" :closable="false" data-testid="admin-dialogs-total-failure">Dialog data could not be loaded. Open account diagnostics for the failing stage and reason.</Message>
+            <Message v-if="adminDialogTotalFailure" severity="error" :closable="false" data-testid="admin-dialogs-total-failure">Private dialog data could not be loaded. Open account diagnostics for the failing stage and reason.</Message>
             <Message v-else-if="adminDialogCollectionIncomplete" severity="warn" :closable="false" data-testid="admin-dialogs-partial-error">{{ adminDialogCoverageText }}</Message>
             <p v-if="!adminDialogsLoading && adminDialogAccounts.total === 0" class="admin-dialog-empty" data-testid="admin-dialogs-empty">No active Telegram accounts match these filters.</p>
-            <p v-else-if="!adminDialogsLoading && !adminDialogRows.length && !adminDialogTotalFailure && adminDialogAccounts.complete === adminDialogAccounts.total" class="admin-dialog-empty" data-testid="admin-dialogs-empty">All {{ adminDialogAccounts.total }} accounts loaded; no dialogs matched this period.</p>
-            <p v-else-if="!adminDialogsLoading && !adminDialogRows.length && adminDialogCollectionIncomplete && !adminDialogTotalFailure" class="admin-dialog-empty" data-testid="admin-dialogs-empty">No dialogs were returned by the accounts that responded.</p>
+            <p v-else-if="!adminDialogsLoading && !adminDialogRows.length && !adminDialogTotalFailure && adminDialogAccounts.loaded === adminDialogAccounts.total" class="admin-dialog-empty" data-testid="admin-dialogs-empty"><template v-if="adminDialogAccounts.complete === adminDialogAccounts.total">All {{ adminDialogAccounts.total }} accounts were fully scanned; no private dialogs matched this period.</template><template v-else>All {{ adminDialogAccounts.total }} account snapshots loaded; no recent private dialogs matched this period. Use “Load all dialogs” for exhaustive results.</template></p>
+            <p v-else-if="!adminDialogsLoading && !adminDialogRows.length && adminDialogCollectionIncomplete && !adminDialogTotalFailure" class="admin-dialog-empty" data-testid="admin-dialogs-empty">No private dialogs were returned by the accounts that responded.</p>
           </template>
           <div v-if="adminDialogRows.length" :class="['admin-dialog-table-wrap', { stale: adminDialogsStale }]">
             <table class="admin-dialog-table" data-testid="admin-dialogs-table">
@@ -2029,7 +2079,10 @@ onUnmounted(() => {
                 <p v-if="Number.isFinite(Number(result.discoveredCount)) || Number.isFinite(Number(result.matchedCount))"><span v-if="Number.isFinite(Number(result.discoveredCount))">Discovered: {{ Number(result.discoveredCount) }}</span><span v-if="Number.isFinite(Number(result.matchedCount))"> · Matched: {{ Number(result.matchedCount) }}</span></p>
                 <p v-if="adminDialogDiagnosticListState(result, 'main') || adminDialogDiagnosticListState(result, 'archive')">{{ [adminDialogDiagnosticListState(result, 'main'), adminDialogDiagnosticListState(result, 'archive')].filter(Boolean).join(' · ') }}</p>
                 <p v-if="adminDialogDiagnosticError(result)" class="admin-dialog-diagnostic-error">{{ adminDialogDiagnosticError(result) }}</p>
-                <Button v-if="!adminDialogsLoading && ['partial', 'failed'].includes(result.outcome)" label="Retry account" icon="pi pi-refresh" size="small" severity="secondary" :data-testid="`admin-dialog-retry-${result.clientId}-${result.accountId}`" @click="retryAdminDialogAccount(result)" />
+                <div v-if="!adminDialogsLoading && !adminDialogScanLoading && !adminDialogRetryLoading" class="admin-dialog-diagnostic-actions">
+                  <Button v-if="!result.snapshotComplete && ['partial', 'failed'].includes(result.outcome)" label="Retry snapshot" icon="pi pi-refresh" size="small" severity="secondary" :data-testid="`admin-dialog-retry-${result.clientId}-${result.accountId}`" @click="retryAdminDialogAccount(result)" />
+                  <Button v-if="result.snapshotComplete && result.outcome !== 'complete'" :label="result.stage === 'scan' || result.lists ? 'Retry full scan' : 'Load all dialogs'" icon="pi pi-list" size="small" severity="secondary" :data-testid="`admin-dialog-scan-${result.clientId}-${result.accountId}`" @click="loadAllAdminDialogs(result)" />
+                </div>
               </article>
             </div>
             <small v-if="adminDialogRequest?.durationMs !== undefined" class="admin-dialog-request-summary">Collection finished in {{ adminDialogRequest.durationMs }} ms.</small>

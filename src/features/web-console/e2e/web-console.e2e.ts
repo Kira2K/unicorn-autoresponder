@@ -438,7 +438,7 @@ async function runTests(): Promise<void> {
     await page.getByTestId('admin-dialogs-card').waitFor()
     assert.equal(await page.getByTestId('admin-dialog-days').inputValue(), '1')
     await page.getByTestId('admin-dialogs-table').waitFor()
-    await page.getByTestId('admin-dialog-account-coverage').getByText(/Accounts loaded: \d+\/\d+.*Complete: \d+\/\d+/).waitFor()
+    await page.getByTestId('admin-dialog-account-coverage').getByText(/Accounts loaded: \d+\/\d+.*Full scans: 0\/\d+/).waitFor()
     await page.unroute('**/api/admin/telegram/senders', slowInitialAdminSenders)
     await page.unroute('**/api/telegram/status?*', slowInitialAdminStatus)
     await page.unroute('**/api/admin/latest-client', addCurrentAdminTelegramAccount)
@@ -479,6 +479,11 @@ async function runTests(): Promise<void> {
     let scenario = 'fresh'
     let delayedCatalogSeen = false
     let eagerHistoryRequests = 0
+    let scanRequests = 0
+    let activeSnapshotRequests = 0
+    let maxActiveSnapshotRequests = 0
+    let activeScanRequests = 0
+    let maxActiveScanRequests = 0
     const scenarioSenders = async (route: any) => {
       const definitions: Record<string, any[]> = {
         slow: [{ clientId: 101, clientName: 'Stale client', accountId: 101, accountLabel: 'Stale account', market: 'Ru', stack: 'Frontend' }],
@@ -488,7 +493,11 @@ async function runTests(): Promise<void> {
           { clientId: 202, clientName: 'Failed client', accountId: 202, accountLabel: 'Failed account', market: 'Ru', stack: 'Frontend' }
         ],
         zero: [{ clientId: 301, clientName: 'Empty client', accountId: 301, accountLabel: 'Empty account', market: 'En', stack: 'Go' }],
-        failed: [{ clientId: 401, clientName: 'Unavailable client', accountId: 401, accountLabel: 'Unavailable account', market: 'En', stack: 'Go' }]
+        failed: [{ clientId: 401, clientName: 'Unavailable client', accountId: 401, accountLabel: 'Unavailable account', market: 'En', stack: 'Go' }],
+        sequential: [
+          { clientId: 501, clientName: 'Sequential one', accountId: 501, accountLabel: 'First account', market: 'En', stack: 'Go' },
+          { clientId: 502, clientName: 'Sequential two', accountId: 502, accountLabel: 'Second account', market: 'En', stack: 'Go' }
+        ]
       }
       if (scenario === 'transport') {
         return await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Temporary sender catalog failure.' }) })
@@ -503,20 +512,34 @@ async function runTests(): Promise<void> {
       const url = new URL(route.request().url())
       const clientId = Number(url.searchParams.get('targetClientId'))
       if (clientId < 100) return await route.continue()
-      if ([202, 401].includes(clientId)) {
-        return await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'telegram_connecting' }) })
+      assert.equal(url.searchParams.get('privateOnly'), 'true', 'admin snapshots must request private-only dialogs')
+      activeSnapshotRequests += 1
+      maxActiveSnapshotRequests = Math.max(maxActiveSnapshotRequests, activeSnapshotRequests)
+      try {
+        await wait(25)
+        if ([202, 401].includes(clientId)) {
+          return await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'telegram_connecting' }) })
+        }
+        if (clientId === 301) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ accountId: clientId, dialogs: [] }) })
+        const list = url.searchParams.get('list') || 'main'
+        const title = clientId === 101 ? 'Stale dialog' : clientId === 102 ? 'Fresh dialog' : 'Snapshot kept'
+        return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+          accountId: clientId,
+          dialogs: [
+            { id: `${clientId}-${list}`, title, chatList: list, isPrivate: true, lastMessageAt: new Date().toISOString() },
+            { id: `${clientId}-${list}-group`, title: 'Hidden group dialog', chatList: list, isPrivate: false, lastMessageAt: new Date().toISOString() }
+          ]
+        }) })
+      } finally {
+        activeSnapshotRequests -= 1
       }
-      if (clientId === 301) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ accountId: clientId, dialogs: [] }) })
-      const list = url.searchParams.get('list') || 'main'
-      const title = clientId === 101 ? 'Stale dialog' : clientId === 102 ? 'Fresh dialog' : 'Snapshot kept'
-      return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-        accountId: clientId,
-        dialogs: [{ id: `${clientId}-${list}`, title, chatList: list, lastMessageAt: new Date().toISOString() }]
-      }) })
     }
     const scenarioScan = async (route: any) => {
+      scanRequests += 1
       const url = new URL(route.request().url())
       const clientId = Number(url.searchParams.get('targetClientId'))
+      activeScanRequests += 1
+      maxActiveScanRequests = Math.max(maxActiveScanRequests, activeScanRequests)
       const base = {
         clientId,
         clientName: clientId === 201 ? 'Partial client' : clientId === 202 ? 'Failed client' : `Client ${clientId}`,
@@ -526,37 +549,45 @@ async function runTests(): Promise<void> {
         matchedCount: 0,
         durationMs: 25
       }
-      if (clientId === 201) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-        rows: [],
-        accountResult: {
-          ...base,
-          outcome: 'partial',
-          stage: 'chat_load_archive',
-          lists: { main: { complete: true, discovered: 2 }, archive: { complete: false, discovered: 0 } },
-          error: { code: 'telegram_dialog_scan_timeout', message: 'Telegram dialog scan exceeded its configured deadline.', stage: 'chat_load_archive' }
-        }
-      }) })
-      if ([202, 401].includes(clientId)) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-        rows: [],
-        accountResult: {
-          ...base,
-          outcome: 'failed',
-          stage: 'authorization',
-          lists: { main: { complete: false, discovered: 0 }, archive: { complete: false, discovered: 0 } },
-          error: { code: 'telegram_connecting', message: 'The stored Telegram session is still initializing.', stage: 'authorization' }
-        }
-      }) })
-      const empty = clientId === 301
-      return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-        rows: empty ? [] : [{ clientId, clientName: base.clientName, accountId: clientId, accountLabel: base.accountLabel, chatId: `${clientId}-complete`, dialogTitle: clientId === 101 ? 'Stale dialog' : 'Fresh dialog', lastMessageAt: new Date().toISOString() }],
-        accountResult: {
-          ...base,
-          outcome: 'complete',
-          stage: 'complete',
-          matchedCount: empty ? 0 : 1,
-          lists: { main: { complete: true, discovered: 1 }, archive: { complete: true, discovered: 1 } }
-        }
-      }) })
+      try {
+        await wait(25)
+        if (clientId === 201) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+          rows: [],
+          accountResult: {
+            ...base,
+            outcome: 'partial',
+            stage: 'chat_load_archive',
+            lists: { main: { complete: true, discovered: 2 }, archive: { complete: false, discovered: 0 } },
+            error: { code: 'telegram_dialog_scan_timeout', message: 'Telegram dialog scan exceeded its configured deadline.', stage: 'chat_load_archive' }
+          }
+        }) })
+        if ([202, 401].includes(clientId)) return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+          rows: [],
+          accountResult: {
+            ...base,
+            outcome: 'failed',
+            stage: 'authorization',
+            lists: { main: { complete: false, discovered: 0 }, archive: { complete: false, discovered: 0 } },
+            error: { code: 'telegram_connecting', message: 'The stored Telegram session is still initializing.', stage: 'authorization' }
+          }
+        }) })
+        const empty = clientId === 301
+        return await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+          rows: empty ? [] : [
+            { clientId, clientName: base.clientName, accountId: clientId, accountLabel: base.accountLabel, chatId: `${clientId}-complete`, dialogTitle: clientId === 101 ? 'Stale dialog' : 'Fresh dialog', isPrivate: true, lastMessageAt: new Date().toISOString() },
+            { clientId, clientName: base.clientName, accountId: clientId, accountLabel: base.accountLabel, chatId: `${clientId}-complete-group`, dialogTitle: 'Hidden scan group', isPrivate: false, lastMessageAt: new Date().toISOString() }
+          ],
+          accountResult: {
+            ...base,
+            outcome: 'complete',
+            stage: 'complete',
+            matchedCount: empty ? 0 : 1,
+            lists: { main: { complete: true, discovered: 1 }, archive: { complete: true, discovered: 1 } }
+          }
+        }) })
+      } finally {
+        activeScanRequests -= 1
+      }
     }
     const countEagerHistory = async (route: any) => {
       eagerHistoryRequests += 1
@@ -573,16 +604,25 @@ async function runTests(): Promise<void> {
     while (!delayedCatalogSeen) await wait(10)
     scenario = 'fresh'
     await page.getByTestId('admin-dialog-reset').click()
-    await page.getByTestId('admin-dialog-account-coverage').getByText(/Complete: 1\/1/).waitFor()
-    await page.getByText('Fresh dialog', { exact: true }).waitFor()
+    await page.getByTestId('admin-dialog-account-coverage').getByText(/Accounts loaded: 1\/1.*Full scans: 0\/1/).waitFor()
+    await page.getByText('Fresh dialog', { exact: true }).first().waitFor()
+    assert.equal(await page.getByText('Hidden group dialog', { exact: true }).count(), 0)
     await page.waitForTimeout(700)
     assert.equal(await page.getByText('Stale dialog', { exact: true }).count(), 0)
     assert.equal(eagerHistoryRequests, 0, 'admin collection must not eagerly load message history')
+    assert.equal(scanRequests, 0, 'admin collection must not start exhaustive scans automatically')
+    await page.getByTestId('admin-dialog-load-all').click()
+    await page.getByTestId('admin-dialog-account-coverage').getByText(/Full scans: 1\/1/).waitFor()
+    assert.equal(scanRequests, 1, 'exhaustive scanning must start only after explicit user action')
+    assert.equal(await page.getByText('Hidden scan group', { exact: true }).count(), 0)
 
     scenario = 'partial'
     await page.getByTestId('admin-dialog-apply').click()
-    await page.getByTestId('admin-dialogs-partial-error').getByText(/Accounts loaded: 1\/2.*Complete: 0\/2.*1 partial.*1 failed/).waitFor()
+    await page.getByTestId('admin-dialogs-partial-error').getByText(/Accounts loaded: 1\/2.*Full scans: 0\/2.*1 failed/).waitFor()
     await page.getByText('Snapshot kept', { exact: true }).first().waitFor()
+    assert.equal(scanRequests, 1, 'failed snapshots must not trigger exhaustive scans')
+    await page.getByTestId('admin-dialog-load-all').click()
+    await page.getByTestId('admin-dialogs-partial-error').getByText(/Accounts loaded: 1\/2.*Full scans: 0\/2.*1 partial.*1 failed/).waitFor()
     await page.getByTestId('admin-dialog-diagnostics').locator('summary').click()
     await page.getByText('chat_load_archive', { exact: false }).waitFor()
     await page.locator('[data-testid^="admin-dialog-retry-"]').first().waitFor()
@@ -595,12 +635,22 @@ async function runTests(): Promise<void> {
 
     scenario = 'zero'
     await page.getByTestId('admin-dialog-apply').click()
-    await page.getByTestId('admin-dialogs-empty').getByText('All 1 accounts loaded; no dialogs matched this period.', { exact: false }).waitFor()
+    await page.getByTestId('admin-dialogs-empty').getByText('All 1 account snapshots loaded; no recent private dialogs matched this period.', { exact: false }).waitFor()
 
     scenario = 'failed'
     await page.getByTestId('admin-dialog-apply').click()
-    await page.getByTestId('admin-dialogs-total-failure').getByText('Dialog data could not be loaded', { exact: false }).waitFor()
-    assert.equal(await page.getByText('no dialogs matched this period', { exact: false }).count(), 0)
+    await page.getByTestId('admin-dialogs-total-failure').getByText('Private dialog data could not be loaded', { exact: false }).waitFor()
+    assert.equal(await page.getByText('no private dialogs matched this period', { exact: false }).count(), 0)
+
+    scenario = 'sequential'
+    maxActiveSnapshotRequests = 0
+    maxActiveScanRequests = 0
+    await page.getByTestId('admin-dialog-apply').click()
+    await page.getByTestId('admin-dialog-account-coverage').getByText(/Accounts loaded: 2\/2.*Full scans: 0\/2/).waitFor()
+    assert.equal(maxActiveSnapshotRequests, 1, 'account snapshots must be serialized')
+    await page.getByTestId('admin-dialog-load-all').click()
+    await page.getByTestId('admin-dialog-account-coverage').getByText(/Full scans: 2\/2/).waitFor()
+    assert.equal(maxActiveScanRequests, 1, 'explicit exhaustive scans must be serialized')
 
     await page.unroute('**/api/admin/telegram/senders', scenarioSenders)
     await page.unroute('**/api/telegram/dialogs?*', scenarioDialogs)

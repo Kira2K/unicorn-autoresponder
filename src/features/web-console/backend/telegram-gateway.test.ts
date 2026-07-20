@@ -25,7 +25,7 @@ function fakeTelegramService(overrides: Record<string, any> = {}) {
     async connect(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, status: 'active', dbPath: '/render/private/db' } },
     async status(clientId: number, accountId: number) { requireTelegramAccount(clientId, accountId); return { clientId, accountId, status: 'active', dbPath: '/render/private/db', eventLog: 'private' } },
     async folders(clientId: number, accountId: number) { requireTelegramAccount(clientId, accountId); return { folders: [{ id: 'main', title: 'All chats', type: 'main' }] } },
-    async dialogs(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, dialogs: [{ id: '10', title: 'Safe dialog' }], dbPath: '/render/private/db' } },
+    async dialogs(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, privateOnly: input.privateOnly, dialogs: [{ id: '10', title: 'Safe dialog', isPrivate: true }], dbPath: '/render/private/db' } },
     async scanAdminDialogs(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, outcome: 'complete', dialogs: [] } },
     async messages(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, messages: [{ id: '20', chatId: input.chatId, text: 'safe message' }] } },
     async send(clientId: number, input: any) { requireTelegramAccount(clientId, input.accountId); return { clientId, accountId: input.accountId, message: { id: '30', text: input.text } } },
@@ -104,8 +104,9 @@ async function run(): Promise<void> {
   assert.deepEqual(catalog.senders.map((sender: any) => `${sender.clientId}:${sender.accountId}`), ['102:473', '93:399', '112:502'])
   assert.equal(catalog.senders.every((sender: any) => !('phone' in sender) && !('dbPath' in sender)), true)
 
-  const dialogs = await controller.execute({ operation: 'dialogs', clientId: 102, accountId: 473, input: { list: 'main' } })
+  const dialogs = await controller.execute({ operation: 'dialogs', clientId: 102, accountId: 473, input: { list: 'main', privateOnly: true } })
   assert.equal(dialogs.dialogs[0].title, 'Safe dialog')
+  assert.equal(dialogs.privateOnly, true)
   assert.equal('dbPath' in dialogs, false)
   const otherDialogs = await controller.execute({ operation: 'dialogs', clientId: 93, accountId: 399 })
   assert.equal(otherDialogs.accountId, 399)
@@ -222,12 +223,12 @@ async function run(): Promise<void> {
       })
     }
   })
-  await remote.dialogs(102, { accountId: 473, list: 'archive', limit: 50 })
+  await remote.dialogs(102, { accountId: 473, list: 'archive', limit: 50, privateOnly: true })
   assert.deepEqual(forwarded[0], {
     operation: 'dialogs',
     clientId: 102,
     accountId: 473,
-    input: { accountId: 473, list: 'archive', limit: 50 }
+    input: { accountId: 473, list: 'archive', limit: 50, privateOnly: true }
   })
 
   let remoteSendAttempts = 0

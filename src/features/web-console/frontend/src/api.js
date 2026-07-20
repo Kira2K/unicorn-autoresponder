@@ -99,6 +99,7 @@ export const api = {
     if (params.folderId) query.set('folderId', params.folderId)
     if (params.query) query.set('query', params.query)
     if (params.limit) query.set('limit', params.limit)
+    if (params.privateOnly === true) query.set('privateOnly', 'true')
     return request(`/api/telegram/dialogs${query.toString() ? `?${query}` : ''}`, {
       signal: options.signal
     })

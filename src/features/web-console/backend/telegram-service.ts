@@ -235,7 +235,7 @@ function createTelegramService(options: {
   connect(clientId: number, input: { accountId?: number; phone?: string; code?: string; password?: string }): Promise<unknown>
   status(clientId: number, accountId?: number): Promise<unknown>
   folders(clientId: number, accountId?: number): Promise<unknown>
-  dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number }): Promise<unknown>
+  dialogs(clientId: number, input?: { accountId?: number; list?: string; folderId?: number; query?: string; limit?: number; privateOnly?: boolean }): Promise<unknown>
   scanAdminDialogs(clientId: number, input: { accountId: number; days: number; signal?: AbortSignal }): Promise<unknown>
   messages(clientId: number, input: { accountId?: number; chatId: string; limit?: number }): Promise<unknown>
   send(clientId: number, input: { accountId?: number; chatId: string; text: string; allowWrite?: boolean }): Promise<unknown>
@@ -336,14 +336,20 @@ function createTelegramService(options: {
     },
     async dialogs(clientId, input = {}) {
       const account = await getAccount(clientId, input.accountId)
-      return { accountId: account.id, dialogs: await getAdapter().dialogs({
+      const dialogs = await getAdapter().dialogs({
         ...(await baseRef(account)),
         proxy: await proxyResolver(clientId),
         list: input.list,
         folderId: input.folderId,
         query: input.query,
         limit: input.limit
-      }) }
+      })
+      return {
+        accountId: account.id,
+        dialogs: input.privateOnly === true
+          ? dialogs.filter(dialog => dialog.isPrivate === true)
+          : dialogs
+      }
     },
     async scanAdminDialogs(clientId, input) {
       const startedAt = Date.now()
@@ -379,7 +385,8 @@ function createTelegramService(options: {
             hydrationConcurrency: 8
           })
         }, input.signal)
-        const rows = (scan.dialogs || []).map(dialog => ({
+        const privateDialogs = (scan.dialogs || []).filter(dialog => dialog.isPrivate === true)
+        const rows = privateDialogs.map(dialog => ({
           clientId,
           clientName: client?.clientName || `Client ${clientId}`,
           accountId: account!.id,
@@ -388,7 +395,8 @@ function createTelegramService(options: {
           stack: client?.primaryStack,
           chatId: String(dialog.id),
           dialogTitle: String(dialog.title || dialog.id),
-          lastMessageAt: dialog.lastMessageAt
+          lastMessageAt: dialog.lastMessageAt,
+          isPrivate: true
         }))
         return {
           rows,
@@ -403,7 +411,7 @@ function createTelegramService(options: {
             stage: scan.stage,
             durationMs: scan.durationMs,
             discoveredCount: scan.discoveredCount,
-            matchedCount: scan.matchedCount,
+            matchedCount: privateDialogs.length,
             lists: scan.lists,
             ...(scan.error ? { error: safeScanError(scan.error, scan.stage) } : {})
           }

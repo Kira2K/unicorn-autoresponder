@@ -90,6 +90,48 @@ async function runTests(): Promise<void> {
   assert.equal(searchedDialogs.dialogs.some((dialog: any) => dialog.id === 'client-chat'), true)
   assert.equal(searchedDialogs.dialogs.find((dialog: any) => dialog.id === 'client-chat')?.username, '@client_partner')
 
+  const mixedDialogs = [
+    { id: 'private-human', title: 'Private human', isPrivate: true, lastMessageAt: new Date().toISOString() },
+    { id: 'private-bot', title: 'Private bot', isPrivate: true, lastMessageAt: new Date().toISOString() },
+    { id: 'basic-group', title: 'Basic group', isPrivate: false, lastMessageAt: new Date().toISOString() },
+    { id: 'supergroup', title: 'Supergroup', isPrivate: false, lastMessageAt: new Date().toISOString() },
+    { id: 'channel', title: 'Channel', isPrivate: false, lastMessageAt: new Date().toISOString() },
+    { id: 'secret', title: 'Secret chat', isPrivate: false, lastMessageAt: new Date().toISOString() },
+    { id: 'unknown', title: 'Unknown chat', lastMessageAt: new Date().toISOString() }
+  ]
+  const mixedAdapter = {
+    ...createFakeTdlibAdapter(),
+    async dialogs() { return mixedDialogs },
+    async scanDialogs() {
+      return {
+        dialogs: mixedDialogs,
+        outcome: 'complete',
+        stage: 'complete',
+        discoveredCount: mixedDialogs.length,
+        matchedCount: mixedDialogs.length,
+        durationMs: 1,
+        lists: {
+          main: { complete: true, discovered: 6 },
+          archive: { complete: true, discovered: 1 }
+        }
+      }
+    }
+  }
+  const mixedService = createTelegramService({
+    repository,
+    adapter: mixedAdapter,
+    proxyResolver: async () => ({ type: 'socks5', host: '127.0.0.1', port: 1080 })
+  })
+  const compatibleMixedDialogs = await mixedService.dialogs(1, { accountId: 102 })
+  assert.deepEqual(compatibleMixedDialogs.dialogs.map((dialog: any) => dialog.id), mixedDialogs.map(dialog => dialog.id))
+  const privateSnapshot = await mixedService.dialogs(1, { accountId: 102, privateOnly: true })
+  assert.deepEqual(privateSnapshot.dialogs.map((dialog: any) => dialog.id), ['private-human', 'private-bot'])
+  const privateScan = await mixedService.scanAdminDialogs(1, { accountId: 102, days: 1 })
+  assert.deepEqual(privateScan.rows.map((row: any) => row.chatId), ['private-human', 'private-bot'])
+  assert.equal(privateScan.rows.every((row: any) => row.isPrivate === true), true)
+  assert.equal(privateScan.accountResult.matchedCount, 2)
+  assert.equal(privateScan.accountResult.discoveredCount, mixedDialogs.length)
+
   await assert.rejects(
     () => service.send(1, { accountId: 102, chatId: 'reporting-chat', text: 'TDLib smoke test' }),
     (error: any) => {
@@ -109,7 +151,9 @@ async function runTests(): Promise<void> {
   assert.equal(scanned.accountResult.outcome, 'complete')
   assert.equal(scanned.accountResult.lists.main.complete, true)
   assert.equal(scanned.accountResult.lists.archive.complete, true)
-  assert.equal(scanned.rows.length, 3)
+  assert.deepEqual(scanned.rows.map((row: any) => row.chatId), ['client-chat', 'archived-chat'])
+  assert.equal(scanned.rows.every((row: any) => row.isPrivate === true), true)
+  assert.equal(scanned.accountResult.matchedCount, 2)
   assert.equal(scanned.rows.every((row: any) => row.clientId === 1 && row.accountId === 102), true)
   assert.equal(patches.length, patchesBeforeScan, 'read-only admin scanning must not update stored account status')
 

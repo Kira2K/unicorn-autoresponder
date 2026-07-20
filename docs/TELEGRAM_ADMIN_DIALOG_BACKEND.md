@@ -185,16 +185,22 @@ The browser owns multi-account orchestration:
 1. Fetch `/api/admin/telegram/senders`.
 2. Filter the catalog by market and stack. The date filter does not change the
    account denominator.
-3. For up to three accounts concurrently, call the deployed dialog endpoint
-   sequentially for `list=main&limit=50` and `list=archive&limit=50`.
-4. Filter each successful list by `lastMessageAt` and render it immediately;
+3. For one account at a time, call the deployed dialog endpoint sequentially
+   for `list=main&limit=50&privateOnly=true` and
+   `list=archive&limit=50&privateOnly=true`.
+4. Retain only rows explicitly marked `isPrivate: true`, filter each successful
+   list by `lastMessageAt`, and render it immediately;
    finalize the account's snapshot coverage after both attempts settle.
-5. For up to three accounts concurrently, call the exhaustive scan endpoint.
+5. Do not scan automatically. When the administrator chooses **Load all
+   dialogs**, call the exhaustive scan endpoint for one snapshot-successful
+   account at a time.
 6. Merge results by client, account, and chat ID and sort newest activity first.
 7. Fetch `/api/telegram/messages` only when an admin expands a row.
 
 Main and archive are sequential within one account because both calls use the
-same deployed TDLib client/login state. Parallelism is across accounts.
+same deployed TDLib client/login state. Accounts are also serialized because
+concurrent cold TDLib restoration proved unreliable on the Render service.
+Rows still render progressively as each account settles.
 
 A two-list snapshot counts as initially loaded even when no dialogs match the
 date. One successful snapshot list is partial and its rows remain visible.
@@ -213,6 +219,11 @@ The deployed `/api/telegram/dialogs` implementation is intentionally small:
 - call `getChat` for each returned ID;
 - optionally call `getUser` for private-chat username display;
 - expose `lastMessageAt` from `chat.last_message.date`.
+
+When `privateOnly=true`, the service filters the hydrated result to TDLib
+`chatTypePrivate`. Calls that omit the flag retain the existing mixed chat list,
+which keeps the client Telegram workspace compatible. The admin frontend also
+fails closed by rejecting rows not explicitly marked `isPrivate: true`.
 
 It does not call `loadChats`, history, `openChat`, or `viewMessages`. A snapshot
 is fast initial evidence, not proof that the list is complete.
@@ -244,8 +255,14 @@ The adapter operation obtains the client through the deployed `getClient` and
 - enforces a combined 5,000-chat limit;
 - hydrates lightweight metadata with `getChat` at concurrency eight;
 - filters on `last_message.date` without loading message history;
+- returns only hydrated `chatTypePrivate` rows (including bots) and excludes
+  groups, supergroups, channels, secret chats, and unknown chat types;
 - removes the temporary listener on success, partial completion, failure,
   timeout, and cancellation.
+
+TDLib does not expose a private-only main/archive list. The scan therefore sees
+mixed chat IDs and performs one lightweight `getChat` hydration to identify
+their type. It never loads group message history or changes read state.
 
 The default per-account deadline is 60 seconds and is configurable with:
 
@@ -255,8 +272,9 @@ TELEGRAM_TDLIB_DIALOG_SCAN_TIMEOUT_MS=60000
 
 The backend scan semaphore permits three exhaustive scans globally within the
 server process, including overlapping browser tabs. Snapshot, history, and send
-operations do not enter that queue. The browser also limits snapshot and scan
-workers to three and gives each snapshot call a 45-second client-side bound.
+operations do not enter that queue. The browser is deliberately stricter: it
+serializes account snapshots and scans, and gives each snapshot call a
+75-second client-side bound.
 
 Cancellation is cooperative: it prevents more scan batches and releases the
 temporary listener. It intentionally does not close the shared TDLib client or
@@ -305,7 +323,7 @@ scan output is failed. A complete scan with zero date matches is still complete.
 The frontend derives:
 
 - `Accounts loaded: X/N` from successful two-list snapshots;
-- `Complete: Y/N` from exhaustive results;
+- `Full scans: Y/N` from explicitly requested exhaustive results;
 - partial, failed, and not-processed counts from per-account state.
 
 Snapshot rows survive a partial or failed exhaustive scan. A transport failure
