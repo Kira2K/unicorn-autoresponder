@@ -18,6 +18,17 @@ const {
     excluded: ClientAutomationData[]
   }
 }
+const {
+  attachBlockedCompanies,
+  GLOBAL_BLOCKED_COMPANIES,
+  mergeBlockedCompanies,
+  parseRunExtraBlockedCompanies
+} = require('./blocked-companies.ts') as {
+  attachBlockedCompanies(clients: ClientAutomationData[]): ClientAutomationData[]
+  GLOBAL_BLOCKED_COMPANIES: Array<{ id: string; name: string }>
+  mergeBlockedCompanies(...sources: unknown[]): Array<{ id: string; name: string }>
+  parseRunExtraBlockedCompanies(value?: string): Array<{ id: string; name: string }>
+}
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
 type ClientHHAuthCredentials = import('./types.ts').ClientHHAuthCredentials
@@ -115,10 +126,60 @@ function testExcludeClientsByNameAndId(): void {
   )
 }
 
+function testBlockedCompaniesMergeAndRunExtras(): void {
+  assert.deepEqual(GLOBAL_BLOCKED_COMPANIES, [
+    { id: 'global-comtek', name: 'Comtek' }
+  ])
+  assert.deepEqual(
+    mergeBlockedCompanies(
+      [{ id: 'global-comtek', name: 'Comtek' }],
+      [{ id: 'client-stop-list:1:comtek', name: ' comtek ' }],
+      [{ id: 'client-stop-list:1:ozon', name: 'Ozon' }]
+    ),
+    [
+      { id: 'global-comtek', name: 'Comtek' },
+      { id: 'client-stop-list:1:ozon', name: 'Ozon' }
+    ]
+  )
+  assert.deepEqual(parseRunExtraBlockedCompanies('Alpha, Beta; Gamma'), [
+    { id: 'run-extra-stop-list:alpha', name: 'Alpha' },
+    { id: 'run-extra-stop-list:beta', name: 'Beta' },
+    { id: 'run-extra-stop-list:gamma', name: 'Gamma' }
+  ])
+}
+
+function testAttachBlockedCompaniesUsesRunExtras(): void {
+  const previous = process.env.ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES
+  process.env.ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES = 'Alpha, Comtek'
+
+  try {
+    assert.deepEqual(
+      attachBlockedCompanies([
+        makeClient({
+          blockedCompanies: [{ id: 'client-stop-list:1:ozon', name: 'Ozon' }]
+        })
+      ])[0].blockedCompanies,
+      [
+        { id: 'global-comtek', name: 'Comtek' },
+        { id: 'client-stop-list:1:ozon', name: 'Ozon' },
+        { id: 'run-extra-stop-list:alpha', name: 'Alpha' }
+      ]
+    )
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES
+    } else {
+      process.env.ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES = previous
+    }
+  }
+}
+
 async function main(): Promise<void> {
   await testStrictAttachStillThrows()
   await testBestEffortAttachSkipsOnlyBrokenClients()
   testExcludeClientsByNameAndId()
+  testBlockedCompaniesMergeAndRunExtras()
+  testAttachBlockedCompaniesUsesRunExtras()
 
   console.log('orchestrator client selection tests passed')
 }

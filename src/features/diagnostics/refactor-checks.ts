@@ -49,11 +49,15 @@ const {
   }>
 }
 const {
-  MOCK_BLOCKED_COMPANIES,
-  attachBlockedCompanies
+  GLOBAL_BLOCKED_COMPANIES,
+  attachBlockedCompanies,
+  mergeBlockedCompanies,
+  parseRunExtraBlockedCompanies
 } = require('../hh-responses/orchestrator/blocked-companies.ts') as {
-  MOCK_BLOCKED_COMPANIES: Array<{ id: string; name: string }>
+  GLOBAL_BLOCKED_COMPANIES: Array<{ id: string; name: string }>
   attachBlockedCompanies(clients: any[]): any[]
+  mergeBlockedCompanies(...sources: unknown[]): Array<{ id: string; name: string }>
+  parseRunExtraBlockedCompanies(value?: string): Array<{ id: string; name: string }>
 }
 const {
   isClientReportSuccessful,
@@ -267,13 +271,30 @@ assert.equal(findBlockedCompanyMatch('Totally Different', blockedCompanies), und
 assert.deepEqual(normalizeBlockedCompanies([{ id: 1, name: ' Comtek ' }]), [
   { id: '1', name: 'Comtek' }
 ])
-assert.deepEqual(MOCK_BLOCKED_COMPANIES, [
-  { id: 'mock-comtek', name: 'Comtek' },
-  { id: 'mock-trynexis', name: 'Trynexis' }
+assert.deepEqual(GLOBAL_BLOCKED_COMPANIES, [
+  { id: 'global-comtek', name: 'Comtek' }
 ])
-assert.deepEqual(attachBlockedCompanies([targets[0]])[0].blockedCompanies, [
-  { id: 'mock-comtek', name: 'Comtek' },
-  { id: 'mock-trynexis', name: 'Trynexis' }
+assert.deepEqual(attachBlockedCompanies([{ ...targets[0], blockedCompanies: [
+  { id: 'client-stop-list:1:ozon', name: 'Ozon' }
+] }])[0].blockedCompanies, [
+  { id: 'global-comtek', name: 'Comtek' },
+  { id: 'client-stop-list:1:ozon', name: 'Ozon' }
+])
+assert.deepEqual(
+  mergeBlockedCompanies(
+    [{ id: 'global-comtek', name: 'Comtek' }],
+    [{ id: 'client-stop-list:1:comtek', name: ' comtek ' }],
+    [{ id: 'client-stop-list:1:ozon', name: 'Ozon' }]
+  ),
+  [
+    { id: 'global-comtek', name: 'Comtek' },
+    { id: 'client-stop-list:1:ozon', name: 'Ozon' }
+  ]
+)
+assert.deepEqual(parseRunExtraBlockedCompanies('Alpha, Beta; Gamma'), [
+  { id: 'run-extra-stop-list:alpha', name: 'Alpha' },
+  { id: 'run-extra-stop-list:beta', name: 'Beta' },
+  { id: 'run-extra-stop-list:gamma', name: 'Gamma' }
 ])
 const browserStopListWindow: any = {}
 new Function(

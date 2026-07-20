@@ -4,6 +4,11 @@ const { createNocoClient } = require('../../../integrations/noco/core/client.ts'
 const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { key: string; id: string; title: string }>
 }
+const {
+  compactCompanyName
+} = require('../../../../shared/company-stop-list.ts') as {
+  compactCompanyName(value: unknown): string
+}
 
 type AppDb = import('../types.ts').AppDb
 type AutomationTargetOptions = import('../types.ts').AutomationTargetOptions
@@ -18,12 +23,16 @@ type ResolvedStack = {
   source: StackSource
   row?: NocoRecord
 }
+type BlockedCompany = { id: string; name: string }
 
 const STACK_OVERRIDE_FIELD = 'Stack Override'
 const HH_PLATFORM_IDS: Record<Market, number> = {
   Ru: 11,
   En: 10
 }
+const GLOBAL_BLOCKED_COMPANIES: BlockedCompany[] = [
+  { id: 'global-comtek', name: 'Comtek' }
+]
 
 function normalizeText(value: unknown): string {
   return String(value ?? '')
@@ -68,6 +77,97 @@ function linkedName(value: unknown): string {
       record?.stack ??
       ''
   ).trim()
+}
+
+function slugifyBlockedCompanyId(value: unknown): string {
+  const compact = compactCompanyName(value)
+  return compact
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase() || 'company'
+}
+
+function splitStopListCompany(value: unknown): string[] {
+  return String(value ?? '')
+    .split(/[;,\n]/)
+    .map(item => item.trim())
+    .map(item => item.replace(/^["'`]+|["'`]+$/g, '').trim())
+    .filter(Boolean)
+}
+
+function getRestrictionClientId(restriction: NocoRecord): number | null {
+  return linkedId(restriction.rel_restrictions_client) ?? Number(restriction.clients_id)
+}
+
+function restrictionMarketMatches(restriction: NocoRecord, market: Market): boolean {
+  const normalized = normalizeMarket(
+    restriction.market ?? restriction.rel_restrictions_market
+  )
+  return !normalized || normalized === market
+}
+
+function getCompanyNameFromRestrictionLink(record: Record<string, unknown>): string {
+  return String(
+    record.company_name ??
+      record.name ??
+      record.title ??
+      record.Name ??
+      ''
+  ).trim()
+}
+
+function addBlockedCompany(
+  companiesByKey: Map<string, BlockedCompany>,
+  company: BlockedCompany
+): void {
+  const key = compactCompanyName(company.name)
+  if (!key || companiesByKey.has(key)) {
+    return
+  }
+
+  companiesByKey.set(key, company)
+}
+
+function getBlockedCompaniesForClientMarket(
+  client: NocoRecord,
+  market: Market,
+  restrictions: NocoRecord[] = []
+): BlockedCompany[] {
+  const companiesByKey = new Map<string, BlockedCompany>()
+
+  for (const company of GLOBAL_BLOCKED_COMPANIES) {
+    addBlockedCompany(companiesByKey, company)
+  }
+
+  for (const companyName of splitStopListCompany(client.stop_list_company)) {
+    addBlockedCompany(companiesByKey, {
+      id: `client-stop-list:${client.Id}:${slugifyBlockedCompanyId(companyName)}`,
+      name: companyName
+    })
+  }
+
+  for (const restriction of restrictions) {
+    if (
+      getRestrictionClientId(restriction) !== Number(client.Id) ||
+      !restrictionMarketMatches(restriction, market)
+    ) {
+      continue
+    }
+
+    for (const company of linkedRecords(restriction.rel_restrictions_blocked_companies)) {
+      const companyName = getCompanyNameFromRestrictionLink(company)
+      if (!companyName) {
+        continue
+      }
+
+      addBlockedCompany(companiesByKey, {
+        id: `restriction-company:${String(company.Id ?? company.id ?? slugifyBlockedCompanyId(companyName)).trim()}`,
+        name: companyName
+      })
+    }
+  }
+
+  return [...companiesByKey.values()]
 }
 
 function findStackById(stacks: NocoRecord[], stackId: number | null): NocoRecord | undefined {
@@ -257,14 +357,16 @@ async function fetchNocoAutomationState(client: any): Promise<{
   autoresponseRows: NocoRecord[]
   profiles: NocoRecord[]
   stacks: NocoRecord[]
+  restrictions: NocoRecord[]
 }> {
-  const [clients, autoresponseRows, profiles, stacks] = await Promise.all([
+  const [clients, autoresponseRows, profiles, stacks, restrictions] = await Promise.all([
     client.fetchRecords(TABLES.clients.id, 1000),
     client.fetchRecords(TABLES.hhAutoresponses.id, 1000),
     client.fetchRecords(TABLES.dolphinProfiles.id, 1000),
-    client.fetchRecords(TABLES.stacks.id, 1000)
+    client.fetchRecords(TABLES.stacks.id, 1000),
+    client.fetchRecords(TABLES.restrictions.id, 1000)
   ])
-  return { clients, autoresponseRows, profiles, stacks }
+  return { clients, autoresponseRows, profiles, stacks, restrictions }
 }
 
 function buildAutomationTargetsFromNocoState(
@@ -273,6 +375,7 @@ function buildAutomationTargetsFromNocoState(
     autoresponseRows: NocoRecord[]
     profiles: NocoRecord[]
     stacks: NocoRecord[]
+    restrictions?: NocoRecord[]
   },
   options: AutomationTargetOptions = {}
 ): ClientAutomationData[] {
@@ -312,6 +415,11 @@ function buildAutomationTargetsFromNocoState(
         dolphinProfileId,
         commonChatId,
         coverText: String(row[coverField(market)] ?? '').trim() || undefined,
+        blockedCompanies: getBlockedCompaniesForClientMarket(
+          client,
+          market,
+          state.restrictions ?? []
+        ),
         stackSheetName: 'Noco stacks',
         stackScenario: scenario
       })
@@ -461,6 +569,7 @@ module.exports = {
   buildAutomationTargetsFromNocoState,
   createNocoDb,
   findClientDolphinProfile,
+  getBlockedCompaniesForClientMarket,
   getNocoHHAuthCredentials,
   HH_PLATFORM_IDS,
   isHHPlatformAccountForMarket,

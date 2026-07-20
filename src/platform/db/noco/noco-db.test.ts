@@ -32,6 +32,7 @@ async function runTests(): Promise<void> {
         {
           Id: 1,
           client_name: 'Кира',
+          stop_list_company: 'Ozon, Comtek',
           telegram_general_chat_id: '5216637594',
           rel_clients_primary_stack: { Id: 1, name: 'КИРА' }
         },
@@ -73,6 +74,33 @@ async function runTests(): Promise<void> {
           rel_dolphinProfiles_client: { Id: 2 }
         }
       ],
+      restrictions: [
+        {
+          Id: 10,
+          market: 'ru',
+          rel_restrictions_client: { Id: 1 },
+          rel_restrictions_blocked_companies: [
+            { Id: 100, company_name: 'Trynexis' },
+            { Id: 101, company_name: 'Ozon' }
+          ]
+        },
+        {
+          Id: 11,
+          market: 'en',
+          rel_restrictions_client: { Id: 1 },
+          rel_restrictions_blocked_companies: [
+            { Id: 102, company_name: 'English Only Ltd' }
+          ]
+        },
+        {
+          Id: 12,
+          market: '',
+          rel_restrictions_client: { Id: 2 },
+          rel_restrictions_blocked_companies: [
+            { Id: 103, company_name: 'Shared Restriction LLC' }
+          ]
+        }
+      ],
       stacks: [
         {
           Id: 1,
@@ -110,12 +138,21 @@ async function runTests(): Promise<void> {
   assert.equal(targets[0].dolphinProfileId, 770032142)
   assert.equal(targets[0].commonChatId, '5216637594')
   assert.equal(targets[0].coverText, 'Здравствуйте!')
+  assert.deepEqual(targets[0].blockedCompanies, [
+    { id: 'global-comtek', name: 'Comtek' },
+    { id: 'client-stop-list:1:ozon', name: 'Ozon' },
+    { id: 'restriction-company:100', name: 'Trynexis' }
+  ])
   assert.equal(targets[0].stackScenario, 'https://hh.ru/applicant/vacancy_response?kira')
   assert.equal(targets[1].clientName, 'Антон')
   assert.equal(targets[1].stack, 'FRONTEND')
   assert.equal(targets[1].dolphinProfileId, 123456789)
   assert.equal(targets[1].commonChatId, '-1001')
   assert.equal(targets[1].coverText, 'Добрый день!')
+  assert.deepEqual(targets[1].blockedCompanies, [
+    { id: 'global-comtek', name: 'Comtek' },
+    { id: 'restriction-company:103', name: 'Shared Restriction LLC' }
+  ])
   assert.equal(targets[1].stackScenario, 'https://hh.ru/applicant/vacancy_response?front')
 
   const enTargets = buildAutomationTargetsFromNocoState(
@@ -164,6 +201,9 @@ async function runTests(): Promise<void> {
   assert.equal(enTargets[0].market, 'En')
   assert.equal(enTargets[0].dolphinProfileId, 555123456)
   assert.equal(enTargets[0].coverText, 'Hello!')
+  assert.deepEqual(enTargets[0].blockedCompanies, [
+    { id: 'global-comtek', name: 'Comtek' }
+  ])
   assert.equal(enTargets[0].stackScenario, 'https://hh.ru/search/vacancy?text=react-en')
 
   const kiraOverrideTargets = buildAutomationTargetsFromNocoState(
