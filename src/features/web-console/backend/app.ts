@@ -63,7 +63,7 @@ const {
   resumeWorkflow(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
   resumeWorkflowById(workflowId: number, repository: WebConsoleRepository, options?: any): Promise<any>
   saveKiraCommentsFromChat(repository: WebConsoleRepository, actor?: any, comments?: string): Promise<any>
-  saveResumeTaskInputFromChat(repository: WebConsoleRepository, actor?: any, text?: string): Promise<any>
+  saveResumeTaskInputFromChat(repository: WebConsoleRepository, actor?: any, text?: string, options?: any): Promise<any>
 }
 const { sendTelegramMessage } = require('../../../integrations/telegram/messenger.ts') as {
   sendTelegramMessage(to: string, message: string, options?: { parseMode?: false | 'html' | 'md' | 'markdown' }): Promise<void>
@@ -952,7 +952,11 @@ function createWebConsoleApp(options: {
 
   app.post('/api/bot/telegram/resume/task-input', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await saveResumeTaskInputFromChat(repository, botActorFromRequest(req), req.body?.text)
+      const workflowId = Number(req.body?.workflowId)
+      const result = await saveResumeTaskInputFromChat(repository, botActorFromRequest(req), req.body?.text, {
+        workflowId: Number.isFinite(workflowId) && workflowId > 0 ? workflowId : undefined,
+        expectedStatus: req.body?.expectedStatus
+      })
       res.json({
         ...result,
         workflow: result.workflow ? publicWorkflow(result.workflow) : undefined

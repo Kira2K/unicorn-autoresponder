@@ -117,6 +117,16 @@ type ProviderTaskListResult = {
   total?: number
 }
 
+type ResumeTaskInputOptions = {
+  workflowId?: number
+  expectedStatus?: string
+}
+
+type ResumeTaskInputResult = ProviderTaskListResult & {
+  workflow?: ResumeWorkflowRecord
+  clearActiveTask?: boolean
+}
+
 const RESUME_STATUSES: ResumeStatus[] = [
   'stopped',
   "collection student's data",
@@ -846,6 +856,12 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
   const missing = missingAdvanceFields(workflow)
   const explicitSourceFolder = normalizeText(workflow.studentDataFolderUrl)
   const rootGoogleFolder = normalizeText(workflow.clientGoogleFolder)
+  const status = statusText(workflow)
+  const inputHint = status === "collection Kira's comments"
+    ? 'Следующее сообщение с комментарием сохраню именно в эту задачу.'
+    : providerLinkRequirement(workflow)
+      ? 'Следующее сообщение со ссылкой сохраню именно в эту задачу.'
+      : undefined
   const rows = [
     `Ученик: ${workflow.clientName}`,
     workflow.clientMarket ? `Маркет: ${workflow.clientMarket}` : undefined,
@@ -856,7 +872,8 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
     workflow.cvDraftUrl ? `Черновик: ${workflow.cvDraftUrl}` : undefined,
     workflow.enVersionUrl ? `EN: ${workflow.enVersionUrl}` : undefined,
     workflow.ruVersionUrl ? `RU: ${workflow.ruVersionUrl}` : undefined,
-    missing.length ? missingActionInstruction(missing) : undefined
+    missing.length ? missingActionInstruction(missing) : undefined,
+    inputHint
   ].filter(Boolean)
 
   return rows.join('\n')
@@ -1212,7 +1229,12 @@ async function getProviderTaskById(workflowId: number, repository: ResumeWorkflo
   }
 }
 
-async function saveKiraCommentsFromChat(repository: ResumeWorkflowRepository, actorInput: ResumeActorInput | undefined, comments: string): Promise<ProviderTaskListResult & { workflow?: ResumeWorkflowRecord }> {
+async function saveKiraCommentsFromChat(
+  repository: ResumeWorkflowRepository,
+  actorInput: ResumeActorInput | undefined,
+  comments: string,
+  options: ResumeTaskInputOptions = {}
+): Promise<ResumeTaskInputResult> {
   const actor = resolveGlobalActor(actorInput)
   ensureTaskActor(actor)
   if (actor.role !== 'kira') {
@@ -1225,6 +1247,58 @@ async function saveKiraCommentsFromChat(repository: ResumeWorkflowRepository, ac
   const text = normalizeText(comments)
   if (!text) {
     throw Object.assign(new Error('Нужно отправить текст комментария Киры.'), { code: 'missing_kira_comments' })
+  }
+
+  if (options.workflowId) {
+    if (!repository.getResumeWorkflowById) {
+      throw new Error('Repository does not support resume workflow lookup by id.')
+    }
+    const workflow = await repository.getResumeWorkflowById(options.workflowId)
+    if (!workflow || !actorCanAccessTaskWorkflow(workflow, actor)) {
+      return {
+        actor,
+        tasks: [],
+        clearActiveTask: true,
+        message: 'Эта задача по резюме больше недоступна. Обнови список задач и открой нужную задачу снова.'
+      }
+    }
+    const currentStatus = statusText(workflow)
+    const expectedStatus = normalizeText(options.expectedStatus)
+    if (expectedStatus && currentStatus !== expectedStatus) {
+      return {
+        actor,
+        workflow,
+        tasks: [providerTaskFromWorkflow(workflow)],
+        clearActiveTask: true,
+        message: `Статус резюме изменился с «${displayStatus(expectedStatus)}» на «${displayStatus(currentStatus)}». Обнови задачи и открой нужную задачу снова.`
+      }
+    }
+    if (currentStatus !== "collection Kira's comments") {
+      return {
+        actor,
+        workflow,
+        tasks: [providerTaskFromWorkflow(workflow)],
+        clearActiveTask: true,
+        message: 'Эта задача больше не ожидает комментарий Киры. Обнови задачи и открой нужную задачу снова.'
+      }
+    }
+    const updated = await repository.patchResumeWorkflow(workflow.id, {
+      kirasComments: text,
+      lastWorkflowError: '',
+      workflowTrace: appendTrace(workflow, 'Kira comments saved from Telegram chat', actor)
+    })
+    return {
+      actor,
+      workflow: updated,
+      tasks: [providerTaskFromWorkflow(updated)],
+      message: [
+        `Комментарии Киры для ${updated.clientName} сохранены.`,
+        'Комментарий сохранен в задаче. Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу».',
+        '',
+        providerTaskMessage(updated)
+      ].join('\n'),
+      replyMarkup: taskReplyMarkup(updated)
+    }
   }
 
   const commentTasks = (await repository.getProviderResumeTasks())
@@ -1285,7 +1359,61 @@ function providerLinkRequirement(workflow: ResumeWorkflowRecord): {
   }
 }
 
-async function saveProviderLinkFromChat(repository: ResumeWorkflowRepository, actorInput: ResumeActorInput | undefined, link: string): Promise<ProviderTaskListResult & { workflow?: ResumeWorkflowRecord }> {
+async function saveProviderLinkToWorkflow(
+  repository: ResumeWorkflowRepository,
+  actor: ResumeActor,
+  workflow: ResumeWorkflowRecord,
+  url: string,
+  expectedStatus = ''
+): Promise<ResumeTaskInputResult> {
+  const currentStatus = statusText(workflow)
+  if (expectedStatus && currentStatus !== expectedStatus) {
+    return {
+      actor,
+      workflow,
+      tasks: [providerTaskFromWorkflow(workflow)],
+      clearActiveTask: true,
+      message: `Статус резюме изменился с «${displayStatus(expectedStatus)}» на «${displayStatus(currentStatus)}». Обнови задачи и открой нужную задачу снова.`
+    }
+  }
+
+  const requirement = providerLinkRequirement(workflow)
+  if (!requirement) {
+    return {
+      actor,
+      workflow,
+      tasks: [providerTaskFromWorkflow(workflow)],
+      clearActiveTask: true,
+      message: 'Эта задача больше не ожидает ссылку от подрядчика. Обнови задачи и открой нужную задачу снова.'
+    }
+  }
+
+  const updated = await repository.patchResumeWorkflow(workflow.id, {
+    [requirement.field]: url,
+    lastWorkflowError: '',
+    workflowTrace: appendTrace(workflow, requirement.trace, actor)
+  })
+
+  return {
+    actor,
+    workflow: updated,
+    tasks: [providerTaskFromWorkflow(updated)],
+    message: [
+      `${requirement.label} для ${updated.clientName} сохранена.`,
+      'Ссылка сохранена в задаче. Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу».',
+      '',
+      providerTaskMessage(updated)
+    ].join('\n'),
+    replyMarkup: taskReplyMarkup(updated)
+  }
+}
+
+async function saveProviderLinkFromChat(
+  repository: ResumeWorkflowRepository,
+  actorInput: ResumeActorInput | undefined,
+  link: string,
+  options: { workflowId?: number; expectedStatus?: string } = {}
+): Promise<ResumeTaskInputResult> {
   const actor = resolveGlobalActor(actorInput)
   ensureTaskActor(actor)
   if (actor.role !== 'provider') {
@@ -1298,6 +1426,22 @@ async function saveProviderLinkFromChat(repository: ResumeWorkflowRepository, ac
   const url = normalizeOptionalUrl(link)
   if (!url) {
     throw Object.assign(new Error('Нужно отправить ссылку на резюме.'), { code: 'missing_provider_resume_link' })
+  }
+
+  if (options.workflowId) {
+    if (!repository.getResumeWorkflowById) {
+      throw new Error('Repository does not support resume workflow lookup by id.')
+    }
+    const workflow = await repository.getResumeWorkflowById(options.workflowId)
+    if (!workflow || !actorCanAccessTaskWorkflow(workflow, actor)) {
+      return {
+        actor,
+        tasks: [],
+        clearActiveTask: true,
+        message: 'Эта задача по резюме больше недоступна. Обнови список задач и открой нужную задачу снова.'
+      }
+    }
+    return await saveProviderLinkToWorkflow(repository, actor, workflow, url, normalizeText(options.expectedStatus))
   }
 
   const linkTasks = (await repository.getProviderResumeTasks())
@@ -1321,32 +1465,18 @@ async function saveProviderLinkFromChat(repository: ResumeWorkflowRepository, ac
     }
   }
 
-  const workflow = linkTasks[0]
-  const requirement = providerLinkRequirement(workflow)!
-  const updated = await repository.patchResumeWorkflow(workflow.id, {
-    [requirement.field]: url,
-    lastWorkflowError: '',
-    workflowTrace: appendTrace(workflow, requirement.trace, actor)
-  })
-
-  return {
-    actor,
-    workflow: updated,
-    tasks: [providerTaskFromWorkflow(updated)],
-    message: [
-      `${requirement.label} для ${updated.clientName} сохранена.`,
-      'Ссылка сохранена в задаче. Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу».',
-      '',
-      providerTaskMessage(updated)
-    ].join('\n'),
-    replyMarkup: taskReplyMarkup(updated)
-  }
+  return await saveProviderLinkToWorkflow(repository, actor, linkTasks[0], url)
 }
 
-async function saveResumeTaskInputFromChat(repository: ResumeWorkflowRepository, actorInput: ResumeActorInput | undefined, text: string): Promise<ProviderTaskListResult & { workflow?: ResumeWorkflowRecord }> {
+async function saveResumeTaskInputFromChat(
+  repository: ResumeWorkflowRepository,
+  actorInput: ResumeActorInput | undefined,
+  text: string,
+  options: ResumeTaskInputOptions = {}
+): Promise<ResumeTaskInputResult> {
   const actor = resolveGlobalActor(actorInput)
-  if (actor.role === 'kira') return await saveKiraCommentsFromChat(repository, actorInput, text)
-  if (actor.role === 'provider') return await saveProviderLinkFromChat(repository, actorInput, text)
+  if (actor.role === 'kira') return await saveKiraCommentsFromChat(repository, actorInput, text, options)
+  if (actor.role === 'provider') return await saveProviderLinkFromChat(repository, actorInput, text, options)
   throw Object.assign(new Error('Добавлять данные по задачам резюме из личного чата могут только Кира или подрядчик.'), { code: 'forbidden' })
 }
 

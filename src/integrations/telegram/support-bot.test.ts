@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const {
   BACKEND_UNAVAILABLE_MESSAGE,
   SUPPORT_BOT_ALLOWED_UPDATES,
+  clearActiveTaskContextsForTest,
   commandArgument,
   commandName,
   createSupportBotApiClient,
@@ -13,6 +14,7 @@ const {
 } = require('./support-bot.ts') as {
   BACKEND_UNAVAILABLE_MESSAGE: string
   SUPPORT_BOT_ALLOWED_UPDATES: string[]
+  clearActiveTaskContextsForTest(): void
   commandArgument(text: string): string
   commandName(text: string): string
   createSupportBotApiClient(options?: any): any
@@ -46,8 +48,8 @@ const {
   resumeWorkflowFakeDataMode(): boolean
   resumeWorkflow(chatId: string, repository: any, options?: any): Promise<any>
   resumeWorkflowById(workflowId: number, repository: any, options?: any): Promise<any>
-  saveKiraCommentsFromChat(repository: any, actor?: any, comments?: string): Promise<any>
-  saveProviderLinkFromChat(repository: any, actor?: any, link?: string): Promise<any>
+  saveKiraCommentsFromChat(repository: any, actor?: any, comments?: string, options?: any): Promise<any>
+  saveProviderLinkFromChat(repository: any, actor?: any, link?: string, options?: any): Promise<any>
 }
 
 const studentActor = {
@@ -120,7 +122,32 @@ function makeWorkflowRepository(workflowRecord = makeWorkflow()) {
   return repository
 }
 
+function makeWorkflowListRepository(workflowRecords: any[]) {
+  const patches: any[] = []
+  return {
+    patches,
+    workflowRecords,
+    async getResumeWorkflowByTelegramChatId() {
+      return workflowRecords[0] ?? null
+    },
+    async getResumeWorkflowById(workflowId: number) {
+      return workflowRecords.find(workflow => Number(workflow.id) === Number(workflowId)) ?? null
+    },
+    async getProviderResumeTasks() {
+      return workflowRecords
+    },
+    async patchResumeWorkflow(recordId: number, patch: any) {
+      patches.push({ recordId, patch })
+      const workflow = workflowRecords.find(record => Number(record.id) === Number(recordId))
+      if (!workflow) throw new Error(`Workflow ${recordId} not found`)
+      Object.assign(workflow, patch)
+      return workflow
+    }
+  }
+}
+
 async function runTests() {
+  clearActiveTaskContextsForTest()
   assert.equal(commandName('/student@veu_support_bot hello'), '/student')
   assert.equal(commandArgument('/change_google_folder https://drive.google.com/drive/folders/abc'), 'https://drive.google.com/drive/folders/abc')
   assert.equal(RESUME_STATUSES.includes('filled'), true)
@@ -341,6 +368,150 @@ async function runTests() {
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
   assert.match(responseText(callbackResponse), /черновик на проверке у Киры/)
+
+  clearActiveTaskContextsForTest()
+  const contextualInputs: any[] = []
+  const contextualApi = {
+    ...foundApi,
+    async providerTask(workflowId: number) {
+      return {
+        message: `Task ${workflowId}`,
+        replyMarkup: { inline_keyboard: [] },
+        workflow: {
+          id: workflowId,
+          status: workflowId === 77 ? "collection Kira's comments" : 'Draft in process'
+        }
+      }
+    },
+    async providerTasks(_actor?: any, offset = 0) {
+      providerTaskOffsets.push(offset)
+      return { message: 'Task list', replyMarkup: { inline_keyboard: [] } }
+    },
+    async saveResumeTaskInput(text: string, actor?: any, options?: any) {
+      contextualInputs.push({ text, actor, options })
+      return {
+        message: `saved ${text}`,
+        replyMarkup: { inline_keyboard: [] },
+        workflow: options?.workflowId ? { id: options.workflowId, status: options.expectedStatus } : undefined
+      }
+    }
+  }
+  await handleSupportBotCallback({
+    data: 'resume:open:99',
+    message: { chat: { id: 8222949251, type: 'private' } },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  await handleSupportBotMessage({
+    text: 'https://drive.google.com/drive/folders/selected-provider-task',
+    chat: { id: 8222949251, type: 'private' },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  assert.equal(contextualInputs.at(-1).options.workflowId, 99)
+  assert.equal(contextualInputs.at(-1).options.expectedStatus, 'Draft in process')
+
+  await handleSupportBotCallback({
+    data: 'resume:open:98',
+    message: { chat: { id: 8222949251, type: 'private' } },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  await handleSupportBotCallback({
+    data: 'resume:open:99',
+    message: { chat: { id: 8222949251, type: 'private' } },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  await handleSupportBotMessage({
+    text: 'https://drive.google.com/drive/folders/replaced-provider-task',
+    chat: { id: 8222949251, type: 'private' },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  assert.equal(contextualInputs.at(-1).options.workflowId, 99)
+
+  await handleSupportBotCallback({
+    data: 'resume:open:77',
+    message: { chat: { id: 343610488, type: 'private' } },
+    from: { id: 343610488, username: 'Kira_arbeitet' }
+  }, contextualApi)
+  await handleSupportBotMessage({
+    text: 'Kira contextual comment',
+    chat: { id: 343610488, type: 'private' },
+    from: { id: 343610488, username: 'Kira_arbeitet' }
+  }, contextualApi)
+  assert.equal(contextualInputs.at(-1).options.workflowId, 77)
+  assert.equal(contextualInputs.at(-1).options.expectedStatus, "collection Kira's comments")
+
+  await handleSupportBotCallback({
+    data: 'resume:open:99',
+    message: { chat: { id: 8222949251, type: 'private' } },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  await handleSupportBotCallback({
+    data: 'resume:tasks',
+    message: { chat: { id: 8222949251, type: 'private' } },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  await handleSupportBotMessage({
+    text: 'https://drive.google.com/drive/folders/no-active-task-after-list',
+    chat: { id: 8222949251, type: 'private' },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, contextualApi)
+  assert.equal(contextualInputs.at(-1).options.workflowId, undefined)
+
+  const realDateNow = Date.now
+  try {
+    ;(Date as any).now = () => 1000
+    await handleSupportBotCallback({
+      data: 'resume:open:99',
+      message: { chat: { id: 8222949251, type: 'private' } },
+      from: { id: 8222949251, username: 'veu_support' }
+    }, contextualApi)
+    ;(Date as any).now = () => 1000 + 30 * 60 * 1000 + 1
+    await handleSupportBotMessage({
+      text: 'https://drive.google.com/drive/folders/expired-active-task',
+      chat: { id: 8222949251, type: 'private' },
+      from: { id: 8222949251, username: 'veu_support' }
+    }, contextualApi)
+    assert.equal(contextualInputs.at(-1).options.workflowId, undefined)
+  } finally {
+    ;(Date as any).now = realDateNow
+    clearActiveTaskContextsForTest()
+  }
+
+  const retryInputs: any[] = []
+  let rejectNextTaskInput = true
+  const retryApi = {
+    ...contextualApi,
+    async saveResumeTaskInput(text: string, actor?: any, options?: any) {
+      retryInputs.push({ text, actor, options })
+      if (rejectNextTaskInput) {
+        rejectNextTaskInput = false
+        throw Object.assign(new Error('Нужно отправить ссылку на резюме.'), { code: 'missing_provider_resume_link' })
+      }
+      return {
+        message: `saved ${text}`,
+        workflow: { id: options.workflowId, status: options.expectedStatus }
+      }
+    }
+  }
+  await handleSupportBotCallback({
+    data: 'resume:open:99',
+    message: { chat: { id: 8222949251, type: 'private' } },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, retryApi)
+  await assert.rejects(
+    () => handleSupportBotMessage({
+      text: 'not-a-link',
+      chat: { id: 8222949251, type: 'private' },
+      from: { id: 8222949251, username: 'veu_support' }
+    }, retryApi),
+    /ссылку/
+  )
+  await handleSupportBotMessage({
+    text: 'https://drive.google.com/drive/folders/retry-after-invalid-link',
+    chat: { id: 8222949251, type: 'private' },
+    from: { id: 8222949251, username: 'veu_support' }
+  }, retryApi)
+  assert.equal(retryInputs.at(-1).options.workflowId, 99)
+  clearActiveTaskContextsForTest()
 
   assert.equal(
     responseText(await handleSupportBotGroupAdd({
@@ -673,6 +844,87 @@ async function runTests() {
       savedProviderRussianResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Перейти к следующему шагу', 'Назад к задачам']
     )
+
+    const exactKiraRepository = makeWorkflowListRepository([
+      makeWorkflow({
+        id: 201,
+        status: "collection Kira's comments",
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/source-one'
+      }),
+      makeWorkflow({
+        id: 202,
+        clientName: 'Selected Kira Task',
+        status: "collection Kira's comments",
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/source-two'
+      })
+    ])
+    const exactKiraResult = await saveKiraCommentsFromChat(
+      exactKiraRepository,
+      manualKiraActor,
+      'Comment for selected task only',
+      { workflowId: 202, expectedStatus: "collection Kira's comments" }
+    )
+    assert.equal(exactKiraRepository.workflowRecords[0].kirasComments, '')
+    assert.equal(exactKiraRepository.workflowRecords[1].kirasComments, 'Comment for selected task only')
+    assert.equal(exactKiraResult.workflow.id, 202)
+
+    const exactProviderRepository = makeWorkflowListRepository([
+      makeWorkflow({
+        id: 301,
+        status: 'Draft in process',
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/source-one',
+        kirasComments: 'First task'
+      }),
+      makeWorkflow({
+        id: 302,
+        clientName: 'Selected Provider Task',
+        status: 'Draft in process',
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/source-two',
+        kirasComments: 'Second task'
+      })
+    ])
+    const exactProviderResult = await saveProviderLinkFromChat(
+      exactProviderRepository,
+      providerActor,
+      'https://drive.google.com/drive/folders/selected-draft',
+      { workflowId: 302, expectedStatus: 'Draft in process' }
+    )
+    assert.equal(exactProviderRepository.workflowRecords[0].cvDraftUrl, '')
+    assert.equal(exactProviderRepository.workflowRecords[1].cvDraftUrl, 'https://drive.google.com/drive/folders/selected-draft')
+    assert.equal(exactProviderResult.workflow.id, 302)
+
+    const staleProviderRepository = makeWorkflowListRepository([
+      makeWorkflow({
+        id: 401,
+        status: 'English version in progress',
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/source',
+        kirasComments: 'Ready'
+      })
+    ])
+    const staleProviderResult = await saveProviderLinkFromChat(
+      staleProviderRepository,
+      providerActor,
+      'https://drive.google.com/drive/folders/stale-draft',
+      { workflowId: 401, expectedStatus: 'Draft in process' }
+    )
+    assert.equal(staleProviderRepository.workflowRecords[0].cvDraftUrl, '')
+    assert.equal(staleProviderResult.clearActiveTask, true)
+
+    const wrongStatusKiraRepository = makeWorkflowListRepository([
+      makeWorkflow({
+        id: 501,
+        status: 'Draft in process',
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/source'
+      })
+    ])
+    const wrongStatusKiraResult = await saveKiraCommentsFromChat(
+      wrongStatusKiraRepository,
+      manualKiraActor,
+      'Too late comment',
+      { workflowId: 501, expectedStatus: "collection Kira's comments" }
+    )
+    assert.equal(wrongStatusKiraRepository.workflowRecords[0].kirasComments, '')
+    assert.equal(wrongStatusKiraResult.clearActiveTask, true)
 
     const sparseDraftRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Draft in process',

@@ -1080,6 +1080,19 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.transitions.at(-1), "collection student's data -> collection Kira's comments")
       assert.equal(result.body.notifications.at(-1).kind, 'private_kira')
       assert.equal(telegramBotMessages.at(-1).chatId, '343610488')
+      const commentWorkflowId = result.body.workflow.id
+
+      result = await request(server.baseUrl, '/api/bot/telegram/resume/task-input', {
+        method: 'POST',
+        headers: kiraHeaders,
+        body: JSON.stringify({
+          text: 'Contextual Kira comments',
+          workflowId: commentWorkflowId,
+          expectedStatus: "collection Kira's comments"
+        })
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.kirasComments, 'Contextual Kira comments')
 
       result = await resumeByChat(providerHeaders)
       assert.equal(result.response.status, 403, JSON.stringify(result.body))
@@ -1100,6 +1113,18 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.tasks[0].expectedStatus, 'Draft in process')
       const workflowId = result.body.tasks[0].id
 
+      result = await request(server.baseUrl, '/api/bot/telegram/resume/task-input', {
+        method: 'POST',
+        headers: providerHeaders,
+        body: JSON.stringify({
+          text: 'https://docs.google.com/document/d/contextual-draft',
+          workflowId,
+          expectedStatus: 'Draft in process'
+        })
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.cvDraftUrl, 'https://docs.google.com/document/d/contextual-draft')
+
       result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
         headers: studentHeaders
       })
@@ -1113,7 +1138,7 @@ async function runTests(): Promise<void> {
       })
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Draft in approve by Kira')
-      assert.equal(result.body.workflow.cvDraftUrl, 'https://docs.google.com/document/d/test-draft')
+      assert.equal(result.body.workflow.cvDraftUrl, 'https://docs.google.com/document/d/contextual-draft')
 
       result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
         headers: kiraHeaders

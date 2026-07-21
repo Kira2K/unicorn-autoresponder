@@ -29,14 +29,23 @@ type SupportBotApiClient = {
   resumeStatus(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
   resumeResetTest(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
   providerTasks(actor?: SupportBotActor, offset?: number): Promise<{ message: string; replyMarkup?: unknown }>
-  providerTask(workflowId: number, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
+  providerTask(workflowId: number, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown; workflow?: { id?: number; status?: string } }>
   advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; workflow?: { status?: string } }>
   saveKiraComments(comments: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
-  saveResumeTaskInput(text: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
+  saveResumeTaskInput(text: string, actor?: SupportBotActor, options?: { workflowId?: number; expectedStatus?: string }): Promise<{ message: string; replyMarkup?: unknown; workflow?: { id?: number; status?: string }; clearActiveTask?: boolean }>
 }
 
 const BACKEND_UNAVAILABLE_MESSAGE = 'Бэкенд сейчас недоступен. Попробуй позже.'
 const SUPPORT_BOT_ALLOWED_UPDATES = ['message', 'callback_query', 'my_chat_member']
+const ACTIVE_TASK_CONTEXT_TTL_MS = 30 * 60 * 1000
+
+type ActiveTaskContext = {
+  workflowId: number
+  expectedStatus: string
+  openedAtMs: number
+}
+
+const activeTaskContexts = new Map<string, ActiveTaskContext>()
 
 function normalizeCommandText(value: unknown): string {
   return String(value ?? '').trim()
@@ -77,6 +86,39 @@ function actorHeaders(actor?: SupportBotActor): Record<string, string> {
     'X-Telegram-Chat-Id': actor.chatId,
     'X-Telegram-Chat-Type': actor.chatType
   }
+}
+
+function activeTaskContextKey(actor: SupportBotActor): string {
+  return [actor.chatType, actor.chatId, actor.userId].join(':')
+}
+
+function clearActiveTaskContext(actor: SupportBotActor): void {
+  activeTaskContexts.delete(activeTaskContextKey(actor))
+}
+
+function clearActiveTaskContextsForTest(): void {
+  activeTaskContexts.clear()
+}
+
+function rememberActiveTaskContext(actor: SupportBotActor, workflowId: number, expectedStatus = '', nowMs = Date.now()): void {
+  if (actor.chatType !== 'private') return
+  if (!Number.isFinite(workflowId) || workflowId <= 0) return
+  activeTaskContexts.set(activeTaskContextKey(actor), {
+    workflowId,
+    expectedStatus,
+    openedAtMs: nowMs
+  })
+}
+
+function activeTaskContext(actor: SupportBotActor, nowMs = Date.now()): ActiveTaskContext | null {
+  const key = activeTaskContextKey(actor)
+  const context = activeTaskContexts.get(key)
+  if (!context) return null
+  if (nowMs - context.openedAtMs > ACTIVE_TASK_CONTEXT_TTL_MS) {
+    activeTaskContexts.delete(key)
+    return null
+  }
+  return context
 }
 
 function decodeCallbackStatus(value: string | undefined): string {
@@ -231,11 +273,16 @@ function createSupportBotApiClient(options: {
         body: JSON.stringify({ actor, comments })
       })
     },
-    async saveResumeTaskInput(text: string, actor?: SupportBotActor) {
+    async saveResumeTaskInput(text: string, actor?: SupportBotActor, options: { workflowId?: number; expectedStatus?: string } = {}) {
       return await request('/api/bot/telegram/resume/task-input', {
         method: 'POST',
         headers: actorHeaders(actor),
-        body: JSON.stringify({ actor, text })
+        body: JSON.stringify({
+          actor,
+          text,
+          workflowId: options.workflowId,
+          expectedStatus: options.expectedStatus
+        })
       })
     }
   }
@@ -317,6 +364,7 @@ async function handleOpenTasks(actor: SupportBotActor, api: SupportBotApiClient)
   if (actor.chatType !== 'private') {
     return '/open_my_tasks работает только в личном чате. Открой личный чат с ботом и отправь там /open_my_tasks.'
   }
+  clearActiveTaskContext(actor)
 
   return await withBackendStatusMessage(async () => {
     const result = await api.providerTasks(actor)
@@ -352,7 +400,13 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
       })
     }
     return await withBackendStatusMessage(async () => {
-      const result = await api.saveResumeTaskInput(text, actor)
+      const context = activeTaskContext(actor)
+      const result = await api.saveResumeTaskInput(text, actor, context
+        ? { workflowId: context.workflowId, expectedStatus: context.expectedStatus }
+        : {})
+      if (result.workflow || result.clearActiveTask) {
+        clearActiveTaskContext(actor)
+      }
       return {
         text: result.message,
         replyMarkup: result.replyMarkup
@@ -444,6 +498,7 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
   if (parts[0] !== 'resume') return null
 
   if (parts[1] === 'tasks') {
+    clearActiveTaskContext(actor)
     const offset = Number(parts[2])
     return await withBackendStatusMessage(async () => {
       const result = await api.providerTasks(actor, Number.isFinite(offset) && offset > 0 ? offset : 0)
@@ -459,6 +514,11 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
   if (parts[1] === 'open') {
     return await withBackendStatusMessage(async () => {
       const result = await api.providerTask(workflowId, actor)
+      if (result.workflow) {
+        rememberActiveTaskContext(actor, workflowId, String(result.workflow.status ?? ''))
+      } else {
+        clearActiveTaskContext(actor)
+      }
       return { text: result.message, replyMarkup: result.replyMarkup }
     })
   }
@@ -617,6 +677,7 @@ module.exports = {
   commandArgument,
   commandName,
   createSupportBotApiClient,
+  clearActiveTaskContextsForTest,
   handleSupportBotCallback,
   handleSupportBotGroupAdd,
   handleSupportBotMessage,
