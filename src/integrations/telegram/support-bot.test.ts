@@ -1141,6 +1141,20 @@ async function runTests() {
     assert.match(providerTasks.message, /1-1/)
     assert.match(providerTasks.message, /1\. Test \[EN\]/)
     assert.doesNotMatch(providerTasks.message, /Google-/)
+    const fillingProviderTasks = await getProviderTasks({
+      async getProviderResumeTasks() {
+        return [
+          makeWorkflow({ id: 98, clientId: 102, clientName: 'Ready Filling', status: 'moved to filling' }),
+          makeWorkflow({ id: 99, clientId: 102, clientName: 'Provider Work', status: 'Russian version in process' })
+        ]
+      },
+      async getResumeWorkflowById(workflowId: number) {
+        return makeWorkflow({ id: workflowId, clientId: 102, clientName: 'Ready Filling', status: 'moved to filling' })
+      }
+    }, providerActor)
+    assert.deepEqual(fillingProviderTasks.tasks.map((task: any) => task.clientName), ['Provider Work'])
+    assert.doesNotMatch(fillingProviderTasks.message, /Ready Filling/)
+    assert.doesNotMatch(JSON.stringify(fillingProviderTasks.replyMarkup), /Ready Filling/)
     const kiraTaskRows = [
       makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in approve by Kira' }),
       makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Kira Client', status: 'English version in approve by Kira' }),

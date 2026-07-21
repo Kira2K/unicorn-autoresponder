@@ -149,8 +149,7 @@ const RESUME_STATUSES: ResumeStatus[] = [
 const PROVIDER_RESPONSIBLE_STATUSES = new Set([
   'Draft in process',
   'English version in progress',
-  'Russian version in process',
-  'moved to filling'
+  'Russian version in process'
 ])
 
 const KIRA_RESPONSIBLE_STATUSES = new Set([
