@@ -7,6 +7,7 @@ type BotApiRequester = (url: string, options: Record<string, unknown>) => Promis
 type SendMessageInput = {
   chatId: string
   text: string
+  messageThreadId?: number
   replyMarkup?: unknown
   parseMode?: string
 }
@@ -67,6 +68,7 @@ function createTelegramBotApi(options: {
       if (!text) throw botError('telegram_bot_empty_message', 'Telegram message text is required.')
       return await request('sendMessage', {
         chat_id: chatId,
+        ...(input.messageThreadId ? { message_thread_id: input.messageThreadId } : {}),
         text,
         disable_web_page_preview: true,
         ...(input.parseMode ? { parse_mode: input.parseMode } : {}),

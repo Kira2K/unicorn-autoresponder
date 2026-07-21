@@ -242,6 +242,9 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): 
   const clientMarket =
     linkedName((client as any)?.market) ||
     normalizeText((client as any)?.market)
+  const clientStack =
+    linkedName((client as any)?.rel_clients_primary_stack) ||
+    normalizeText((client as any)?.primaryStack ?? (client as any)?.primary_stack)
   const englishLevelId =
     (linkedId((client as any)?.['English level']) ?? Number((client as any)?.english_levels_id ?? (client as any)?.englishLevelId)) || undefined
   const englishLevel =
@@ -252,6 +255,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): 
     clientId,
     clientName,
     clientMarket: clientMarket || undefined,
+    clientStack: clientStack || undefined,
     clientTelegramUsername: normalizeText((client as any)?.telegram_personal_chat_id ?? (client as any)?.telegramPersonalChatId) || undefined,
     clientGoogleFolder: normalizeText((client as any)?.google_folder ?? (client as any)?.googleFolder) || undefined,
     commonChatId: normalizeText((client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId) || undefined,

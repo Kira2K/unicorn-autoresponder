@@ -15,7 +15,7 @@ type ResumeStatus =
   | 'filled'
 
 type ResumeActorRole = 'student' | 'kira' | 'provider' | 'unknown'
-type ResumeNotificationKind = 'common_chat' | 'private_kira' | 'private_provider' | 'hh_summary'
+type ResumeNotificationKind = 'common_chat' | 'private_kira' | 'private_provider' | 'linkedin_ready' | 'hh_summary'
 
 type ResumeActorInput = {
   userId?: string
@@ -33,6 +33,7 @@ type ResumeWorkflowRecord = {
   clientId: number
   clientName: string
   clientMarket?: string
+  clientStack?: string
   clientTelegramUsername?: string
   clientGoogleFolder?: string
   commonChatId?: string
@@ -68,6 +69,7 @@ type ResumeWorkflowNotification = {
   kind: ResumeNotificationKind
   chatId?: string
   chatIds?: string[]
+  messageThreadId?: number
   text: string
 }
 
@@ -236,6 +238,17 @@ function defaultProviderNotifyChatIds(): string[] {
     normalizeText(process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID),
     ...envList('RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS', DEFAULT_PROVIDER_USER_IDS)
   ].map(normalizeId).filter((item, index, items) => item && items.indexOf(item) === index)
+}
+
+function linkedinReadyNotifyChatId(): string {
+  return normalizeText(process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID) ||
+    normalizeText(process.env.summary_logs_channel_id) ||
+    normalizeText(process.env.SUMMARY_LOGS_CHANNEL_ID)
+}
+
+function linkedinReadyNotifyThreadId(): number | undefined {
+  const value = Number(process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID)
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 }
 
 function statusText(record: ResumeWorkflowRecord | null): ResumeStatus | string {
@@ -743,6 +756,12 @@ function clientMarketLabel(record: ResumeWorkflowRecord): string {
   return [record.clientName, market].filter(Boolean).join(' ')
 }
 
+function clientLinkedInReadyLabel(record: ResumeWorkflowRecord): string {
+  const stack = normalizeText(record.clientStack) || 'стек не указан'
+  const market = normalizeText(record.clientMarket) || 'рынок не указан'
+  return [record.clientName, stack, market].filter(Boolean).join(', ')
+}
+
 function responsibleMention(record: ResumeWorkflowRecord, responsible: ResumeActorRole | 'done' | 'admin'): string {
   if (responsible === 'kira') return 'Кира'
   if (responsible === 'provider') return 'Юля'
@@ -822,9 +841,22 @@ function movedToFillingSummary(record: ResumeWorkflowRecord, testMode: boolean):
   }
 }
 
+function linkedInReadyNotification(record: ResumeWorkflowRecord): ResumeWorkflowNotification | null {
+  if (statusText(record) !== 'moved to filling') return null
+  const chatId = linkedinReadyNotifyChatId()
+  if (!chatId) return null
+  const messageThreadId = linkedinReadyNotifyThreadId()
+  const text = [
+    `@CheMpoKaRokee, резюме ${clientLinkedInReadyLabel(record)}, готово к заполнению на LinkedIn.`,
+    `Ссылка на резюме: ${record.enVersionUrl || 'n/a'}`
+  ].join('\n')
+  return { kind: 'linkedin_ready', chatId, messageThreadId, text }
+}
+
 function buildTransitionNotifications(record: ResumeWorkflowRecord, testMode: boolean): ResumeWorkflowNotification[] {
   return [
     notificationForNextResponsible(record),
+    linkedInReadyNotification(record),
     movedToFillingSummary(record, testMode)
   ].filter((item): item is ResumeWorkflowNotification => Boolean(item))
 }

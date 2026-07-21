@@ -76,6 +76,7 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     id: 98,
     clientId: 102,
     clientName: 'Test',
+    clientStack: 'Python',
     clientMarket: 'EN',
     clientTelegramUsername: '@student_user',
     commonChatId: '-5216637594',
@@ -684,6 +685,8 @@ async function runTests() {
   const previousProviderUserIds = process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS
   const previousProviderNotifyChatId = process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID
   const previousProviderRefs = process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
+  const previousLinkedInReadyChatId = process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID
+  const previousLinkedInReadyThreadId = process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID
   const previousFakeDataMode = process.env.RESUME_WORKFLOW_FAKE_DATA_MODE
   process.env.RESUME_WORKFLOW_TEST_MODE = 'true'
   process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
@@ -691,6 +694,8 @@ async function runTests() {
   process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251,315110920'
   process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
   process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '102:473'
+  process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = '-1003187558078'
+  process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = '777'
   process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'false'
   try {
     const manualKiraActor = {
@@ -1025,17 +1030,19 @@ async function runTests() {
       assert.equal(lastResult.workflow.status, step.after)
       if (step.notification) {
         assert.equal(lastResult.notifications.some((item: any) => item.kind === step.notification), true)
-        if ((step.notification === 'private_kira' || step.notification === 'private_provider') && step.after !== 'moved to filling') {
+        if (step.notification === 'private_kira' || step.notification === 'private_provider') {
           const notification = lastResult.notifications.find((item: any) => item.kind === step.notification)
-          if (step.notification === 'private_kira') {
+          if (step.notification === 'private_kira' && step.after !== 'moved to filling') {
             assert.match(notification.text, /^Кира, резюме/)
           }
           if (step.notification === 'private_provider') {
             assert.match(notification.text, /^Юля, резюме/)
           }
           assert.doesNotMatch(notification.text, /^@student_user, резюме/)
-          assert.match(notification.text, /Открой \/open_my_tasks, чтобы обработать эту задачу/)
-          assert.match(notification.text, /Ученик: Test/)
+          if (step.after !== 'moved to filling') {
+            assert.match(notification.text, /Открой \/open_my_tasks, чтобы обработать эту задачу/)
+            assert.match(notification.text, /Ученик: Test/)
+          }
           if (step.notification === 'private_provider') {
             assert.deepEqual(notification.chatIds, ['8222949251', '315110920'])
           }
@@ -1048,10 +1055,16 @@ async function runTests() {
           assert.match(notification.text, /После этого я переведу резюме на следующий шаг/)
         }
         if (step.after === 'moved to filling') {
-          const notification = lastResult.notifications.find((item: any) => item.kind === 'private_kira')
-          assert.match(notification.text, /Резюме для Test EN передано на заполнение/)
-          assert.match(notification.text, /Английская версия:/)
-          assert.match(notification.text, /Русская версия:/)
+          const kiraNotification = lastResult.notifications.find((item: any) => item.kind === 'private_kira')
+          assert.match(kiraNotification.text, /Резюме для Test EN передано на заполнение/)
+          assert.match(kiraNotification.text, /Английская версия:/)
+          assert.match(kiraNotification.text, /Русская версия:/)
+
+          const linkedInNotification = lastResult.notifications.find((item: any) => item.kind === 'linkedin_ready')
+          assert.equal(linkedInNotification.chatId, '-1003187558078')
+          assert.equal(linkedInNotification.messageThreadId, 777)
+          assert.match(linkedInNotification.text, /^@CheMpoKaRokee, резюме Test, Python, EN, готово к заполнению на LinkedIn\./)
+          assert.match(linkedInNotification.text, /Ссылка на резюме: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
         }
       }
     }
@@ -1218,6 +1231,16 @@ async function runTests() {
       delete process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
     } else {
       process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = previousProviderRefs
+    }
+    if (previousLinkedInReadyChatId === undefined) {
+      delete process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID
+    } else {
+      process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = previousLinkedInReadyChatId
+    }
+    if (previousLinkedInReadyThreadId === undefined) {
+      delete process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID
+    } else {
+      process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = previousLinkedInReadyThreadId
     }
     if (previousFakeDataMode === undefined) {
       delete process.env.RESUME_WORKFLOW_FAKE_DATA_MODE

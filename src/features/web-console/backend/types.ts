@@ -131,6 +131,7 @@ export type ResumeWorkflowRecord = {
   clientId: number
   clientName: string
   clientMarket?: string
+  clientStack?: string
   clientTelegramUsername?: string
   clientGoogleFolder?: string
   commonChatId?: string

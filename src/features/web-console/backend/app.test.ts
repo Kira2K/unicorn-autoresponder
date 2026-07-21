@@ -987,6 +987,8 @@ async function runTests(): Promise<void> {
     const previousProviderNotifyChatId = process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID
     const previousKiraUserIds = process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS
     const previousKiraNotifyChatId = process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID
+    const previousLinkedInReadyChatId = process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID
+    const previousLinkedInReadyThreadId = process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID
     const previousFakeDataMode = process.env.RESUME_WORKFLOW_FAKE_DATA_MODE
     process.env.RESUME_WORKFLOW_TEST_MODE = 'true'
     process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '1:12'
@@ -994,6 +996,8 @@ async function runTests(): Promise<void> {
     process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
     process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
     process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
+    process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = '-1003187558078'
+    process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = '777'
     process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
     try {
       const botHeaders = { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' }
@@ -1200,7 +1204,18 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.workflow.status, 'moved to filling')
       assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> moved to filling')
       assert(result.body.notifications.some((notification: any) => notification.kind === 'private_kira'))
-      assert.match(result.body.message, /передано на заполнение/)
+      assert(result.body.notifications.some((notification: any) => notification.kind === 'linkedin_ready'))
+      const kiraFillingMessage = telegramBotMessages.find((message: any) => /передано на заполнение/.test(message.text))
+      assert(kiraFillingMessage)
+      assert.equal(kiraFillingMessage.chatId, '343610488')
+      assert.match(kiraFillingMessage.text, /Английская версия: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
+      assert.match(kiraFillingMessage.text, /Русская версия: https:\/\/docs\.google\.com\/document\/d\/test-russian-version/)
+      const linkedInReadyMessage = telegramBotMessages.find((message: any) => /@CheMpoKaRokee/.test(message.text))
+      assert(linkedInReadyMessage)
+      assert.equal(linkedInReadyMessage.chatId, '-1003187558078')
+      assert.equal(linkedInReadyMessage.messageThreadId, 777)
+      assert.match(linkedInReadyMessage.text, /^@CheMpoKaRokee, резюме Client One, FRONTEND, Ru, готово к заполнению на LinkedIn\./)
+      assert.match(linkedInReadyMessage.text, /Ссылка на резюме: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
 
       result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reset-test', {
         method: 'POST',
@@ -1242,6 +1257,16 @@ async function runTests(): Promise<void> {
         delete process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID
       } else {
         process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = previousKiraNotifyChatId
+      }
+      if (previousLinkedInReadyChatId === undefined) {
+        delete process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID
+      } else {
+        process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = previousLinkedInReadyChatId
+      }
+      if (previousLinkedInReadyThreadId === undefined) {
+        delete process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID
+      } else {
+        process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = previousLinkedInReadyThreadId
       }
       if (previousFakeDataMode === undefined) {
         delete process.env.RESUME_WORKFLOW_FAKE_DATA_MODE

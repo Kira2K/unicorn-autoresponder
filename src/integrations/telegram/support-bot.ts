@@ -3,7 +3,7 @@ require('dotenv').config()
 const { createTelegramBotApi } = require('./bot-api.ts') as {
   createTelegramBotApi(options?: any): {
     getUpdates(offset?: number, timeout?: number, allowedUpdates?: string[]): Promise<any[]>
-    sendMessage(input: { chatId: string; text: string; replyMarkup?: unknown; parseMode?: string }): Promise<unknown>
+    sendMessage(input: { chatId: string; text: string; messageThreadId?: number; replyMarkup?: unknown; parseMode?: string }): Promise<unknown>
     answerCallbackQuery(input: { callbackQueryId: string; text?: string }): Promise<unknown>
   }
 }

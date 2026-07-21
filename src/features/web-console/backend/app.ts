@@ -143,7 +143,7 @@ type TelegramService = {
   disconnect(clientId: number, accountId?: number): Promise<unknown>
 }
 type TelegramBotApi = {
-  sendMessage(input: { chatId: string; text: string; replyMarkup?: unknown; parseMode?: string }): Promise<unknown>
+  sendMessage(input: { chatId: string; text: string; messageThreadId?: number; replyMarkup?: unknown; parseMode?: string }): Promise<unknown>
 }
 type CvTailoringRequest = {
   fileName: string
@@ -681,6 +681,7 @@ function createWebConsoleApp(options: {
           await withNotificationTimeout(
             telegramBotApi.sendMessage({
               chatId,
+              ...(notification.messageThreadId ? { messageThreadId: notification.messageThreadId } : {}),
               text: notification.text
             }),
             notification
