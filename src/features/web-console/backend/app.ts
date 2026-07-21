@@ -645,39 +645,44 @@ function createWebConsoleApp(options: {
       }
     }
 
-    function notificationWarning(notification: any, error: any): string {
+    function notificationWarning(notification: any, error: any, chatId?: string): string {
       const message = error instanceof Error ? error.message : String(error)
+      const target = chatId ? ` chat ${chatId}` : ''
       if (
         (notification.kind === 'private_provider' || notification.kind === 'private_kira') &&
         /bot can't initiate conversation with a user/i.test(message)
       ) {
-        return `${notification.kind}: не удалось отправить уведомление. Попроси этого пользователя открыть @veu_support_bot и один раз отправить /start.`
+        return `${notification.kind}${target}: не удалось отправить уведомление. Попроси этого пользователя открыть @veu_support_bot и один раз отправить /start.`
       }
-      return `${notification.kind}: не удалось отправить уведомление: ${message}`
+      return `${notification.kind}${target}: не удалось отправить уведомление: ${message}`
     }
 
     for (const notification of notifications) {
-      try {
-        if (notification.kind === 'hh_summary') {
+      if (notification.kind === 'hh_summary') {
+        try {
           if (summaryLogsChannelId) {
             await withNotificationTimeout(
               sendSummaryTelegramMessage(summaryLogsChannelId, notification.text, { parseMode: false }),
               notification
             )
           }
-          continue
+        } catch (error: any) {
+          warnings.push(notificationWarning(notification, error))
         }
+        continue
+      }
 
-        const notificationChatIds = Array.isArray(notification.chatIds)
-          ? notification.chatIds.map((item: unknown) => String(item ?? '').trim()).filter(Boolean)
-          : [String(notification.chatId ?? '').trim()].filter(Boolean)
+      const notificationChatIds = Array.isArray(notification.chatIds)
+        ? notification.chatIds.map((item: unknown) => String(item ?? '').trim()).filter(Boolean)
+        : [String(notification.chatId ?? '').trim()].filter(Boolean)
 
-        if (!notificationChatIds.length) {
-          warnings.push(`Уведомление ${notification.kind} пропущено: не указан chat id.`)
-          continue
-        }
+      if (!notificationChatIds.length) {
+        warnings.push(`Уведомление ${notification.kind} пропущено: не указан chat id.`)
+        continue
+      }
 
-        for (const chatId of notificationChatIds) {
+      for (const chatId of notificationChatIds) {
+        try {
           await withNotificationTimeout(
             telegramBotApi.sendMessage({
               chatId,
@@ -686,9 +691,9 @@ function createWebConsoleApp(options: {
             }),
             notification
           )
+        } catch (error: any) {
+          warnings.push(notificationWarning(notification, error, chatId))
         }
-      } catch (error: any) {
-        warnings.push(notificationWarning(notification, error))
       }
     }
 

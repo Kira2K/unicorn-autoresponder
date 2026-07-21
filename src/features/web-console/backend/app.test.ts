@@ -687,6 +687,7 @@ async function runTests(): Promise<void> {
   const createdDolphinProfiles: any[] = []
   const updatedProxies: any[] = []
   const telegramBotMessages: any[] = []
+  const telegramBotFailChatIds = new Set<string>()
   let cvTailoringShouldFail = false
   let cvTailoringResponseMode: 'plain' | 'json_object' = 'plain'
   const cvTailoringCalls: any[] = []
@@ -826,6 +827,10 @@ async function runTests(): Promise<void> {
       async sendMessage(input: any) {
         if (input.text === 'fail telegram') {
           throw Object.assign(new Error('Telegram exploded'), { code: 'telegram_bot_api_failed' })
+        }
+        if (telegramBotFailChatIds.has(String(input.chatId))) {
+          telegramBotFailChatIds.delete(String(input.chatId))
+          throw Object.assign(new Error('bot can\'t initiate conversation with a user'), { code: 'telegram_bot_api_failed' })
         }
         telegramBotMessages.push(input)
         return { message_id: telegramBotMessages.length, chat: { id: input.chatId }, text: input.text }
@@ -1102,12 +1107,14 @@ async function runTests(): Promise<void> {
       assert.equal(result.response.status, 403, JSON.stringify(result.body))
       assert.equal(result.body.error, 'forbidden')
 
+      telegramBotFailChatIds.add('8222949251')
       result = await resumeByChat(kiraHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Draft in process')
       assert.equal(result.body.notifications.at(-1).kind, 'private_provider')
       assert.deepEqual(result.body.notifications.at(-1).chatIds, ['8222949251', '315110920'])
-      assert.deepEqual(telegramBotMessages.slice(-2).map((message: any) => message.chatId), ['8222949251', '315110920'])
+      assert.deepEqual(telegramBotMessages.slice(-1).map((message: any) => message.chatId), ['315110920'])
+      assert.match(result.body.notificationWarnings.join('\n'), /private_provider chat 8222949251/)
 
       result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
         headers: providerHeaders
