@@ -38,7 +38,7 @@ const {
 } = require('./resume-workflow.ts') as {
   RESUME_STATUSES: string[]
   getProviderTaskById(workflowId: number, repository: any, actor?: any): Promise<any>
-  getProviderTasks(repository: any, actor?: any): Promise<any>
+  getProviderTasks(repository: any, actor?: any, options?: any): Promise<any>
   getResumeStatus(chatId: string, repository: any, options?: any): Promise<any>
   missingAdvanceFields(workflow: any, fakeDataMode?: boolean): string[]
   resetResumeWorkflowForTest(chatId: string, repository: any): Promise<any>
@@ -137,6 +137,7 @@ async function runTests() {
   assert.equal(resolveActorForWorkflow(kiraActor, makeWorkflow()).role, 'kira')
 
   let lastResumeOptions: any
+  const providerTaskOffsets: number[] = []
   const foundApi = {
     async backendStatus() {
       return { ok: true, service: 'web-console-backend' }
@@ -157,7 +158,8 @@ async function runTests() {
     async resumeResetTest(chatId: string) {
       return { found: true, chatId, message: 'Тестовый workflow резюме для Client One сброшен.' }
     },
-    async providerTasks() {
+    async providerTasks(_actor?: any, offset = 0) {
+      providerTaskOffsets.push(offset)
       return { message: 'Задачи подрядчика по резюме:\n1. Client One: черновик в работе', replyMarkup: { inline_keyboard: [] } }
     },
     async providerTask() {
@@ -856,10 +858,11 @@ async function runTests() {
     const providerTasks = await getProviderTasks(makeWorkflowRepository(beforeFilled), providerActor)
     assert.equal(providerTasks.tasks.length, 1)
     assert.equal(providerTasks.tasks[0].clientName, 'Test')
-    assert.match(providerTasks.message, /^Задачи подрядчика по резюме:/)
-    assert.match(providerTasks.message, /Ученик: Test/)
-    assert.match(providerTasks.message, /Статус: черновик в работе/)
-    assert.match(providerTasks.message, /Маркет: EN/)
+    assert.equal(providerTasks.total, 1)
+    assert.equal(providerTasks.offset, 0)
+    assert.match(providerTasks.message, /1-1/)
+    assert.match(providerTasks.message, /1\. Test \[EN\]/)
+    assert.doesNotMatch(providerTasks.message, /Google-/)
     const kiraTaskRows = [
       makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in approve by Kira' }),
       makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Kira Client', status: 'English version in approve by Kira' }),
@@ -875,9 +878,9 @@ async function runTests() {
       }
     }
     const kiraTasks = await getProviderTasks(kiraTaskRepository, manualKiraActor)
-    assert.match(kiraTasks.message, /^Задачи Киры по резюме:/)
-    assert.match(kiraTasks.message, /Ученик: Test/)
-    assert.match(kiraTasks.message, /Статус: черновик на проверке у Киры/)
+    assert.match(kiraTasks.message, /1-2/)
+    assert.match(kiraTasks.message, /1\. Test/)
+    assert.match(kiraTasks.message, /2\. Other Kira Client/)
     assert.deepEqual(kiraTasks.tasks.map((task: any) => task.clientName), ['Test', 'Other Kira Client'])
     const unavailableProviderTaskForKira = await getProviderTaskById(100, kiraTaskRepository, manualKiraActor)
     assert.equal(unavailableProviderTaskForKira.workflow, undefined)

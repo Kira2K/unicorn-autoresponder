@@ -56,7 +56,7 @@ const {
   saveResumeTaskInputFromChat
 } = require('../../../integrations/telegram/resume-workflow.ts') as {
   getProviderTaskById(workflowId: number, repository: WebConsoleRepository, actor?: any): Promise<any>
-  getProviderTasks(repository: WebConsoleRepository, actor?: any): Promise<any>
+  getProviderTasks(repository: WebConsoleRepository, actor?: any, options?: any): Promise<any>
   getResumeStatus(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
   publicWorkflow(record: any): any
   resetResumeWorkflowForTest(chatId: string, repository: WebConsoleRepository): Promise<any>
@@ -923,7 +923,10 @@ function createWebConsoleApp(options: {
 
   app.get('/api/bot/telegram/resume/provider/tasks', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await getProviderTasks(repository, botActorFromRequest(req))
+      const offset = Number(req.query.offset)
+      const result = await getProviderTasks(repository, botActorFromRequest(req), {
+        offset: Number.isFinite(offset) && offset > 0 ? offset : 0
+      })
       res.json(result)
     } catch (error) {
       next(error)

@@ -28,7 +28,7 @@ type SupportBotApiClient = {
   resume(chatId: string, actor?: SupportBotActor, options?: { studentDataFolderUrl?: string }): Promise<{ found: boolean; message: string }>
   resumeStatus(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
   resumeResetTest(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
-  providerTasks(actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
+  providerTasks(actor?: SupportBotActor, offset?: number): Promise<{ message: string; replyMarkup?: unknown }>
   providerTask(workflowId: number, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
   advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; workflow?: { status?: string } }>
   saveKiraComments(comments: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
@@ -206,8 +206,9 @@ function createSupportBotApiClient(options: {
         body: JSON.stringify({ actor })
       })
     },
-    async providerTasks(actor?: SupportBotActor) {
-      return await request('/api/bot/telegram/resume/provider/tasks', {
+    async providerTasks(actor?: SupportBotActor, offset = 0) {
+      const query = offset > 0 ? `?offset=${encodeURIComponent(String(offset))}` : ''
+      return await request(`/api/bot/telegram/resume/provider/tasks${query}`, {
         headers: actorHeaders(actor)
       })
     },
@@ -443,8 +444,9 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
   if (parts[0] !== 'resume') return null
 
   if (parts[1] === 'tasks') {
+    const offset = Number(parts[2])
     return await withBackendStatusMessage(async () => {
-      const result = await api.providerTasks(actor)
+      const result = await api.providerTasks(actor, Number.isFinite(offset) && offset > 0 ? offset : 0)
       return { text: result.message, replyMarkup: result.replyMarkup }
     })
   }

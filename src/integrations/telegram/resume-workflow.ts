@@ -113,6 +113,8 @@ type ProviderTaskListResult = {
   tasks: ResumeProviderTask[]
   message: string
   replyMarkup?: unknown
+  offset?: number
+  total?: number
 }
 
 const RESUME_STATUSES: ResumeStatus[] = [
@@ -158,6 +160,8 @@ const DEFAULT_KIRA_USER_IDS = ['7586552066']
 const DEFAULT_PROVIDER_USER_IDS = ['8222949251']
 const DEFAULT_KIRA_PLATFORM_REFS = ['1:452']
 const DEFAULT_PROVIDER_PLATFORM_REFS: string[] = []
+const TASK_LIST_PAGE_SIZE = 15
+const TASK_LIST_MAX_MESSAGE_LENGTH = 3500
 
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim()
@@ -899,15 +903,90 @@ function taskReplyMarkup(workflow: ResumeWorkflowRecord) {
   }
 }
 
-function taskListReplyMarkup(tasks: ResumeProviderTask[]) {
-  return {
-    inline_keyboard: tasks.map(task => ([
-      {
-        text: task.message.slice(0, 60),
-        callback_data: task.callbackData
-      }
-    ]))
+function compactTaskAction(workflow: ResumeWorkflowRecord): string {
+  const missing = missingAdvanceFields(workflow)
+  if (missing.includes('cv_draft_url')) return 'отправь ссылку на черновик'
+  if (missing.includes('en_version_url')) return 'отправь ссылку на EN'
+  if (missing.includes('ru_version_url')) return 'отправь ссылку на RU'
+  if (missing.includes('kiras_comments')) return 'добавь комментарий Киры'
+  if (missing.length) return 'открой задачу'
+  return 'готово к следующему шагу'
+}
+
+function compactTaskLine(workflow: ResumeWorkflowRecord, index: number): string {
+  const market = normalizeText(workflow.clientMarket)
+  const marketLabel = market ? ` [${market}]` : ''
+  return `${index}. ${workflow.clientName}${marketLabel} - ${displayStatus(statusText(workflow))}; ${compactTaskAction(workflow)}`
+}
+
+function taskListOffset(value: unknown, total: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0
+  if (parsed >= total) return Math.max(0, total - TASK_LIST_PAGE_SIZE)
+  return Math.floor(parsed / TASK_LIST_PAGE_SIZE) * TASK_LIST_PAGE_SIZE
+}
+
+function compactTaskListPage(workflows: ResumeWorkflowRecord[], requestedOffset = 0): {
+  offset: number
+  visibleWorkflows: ResumeWorkflowRecord[]
+  message: string
+} {
+  const offset = taskListOffset(requestedOffset, workflows.length)
+  let visibleCount = Math.min(TASK_LIST_PAGE_SIZE, workflows.length - offset)
+  let visibleWorkflows = workflows.slice(offset, offset + visibleCount)
+  let rows = visibleWorkflows.map((workflow, index) => compactTaskLine(workflow, offset + index + 1))
+  let message = rows.join('\n')
+
+  while (message.length > TASK_LIST_MAX_MESSAGE_LENGTH && visibleCount > 1) {
+    visibleCount -= 1
+    visibleWorkflows = workflows.slice(offset, offset + visibleCount)
+    rows = visibleWorkflows.map((workflow, index) => compactTaskLine(workflow, offset + index + 1))
+    message = rows.join('\n')
   }
+
+  return { offset, visibleWorkflows, message }
+}
+
+function taskListMessage(title: string, workflows: ResumeWorkflowRecord[], requestedOffset = 0): {
+  offset: number
+  visibleWorkflows: ResumeWorkflowRecord[]
+  message: string
+} {
+  const page = compactTaskListPage(workflows, requestedOffset)
+  const from = workflows.length ? page.offset + 1 : 0
+  const to = page.offset + page.visibleWorkflows.length
+  return {
+    ...page,
+    message: [
+      `Задачи ${title} по резюме: ${from}-${to} из ${workflows.length}`,
+      '',
+      page.message
+    ].filter(Boolean).join('\n')
+  }
+}
+
+function taskListReplyMarkup(tasks: ResumeProviderTask[], offset = 0, total = tasks.length) {
+  const inline_keyboard = tasks.map(task => ([
+    {
+      text: task.message.slice(0, 60),
+      callback_data: task.callbackData
+    }
+  ]))
+  const navigation: Array<{ text: string; callback_data: string }> = []
+  if (offset > 0) {
+    navigation.push({
+      text: '← Назад',
+      callback_data: `resume:tasks:${Math.max(0, offset - TASK_LIST_PAGE_SIZE)}`
+    })
+  }
+  if (offset + tasks.length < total) {
+    navigation.push({
+      text: 'Вперед →',
+      callback_data: `resume:tasks:${offset + tasks.length}`
+    })
+  }
+  if (navigation.length) inline_keyboard.push(navigation)
+  return { inline_keyboard }
 }
 
 async function getResumeStatus(chatId: string, repository: ResumeWorkflowRepository, options: ResumeWorkflowOptions = {}): Promise<ResumeWorkflowResult> {
@@ -1080,7 +1159,11 @@ async function resetResumeWorkflowForTest(chatId: string, repository: ResumeWork
   }
 }
 
-async function getProviderTasks(repository: ResumeWorkflowRepository, actorInput?: ResumeActorInput): Promise<ProviderTaskListResult> {
+async function getProviderTasks(
+  repository: ResumeWorkflowRepository,
+  actorInput?: ResumeActorInput,
+  options: { offset?: number } = {}
+): Promise<ProviderTaskListResult> {
   const actor = resolveGlobalActor(actorInput)
   ensureTaskActor(actor)
   if (!repository.getProviderResumeTasks) {
@@ -1089,20 +1172,19 @@ async function getProviderTasks(repository: ResumeWorkflowRepository, actorInput
 
   const workflows = (await repository.getProviderResumeTasks())
     .filter(workflow => actorCanAccessTaskWorkflow(workflow, actor))
-  const tasks = workflows.map(providerTaskFromWorkflow)
   const title = taskActorTitle(actor)
+  const page = taskListMessage(title, workflows, options.offset)
+  const tasks = page.visibleWorkflows.map(providerTaskFromWorkflow)
 
   return {
     actor,
     tasks,
+    offset: page.offset,
+    total: workflows.length,
     message: tasks.length
-      ? [
-          `Задачи ${title} по резюме:`,
-          '',
-          ...workflows.map((workflow, index) => `${index + 1}.\n${providerTaskMessage(workflow)}`)
-        ].join('\n')
+      ? page.message
       : `Сейчас нет ожидающих задач ${title} по резюме.`,
-    replyMarkup: tasks.length ? taskListReplyMarkup(tasks) : undefined
+    replyMarkup: tasks.length ? taskListReplyMarkup(tasks, page.offset, workflows.length) : undefined
   }
 }
 
