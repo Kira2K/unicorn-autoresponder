@@ -756,6 +756,27 @@ function clientMarketLabel(record: ResumeWorkflowRecord): string {
   return [record.clientName, market].filter(Boolean).join(' ')
 }
 
+const RESUME_STATUS_CALLBACK_CODES: Record<string, string> = {
+  "collection student's data": 'csd',
+  "collection Kira's comments": 'ckc',
+  'Draft in process': 'dip',
+  'Draft in approve by Kira': 'dak',
+  'Draft in approve by student': 'das',
+  'English version in progress': 'evp',
+  'English version in approve by Kira': 'eak',
+  'English version in approve by student': 'eas',
+  'Russian version in process': 'rvp',
+  'Russian version in approve by Kira': 'rak',
+  'Russian version in approve by student': 'ras',
+  'moved to filling': 'mtf',
+  stopped: 'stp',
+  filled: 'fld'
+}
+
+const RESUME_STATUS_CALLBACK_STATUSES = Object.fromEntries(
+  Object.entries(RESUME_STATUS_CALLBACK_CODES).map(([status, code]) => [code, status])
+) as Record<string, string>
+
 function clientLinkedInReadyLabel(record: ResumeWorkflowRecord): string {
   const stack = normalizeText(record.clientStack) || 'стек не указан'
   const market = normalizeText(record.clientMarket) || 'рынок не указан'
@@ -862,13 +883,16 @@ function buildTransitionNotifications(record: ResumeWorkflowRecord, testMode: bo
 }
 
 function callbackData(action: 'open' | 'advance', workflowId: number, expectedStatus?: string): string {
-  const encodedStatus = expectedStatus ? Buffer.from(expectedStatus, 'utf8').toString('base64url') : ''
+  const encodedStatus = expectedStatus
+    ? RESUME_STATUS_CALLBACK_CODES[normalizeText(expectedStatus)] || Buffer.from(expectedStatus, 'utf8').toString('base64url')
+    : ''
   return ['resume', action, String(workflowId), encodedStatus].filter(Boolean).join(':')
 }
 
 function decodeCallbackStatus(value: string | undefined): string {
   if (!value) return ''
-  return Buffer.from(value, 'base64url').toString('utf8')
+  const normalized = normalizeText(value)
+  return RESUME_STATUS_CALLBACK_STATUSES[normalized] || Buffer.from(normalized, 'base64url').toString('utf8')
 }
 
 function providerTaskFromWorkflow(workflow: ResumeWorkflowRecord): ResumeProviderTask {

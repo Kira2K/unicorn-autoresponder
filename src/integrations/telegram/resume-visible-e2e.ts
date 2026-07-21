@@ -481,7 +481,7 @@ async function sendStudentCommand(input: {
   config: VisibleResumeE2eConfig
   command: string
   expectedStatus?: string
-  reply: string | RegExp
+  reply?: string | RegExp
   observedUpdates?: any[]
   observedSends?: any[]
   studentUserId?: string
@@ -904,7 +904,6 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       config,
       command: '/resume',
       expectedStatus: 'moved to filling',
-      reply: /передано на заполнение/i,
       observedUpdates: observed.updates,
       observedSends: observed.sends,
       studentUserId: discoveredStudentUserId,
@@ -922,6 +921,19 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
     }
     if (normalizeText(finalWorkflow.lastWorkflowError).includes('Notification warning')) {
       throw new Error(`Final workflow has notification warning: ${finalWorkflow.lastWorkflowError}`)
+    }
+    const kiraFillingNotification = findObservedBotSend({
+      sends: observed.sends,
+      chatId: config.kiraUserId,
+      expected: /передано на заполнение/i,
+      afterIndex: 0
+    })
+    if (!kiraFillingNotification) {
+      throw new Error('Final Kira filling notification was not observed.')
+    }
+    const linkedInReadyNotification = observed.sends.find(send => /@CheMpoKaRokee/.test(normalizeText(send?.text)))
+    if (!linkedInReadyNotification) {
+      throw new Error('Final LinkedIn-ready reporting notification was not observed.')
     }
 
     return {

@@ -121,9 +121,27 @@ function activeTaskContext(actor: SupportBotActor, nowMs = Date.now()): ActiveTa
   return context
 }
 
+const RESUME_STATUS_CALLBACK_STATUSES: Record<string, string> = {
+  csd: "collection student's data",
+  ckc: "collection Kira's comments",
+  dip: 'Draft in process',
+  dak: 'Draft in approve by Kira',
+  das: 'Draft in approve by student',
+  evp: 'English version in progress',
+  eak: 'English version in approve by Kira',
+  eas: 'English version in approve by student',
+  rvp: 'Russian version in process',
+  rak: 'Russian version in approve by Kira',
+  ras: 'Russian version in approve by student',
+  mtf: 'moved to filling',
+  stp: 'stopped',
+  fld: 'filled'
+}
+
 function decodeCallbackStatus(value: string | undefined): string {
   if (!value) return ''
-  return Buffer.from(value, 'base64url').toString('utf8')
+  const normalized = normalizeCommandText(value)
+  return RESUME_STATUS_CALLBACK_STATUSES[normalized] || Buffer.from(normalized, 'base64url').toString('utf8')
 }
 
 function responseText(response: SupportBotResponse): string {

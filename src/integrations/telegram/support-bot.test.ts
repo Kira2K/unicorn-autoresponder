@@ -26,6 +26,8 @@ const {
 }
 const {
   RESUME_STATUSES,
+  callbackData,
+  decodeCallbackStatus,
   getProviderTaskById,
   getProviderTasks,
   getResumeStatus,
@@ -39,6 +41,8 @@ const {
   saveProviderLinkFromChat
 } = require('./resume-workflow.ts') as {
   RESUME_STATUSES: string[]
+  callbackData(action: 'open' | 'advance', workflowId: number, expectedStatus?: string): string
+  decodeCallbackStatus(value: string | undefined): string
   getProviderTaskById(workflowId: number, repository: any, actor?: any): Promise<any>
   getProviderTasks(repository: any, actor?: any, options?: any): Promise<any>
   getResumeStatus(chatId: string, repository: any, options?: any): Promise<any>
@@ -369,6 +373,15 @@ async function runTests() {
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
   assert.match(responseText(callbackResponse), /черновик на проверке у Киры/)
+
+  const longStatusCallback = callbackData('advance', 98, 'English version in approve by Kira')
+  assert.equal(longStatusCallback, 'resume:advance:98:eak')
+  assert(longStatusCallback.length <= 64)
+  assert.equal(decodeCallbackStatus(longStatusCallback.split(':')[3]), 'English version in approve by Kira')
+  assert.equal(
+    decodeCallbackStatus(Buffer.from('Draft in process', 'utf8').toString('base64url')),
+    'Draft in process'
+  )
 
   clearActiveTaskContextsForTest()
   const contextualInputs: any[] = []
