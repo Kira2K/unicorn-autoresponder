@@ -615,8 +615,7 @@ async function runSelectedClientsOrchestrator(
   clientNames: string[]
 ): Promise<OrchestratorStatus[]> {
   const db = createAppDb()
-  const allClients: ClientAutomationData[] =
-    await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
+  const allClients = await fetchSelectedClientsByUniqueNames(db, clientNames)
   const selectedClients = await attachHHAuthCredentials(
     attachBlockedCompanies(
       prepareSelectedClients(selectClientsByUniqueNames(allClients, clientNames))
@@ -625,6 +624,21 @@ async function runSelectedClientsOrchestrator(
   )
 
   return runClientsOrchestrator(selectedClients)
+}
+
+async function fetchSelectedClientsByUniqueNames(
+  db: {
+    getAutomationTargets: (options?: {
+      market?: 'Ru' | 'En'
+      clientNames?: string[]
+    }) => Promise<ClientAutomationData[]>
+  },
+  clientNames: string[]
+): Promise<ClientAutomationData[]> {
+  return db.getAutomationTargets({
+    ...getConfiguredAutomationTargetOptions(),
+    clientNames
+  })
 }
 
 async function runSelectedClientIdsOrchestrator(
@@ -798,6 +812,7 @@ module.exports = {
   getLocalRunLogFile: () => LOCAL_RUN_LOG_FILE,
   getRecommendedExternalTimeoutMs,
   getRunningDolphinBrowserProfileIds,
+  fetchSelectedClientsByUniqueNames,
   openScenarioAndInjectIndex,
   main,
   runWithBoundedConcurrency,

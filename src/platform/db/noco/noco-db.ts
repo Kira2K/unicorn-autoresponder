@@ -42,6 +42,10 @@ function normalizeText(value: unknown): string {
     .replace(/\s+/g, ' ')
 }
 
+function normalizeClientNameKey(value: unknown): string {
+  return normalizeText(value).replace(/\u0451/g, '\u0435')
+}
+
 function normalizeId(value: unknown): string {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
@@ -359,13 +363,15 @@ async function fetchNocoAutomationState(client: any): Promise<{
   stacks: NocoRecord[]
   restrictions: NocoRecord[]
 }> {
-  const [clients, autoresponseRows, profiles, stacks, restrictions] = await Promise.all([
-    client.fetchRecords(TABLES.clients.id, 1000),
-    client.fetchRecords(TABLES.hhAutoresponses.id, 1000),
-    client.fetchRecords(TABLES.dolphinProfiles.id, 1000),
-    client.fetchRecords(TABLES.stacks.id, 1000),
-    client.fetchRecords(TABLES.restrictions.id, 1000)
-  ])
+  const clients = await client.fetchRecords(TABLES.clients.id, 1000)
+  const autoresponseRows = await client.fetchRecords(
+    TABLES.hhAutoresponses.id,
+    1000
+  )
+  const profiles = await client.fetchRecords(TABLES.dolphinProfiles.id, 1000)
+  const stacks = await client.fetchRecords(TABLES.stacks.id, 1000)
+  const restrictions = await client.fetchRecords(TABLES.restrictions.id, 1000)
+
   return { clients, autoresponseRows, profiles, stacks, restrictions }
 }
 
@@ -381,6 +387,10 @@ function buildAutomationTargetsFromNocoState(
 ): ClientAutomationData[] {
   const marketFilter = options.market ?? ((options.workWithRuOnly ?? true) ? 'Ru' : undefined)
   const clientsById = new Map(state.clients.map(client => [client.Id, client]))
+  const selectedClientNames = new Set(
+    (options.clientNames ?? []).map(name => normalizeClientNameKey(name))
+  )
+  const hasSelectedClientNames = selectedClientNames.size > 0
   const targets: ClientAutomationData[] = []
 
   for (const row of state.autoresponseRows) {
@@ -389,6 +399,12 @@ function buildAutomationTargetsFromNocoState(
     if (!client) continue
 
     const clientName = String(client.client_name ?? '').trim()
+    if (
+      hasSelectedClientNames &&
+      !selectedClientNames.has(normalizeClientNameKey(clientName))
+    ) {
+      continue
+    }
     const resolvedStack = resolveStack(row, client, clientName, state.stacks)
     const stack = resolvedStack.name
     const commonChatId = normalizeId(client.telegram_general_chat_id)
@@ -513,7 +529,7 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
     },
 
     async getAutomationTargetByName(name: string, market: Market = 'Ru'): Promise<ClientAutomationData> {
-      const targets = await this.getAutomationTargets({ market })
+      const targets = await this.getAutomationTargets({ market, clientNames: [name] })
       const matches = targets.filter(target => target.clientName === name && target.market === market)
       if (!matches.length) throw new Error(`Client "${name}" on market "${market}" was not found or is not enabled`)
       if (matches.length > 1) throw new Error(`Client name "${name}" on market "${market}" is ambiguous. Matching chat ids: ${matches.map(target => target.commonChatId).join(', ')}`)

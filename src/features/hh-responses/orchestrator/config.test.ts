@@ -128,6 +128,24 @@ function testOrchestratorConcurrencyIsPositiveInteger(): void {
   )
 }
 
+function testMarketConfigParsesEn(): void {
+  const config = loadConfig({
+    ORCHESTRATOR_WORK_WITH_MARKET: 'en'
+  })
+
+  assert.equal(config.ORCHESTRATOR_WORK_WITH_MARKET, 'En')
+}
+
+function testMarketConfigRejectsInvalidValue(): void {
+  assert.throws(
+    () =>
+      loadConfig({
+        ORCHESTRATOR_WORK_WITH_MARKET: 'all'
+      }),
+    /Invalid ORCHESTRATOR_WORK_WITH_MARKET/
+  )
+}
+
 testResponseLimitDoesNotDisableDefaultWatch()
 testExplicitWatchStillOverridesDefaultWatch()
 testExplicitWatchCanBeDisabled()
@@ -136,5 +154,7 @@ testIdleTimeoutDefaultsToTenMinutes()
 testOrchestratorConcurrencyDefaultsToOneWhenUnsupervised()
 testSupervisedOrchestratorConcurrencyDefaultsToThree()
 testOrchestratorConcurrencyIsPositiveInteger()
+testMarketConfigParsesEn()
+testMarketConfigRejectsInvalidValue()
 
 console.log('orchestrator config tests passed')

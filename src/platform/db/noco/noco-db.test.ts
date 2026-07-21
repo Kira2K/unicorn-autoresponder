@@ -17,6 +17,8 @@ const {
   responseField(market: 'Ru' | 'En'): string
 }
 
+const COVER_EN = '\u0421\u043e\u043f\u0440\u043e\u0432\u043e\u0434_En'
+
 async function runTests(): Promise<void> {
   assert.equal(normalizeId('770032142.0'), '770032142')
   assert.equal(isEnabled('TRUE'), true)
@@ -205,6 +207,59 @@ async function runTests(): Promise<void> {
     { id: 'global-comtek', name: 'Comtek' }
   ])
   assert.equal(enTargets[0].stackScenario, 'https://hh.ru/search/vacancy?text=react-en')
+
+  const selectedEnTargets = buildAutomationTargetsFromNocoState(
+    {
+      clients: [
+        {
+          Id: 10,
+          client_name: 'Broken',
+          telegram_general_chat_id: '-10010',
+          rel_clients_primary_stack: { Id: 4, name: 'FRONTEND' }
+        },
+        {
+          Id: 11,
+          client_name: 'Artem',
+          telegram_general_chat_id: '-10011',
+          rel_clients_primary_stack: { Id: 4, name: 'FRONTEND' }
+        }
+      ],
+      autoresponseRows: [
+        {
+          Id: 10,
+          rel_hhAutoresponses_client: { Id: 10, client_name: 'Broken' },
+          [COVER_EN]: 'Hello!',
+          [responseField('En')]: 'TRUE'
+        },
+        {
+          Id: 11,
+          rel_hhAutoresponses_client: { Id: 11, client_name: 'Artem' },
+          [COVER_EN]: 'Hello!',
+          [responseField('En')]: 'TRUE'
+        }
+      ],
+      profiles: [
+        {
+          Id: 11,
+          locale: 'en',
+          dolphin_profile_id: '793981534',
+          rel_dolphinProfiles_client: { Id: 11 }
+        }
+      ],
+      stacks: [
+        {
+          Id: 4,
+          name: 'FRONTEND',
+          hh_scenario_url_en: 'https://hh.ru/search/vacancy?text=frontend-en'
+        }
+      ]
+    },
+    { market: 'En', clientNames: ['Artem'] }
+  )
+
+  assert.equal(selectedEnTargets.length, 1)
+  assert.equal(selectedEnTargets[0].clientName, 'Artem')
+  assert.equal(selectedEnTargets[0].dolphinProfileId, 793981534)
 
   const kiraOverrideTargets = buildAutomationTargetsFromNocoState(
     {

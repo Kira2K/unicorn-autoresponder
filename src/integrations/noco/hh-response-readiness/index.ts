@@ -34,13 +34,16 @@ const { TABLES } = require('../core/schema.ts') as {
 type Market = import('../../../platform/db/types.ts').Market
 
 type CliOptions = {
+  clientNames: string[]
   json: boolean
   market?: Market
   strict: boolean
 }
 
 type TargetReadiness = {
+  clientId: number
   clientName: string
+  enabled: boolean
   market: Market
   stack: string
   stackId: number
@@ -61,8 +64,14 @@ function parseArgs(args: string[]): CliOptions {
   const marketValue = marketArg?.slice('--market='.length).trim().toLowerCase()
   const market =
     marketValue === 'ru' ? 'Ru' : marketValue === 'en' ? 'En' : undefined
+  const clientNamesArg = args.find(arg => arg.startsWith('--client-names='))
+  const clientNames = String(clientNamesArg?.slice('--client-names='.length) ?? '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
 
   return {
+    clientNames,
     json: args.includes('--json'),
     market,
     strict: args.includes('--strict')
@@ -73,12 +82,16 @@ function normalizeText(value: unknown): string {
   return String(value ?? '')
     .trim()
     .toLowerCase()
-    .replace(/ё/g, 'е')
+    .replace(/\u0451/g, '\u0435')
     .replace(/\s+/g, ' ')
 }
 
+function normalizeNameKey(value: unknown): string {
+  return normalizeText(value).replace(/\u0451/g, '\u0435')
+}
+
 function isEnabled(value: unknown): boolean {
-  return ['1', 'true', 'yes', 'да', 'y'].includes(normalizeText(value))
+  return ['1', 'true', 'yes', '\u0434\u0430', 'y'].includes(normalizeText(value))
 }
 
 function linkedRecord(value: unknown): Record<string, unknown> | null {
@@ -151,19 +164,26 @@ function buildTargets(state: {
   autoresponseRows: Array<Record<string, unknown> & { Id: number }>
   platformAccounts: Array<Record<string, unknown> & { Id: number }>
   stacks: Array<Record<string, unknown> & { Id: number }>
-}, marketFilter?: Market): TargetReadiness[] {
+}, marketFilter?: Market, clientNames: string[] = []): TargetReadiness[] {
   const clientsById = new Map(state.clients.map(client => [client.Id, client]))
+  const selectedClientNames = new Set(clientNames.map(normalizeNameKey))
+  const hasSelectedClients = selectedClientNames.size > 0
   const targets: TargetReadiness[] = []
+  const seenSelectedKeys = new Set<string>()
 
   for (const row of state.autoresponseRows) {
     const clientId = linkedId(row.rel_hhAutoresponses_client) ?? Number(row.clients_id)
     const client = clientsById.get(clientId)
     const clientName = String(client?.client_name ?? '').trim()
     const commonChatId = normalizeId(client?.telegram_general_chat_id)
+    const selected = selectedClientNames.has(normalizeNameKey(clientName))
+    if (hasSelectedClients && !selected) continue
 
     for (const market of ['Ru', 'En'] as Market[]) {
       if (marketFilter && market !== marketFilter) continue
-      if (!isEnabled(row[enabledField(market)])) continue
+      const enabled = isEnabled(row[enabledField(market)])
+      if (!enabled && !selected) continue
+      if (selected) seenSelectedKeys.add(`${normalizeNameKey(clientName)}:${market}`)
 
       const problems: string[] = []
       let stack = ''
@@ -202,6 +222,7 @@ function buildTargets(state: {
       const canonicalHHAccount = hhAccounts.length === 1 ? hhAccounts[0] : undefined
       const canonicalHHAccountId = Number(canonicalHHAccount?.Id ?? 0)
       const coverText = String(row[coverField(market)] ?? '').trim()
+      if (!enabled) problems.push(`HH autoresponses disabled for ${market}`)
       if (!clientName) problems.push('missing client name')
       if (!stack) problems.push('missing stack')
       if (!Number.isFinite(dolphinProfileId) || dolphinProfileId <= 0) problems.push('missing Dolphin profile id')
@@ -216,7 +237,9 @@ function buildTargets(state: {
       }
 
       targets.push({
+        clientId: Number(client?.Id ?? 0),
         clientName,
+        enabled,
         market,
         stack,
         stackId,
@@ -234,6 +257,41 @@ function buildTargets(state: {
     }
   }
 
+  if (hasSelectedClients) {
+    for (const clientName of clientNames) {
+      const client = state.clients.find(candidate =>
+        normalizeNameKey(candidate.client_name) === normalizeNameKey(clientName)
+      )
+
+      for (const market of ['Ru', 'En'] as Market[]) {
+        if (marketFilter && market !== marketFilter) continue
+        const key = `${normalizeNameKey(clientName)}:${market}`
+        if (seenSelectedKeys.has(key)) continue
+
+        targets.push({
+          clientId: Number(client?.Id ?? 0),
+          clientName,
+          enabled: false,
+          market,
+          stack: '',
+          stackId: 0,
+          stackSource: '',
+          dolphinProfileId: 0,
+          commonChatId: normalizeId(client?.telegram_general_chat_id),
+          hasCoverText: false,
+          hasStackScenario: false,
+          hasProfileRelation: false,
+          hasCanonicalHHAccount: false,
+          canonicalHHAccountId: 0,
+          hasHHCredentials: false,
+          problems: client
+            ? [`missing hh-autoresponses row for ${market}`]
+            : ['client not found']
+        })
+      }
+    }
+  }
+
   return targets
 }
 
@@ -242,9 +300,11 @@ function printText(results: TargetReadiness[]): void {
 
   for (const result of results) {
     const status = result.problems.length ? 'BLOCKED' : 'ready'
+    const enabledStatus = result.enabled ? 'enabled' : 'disabled'
     console.log(
       [
         `- ${result.clientName} / ${result.market}`,
+        enabledStatus,
         `${result.stack || 'missing stack'} (${result.stackSource || 'no source'}${result.stackId ? ` #${result.stackId}` : ''})`,
         `profile ${result.dolphinProfileId}`,
         `chat ${result.commonChatId}`,
@@ -262,14 +322,25 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
   const db = createNocoDb()
   const nocoClient = createNocoClient()
-  const [clients, profiles, autoresponseRows, platformAccounts, stacks] = await Promise.all([
-    nocoClient.fetchRecords(TABLES.clients.id, 1000),
-    nocoClient.fetchRecords(TABLES.dolphinProfiles.id, 1000),
-    nocoClient.fetchRecords(TABLES.hhAutoresponses.id, 1000),
-    nocoClient.fetchRecords(TABLES.platformAccounts.id, 1000),
-    nocoClient.fetchRecords(TABLES.stacks.id, 1000)
-  ])
-  const targets = buildTargets({ clients, profiles, autoresponseRows, platformAccounts, stacks }, options.market)
+  const clients = await nocoClient.fetchRecords(TABLES.clients.id, 1000)
+  const profiles = await nocoClient.fetchRecords(
+    TABLES.dolphinProfiles.id,
+    1000
+  )
+  const autoresponseRows = await nocoClient.fetchRecords(
+    TABLES.hhAutoresponses.id,
+    1000
+  )
+  const platformAccounts = await nocoClient.fetchRecords(
+    TABLES.platformAccounts.id,
+    1000
+  )
+  const stacks = await nocoClient.fetchRecords(TABLES.stacks.id, 1000)
+  const targets = buildTargets(
+    { clients, profiles, autoresponseRows, platformAccounts, stacks },
+    options.market,
+    options.clientNames
+  )
   const results = await Promise.all(
     targets.map(target => checkTarget(db, target))
   )
@@ -297,7 +368,15 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.stack : error)
-  process.exitCode = 1
-})
+if (require.main === module) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.stack : error)
+    process.exitCode = 1
+  })
+}
+
+module.exports = {
+  buildTargets,
+  checkTarget,
+  parseArgs
+}

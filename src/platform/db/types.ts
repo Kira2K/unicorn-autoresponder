@@ -17,6 +17,7 @@ export type SheetState = {
 export type AutomationTargetOptions = {
   workWithRuOnly?: boolean
   market?: Market
+  clientNames?: string[]
 }
 
 export type ClientAutomationData = {

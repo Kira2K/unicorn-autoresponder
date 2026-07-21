@@ -1,9 +1,17 @@
 const assert = require('node:assert/strict')
 
 const {
+  fetchSelectedClientsByUniqueNames,
   getRecommendedExternalTimeoutMs,
   runWithBoundedConcurrency
 } = require('./orchestrator.ts') as {
+  fetchSelectedClientsByUniqueNames(
+    db: {
+      getAutomationTargetByName?: (name: string, market?: 'Ru' | 'En') => Promise<any>
+      getAutomationTargets: (options?: unknown) => Promise<any[]>
+    },
+    clientNames: string[]
+  ): Promise<any[]>
   getRecommendedExternalTimeoutMs(
     clientCount: number,
     watchMs?: number,
@@ -75,10 +83,33 @@ function testExternalTimeoutAccountsForClientBatches(): void {
   assert.equal(twoAtATime, 266200)
 }
 
+async function testSelectedClientsFetchByNameWithoutAllTargets(): Promise<void> {
+  const calls: unknown[] = []
+  const clients = await fetchSelectedClientsByUniqueNames(
+    {
+      getAutomationTargets: async (options?: unknown) => {
+        calls.push(options)
+
+        return [
+          {
+            clientName: 'Artem',
+            market: 'Ru'
+          }
+        ]
+      }
+    },
+    ['Artem']
+  )
+
+  assert.deepEqual(calls, [{ market: 'Ru', clientNames: ['Artem'] }])
+  assert.deepEqual(clients, [{ clientName: 'Artem', market: 'Ru' }])
+}
+
 async function main(): Promise<void> {
   await testDefaultSerialConcurrencyShape()
   await testConfiguredConcurrencyCapsActiveRuns()
   testExternalTimeoutAccountsForClientBatches()
+  await testSelectedClientsFetchByNameWithoutAllTargets()
 
   console.log('orchestrator cli tests passed')
 }
