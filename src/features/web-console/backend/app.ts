@@ -73,28 +73,23 @@ const { SUMMARY_LOGS_CHANNEL_ID } = require('../../hh-responses/orchestrator/con
 }
 const {
   buildProxyName,
-  buildProfileName,
-  buildProxyNameExample,
   createDolphinProfileProvisioner,
-  getRequiredClientDataIssues,
-  requiredLocalesForMarket,
   prepareJudosharkClientIfNeeded
 } = require('./dolphin-profile-provisioning.ts') as {
   buildProxyName(client: any, enProfileId: number): string
-  buildProfileName(client: any, locale: 'ru' | 'en'): string
-  buildProxyNameExample(client: any): string
   createDolphinProfileProvisioner(options: {
     repository: WebConsoleRepository
     api?: any
     templateProfileId?: number
   }): DolphinProfileProvisioner
-  getRequiredClientDataIssues(client: any, options?: { requireCalendarEmail?: boolean }): Array<{
-    field: string
-    fieldLabel: string
-    message: string
-  }>
-  requiredLocalesForMarket(market: unknown): Array<'ru' | 'en'>
   prepareJudosharkClientIfNeeded(repository: WebConsoleRepository, client: any): Promise<any>
+}
+const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as {
+  buildDolphinProfileStatus(options: {
+    client: any
+    existingProfiles: Array<{ id: number; locale: string }>
+    actorRole: 'client' | 'admin' | 'provider'
+  }): import('./types.ts').DolphinProfileStatus
 }
 
 type Request = import('express').Request
@@ -273,55 +268,13 @@ function createMissingProfilesError(clientId: number, missingLocales?: string[])
   })
 }
 
-function safeRequiredLocales(client: any): Array<'ru' | 'en'> {
-  try {
-    return requiredLocalesForMarket(client.market)
-  } catch {
-    return []
-  }
-}
-
-function localeSortValue(locale: string): number {
-  return locale === 'ru' ? 0 : locale === 'en' ? 1 : 2
-}
-
 async function getDolphinProfileStatus(options: {
   repository: WebConsoleRepository
   client: any
   actorRole: 'client' | 'admin' | 'provider'
 }) {
-  const requireCalendarEmail = options.actorRole === 'client'
-  const requiredFields = getRequiredClientDataIssues(options.client, { requireCalendarEmail })
   const existingProfiles = await options.repository.getDolphinProfilesForClient(options.client.id)
-  const requiredLocales = requiredFields.length ? [] : safeRequiredLocales(options.client)
-  const existingLocales = new Set(existingProfiles.map(profile => String(profile.locale || '').toLowerCase()))
-  const missingLocales = requiredLocales.filter(locale => !existingLocales.has(locale))
-  const expectedProfileNames = requiredFields.length
-    ? []
-    : requiredLocales.map(locale => ({
-      locale,
-      name: buildProfileName(options.client, locale)
-    }))
-  const expectedProxyName = !requiredFields.length && requiredLocales.includes('en')
-    ? buildProxyNameExample(options.client)
-    : ''
-
-  return {
-    targetClientId: options.client.id,
-    targetClientName: options.client.clientName,
-    actorRole: options.actorRole,
-    action: requiredFields.length
-      ? 'blocked'
-      : missingLocales.length
-        ? 'create_new'
-        : 'open_existing',
-    existingProfiles: existingProfiles.sort((a, b) => localeSortValue(a.locale) - localeSortValue(b.locale) || a.id - b.id),
-    requiredLocales,
-    missingLocales,
-    expectedProfileNames,
-    expectedProxyName,
-    requiredFields
-  }
+  return buildDolphinProfileStatus({ ...options, existingProfiles })
 }
 
 function assertProfileStatusUsable(status: Awaited<ReturnType<typeof getDolphinProfileStatus>>) {

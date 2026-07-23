@@ -75,6 +75,11 @@ const TABLES = {
     id: 'mes5o0s90zwat1t',
     title: 'hh-autoresponses'
   },
+  providerResponses: {
+    key: 'providerResponses',
+    id: 'mr5q0wij94utk1q',
+    title: 'provider responses'
+  },
   cvProcessing: {
     key: 'cvProcessing',
     id: 'mhiysd8l0f33bny',

@@ -40,6 +40,7 @@ const mockClients = [
     telegram_general_chat_id: '-100200301',
     rel_clients_primary_stack: { Id: 12, name: 'DATA' },
     market: 'En',
+    stop_list_company: 'Smartcat, Bank CenterCredit',
     client_status: { id: 'sxi0rjsc39ffpt5', name: 'on en market' }
   },
   {
@@ -74,6 +75,18 @@ const mockClients = [
     rel_clients_primary_stack: { Id: 15, name: 'PYTHON' },
     market: 'ru',
     client_status: { Id: 1, title: 'studying' }
+  },
+  {
+    Id: 6,
+    client_name: 'Provider Ru Visible',
+    first_name: 'Provider',
+    last_name: 'Ru',
+    fio: 'Provider Ru Visible',
+    calendar_email: 'provider-ru-visible@example.com',
+    telegram_general_chat_id: '-100777003',
+    rel_clients_primary_stack: { Id: 16, name: 'PYTHON' },
+    market: 'ru',
+    client_status: { id: 'sxi0rjsc39ffpt5', name: 'on en market' }
   }
 ]
 
@@ -174,6 +187,41 @@ const mockPlatformAccounts = [
     password: '',
     clients_id: 10,
     rel_platformAccounts_platform: { Id: 99, name: 'linkedin', label: 'linkedin' }
+  },
+  {
+    Id: 205,
+    platform: 'hh_en',
+    account_label: 'Ilyas HH En',
+    email: 'ilyas.hh-en@example.com',
+    password: 'ilyas-hh-en-secret',
+    clients_id: 2,
+    platforms_id: 10
+  },
+  {
+    Id: 206,
+    platform: 'hh_ru',
+    account_label: 'Ilyas HH Ru',
+    email: 'ilyas.hh-ru@example.com',
+    password: 'ilyas-hh-ru-secret',
+    clients_id: 2,
+    platforms_id: 11
+  },
+  {
+    Id: 207,
+    platform: 'hh_ru',
+    account_label: 'Provider Ru Visible HH Ru',
+    email: 'provider.ru.hh-ru@example.com',
+    password: 'provider-ru-visible-secret',
+    clients_id: 6,
+    platforms_id: 11
+  },
+  {
+    Id: 208,
+    platform: 'phone_en',
+    account_label: 'Ilyas Phone En',
+    phone: '+995 555 111 222',
+    clients_id: 2,
+    platforms_id: 28
   }
 ]
 
@@ -232,12 +280,34 @@ const mockDolphinProfiles = [
   }
 ]
 
+const mockProviderResponses = [
+  {
+    Id: 401,
+    clients_id: 2,
+    client: { Id: 2, client_name: 'Ильяс Тохтаран' },
+    record_key: 'Ilyas EN',
+    respond_ru: false,
+    respond_en: true,
+    salary_expectations: 2500,
+    comment: 'Ready for provider review.',
+    Github: 'https://github.com/ilyas-provider',
+    'Stack preferenses / possibilities': 'Data, Backend-heavy FullStack',
+    'Blacklisted companies': 'Wrong response blacklist',
+    hh_en_account: { Id: 301, account_label: 'Ilyas hh_en' },
+    hh_ru_account: { Id: 302, account_label: 'Ilyas hh_ru' },
+    linkedin_account: { Id: 303, account_label: 'Ilyas LinkedIn' },
+    main_CV: 'https://drive.google.com/main-cv',
+    additional_CV: 'https://drive.google.com/additional-cv'
+  }
+]
+
 function createMockNocoClient() {
   const clients: Array<Record<string, any> & { Id: number }> = mockClients.map(record => ({ ...record }))
   const platformAccounts: Array<Record<string, any> & { Id: number }> = mockPlatformAccounts.map(record => ({ ...record }))
   const platforms: Array<Record<string, any> & { Id: number }> = mockPlatforms.map(record => ({ ...record }))
   const englishLevels: Array<Record<string, any> & { Id: number }> = mockEnglishLevels.map(record => ({ ...record }))
   const dolphinProfiles: Array<Record<string, any> & { Id: number }> = mockDolphinProfiles.map(record => ({ ...record }))
+  const providerResponses: Array<Record<string, any> & { Id: number }> = mockProviderResponses.map(record => ({ ...record }))
 
   function nextId(records: Array<{ Id: number }>): number {
     return Math.max(0, ...records.map(record => Number(record.Id))) + 1
@@ -291,6 +361,7 @@ function createMockNocoClient() {
       if (tableId === 'mg3ovkendur1kpo') return platforms
       if (tableId === 'mpteejwqy2kvmvm') return englishLevels
       if (tableId === 'm4thvbutfyb15qz') return dolphinProfiles
+      if (tableId === 'mr5q0wij94utk1q') return providerResponses
       return []
     },
     async createRecord(tableId: string, record: Record<string, any>) {
@@ -339,6 +410,7 @@ module.exports = {
   mockClients,
   mockDolphinProfiles,
   mockEnglishLevels,
+  mockProviderResponses,
   mockPlatformAccounts,
   mockPlatforms
 }

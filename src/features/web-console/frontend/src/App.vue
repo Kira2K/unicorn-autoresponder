@@ -38,6 +38,9 @@ const email = ref('')
 const password = ref('')
 const dashboard = ref(null)
 const providerClients = ref([])
+const providerDetailsVisible = ref(false)
+const selectedProviderClient = ref(null)
+const providerCredentialRevealed = ref({})
 const providerDolphinEmail = ref('')
 const dryRunResult = ref(null)
 const dolphinLease = ref(null)
@@ -1176,17 +1179,6 @@ async function loadDolphinStatus(targetClientId = null) {
   return status
 }
 
-async function loadProviderDolphinStatuses(clients) {
-  providerDolphinProfileStatuses.value = {}
-  await Promise.all((clients || []).map(async client => {
-    try {
-      await loadDolphinStatus(client.id)
-    } catch {
-      // Row-level status is best-effort; the action itself still validates server-side.
-    }
-  }))
-}
-
 async function loadDashboard() {
   if (!session.value) return
   pageLoading.value = true
@@ -1210,7 +1202,9 @@ async function loadDashboard() {
       dashboard.value = null
       providerClients.value = result.clients || []
       providerDolphinEmail.value = result.providerDolphinEmail || ''
-      await loadProviderDolphinStatuses(providerClients.value)
+      providerDolphinProfileStatuses.value = Object.fromEntries(
+        providerClients.value.map(client => [client.id, client.dolphinProfileStatus])
+      )
     } else {
       await loadClientOptions()
       dashboard.value = await api.clientDashboard()
@@ -1253,6 +1247,46 @@ async function refreshTelegramStatus() {
   } finally {
     state.loading = false
   }
+}
+
+function openProviderDetails(client) {
+  selectedProviderClient.value = client
+  providerCredentialRevealed.value = {}
+  providerDetailsVisible.value = true
+}
+
+function providerCredentialKey(credential) {
+  return `${selectedProviderClient.value?.id || 'client'}:${credential.market}`
+}
+
+function providerCredentialVisible(credential) {
+  return Boolean(providerCredentialRevealed.value[providerCredentialKey(credential)])
+}
+
+function toggleProviderCredential(credential) {
+  const key = providerCredentialKey(credential)
+  providerCredentialRevealed.value = {
+    ...providerCredentialRevealed.value,
+    [key]: !providerCredentialRevealed.value[key]
+  }
+}
+
+function providerHHStatusSeverity(status) {
+  if (status === 'ready') return 'success'
+  if (status === 'missing_account') return 'danger'
+  if (status === 'not_required') return 'info'
+  return 'warn'
+}
+
+function providerHHStatusLabel(status) {
+  return {
+    ready: 'Ready',
+    not_required: 'Not required for this student market',
+    missing_account: 'Missing account',
+    missing_email: 'Missing email',
+    missing_password: 'Missing password',
+    incomplete: 'Missing email and password'
+  }[status] || status
 }
 
 async function connectTelegram() {
@@ -1960,6 +1994,94 @@ onUnmounted(() => {
           </div>
         </template>
       </Dialog>
+      <Drawer v-model:visible="providerDetailsVisible" position="right" class="provider-details-drawer" data-testid="provider-details-drawer">
+        <template #header>
+          <div v-if="selectedProviderClient" class="provider-drawer-heading">
+            <span>Student details</span>
+            <strong>{{ selectedProviderClient.clientName }}</strong>
+          </div>
+        </template>
+        <div v-if="selectedProviderClient" class="provider-details-content">
+          <section class="provider-detail-section">
+            <h3>Client data</h3>
+            <dl class="info-list">
+              <div><dt>Market</dt><dd>{{ selectedProviderClient.market || 'empty' }}</dd></div>
+              <div><dt>Primary stack</dt><dd>{{ selectedProviderClient.primaryStack || 'empty' }}</dd></div>
+              <div><dt>LinkedIn email</dt><dd>{{ selectedProviderClient.linkedInEmail || 'empty' }}</dd></div>
+            </dl>
+          </section>
+          <section class="provider-detail-section">
+            <h3>HH credentials</h3>
+            <div class="provider-hh-grid">
+              <article
+                v-for="credential in selectedProviderClient.hhCredentials || []"
+                :key="credential.market"
+                :class="['provider-hh-card', `provider-hh-card-${credential.status}`]"
+                :data-testid="`provider-hh-credential-${credential.market.toLowerCase()}`"
+              >
+                <header>
+                  <strong>{{ credential.market }}</strong>
+                  <Tag :value="providerHHStatusLabel(credential.status)" :severity="providerHHStatusSeverity(credential.status)" />
+                </header>
+                <div class="provider-hh-fields">
+                  <div class="provider-response-field">
+                    <span class="provider-detail-label">Market</span>
+                    <span>{{ credential.market }}</span>
+                  </div>
+                  <div class="provider-response-field">
+                    <span class="provider-detail-label">Email</span>
+                    <span>{{ credential.email || 'empty' }}</span>
+                  </div>
+                  <div class="provider-response-field provider-hh-password-field">
+                    <span class="provider-detail-label">Password</span>
+                    <div class="provider-hh-password-row">
+                      <InputText
+                        :type="providerCredentialVisible(credential) ? 'text' : 'password'"
+                        :model-value="credential.password || ''"
+                        readonly
+                        :placeholder="credential.password ? '' : 'empty'"
+                        :data-testid="`provider-hh-password-${credential.market.toLowerCase()}`"
+                      />
+                      <Button
+                        :icon="providerCredentialVisible(credential) ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                        severity="secondary"
+                        text
+                        rounded
+                        :aria-label="providerCredentialVisible(credential) ? 'Hide HH password' : 'Show HH password'"
+                        :disabled="!credential.password"
+                        :data-testid="`provider-hh-password-toggle-${credential.market.toLowerCase()}`"
+                        @click="toggleProviderCredential(credential)"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+          <section class="provider-detail-section">
+            <h3>Provider responses</h3>
+            <Message v-if="!(selectedProviderClient.providerResponses || []).length" severity="secondary" :closable="false">No provider-response row is linked to this client.</Message>
+            <div v-else class="provider-response-grid">
+              <article v-for="response in selectedProviderClient.providerResponses" :key="response.id" class="provider-response-card">
+                <header>
+                  <strong>Provider response</strong>
+                  <div class="provider-response-tags">
+                    <Tag :value="response.respondEn ? 'EN on' : 'EN off'" :severity="response.respondEn ? 'success' : 'secondary'" />
+                    <Tag :value="response.respondRu ? 'RU on' : 'RU off'" :severity="response.respondRu ? 'success' : 'secondary'" />
+                  </div>
+                </header>
+                <div class="provider-response-fields">
+                  <div v-for="field in response.fields" :key="field.label" class="provider-response-field">
+                    <span class="provider-detail-label">{{ field.label }}</span>
+                    <a v-if="field.kind === 'url' && field.value" :href="field.value" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>
+                    <span v-else>{{ field.value || 'empty' }}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </Drawer>
       <Dialog v-model:visible="adminAiTailorModalOpen" modal header="[Beta] CV AI-tailoring" class="admin-ai-tailor-dialog" data-testid="admin-ai-tailor-dialog">
         <div class="admin-ai-tailor-form">
           <label class="field wide-field">
@@ -2161,11 +2283,15 @@ onUnmounted(() => {
             </section>
             <DataTable :value="providerClients" striped-rows responsive-layout="scroll" data-testid="provider-clients-table">
               <Column field="clientName" header="Name" />
+              <Column field="market" header="Market" />
               <Column field="primaryStack" header="Stack" />
               <Column field="linkedInEmail" header="LinkedIn email" />
               <Column header="Action">
                 <template #body="{ data }">
-                  <Button v-if="!hasActiveDolphinLease" label="Open Dolphin profiles" icon="pi pi-external-link" size="small" :loading="dolphinLeaseLoading" data-testid="open-dolphin-provider-button" @click="openDolphinProfile(data.clientName, data.id, 'open_existing')" />
+                  <div class="provider-row-actions">
+                    <Button label="Details" icon="pi pi-eye" size="small" severity="secondary" outlined data-testid="provider-details-button" @click="openProviderDetails(data)" />
+                    <Button v-if="!hasActiveDolphinLease" class="provider-dolphin-button" label="Open Dolphin profiles" icon="pi pi-external-link" size="small" :loading="dolphinLeaseLoading" data-testid="open-dolphin-provider-button" @click="openDolphinProfile(data.clientName, data.id, 'open_existing')" />
+                  </div>
                 </template>
               </Column>
             </DataTable>

@@ -392,6 +392,151 @@ body {
   width: min(920px, calc(100vw - 32px));
 }
 
+.provider-details-drawer {
+  width: min(42rem, 96vw) !important;
+}
+
+.provider-drawer-heading,
+.provider-details-content,
+.provider-detail-section,
+.provider-response-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.provider-drawer-heading {
+  gap: 0.2rem;
+}
+
+.provider-drawer-heading span,
+.provider-detail-label {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.provider-detail-section + .provider-detail-section {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 0.5rem;
+  padding-top: 1.25rem;
+}
+
+.provider-detail-section h3 {
+  margin: 0;
+}
+
+.provider-response-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.85rem;
+  padding: 1rem;
+}
+
+.provider-response-card header,
+.provider-row-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: space-between;
+}
+
+.provider-response-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.provider-response-fields {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.provider-response-field {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.provider-response-field a,
+.provider-response-field span:last-child {
+  overflow-wrap: anywhere;
+}
+
+.provider-hh-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.provider-hh-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.85rem;
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+}
+
+.provider-hh-card header {
+  align-items: center;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: space-between;
+}
+
+.provider-hh-card-missing_account {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.provider-hh-card-missing_email,
+.provider-hh-card-missing_password,
+.provider-hh-card-incomplete {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.provider-hh-card-not_required {
+  background: #f8fafc;
+  border-color: #dbeafe;
+}
+
+.provider-hh-fields {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.provider-hh-password-row {
+  align-items: center;
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.provider-hh-password-row .p-inputtext {
+  min-width: 0;
+  width: 100%;
+}
+
+.provider-row-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  min-width: max-content;
+}
+
+.provider-dolphin-button {
+  justify-content: center;
+  min-width: 13.5rem;
+}
+
+.provider-dolphin-button .p-button-label {
+  white-space: nowrap;
+}
+
 .admin-ai-tailor-dialog {
   width: min(720px, calc(100vw - 32px));
 }

@@ -93,11 +93,43 @@ export type ClientDashboard = {
   linkedInEmail: string
 }
 
+export type DolphinProfileStatus = {
+  targetClientId: number
+  targetClientName: string
+  actorRole: 'client' | 'admin' | 'provider'
+  action: 'blocked' | 'create_new' | 'open_existing'
+  existingProfiles: Array<{ id: number; locale: string }>
+  requiredLocales: Array<'ru' | 'en'>
+  missingLocales: Array<'ru' | 'en'>
+  expectedProfileNames: Array<{ locale: 'ru' | 'en'; name: string }>
+  expectedProxyName: string
+  requiredFields: Array<{ field: string; fieldLabel: string; message: string }>
+}
+
 export type ProviderClientRow = {
   id: number
   clientName: string
   primaryStack?: string
+  market?: string
   linkedInEmail: string
+  dolphinProfileStatus: DolphinProfileStatus
+  hhCredentials: Array<{
+    market: 'Ru' | 'En'
+    required: boolean
+    status: 'ready' | 'not_required' | 'missing_account' | 'missing_email' | 'missing_password' | 'incomplete'
+    email: string
+    password: string
+  }>
+  providerResponses?: Array<{
+    id: number
+    comment: string
+    respondRu: boolean
+    respondEn: boolean
+    salaryExpectations?: number
+    mainCv: string
+    additionalCv: string
+    fields: Array<{ label: string; value: string; kind?: 'boolean' | 'url' | 'number' | 'text' }>
+  }>
 }
 
 export type AdminTelegramSender = {

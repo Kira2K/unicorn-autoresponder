@@ -123,6 +123,7 @@ function createFixtureNocoClient() {
       telegram_general_chat_id: '1004',
       rel_clients_primary_stack: { Id: 11, name: 'DATA' },
       market: 'En',
+      stop_list_company: 'StopCorp, \"Quoted LLC\"; Another Inc',
       client_status: { id: 'status-en', name: 'on en market' }
     },
     {
@@ -164,7 +165,19 @@ function createFixtureNocoClient() {
       calendar_email: 'provider-missing@example.com',
       telegram_general_chat_id: '1009',
       rel_clients_primary_stack: { Id: 16, name: 'REACT' },
-      market: 'En',
+      market: 'both',
+      client_status: { id: 'status-en', name: 'on en market' }
+    },
+    {
+      Id: 9.5,
+      client_name: 'Provider Ru Market',
+      first_name: 'Provider',
+      last_name: 'Ru',
+      fio: 'Provider Ru',
+      calendar_email: 'provider-ru@example.com',
+      telegram_general_chat_id: '1011',
+      rel_clients_primary_stack: { Id: 19, name: 'PYTHON' },
+      market: 'Ru',
       client_status: { id: 'status-en', name: 'on en market' }
     },
     {
@@ -266,6 +279,37 @@ function createFixtureNocoClient() {
       rel_platformAccounts_platform: { Id: 16 }
     },
     {
+      Id: 20,
+      account_label: 'Provider Match HH EN',
+      email: 'provider-match.hh-en@example.com',
+      password: 'provider-match-hh-en-secret',
+      clients_id: 3,
+      platforms_id: 10
+    },
+    {
+      Id: 23,
+      account_label: 'Provider Match Phone EN',
+      phone: '+995 555 000 111',
+      clients_id: 3,
+      platforms_id: 28
+    },
+    {
+      Id: 21,
+      account_label: 'Provider Missing HH RU',
+      email: 'provider-missing.hh-ru@example.com',
+      password: '',
+      clients_id: 8,
+      platforms_id: 11
+    },
+    {
+      Id: 22,
+      account_label: 'Provider Ru HH RU',
+      email: 'provider-ru.hh-ru@example.com',
+      password: 'provider-ru-hh-ru-secret',
+      clients_id: 9.5,
+      platforms_id: 11
+    },
+    {
       Id: 16,
       account_label: 'Wrong id LinkedIn name',
       login: 'wrong-id-should-not-match@example.com',
@@ -352,6 +396,29 @@ function createFixtureNocoClient() {
       workflow_trace: ''
     }
   ]
+  const providerResponses: Array<Record<string, any> & { Id: number }> = [
+    {
+      Id: 901,
+      clients_id: 3,
+      client: { Id: 3, client_name: 'Provider Match' },
+      record_key: 'Provider Match EN',
+      comment: 'Provider should see this table row.',
+      respond_ru: false,
+      respond_en: true,
+      salary_expectations: 3200,
+      hh_en_account: { Id: 44, account_label: 'Provider Match hh_en' },
+      hh_ru_account: { Id: 45, account_label: 'Provider Match hh_ru' },
+      linkedin_account: { Id: 46, account_label: 'Provider Match LinkedIn' },
+      main_CV: 'https://drive.google.com/provider-main-cv',
+      additional_CV: 'https://drive.google.com/provider-additional-cv',
+      Github: 'https://github.com/provider-match',
+      'Stack preferenses / possibilities': 'Backend-heavy FullStack',
+      'Blacklisted companies': 'Wrong provider-response blacklist',
+      platform_accounts_id: 44,
+      platform_accounts_id1: 46,
+      platform_accounts_id2: 45
+    }
+  ]
 
   return {
     calls,
@@ -382,6 +449,7 @@ function createFixtureNocoClient() {
       if (tableId === 'mpteejwqy2kvmvm') return englishLevels
       if (tableId === 'm4thvbutfyb15qz') return dolphinProfiles
       if (tableId === 'mhiysd8l0f33bny') return cvProcessing
+      if (tableId === 'mr5q0wij94utk1q') return providerResponses
       return []
     },
     async createRecord(tableId: string, record: Record<string, any>) {
@@ -1780,10 +1848,11 @@ async function runTests(): Promise<void> {
     assert.equal(providerLogin.response.status, 200)
     assert.equal(providerLogin.body.role, 'provider')
 
+    const providerCallsStart = noco.calls.length
     result = await request(server.baseUrl, '/api/provider/clients', {}, providerLogin.cookie)
     assert.equal(result.response.status, 200)
     assert.equal(result.body.providerDolphinEmail, DEFAULT_DOLPHIN_SHARED_USER_EMAIL)
-    assert.deepEqual(result.body.clients.map((client: any) => client.clientName), ['Provider Match', 'Provider Missing Profile', 'Newest Client'])
+    assert.deepEqual(result.body.clients.map((client: any) => client.clientName), ['Provider Match', 'Provider Missing Profile', 'Provider Ru Market', 'Newest Client'])
     assert.equal(result.body.clients.some((client: any) => client.clientName === 'Unknown Raw String Should Not Match'), false)
     assert.equal(result.body.clients.some((client: any) => client.clientName === 'Provider Missing Profile'), true)
     assert.equal(result.body.clients[0].linkedInEmail, 'provider-match.linkedin@example.com')
@@ -1791,8 +1860,103 @@ async function runTests(): Promise<void> {
       result.body.clients.find((client: any) => client.clientName === 'Newest Client')?.linkedInEmail,
       'newest.linkedin.one@example.com, newest.linkedin.two@example.com'
     )
-    assert.deepEqual(Object.keys(result.body.clients[0]).sort(), ['clientName', 'id', 'linkedInEmail', 'primaryStack'])
+    assert.deepEqual(Object.keys(result.body.clients[0]).sort(), ['clientName', 'dolphinProfileStatus', 'hhCredentials', 'id', 'linkedInEmail', 'market', 'primaryStack', 'providerResponses'])
+    assert.deepEqual(result.body.clients[0].hhCredentials, [
+      {
+        market: 'Ru',
+        required: true,
+        status: 'missing_account',
+        email: '',
+        password: ''
+      },
+      {
+        market: 'En',
+        required: true,
+        status: 'ready',
+        email: 'provider-match.hh-en@example.com',
+        password: 'provider-match-hh-en-secret'
+      }
+    ])
+    assert.deepEqual(Object.keys(result.body.clients[0].hhCredentials[0]).sort(), ['email', 'market', 'password', 'required', 'status'])
+    const providerMissingCredentials = result.body.clients.find((client: any) => client.clientName === 'Provider Missing Profile')?.hhCredentials
+    assert.deepEqual(providerMissingCredentials, [
+      {
+        market: 'Ru',
+        required: true,
+        status: 'missing_password',
+        email: 'provider-missing.hh-ru@example.com',
+        password: ''
+      },
+      {
+        market: 'En',
+        required: true,
+        status: 'missing_account',
+        email: '',
+        password: ''
+      }
+    ])
+    assert.deepEqual(result.body.clients.find((client: any) => client.clientName === 'Provider Ru Market')?.hhCredentials, [
+      {
+        market: 'Ru',
+        required: true,
+        status: 'ready',
+        email: 'provider-ru.hh-ru@example.com',
+        password: 'provider-ru-hh-ru-secret'
+      },
+      {
+        market: 'En',
+        required: false,
+        status: 'not_required',
+        email: '',
+        password: ''
+      }
+    ])
+    assert.equal(JSON.stringify(result.body.clients[0].hhCredentials).includes('platforms_id'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].hhCredentials).includes('clients_id'), false)
+    assert.equal(result.body.clients[0].providerResponses.length, 1)
+    assert.equal(result.body.clients[0].providerResponses[0].comment, 'Provider should see this table row.')
+    assert.equal(result.body.clients[0].providerResponses[0].respondEn, true)
+    assert.equal(result.body.clients[0].providerResponses[0].respondRu, false)
+    assert.equal(result.body.clients[0].providerResponses[0].salaryExpectations, 3200)
+    assert.deepEqual(result.body.clients[0].providerResponses[0].fields, [
+      { label: 'Respond EN', value: 'Yes', kind: 'boolean' },
+      { label: 'Respond RU', value: 'No', kind: 'boolean' },
+      { label: 'Salary expectations', value: '3200', kind: 'number' },
+      { label: 'Phone EN', value: '+995 555 000 111', kind: 'text' },
+      { label: 'Github', value: 'https://github.com/provider-match', kind: 'url' },
+      { label: 'Stack preferenses / possibilities', value: 'Backend-heavy FullStack', kind: 'text' },
+      { label: 'Blacklisted companies', value: 'StopCorp, Quoted LLC, Another Inc', kind: 'text' },
+      { label: 'Main CV', value: 'https://drive.google.com/provider-main-cv', kind: 'url' },
+      { label: 'Additional CV', value: 'https://drive.google.com/provider-additional-cv', kind: 'url' },
+      { label: 'Comment', value: 'Provider should see this table row.', kind: 'text' }
+    ])
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('Record key'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('recordKey'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('Provider Match EN'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('HH EN account'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('HH RU account'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('LinkedIn account'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('Wrong provider-response blacklist'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('platform_accounts_id'), false)
+    assert.equal(JSON.stringify(result.body.clients[0].providerResponses).includes('clients_id'), false)
+    assert.equal(result.body.clients[0].dolphinProfileStatus.action, 'open_existing')
+    assert.deepEqual(result.body.clients[0].dolphinProfileStatus.missingLocales, [])
+    assert.deepEqual(result.body.clients[0].dolphinProfileStatus.existingProfiles.map((profile: any) => profile.id), [333333332, 333333333])
+    assert.equal(
+      result.body.clients.find((client: any) => client.clientName === 'Provider Missing Profile')?.dolphinProfileStatus.action,
+      'create_new'
+    )
     assert.equal(JSON.stringify(result.body).includes('clientStatus'), false)
+    const providerCalls = noco.calls.slice(providerCallsStart)
+    for (const expectedCall of [
+      'mxza381054ldlza',
+      'm8zej2vsv4iypl8',
+      'mr5q0wij94utk1q',
+      'm4thvbutfyb15qz',
+      'meta:mxza381054ldlza'
+    ]) {
+      assert.equal(providerCalls.filter((call: string) => call === expectedCall).length, 1, `${expectedCall} should be fetched once`)
+    }
 
     result = await request(server.baseUrl, '/api/dolphin/verification-code/latest', {}, providerLogin.cookie)
     assert.equal(result.response.status, 200)

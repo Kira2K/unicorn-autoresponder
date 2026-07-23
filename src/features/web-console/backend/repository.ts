@@ -7,6 +7,13 @@ const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
 const { RELATIONS } = require('../../../integrations/noco/core/schema.ts') as {
   RELATIONS: Record<string, string>
 }
+const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as {
+  buildDolphinProfileStatus(options: {
+    client: WebClient
+    existingProfiles: Array<{ id: number; locale: string }>
+    actorRole: 'provider'
+  }): import('./types.ts').DolphinProfileStatus
+}
 
 type ClientDashboard = import('./types.ts').ClientDashboard
 type ClientProfilePatch = import('./types.ts').ClientProfilePatch
@@ -22,6 +29,8 @@ type ResumeWorkflowRecord = import('./types.ts').ResumeWorkflowRecord
 type NocoRecord = Record<string, unknown> & { Id: number }
 type NocoSelectOption = { id?: string; Id?: string | number; title?: string; name?: string; label?: string }
 const LINKEDIN_PLATFORM_ID = 16
+const HH_PLATFORM_IDS = { Ru: 11, En: 10 } as const
+const PHONE_EN_PLATFORM_ID = 28
 
 function normalizeEmail(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
@@ -29,6 +38,10 @@ function normalizeEmail(value: unknown): string {
 
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+function normalizeCheckbox(value: unknown): boolean {
+  return value === true || value === 1 || ['true', '1', 'yes'].includes(normalizeText(value).toLowerCase())
 }
 
 function normalizeId(value: unknown): string {
@@ -128,6 +141,28 @@ function accountPlatformId(account: NocoRecord): number | null {
   return Number.isFinite(id) && id > 0 ? id : null
 }
 
+function platformLabelFromRelation(account: NocoRecord): string {
+  const record = linkedRecords(account.rel_platformAccounts_platform)[0]
+  return normalizeStatusText(record?.label ?? record?.platform ?? record?.name).replace(/\s+/g, '_')
+}
+
+function normalizedPlatformLabel(value: unknown): string {
+  return normalizeStatusText(value).replace(/\s+/g, '_')
+}
+
+function isHHPlatformAccountForMarket(account: NocoRecord, market: 'Ru' | 'En'): boolean {
+  const platformId = accountPlatformId(account)
+  if (platformId) return platformId === HH_PLATFORM_IDS[market]
+  const expected = market === 'Ru' ? 'hh_ru' : 'hh_en'
+  return normalizedPlatformLabel(account.platform) === expected || platformLabelFromRelation(account) === expected
+}
+
+function isPhoneEnPlatformAccount(account: NocoRecord): boolean {
+  const platformId = accountPlatformId(account)
+  if (platformId) return platformId === PHONE_EN_PLATFORM_ID
+  return normalizedPlatformLabel(account.platform) === 'phone_en' || platformLabelFromRelation(account) === 'phone_en'
+}
+
 function profileClientId(profile: NocoRecord): number | null {
   const id = linkedId(profile.rel_dolphinProfiles_client) ?? Number(profile.clients_id)
   return Number.isFinite(id) && id > 0 ? id : null
@@ -200,12 +235,127 @@ function toClient(record: NocoRecord): WebClient {
   }
 }
 
-function toProviderClientRow(record: NocoRecord, linkedInEmail = ''): ProviderClientRow {
+function toProviderClientRow(
+  record: NocoRecord,
+  linkedInEmail: string,
+  existingProfiles: Array<{ id: number; locale: string }>,
+  hhCredentials: ProviderClientRow['hhCredentials'] = []
+): ProviderClientRow {
+  const client = toClient(record)
+  return {
+    id: client.id,
+    clientName: client.clientName,
+    primaryStack: client.primaryStack,
+    market: client.market,
+    linkedInEmail,
+    hhCredentials,
+    dolphinProfileStatus: buildDolphinProfileStatus({ client, existingProfiles, actorRole: 'provider' })
+  }
+}
+
+function requiredHHMarketsForClientMarket(market: unknown): Set<'Ru' | 'En'> {
+  const normalized = normalizeStatusText(market)
+  if (normalized === 'ru' || normalized === 'ру') return new Set(['Ru'])
+  if (normalized === 'en' || normalized === 'both') return new Set(['Ru', 'En'])
+  return new Set()
+}
+
+function hhCredentialStatus(
+  account: NocoRecord | undefined,
+  required: boolean
+): ProviderClientRow['hhCredentials'][number]['status'] {
+  if (!account) return required ? 'missing_account' : 'not_required'
+  const hasEmail = Boolean(normalizeText(account.email))
+  const hasPassword = Boolean(normalizeText(account.password))
+  if (hasEmail && hasPassword) return 'ready'
+  if (!hasEmail && !hasPassword) return 'incomplete'
+  if (!hasEmail) return 'missing_email'
+  return 'missing_password'
+}
+
+function buildHHCredentialsForProviderClient(client: NocoRecord, accounts: NocoRecord[]): ProviderClientRow['hhCredentials'] {
+  const requiredMarkets = requiredHHMarketsForClientMarket(linkedName(client.market) || client.market)
+  return (['Ru', 'En'] as const).map(market => {
+    const account = accounts
+      .filter(candidate => isHHPlatformAccountForMarket(candidate, market))
+      .sort((a, b) => Number(a.Id) - Number(b.Id))[0]
+    const required = requiredMarkets.has(market)
+    return {
+      market,
+      required,
+      status: hhCredentialStatus(account, required),
+      email: normalizeText(account?.email),
+      password: normalizeText(account?.password)
+    }
+  })
+}
+
+function dolphinProfileSummary(record: NocoRecord): { id: number; locale: string } | null {
+  const id = profileId(record)
+  return id ? { id, locale: profileLocale(record) } : null
+}
+
+function providerResponseClientId(record: NocoRecord): number | null {
+  const id = linkedId(record.client) ?? linkedId(record.rel_hhAutoresponses_client) ?? Number(record.clients_id)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function booleanLabel(value: boolean): string {
+  return value ? 'Yes' : 'No'
+}
+
+function splitStopListCompany(value: unknown): string[] {
+  return normalizeText(value)
+    .split(/[;,\n]/)
+    .map(item => item.trim().replace(/^["'`]+|["'`]+$/g, '').trim())
+    .filter(Boolean)
+}
+
+function providerPhoneEn(accounts: NocoRecord[]): string {
+  const account = accounts
+    .filter(isPhoneEnPlatformAccount)
+    .sort((a, b) => Number(a.Id) - Number(b.Id))[0]
+  return normalizeText(
+    account?.phone ??
+    account?.['typed phone number'] ??
+    account?.typed_phone_number ??
+    account?.foreign_number ??
+    account?.login
+  )
+}
+
+function toProviderResponse(
+  record: NocoRecord,
+  options: { client: NocoRecord; platformAccounts: NocoRecord[] }
+): NonNullable<ProviderClientRow['providerResponses']>[number] {
+  const respondRu = normalizeCheckbox(record.respond_ru)
+  const respondEn = normalizeCheckbox(record.respond_en)
+  const salaryExpectations = Number(record.salary_expectations)
+  const mainCv = normalizeText(record.main_CV)
+  const additionalCv = normalizeText(record.additional_CV)
+  const phoneEn = providerPhoneEn(options.platformAccounts)
+  const blacklistedCompanies = splitStopListCompany(options.client.stop_list_company).join(', ')
+  const fields: NonNullable<ProviderClientRow['providerResponses']>[number]['fields'] = [
+    { label: 'Respond EN', value: booleanLabel(respondEn), kind: 'boolean' },
+    { label: 'Respond RU', value: booleanLabel(respondRu), kind: 'boolean' },
+    { label: 'Salary expectations', value: Number.isFinite(salaryExpectations) ? String(salaryExpectations) : '', kind: 'number' },
+    { label: 'Phone EN', value: phoneEn, kind: 'text' },
+    { label: 'Github', value: normalizeText(record.Github), kind: 'url' },
+    { label: 'Stack preferenses / possibilities', value: normalizeText(record['Stack preferenses / possibilities']), kind: 'text' },
+    { label: 'Blacklisted companies', value: blacklistedCompanies, kind: 'text' },
+    { label: 'Main CV', value: mainCv, kind: 'url' },
+    { label: 'Additional CV', value: additionalCv, kind: 'url' },
+    { label: 'Comment', value: normalizeText(record.comment), kind: 'text' }
+  ]
   return {
     id: Number(record.Id),
-    clientName: normalizeText(record.client_name),
-    primaryStack: linkedName(record.rel_clients_primary_stack) || undefined,
-    linkedInEmail
+    comment: normalizeText(record.comment),
+    respondRu,
+    respondEn,
+    salaryExpectations: Number.isFinite(salaryExpectations) ? salaryExpectations : undefined,
+    mainCv,
+    additionalCv,
+    fields
   }
 }
 
@@ -506,6 +656,10 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     return await nocoClient.fetchRecords(TABLES.cvProcessing.id, 1000)
   }
 
+  async function fetchProviderResponses(): Promise<NocoRecord[]> {
+    return await nocoClient.fetchRecords(TABLES.providerResponses.id, 1000)
+  }
+
   async function fetchClientStatusOptions(): Promise<NocoSelectOption[]> {
     if (typeof nocoClient.fetchTableMeta !== 'function') return []
     const meta = await nocoClient.fetchTableMeta(TABLES.clients.id)
@@ -724,25 +878,71 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null> {
-      const clients = await fetchClients()
-      const statusOptions = await fetchClientStatusOptions()
+      const [clients, statusOptions] = await Promise.all([fetchClients(), fetchClientStatusOptions()])
       const client = clients.find(candidate =>
         Number(candidate.Id) === Number(clientId) &&
         linkedStatusMatches(candidate.client_status, statusLabel, statusOptions)
       )
       if (!client) return null
-      const linkedInEmailByClientId = buildLinkedInEmailByClientId(await fetchPlatformAccounts())
-      return toProviderClientRow(client, linkedInEmailByClientId.get(Number(client.Id)) ?? '')
+      const [platformAccounts, profiles] = await Promise.all([fetchPlatformAccounts(), fetchDolphinProfiles()])
+      const linkedInEmailByClientId = buildLinkedInEmailByClientId(platformAccounts)
+      const accountsForClient = platformAccounts.filter(account => accountClientId(account) === Number(client.Id))
+      const existingProfiles = profiles
+        .filter(profile => profileClientId(profile) === Number(client.Id))
+        .map(dolphinProfileSummary)
+        .filter((profile): profile is { id: number; locale: string } => profile !== null)
+      return toProviderClientRow(
+        client,
+        linkedInEmailByClientId.get(Number(client.Id)) ?? '',
+        existingProfiles,
+        buildHHCredentialsForProviderClient(client, accountsForClient)
+      )
     },
 
     async getProviderClientsForStatus(statusLabel: string): Promise<ProviderClientRow[]> {
-      const [clients, platformAccounts] = await Promise.all([fetchClients(), fetchPlatformAccounts()])
-      const statusOptions = await fetchClientStatusOptions()
+      const [clients, platformAccounts, providerResponses, profiles, statusOptions] = await Promise.all([
+        fetchClients(),
+        fetchPlatformAccounts(),
+        fetchProviderResponses(),
+        fetchDolphinProfiles(),
+        fetchClientStatusOptions()
+      ])
       const linkedInEmailByClientId = buildLinkedInEmailByClientId(platformAccounts)
+      const platformAccountsByClientId = new Map<number, NocoRecord[]>()
+      for (const account of platformAccounts.sort((a, b) => Number(a.Id) - Number(b.Id))) {
+        const clientId = accountClientId(account)
+        if (!clientId) continue
+        platformAccountsByClientId.set(clientId, [...(platformAccountsByClientId.get(clientId) ?? []), account])
+      }
+      const profilesByClientId = new Map<number, Array<{ id: number; locale: string }>>()
+      for (const profile of profiles) {
+        const clientId = profileClientId(profile)
+        const summary = dolphinProfileSummary(profile)
+        if (!clientId || !summary) continue
+        profilesByClientId.set(clientId, [...(profilesByClientId.get(clientId) ?? []), summary])
+      }
+      const providerResponsesByClientId = new Map<number, NocoRecord[]>()
+      for (const record of providerResponses.sort((a, b) => Number(a.Id) - Number(b.Id))) {
+        const clientId = providerResponseClientId(record)
+        if (!clientId) continue
+        providerResponsesByClientId.set(clientId, [...(providerResponsesByClientId.get(clientId) ?? []), record])
+      }
       return clients
         .filter(client => linkedStatusMatches(client.client_status, statusLabel, statusOptions))
         .sort((a, b) => Number(a.Id) - Number(b.Id))
-        .map(client => toProviderClientRow(client, linkedInEmailByClientId.get(Number(client.Id)) ?? ''))
+        .map(client => {
+          const row = toProviderClientRow(
+            client,
+            linkedInEmailByClientId.get(Number(client.Id)) ?? '',
+            profilesByClientId.get(Number(client.Id)) ?? [],
+            buildHHCredentialsForProviderClient(client, platformAccountsByClientId.get(Number(client.Id)) ?? [])
+          )
+          const responses = providerResponsesByClientId.get(Number(client.Id)) ?? []
+          const clientPlatformAccounts = platformAccountsByClientId.get(Number(client.Id)) ?? []
+          return responses.length
+            ? { ...row, providerResponses: responses.map(response => toProviderResponse(response, { client, platformAccounts: clientPlatformAccounts })) }
+            : row
+        })
     },
 
     async listEnglishLevels(): Promise<WebOption[]> {
