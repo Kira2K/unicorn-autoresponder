@@ -35,6 +35,10 @@ type ResumeWorkflowRecord = {
   clientMarket?: string
   clientStack?: string
   clientTelegramUsername?: string
+  clientTelegramRu?: string
+  clientTelegramEn?: string
+  clientPhoneRu?: string
+  clientPhoneEn?: string
   clientGoogleFolder?: string
   commonChatId?: string
   education?: string
@@ -910,7 +914,12 @@ function providerTaskFromWorkflow(workflow: ResumeWorkflowRecord): ResumeProvide
 
 function studentInfoMessage(workflow: ResumeWorkflowRecord): string {
   const rows = [
+    workflow.clientMarket ? `Рынок ученика: ${workflow.clientMarket}` : undefined,
     workflow.clientStack ? `Стек: ${workflow.clientStack}` : undefined,
+    workflow.clientTelegramRu ? `Telegram RU: ${workflow.clientTelegramRu}` : undefined,
+    workflow.clientTelegramEn ? `Telegram EN: ${workflow.clientTelegramEn}` : undefined,
+    workflow.clientPhoneRu ? `Phone RU: ${workflow.clientPhoneRu}` : undefined,
+    workflow.clientPhoneEn ? `Phone EN: ${workflow.clientPhoneEn}` : undefined,
     Number.isFinite(Number(workflow.realAge)) ? `Реальный возраст: ${Number(workflow.realAge)}` : undefined,
     workflow.englishLevel ? `Английский: ${workflow.englishLevel}` : undefined,
     workflow.education ? `Образование: ${workflow.education}` : undefined

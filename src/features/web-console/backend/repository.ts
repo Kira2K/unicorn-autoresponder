@@ -381,7 +381,30 @@ function cvProcessingClientId(record: NocoRecord): number | null {
   return Number.isFinite(id) && id > 0 ? id : null
 }
 
-function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): ResumeWorkflowRecord {
+function contactValue(account: NocoRecord): string {
+  return normalizeText(
+    account.login ||
+    account.nickname ||
+    account.phone ||
+    account.phone_en ||
+    account.foreign_number ||
+    account.email
+  )
+}
+
+function platformContact(platformAccounts: NocoRecord[], labels: string[]): string {
+  const expected = new Set(labels.map(normalizedPlatformLabel))
+  for (const account of platformAccounts) {
+    const label = normalizedPlatformLabel(account.platform || linkedLabel(account.rel_platformAccounts_platform) || linkedName(account.rel_platformAccounts_platform))
+    const relationLabel = platformLabelFromRelation(account)
+    if (!expected.has(label) && !expected.has(relationLabel)) continue
+    const value = contactValue(account)
+    if (value) return value
+  }
+  return ''
+}
+
+function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, platformAccounts: NocoRecord[] = []): ResumeWorkflowRecord {
   const clientId = cvProcessingClientId(record) ?? Number((client as any)?.Id ?? (client as any)?.id)
   const clientName = normalizeText(
     (client as any)?.client_name ??
@@ -408,6 +431,10 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): 
     clientMarket: clientMarket || undefined,
     clientStack: clientStack || undefined,
     clientTelegramUsername: normalizeText((client as any)?.telegram_personal_chat_id ?? (client as any)?.telegramPersonalChatId) || undefined,
+    clientTelegramRu: platformContact(platformAccounts, ['telegram_ru']) || undefined,
+    clientTelegramEn: platformContact(platformAccounts, ['telegram_en']) || undefined,
+    clientPhoneRu: platformContact(platformAccounts, ['phone_ru', 'phone']) || undefined,
+    clientPhoneEn: platformContact(platformAccounts, ['phone_en']) || undefined,
     clientGoogleFolder: normalizeText((client as any)?.google_folder ?? (client as any)?.googleFolder) || undefined,
     commonChatId: normalizeText((client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId) || undefined,
     education: normalizeText((client as any)?.education) || undefined,
@@ -843,7 +870,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         ? await ensureCvProcessingRecordForClient(client)
         : await findCvProcessingRecordByClientId(Number(client.Id))
       if (!record) return null
-      return toResumeWorkflow(record, client)
+      const platformAccounts = await fetchPlatformAccountsForClient(Number(client.Id))
+      return toResumeWorkflow(record, client, platformAccounts)
     },
 
     async getResumeWorkflowById(workflowId: number): Promise<ResumeWorkflowRecord | null> {
@@ -852,17 +880,24 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       if (!record) return null
       const clientId = cvProcessingClientId(record)
       const client = clientId ? (await fetchClients()).find(candidate => Number(candidate.Id) === clientId) : undefined
-      return toResumeWorkflow(record, client)
+      const platformAccounts = clientId ? await fetchPlatformAccountsForClient(clientId) : []
+      return toResumeWorkflow(record, client, platformAccounts)
     },
 
     async getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]> {
-      const [clients, records] = await Promise.all([fetchClients(), fetchCvProcessing()])
+      const [clients, records, platformAccounts] = await Promise.all([fetchClients(), fetchCvProcessing(), fetchPlatformAccounts()])
       const clientsById = new Map(clients.map(client => [Number(client.Id), client]))
+      const platformAccountsByClientId = new Map<number, NocoRecord[]>()
+      for (const account of platformAccounts.sort((a, b) => Number(a.Id) - Number(b.Id))) {
+        const clientId = accountClientId(account)
+        if (!clientId) continue
+        platformAccountsByClientId.set(clientId, [...(platformAccountsByClientId.get(clientId) ?? []), account])
+      }
       return records
         .sort((a, b) => Number(a.Id) - Number(b.Id))
         .map(record => {
           const clientId = cvProcessingClientId(record)
-          return toResumeWorkflow(record, clientId ? clientsById.get(clientId) : undefined)
+          return toResumeWorkflow(record, clientId ? clientsById.get(clientId) : undefined, clientId ? platformAccountsByClientId.get(clientId) ?? [] : [])
         })
     },
 
@@ -876,7 +911,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       if (!record) throw notFoundError(`CV processing row ${recordId} was not found`)
       const clientId = cvProcessingClientId(record)
       const client = clientId ? (await fetchClients()).find(candidate => Number(candidate.Id) === clientId) : undefined
-      return toResumeWorkflow(record, client)
+      const platformAccounts = clientId ? await fetchPlatformAccountsForClient(clientId) : []
+      return toResumeWorkflow(record, client, platformAccounts)
     },
 
     async getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null> {

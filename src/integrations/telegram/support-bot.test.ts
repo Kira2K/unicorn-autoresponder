@@ -83,6 +83,10 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     clientStack: 'Python',
     clientMarket: 'EN',
     clientTelegramUsername: '@student_user',
+    clientTelegramRu: '@student_ru',
+    clientTelegramEn: '@student_en',
+    clientPhoneRu: '+7 999 000 1122',
+    clientPhoneEn: '+1 555 0100',
     commonChatId: '-5216637594',
     education: 'University',
     realAge: 24,
@@ -1057,7 +1061,12 @@ async function runTests() {
             assert.match(notification.text, /Открой \/open_my_tasks, чтобы обработать эту задачу/)
             assert.match(notification.text, /Ученик: Test/)
             assert.match(notification.text, /Данные ученика:/)
+            assert.match(notification.text, /Рынок ученика: EN/)
             assert.match(notification.text, /Стек: Python/)
+            assert.match(notification.text, /Telegram RU: @student_ru/)
+            assert.match(notification.text, /Telegram EN: @student_en/)
+            assert.match(notification.text, /Phone RU: \+7 999 000 1122/)
+            assert.match(notification.text, /Phone EN: \+1 555 0100/)
             assert.match(notification.text, /Реальный возраст: 24/)
             assert.match(notification.text, /Английский: B1/)
             assert.match(notification.text, /Образование: University/)
@@ -1149,7 +1158,12 @@ async function runTests() {
     assert.doesNotMatch(providerTasks.message, /Google-/)
     const openedProviderTask = await getProviderTaskById(98, makeWorkflowRepository(beforeFilled), providerActor)
     assert.match(openedProviderTask.message, /Данные ученика:/)
+    assert.match(openedProviderTask.message, /Рынок ученика: EN/)
     assert.match(openedProviderTask.message, /Стек: Python/)
+    assert.match(openedProviderTask.message, /Telegram RU: @student_ru/)
+    assert.match(openedProviderTask.message, /Telegram EN: @student_en/)
+    assert.match(openedProviderTask.message, /Phone RU: \+7 999 000 1122/)
+    assert.match(openedProviderTask.message, /Phone EN: \+1 555 0100/)
     assert.match(openedProviderTask.message, /Реальный возраст: 24/)
     assert.match(openedProviderTask.message, /Английский: B1/)
     assert.match(openedProviderTask.message, /Образование: University/)
