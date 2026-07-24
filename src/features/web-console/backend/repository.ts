@@ -400,6 +400,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): 
   const englishLevel =
     linkedName((client as any)?.['English level']) ||
     normalizeText((client as any)?.englishLevel ?? (client as any)?.english_level)
+  const realAge = Number((client as any)?.real_age ?? (client as any)?.realAge)
   return {
     id: Number(record.Id),
     clientId,
@@ -410,6 +411,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient): 
     clientGoogleFolder: normalizeText((client as any)?.google_folder ?? (client as any)?.googleFolder) || undefined,
     commonChatId: normalizeText((client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId) || undefined,
     education: normalizeText((client as any)?.education) || undefined,
+    realAge: Number.isFinite(realAge) ? realAge : undefined,
     englishLevel,
     englishLevelId,
     status: normalizeText(record.status),

@@ -168,6 +168,7 @@ export type ResumeWorkflowRecord = {
   clientGoogleFolder?: string
   commonChatId?: string
   education?: string
+  realAge?: number
   englishLevel?: string
   englishLevelId?: number
   status: string

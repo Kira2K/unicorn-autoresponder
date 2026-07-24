@@ -85,6 +85,7 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     clientTelegramUsername: '@student_user',
     commonChatId: '-5216637594',
     education: 'University',
+    realAge: 24,
     englishLevel: 'B1',
     englishLevelId: 3,
     status: "collection student's data",
@@ -1055,6 +1056,11 @@ async function runTests() {
           if (step.after !== 'moved to filling') {
             assert.match(notification.text, /Открой \/open_my_tasks, чтобы обработать эту задачу/)
             assert.match(notification.text, /Ученик: Test/)
+            assert.match(notification.text, /Данные ученика:/)
+            assert.match(notification.text, /Стек: Python/)
+            assert.match(notification.text, /Реальный возраст: 24/)
+            assert.match(notification.text, /Английский: B1/)
+            assert.match(notification.text, /Образование: University/)
           }
           if (step.notification === 'private_provider') {
             assert.deepEqual(notification.chatIds, ['8222949251', '315110920'])
@@ -1141,6 +1147,12 @@ async function runTests() {
     assert.match(providerTasks.message, /1-1/)
     assert.match(providerTasks.message, /1\. Test \[EN\]/)
     assert.doesNotMatch(providerTasks.message, /Google-/)
+    const openedProviderTask = await getProviderTaskById(98, makeWorkflowRepository(beforeFilled), providerActor)
+    assert.match(openedProviderTask.message, /Данные ученика:/)
+    assert.match(openedProviderTask.message, /Стек: Python/)
+    assert.match(openedProviderTask.message, /Реальный возраст: 24/)
+    assert.match(openedProviderTask.message, /Английский: B1/)
+    assert.match(openedProviderTask.message, /Образование: University/)
     const fillingProviderTasks = await getProviderTasks({
       async getProviderResumeTasks() {
         return [

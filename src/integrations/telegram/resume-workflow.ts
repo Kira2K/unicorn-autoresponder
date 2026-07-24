@@ -38,6 +38,7 @@ type ResumeWorkflowRecord = {
   clientGoogleFolder?: string
   commonChatId?: string
   education?: string
+  realAge?: number
   englishLevel?: string
   englishLevelId?: number
   status: ResumeStatus | string
@@ -907,11 +908,22 @@ function providerTaskFromWorkflow(workflow: ResumeWorkflowRecord): ResumeProvide
   }
 }
 
+function studentInfoMessage(workflow: ResumeWorkflowRecord): string {
+  const rows = [
+    workflow.clientStack ? `Стек: ${workflow.clientStack}` : undefined,
+    Number.isFinite(Number(workflow.realAge)) ? `Реальный возраст: ${Number(workflow.realAge)}` : undefined,
+    workflow.englishLevel ? `Английский: ${workflow.englishLevel}` : undefined,
+    workflow.education ? `Образование: ${workflow.education}` : undefined
+  ].filter(Boolean)
+  return rows.length ? ['Данные ученика:', ...rows].join('\n') : ''
+}
+
 function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
   const missing = missingAdvanceFields(workflow)
   const explicitSourceFolder = normalizeText(workflow.studentDataFolderUrl)
   const rootGoogleFolder = normalizeText(workflow.clientGoogleFolder)
   const status = statusText(workflow)
+  const studentInfo = studentInfoMessage(workflow)
   const inputHint = status === "collection Kira's comments"
     ? 'Следующее сообщение с комментарием сохраню именно в эту задачу.'
     : providerLinkRequirement(workflow)
@@ -921,6 +933,7 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
     `Ученик: ${workflow.clientName}`,
     workflow.clientMarket ? `Маркет: ${workflow.clientMarket}` : undefined,
     `Статус: ${displayStatus(statusText(workflow))}`,
+    studentInfo || undefined,
     rootGoogleFolder ? `Корневая Google-папка: ${rootGoogleFolder}` : undefined,
     explicitSourceFolder && explicitSourceFolder !== rootGoogleFolder ? `Папка с исходными данными: ${explicitSourceFolder}` : undefined,
     workflow.kirasComments ? `Комментарии Киры: ${workflow.kirasComments}` : undefined,
