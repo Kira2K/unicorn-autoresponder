@@ -74,6 +74,12 @@ const providerActor = {
   chatId: '8222949251',
   chatType: 'private'
 }
+const ruTranslatorActor = {
+  userId: '490903294',
+  username: 'polinats',
+  chatId: '490903294',
+  chatType: 'private'
+}
 
 function makeWorkflow(overrides: Record<string, any> = {}) {
   return {
@@ -703,6 +709,7 @@ async function runTests() {
   const previousProviderUserIds = process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS
   const previousProviderNotifyChatId = process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID
   const previousProviderRefs = process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
+  const previousRusTranslatorUserIds = process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS
   const previousLinkedInReadyChatId = process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID
   const previousLinkedInReadyThreadId = process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID
   const previousFakeDataMode = process.env.RESUME_WORKFLOW_FAKE_DATA_MODE
@@ -712,6 +719,7 @@ async function runTests() {
   process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251,315110920'
   process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
   process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '102:473'
+  process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = '490903294'
   process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = '-1003187558078'
   process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = '777'
   process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'false'
@@ -722,6 +730,9 @@ async function runTests() {
       username: 'kira_manual'
     }
     assert.equal(resolveActorForWorkflow(manualKiraActor, makeWorkflow()).role, 'kira')
+    assert.equal(resolveActorForWorkflow(ruTranslatorActor, makeWorkflow({
+      status: 'Russian version in process'
+    })).role, 'provider')
     const kiraWithStudentUsername = {
       ...manualKiraActor,
       username: 'student_user',
@@ -853,11 +864,22 @@ async function runTests() {
       cvDraftUrl: 'https://drive.google.com/drive/folders/draft-from-provider',
       enVersionUrl: 'https://drive.google.com/drive/folders/cv-eng-from-provider'
     }))
-    const missingRussianTask = await getProviderTaskById(98, missingRussianVersionRepository, providerActor)
+    const unavailableRussianTaskForMainProvider = await getProviderTaskById(98, missingRussianVersionRepository, providerActor)
+    assert.equal(unavailableRussianTaskForMainProvider.workflow, undefined)
+    assert.match(unavailableRussianTaskForMainProvider.message, /больше недоступна/)
+    const missingRussianTask = await getProviderTaskById(98, missingRussianVersionRepository, ruTranslatorActor)
     assert.match(missingRussianTask.message, /Отправь ссылку на русскую версию следующим сообщением/)
-    const savedProviderRussianResult = await saveProviderLinkFromChat(
+    const wrongProviderRussianSave = await saveProviderLinkFromChat(
       missingRussianVersionRepository,
       providerActor,
+      'https://drive.google.com/drive/folders/cv-ru-from-wrong-provider',
+      { workflowId: 98, expectedStatus: 'Russian version in process' }
+    )
+    assert.equal(wrongProviderRussianSave.workflow, undefined)
+    assert.equal(wrongProviderRussianSave.clearActiveTask, true)
+    const savedProviderRussianResult = await saveProviderLinkFromChat(
+      missingRussianVersionRepository,
+      ruTranslatorActor,
       'https://drive.google.com/drive/folders/cv-ru-from-provider'
     )
     assert.equal(missingRussianVersionRepository.workflowRecord.ruVersionUrl, 'https://drive.google.com/drive/folders/cv-ru-from-provider')
@@ -976,6 +998,17 @@ async function runTests() {
     assert.equal(sparseEnglishResult.workflow.status, 'English version in approve by Kira')
     assert.deepEqual(sparseEnglishResult.transitions, ['English version in progress -> English version in approve by Kira'])
 
+    await assert.rejects(
+      () => resumeWorkflowById(98, makeWorkflowRepository(makeWorkflow({
+        status: 'Draft in process',
+        cvDraftUrl: 'https://drive.google.com/drive/folders/seeded-draft'
+      })), { actor: ruTranslatorActor }),
+      (error: any) => {
+        assert.equal(error.code, 'forbidden')
+        return true
+      }
+    )
+
     const sparseRussianRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Russian version in process',
       studentDataFolderUrl: '',
@@ -984,15 +1017,26 @@ async function runTests() {
       enVersionUrl: '',
       ruVersionUrl: 'https://drive.google.com/drive/folders/seeded-ru'
     }))
-    const sparseRussianTask = await getProviderTaskById(98, sparseRussianRepository, providerActor)
+    const sparseRussianTask = await getProviderTaskById(98, sparseRussianRepository, ruTranslatorActor)
     assert.doesNotMatch(sparseRussianTask.message, /исходными данными|комментарии Киры|черновик|английскую/)
     assert.deepEqual(
       sparseRussianTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Перейти к следующему шагу', 'Назад к задачам']
     )
-    const sparseRussianResult = await resumeWorkflowById(98, sparseRussianRepository, { actor: providerActor })
+    const sparseRussianResult = await resumeWorkflowById(98, sparseRussianRepository, { actor: ruTranslatorActor })
     assert.equal(sparseRussianResult.workflow.status, 'Russian version in approve by Kira')
     assert.deepEqual(sparseRussianResult.transitions, ['Russian version in process -> Russian version in approve by Kira'])
+
+    await assert.rejects(
+      () => resumeWorkflowById(98, makeWorkflowRepository(makeWorkflow({
+        status: 'Russian version in process',
+        ruVersionUrl: 'https://drive.google.com/drive/folders/seeded-ru'
+      })), { actor: providerActor }),
+      (error: any) => {
+        assert.equal(error.code, 'forbidden')
+        return true
+      }
+    )
 
     const sparseEnglishApprovalRepository = makeWorkflowRepository(makeWorkflow({
       status: 'English version in approve by student',
@@ -1037,7 +1081,7 @@ async function runTests() {
       { actor: providerActor, after: 'English version in approve by Kira', notification: 'private_kira' },
       { actor: manualKiraActor, after: 'English version in approve by student', notification: 'common_chat' },
       { actor: studentActor, after: 'Russian version in process', notification: 'private_provider' },
-      { actor: providerActor, after: 'Russian version in approve by Kira', notification: 'private_kira' },
+      { actor: ruTranslatorActor, after: 'Russian version in approve by Kira', notification: 'private_kira' },
       { actor: manualKiraActor, after: 'Russian version in approve by student', notification: 'common_chat' },
       { actor: studentActor, after: 'moved to filling', notification: 'private_kira' }
     ]
@@ -1054,7 +1098,11 @@ async function runTests() {
             assert.match(notification.text, /^Кира, резюме/)
           }
           if (step.notification === 'private_provider') {
-            assert.match(notification.text, /^Юля, резюме/)
+            if (step.after === 'Russian version in process') {
+              assert.match(notification.text, /^Полина, резюме/)
+            } else {
+              assert.match(notification.text, /^Юля, резюме/)
+            }
           }
           assert.doesNotMatch(notification.text, /^@student_user, резюме/)
           if (step.after !== 'moved to filling') {
@@ -1072,7 +1120,10 @@ async function runTests() {
             assert.match(notification.text, /Образование: University/)
           }
           if (step.notification === 'private_provider') {
-            assert.deepEqual(notification.chatIds, ['8222949251', '315110920'])
+            assert.deepEqual(
+              notification.chatIds,
+              step.after === 'Russian version in process' ? ['490903294'] : ['8222949251', '315110920']
+            )
           }
         }
         if (step.after === 'Draft in approve by student') {
@@ -1167,7 +1218,7 @@ async function runTests() {
     assert.match(openedProviderTask.message, /Реальный возраст: 24/)
     assert.match(openedProviderTask.message, /Английский: B1/)
     assert.match(openedProviderTask.message, /Образование: University/)
-    const fillingProviderTasks = await getProviderTasks({
+    const fillingTaskRepository = {
       async getProviderResumeTasks() {
         return [
           makeWorkflow({ id: 98, clientId: 102, clientName: 'Ready Filling', status: 'moved to filling' }),
@@ -1177,10 +1228,14 @@ async function runTests() {
       async getResumeWorkflowById(workflowId: number) {
         return makeWorkflow({ id: workflowId, clientId: 102, clientName: 'Ready Filling', status: 'moved to filling' })
       }
-    }, providerActor)
-    assert.deepEqual(fillingProviderTasks.tasks.map((task: any) => task.clientName), ['Provider Work'])
+    }
+    const fillingProviderTasks = await getProviderTasks(fillingTaskRepository, providerActor)
+    assert.deepEqual(fillingProviderTasks.tasks.map((task: any) => task.clientName), [])
     assert.doesNotMatch(fillingProviderTasks.message, /Ready Filling/)
-    assert.doesNotMatch(JSON.stringify(fillingProviderTasks.replyMarkup), /Ready Filling/)
+    assert.equal(fillingProviderTasks.replyMarkup, undefined)
+    assert.doesNotMatch(fillingProviderTasks.message, /Provider Work/)
+    const fillingRuTranslatorTasks = await getProviderTasks(fillingTaskRepository, ruTranslatorActor)
+    assert.deepEqual(fillingRuTranslatorTasks.tasks.map((task: any) => task.clientName), ['Provider Work'])
     const kiraTaskRows = [
       makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in approve by Kira' }),
       makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Kira Client', status: 'English version in approve by Kira' }),
@@ -1222,11 +1277,22 @@ async function runTests() {
       async getProviderResumeTasks() {
         return [
           makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in process' }),
-          makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Client', status: 'Draft in process' })
+          makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Client', status: 'Draft in process' }),
+          makeWorkflow({ id: 100, clientId: 102, clientName: 'RU Client', status: 'Russian version in process' })
         ]
       }
     }, providerActor)
     assert.deepEqual(mixedProviderTasks.tasks.map((task: any) => task.clientName), ['Test'])
+    const mixedRuTranslatorTasks = await getProviderTasks({
+      async getProviderResumeTasks() {
+        return [
+          makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in process' }),
+          makeWorkflow({ id: 99, clientId: 102, clientName: 'English Client', status: 'English version in progress' }),
+          makeWorkflow({ id: 100, clientId: 102, clientName: 'RU Client', status: 'Russian version in process' })
+        ]
+      }
+    }, ruTranslatorActor)
+    assert.deepEqual(mixedRuTranslatorTasks.tasks.map((task: any) => task.clientName), ['RU Client'])
     delete process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
     const unscopedProviderTasks = await getProviderTasks({
       async getProviderResumeTasks() {
@@ -1284,6 +1350,11 @@ async function runTests() {
       delete process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
     } else {
       process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = previousProviderRefs
+    }
+    if (previousRusTranslatorUserIds === undefined) {
+      delete process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS
+    } else {
+      process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = previousRusTranslatorUserIds
     }
     if (previousLinkedInReadyChatId === undefined) {
       delete process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID

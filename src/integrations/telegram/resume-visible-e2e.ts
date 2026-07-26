@@ -30,6 +30,8 @@ type VisibleResumeE2eConfig = {
   kiraUsername: string
   providerUserId: string
   providerUsername: string
+  rusTranslatorUserId: string
+  rusTranslatorUsername: string
 }
 
 type VisibleResumeE2eStep = {
@@ -64,7 +66,9 @@ const DEFAULT_VISIBLE_RESUME_E2E_CONFIG: VisibleResumeE2eConfig = {
   kiraUserId: '343610488',
   kiraUsername: 'Kira_arbeitet',
   providerUserId: '8222949251',
-  providerUsername: 'veu_support'
+  providerUsername: 'veu_support',
+  rusTranslatorUserId: '490903294',
+  rusTranslatorUsername: 'polinats'
 }
 
 function normalizeText(value: unknown): string {
@@ -79,6 +83,8 @@ function ensureRuntimeEnv(config: VisibleResumeE2eConfig): string {
   process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = config.providerAccountRef
   process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID =
     process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID || config.providerUserId
+  process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS =
+    process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS || config.rusTranslatorUserId
   process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS =
     process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS || config.kiraUserId
   process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID =
@@ -262,6 +268,15 @@ function providerActorHeaders(config: VisibleResumeE2eConfig, token: string): Re
     'X-Telegram-User-Id': config.providerUserId,
     'X-Telegram-Username': config.providerUsername,
     'X-Telegram-Chat-Id': config.providerUserId,
+    'X-Telegram-Chat-Type': 'private'
+  })
+}
+
+function rusTranslatorActorHeaders(config: VisibleResumeE2eConfig, token: string): Record<string, string> {
+  return botHeaders(token, {
+    'X-Telegram-User-Id': config.rusTranslatorUserId,
+    'X-Telegram-Username': config.rusTranslatorUsername,
+    'X-Telegram-Chat-Id': config.rusTranslatorUserId,
     'X-Telegram-Chat-Type': 'private'
   })
 }
@@ -614,10 +629,13 @@ async function advanceProvider(input: {
   workflowId: number
   expectedStatus: string
   nextStatus: string
+  providerLane?: 'main' | 'rus_translator'
 }): Promise<VisibleResumeE2eStep> {
   const result = await retryTransient(`Provider step ${input.expectedStatus}`, () => requestJson(input.baseUrl, `/api/bot/telegram/resume/workflows/${input.workflowId}/advance`, {
     method: 'POST',
-    headers: providerActorHeaders(input.config, input.token),
+    headers: input.providerLane === 'rus_translator'
+      ? rusTranslatorActorHeaders(input.config, input.token)
+      : providerActorHeaders(input.config, input.token),
     body: JSON.stringify({ expectedStatus: input.expectedStatus })
   }))
   assertNoWarnings(`Provider step ${input.expectedStatus}`, result)
@@ -872,7 +890,8 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       config,
       workflowId,
       expectedStatus: 'Russian version in process',
-      nextStatus: 'Russian version in approve by Kira'
+      nextStatus: 'Russian version in approve by Kira',
+      providerLane: 'rus_translator'
     }))
     const russianPromptBaseline = await retryTransient('russian prompt baseline', () => getMessageIdSet(telegramService, config))
     const russianPromptSendBaseline = observed.sends.length

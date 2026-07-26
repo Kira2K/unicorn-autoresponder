@@ -157,6 +157,15 @@ const PROVIDER_RESPONSIBLE_STATUSES = new Set([
   'Russian version in process'
 ])
 
+const MAIN_PROVIDER_RESPONSIBLE_STATUSES = new Set([
+  'Draft in process',
+  'English version in progress'
+])
+
+const RUS_TRANSLATOR_RESPONSIBLE_STATUSES = new Set([
+  'Russian version in process'
+])
+
 const KIRA_RESPONSIBLE_STATUSES = new Set([
   "collection Kira's comments",
   'Draft in approve by Kira',
@@ -174,6 +183,7 @@ const DEFAULT_TEST_CONFIG = {
 
 const DEFAULT_KIRA_USER_IDS = ['7586552066']
 const DEFAULT_PROVIDER_USER_IDS = ['8222949251']
+const DEFAULT_RUS_TRANSLATOR_USER_IDS = ['490903294']
 const DEFAULT_KIRA_PLATFORM_REFS = ['1:452']
 const DEFAULT_PROVIDER_PLATFORM_REFS: string[] = []
 const TASK_LIST_PAGE_SIZE = 15
@@ -244,6 +254,18 @@ function defaultProviderNotifyChatIds(): string[] {
   ].map(normalizeId).filter((item, index, items) => item && items.indexOf(item) === index)
 }
 
+function defaultRusTranslatorNotifyChatIds(): string[] {
+  return envList('RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS', DEFAULT_RUS_TRANSLATOR_USER_IDS)
+    .map(normalizeId)
+    .filter((item, index, items) => item && items.indexOf(item) === index)
+}
+
+function providerNotifyChatIdsForStatus(status: string): string[] {
+  return providerLaneForStatus(status) === 'rus_translator'
+    ? defaultRusTranslatorNotifyChatIds()
+    : defaultProviderNotifyChatIds()
+}
+
 function linkedinReadyNotifyChatId(): string {
   return normalizeText(process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID) ||
     normalizeText(process.env.summary_logs_channel_id) ||
@@ -257,6 +279,21 @@ function linkedinReadyNotifyThreadId(): number | undefined {
 
 function statusText(record: ResumeWorkflowRecord | null): ResumeStatus | string {
   return normalizeText(record?.status) || "collection student's data"
+}
+
+function providerLaneForStatus(status: string): 'main' | 'rus_translator' | null {
+  if (RUS_TRANSLATOR_RESPONSIBLE_STATUSES.has(status)) return 'rus_translator'
+  if (MAIN_PROVIDER_RESPONSIBLE_STATUSES.has(status)) return 'main'
+  return null
+}
+
+function isRusTranslatorActor(input: ResumeActorInput | undefined): boolean {
+  const userId = normalizeId(input?.userId)
+  return Boolean(userId && envIdSet('RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS', DEFAULT_RUS_TRANSLATOR_USER_IDS).has(userId))
+}
+
+function providerStatusesForActor(actor: ResumeActor): Set<string> {
+  return isRusTranslatorActor(actor) ? RUS_TRANSLATOR_RESPONSIBLE_STATUSES : MAIN_PROVIDER_RESPONSIBLE_STATUSES
 }
 
 function actorLabel(actor: ResumeActor): string {
@@ -500,6 +537,9 @@ function resolveActorForWorkflow(input: ResumeActorInput | undefined, workflow?:
     if (userId && envIdSet('RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS', DEFAULT_KIRA_USER_IDS).has(userId)) {
       return 'kira'
     }
+    if (userId && envIdSet('RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS', DEFAULT_RUS_TRANSLATOR_USER_IDS).has(userId)) {
+      return 'provider'
+    }
     if (userId && envIdSet('RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS', DEFAULT_PROVIDER_USER_IDS).has(userId)) {
       return 'provider'
     }
@@ -569,10 +609,11 @@ function ensureTaskActor(actor: ResumeActor): void {
 }
 
 function taskStatusesForActor(actor: ResumeActor): Set<string> {
-  return actor.role === 'kira' ? KIRA_RESPONSIBLE_STATUSES : PROVIDER_RESPONSIBLE_STATUSES
+  return actor.role === 'kira' ? KIRA_RESPONSIBLE_STATUSES : providerStatusesForActor(actor)
 }
 
-function providerCanAccessWorkflow(workflow: ResumeWorkflowRecord): boolean {
+function providerCanAccessWorkflow(workflow: ResumeWorkflowRecord, actor?: ResumeActor): boolean {
+  if (actor && !providerStatusesForActor(actor).has(statusText(workflow))) return false
   const allowedClientIds = envClientIdSetFromRefs(
     'RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS',
     DEFAULT_PROVIDER_PLATFORM_REFS
@@ -582,7 +623,7 @@ function providerCanAccessWorkflow(workflow: ResumeWorkflowRecord): boolean {
 
 function actorCanAccessTaskWorkflow(workflow: ResumeWorkflowRecord, actor: ResumeActor): boolean {
   if (!taskStatusesForActor(actor).has(statusText(workflow))) return false
-  if (actor.role === 'provider') return providerCanAccessWorkflow(workflow)
+  if (actor.role === 'provider') return providerCanAccessWorkflow(workflow, actor)
   return actor.role === 'kira'
 }
 
@@ -601,7 +642,7 @@ function ensureActorCanAdvance(workflow: ResumeWorkflowRecord, actor: ResumeActo
       { code: 'forbidden', requiredRole: required, actorRole: actor.role }
     )
   }
-  if (required === 'provider' && !providerCanAccessWorkflow(workflow)) {
+  if (required === 'provider' && !providerCanAccessWorkflow(workflow, actor)) {
     throw Object.assign(
       new Error(`Этот аккаунт подрядчика не назначен на ${workflow.clientName}.`),
       { code: 'forbidden', requiredRole: required, actorRole: actor.role, clientId: workflow.clientId }
@@ -789,7 +830,9 @@ function clientLinkedInReadyLabel(record: ResumeWorkflowRecord): string {
 
 function responsibleMention(record: ResumeWorkflowRecord, responsible: ResumeActorRole | 'done' | 'admin'): string {
   if (responsible === 'kira') return 'Кира'
-  if (responsible === 'provider') return 'Юля'
+  if (responsible === 'provider') {
+    return providerLaneForStatus(statusText(record)) === 'rus_translator' ? 'Полина' : 'Юля'
+  }
   return clientMention(record)
 }
 
@@ -842,7 +885,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWor
     return { kind: 'private_kira', chatId, text }
   }
   if (responsible === 'provider') {
-    const chatIds = defaultProviderNotifyChatIds()
+    const chatIds = providerNotifyChatIdsForStatus(status)
     if (!chatIds.length) return null
     const text = [
       intro,

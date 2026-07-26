@@ -1058,6 +1058,7 @@ async function runTests(): Promise<void> {
     const previousProviderRefs = process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
     const previousProviderUserIds = process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS
     const previousProviderNotifyChatId = process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID
+    const previousRusTranslatorUserIds = process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS
     const previousKiraUserIds = process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS
     const previousKiraNotifyChatId = process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID
     const previousLinkedInReadyChatId = process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID
@@ -1067,6 +1068,7 @@ async function runTests(): Promise<void> {
     process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '1:12'
     process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251,315110920'
     process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
+    process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = '490903294'
     process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
     process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
     process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = '-1003187558078'
@@ -1100,6 +1102,13 @@ async function runTests(): Promise<void> {
         'X-Telegram-User-Id': '8222949251',
         'X-Telegram-Username': 'veu_support',
         'X-Telegram-Chat-Id': '8222949251',
+        'X-Telegram-Chat-Type': 'private'
+      }
+      const ruTranslatorHeaders = {
+        ...botHeaders,
+        'X-Telegram-User-Id': '490903294',
+        'X-Telegram-Username': 'polinats',
+        'X-Telegram-Chat-Id': '490903294',
         'X-Telegram-Chat-Type': 'private'
       }
       const resumeByChat = async (headers: Record<string, string>, chatId = '1001', body: Record<string, unknown> = {}) => request(server.baseUrl, `/api/bot/telegram/chats/${chatId}/resume`, {
@@ -1263,8 +1272,16 @@ async function runTests(): Promise<void> {
       result = await resumeByChat(studentHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Russian version in process')
+      assert.equal(result.body.notifications.at(-1).kind, 'private_provider')
+      assert.deepEqual(result.body.notifications.at(-1).chatIds, ['490903294'])
+      assert.match(result.body.notifications.at(-1).text, /^Полина, резюме/)
+      assert.equal(telegramBotMessages.at(-1).chatId, '490903294')
 
       result = await resumeByChat(providerHeaders)
+      assert.equal(result.response.status, 403, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'forbidden')
+
+      result = await resumeByChat(ruTranslatorHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Russian version in approve by Kira')
       assert.equal(result.body.workflow.ruVersionUrl, 'https://docs.google.com/document/d/test-russian-version')
@@ -1322,6 +1339,11 @@ async function runTests(): Promise<void> {
         delete process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID
       } else {
         process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = previousProviderNotifyChatId
+      }
+      if (previousRusTranslatorUserIds === undefined) {
+        delete process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS
+      } else {
+        process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = previousRusTranslatorUserIds
       }
       if (previousKiraUserIds === undefined) {
         delete process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS
