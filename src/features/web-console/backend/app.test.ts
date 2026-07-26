@@ -67,6 +67,7 @@ const {
 
 function createFixtureNocoClient() {
   const calls: string[] = []
+  const fetchCalls: Array<{ tableId: string; where: string }> = []
   const clients: Array<Record<string, any> & { Id: number }> = [
     {
       Id: 1,
@@ -420,8 +421,24 @@ function createFixtureNocoClient() {
     }
   ]
 
+  function applyWhere(records: Array<Record<string, any> & { Id: number }>, query?: Record<string, any>) {
+    const where = String(query?.where ?? '').trim()
+    const match = /^\(([^,]+),eq,(.*)\)$/.exec(where)
+    if (!match) return records
+    const field = match[1]
+    const expected = match[2]
+    const valueFor = (record: Record<string, any>) => {
+      if (field === 'clients_id') {
+        return record.clients_id ?? record.rel_platformAccounts_client?.Id ?? record.client?.Id
+      }
+      return record[field]
+    }
+    return records.filter(record => String(valueFor(record) ?? '').trim() === expected)
+  }
+
   return {
     calls,
+    fetchCalls,
     async fetchTableMeta(tableId: string) {
       calls.push(`meta:${tableId}`)
       if (tableId !== 'mxza381054ldlza') return { columns: [] }
@@ -441,14 +458,15 @@ function createFixtureNocoClient() {
         ]
       }
     },
-    async fetchRecords(tableId: string) {
+    async fetchRecords(tableId: string, _limit?: number, query?: Record<string, any>) {
       calls.push(tableId)
-      if (tableId === 'mxza381054ldlza') return clients
-      if (tableId === 'm8zej2vsv4iypl8') return platformAccounts
+      fetchCalls.push({ tableId, where: String(query?.where ?? '') })
+      if (tableId === 'mxza381054ldlza') return applyWhere(clients, query)
+      if (tableId === 'm8zej2vsv4iypl8') return applyWhere(platformAccounts, query)
       if (tableId === 'mg3ovkendur1kpo') return platforms
       if (tableId === 'mpteejwqy2kvmvm') return englishLevels
       if (tableId === 'm4thvbutfyb15qz') return dolphinProfiles
-      if (tableId === 'mhiysd8l0f33bny') return cvProcessing
+      if (tableId === 'mhiysd8l0f33bny') return applyWhere(cvProcessing, query)
       if (tableId === 'mr5q0wij94utk1q') return providerResponses
       return []
     },
@@ -1193,12 +1211,22 @@ async function runTests(): Promise<void> {
       assert.deepEqual(telegramBotMessages.slice(-1).map((message: any) => message.chatId), ['315110920'])
       assert.match(result.body.notificationWarnings.join('\n'), /private_provider chat 8222949251/)
 
+      const taskListCallsStart = noco.calls.length
+      const taskListFetchCallsStart = noco.fetchCalls.length
       result = await request(server.baseUrl, '/api/bot/telegram/resume/provider/tasks', {
         headers: providerHeaders
       })
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.deepEqual(result.body.tasks.map((task: any) => task.clientName), ['Client One'])
       assert.equal(result.body.tasks[0].expectedStatus, 'Draft in process')
+      assert.equal(noco.calls.slice(taskListCallsStart).includes('m8zej2vsv4iypl8'), false)
+      const taskListFetchCalls = noco.fetchCalls.slice(taskListFetchCallsStart)
+      const cvTaskListFetchCalls = taskListFetchCalls.filter(call => call.tableId === 'mhiysd8l0f33bny')
+      assert(cvTaskListFetchCalls.length > 0, 'provider task list should fetch active cv_processing statuses')
+      assert(
+        cvTaskListFetchCalls.every(call => call.where.startsWith('(status,eq,')),
+        `provider task list should not fetch cv_processing without a status filter: ${JSON.stringify(cvTaskListFetchCalls)}`
+      )
       const workflowId = result.body.tasks[0].id
 
       result = await request(server.baseUrl, '/api/bot/telegram/resume/task-input', {

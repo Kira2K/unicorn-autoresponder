@@ -31,6 +31,15 @@ type NocoSelectOption = { id?: string; Id?: string | number; title?: string; nam
 const LINKEDIN_PLATFORM_ID = 16
 const HH_PLATFORM_IDS = { Ru: 11, En: 10 } as const
 const PHONE_EN_PLATFORM_ID = 28
+const RESUME_ACTIVE_TASK_STATUSES = [
+  "collection Kira's comments",
+  'Draft in process',
+  'Draft in approve by Kira',
+  'English version in progress',
+  'English version in approve by Kira',
+  'Russian version in process',
+  'Russian version in approve by Kira'
+]
 
 function normalizeEmail(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
@@ -685,6 +694,38 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     return await nocoClient.fetchRecords(TABLES.cvProcessing.id, 1000)
   }
 
+  async function fetchCvProcessingById(recordId: number): Promise<NocoRecord | null> {
+    if (typeof nocoClient.fetchRecords === 'function') {
+      const records = await nocoClient.fetchRecords(TABLES.cvProcessing.id, 100, {
+        where: `(Id,eq,${Number(recordId)})`
+      }) as NocoRecord[]
+      return records.find(record => Number(record.Id) === Number(recordId)) ?? null
+    }
+    return (await fetchCvProcessing()).find(record => Number(record.Id) === Number(recordId)) ?? null
+  }
+
+  async function fetchCvProcessingByStatuses(statuses: string[]): Promise<NocoRecord[]> {
+    const uniqueStatuses = [...new Set(statuses.map(normalizeText).filter(Boolean))]
+    if (!uniqueStatuses.length) return []
+    if (typeof nocoClient.fetchRecords !== 'function') {
+      const expected = new Set(uniqueStatuses)
+      return (await fetchCvProcessing()).filter(record => expected.has(normalizeText(record.status)))
+    }
+    const rows = await Promise.all(uniqueStatuses.map(status =>
+      nocoClient.fetchRecords(TABLES.cvProcessing.id, 1000, {
+        where: `(status,eq,${status})`
+      }) as Promise<NocoRecord[]>
+    ))
+    const byId = new Map<number, NocoRecord>()
+    for (const record of rows.flat()) {
+      const id = Number(record.Id)
+      if (Number.isFinite(id) && id > 0 && uniqueStatuses.includes(normalizeText(record.status))) {
+        byId.set(id, record)
+      }
+    }
+    return [...byId.values()]
+  }
+
   async function fetchProviderResponses(): Promise<NocoRecord[]> {
     return await nocoClient.fetchRecords(TABLES.providerResponses.id, 1000)
   }
@@ -875,8 +916,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async getResumeWorkflowById(workflowId: number): Promise<ResumeWorkflowRecord | null> {
-      const records = await fetchCvProcessing()
-      const record = records.find(candidate => Number(candidate.Id) === Number(workflowId))
+      const record = await fetchCvProcessingById(Number(workflowId))
       if (!record) return null
       const clientId = cvProcessingClientId(record)
       const client = clientId ? (await fetchClients()).find(candidate => Number(candidate.Id) === clientId) : undefined
@@ -885,19 +925,16 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]> {
-      const [clients, records, platformAccounts] = await Promise.all([fetchClients(), fetchCvProcessing(), fetchPlatformAccounts()])
+      const [clients, records] = await Promise.all([
+        fetchClients(),
+        fetchCvProcessingByStatuses(RESUME_ACTIVE_TASK_STATUSES)
+      ])
       const clientsById = new Map(clients.map(client => [Number(client.Id), client]))
-      const platformAccountsByClientId = new Map<number, NocoRecord[]>()
-      for (const account of platformAccounts.sort((a, b) => Number(a.Id) - Number(b.Id))) {
-        const clientId = accountClientId(account)
-        if (!clientId) continue
-        platformAccountsByClientId.set(clientId, [...(platformAccountsByClientId.get(clientId) ?? []), account])
-      }
       return records
         .sort((a, b) => Number(a.Id) - Number(b.Id))
         .map(record => {
           const clientId = cvProcessingClientId(record)
-          return toResumeWorkflow(record, clientId ? clientsById.get(clientId) : undefined, clientId ? platformAccountsByClientId.get(clientId) ?? [] : [])
+          return toResumeWorkflow(record, clientId ? clientsById.get(clientId) : undefined, [])
         })
     },
 
@@ -906,8 +943,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       if (Object.keys(patch).length) {
         await nocoClient.patchRecord(TABLES.cvProcessing.id, Number(recordId), patch)
       }
-      const records = await fetchCvProcessing()
-      const record = records.find(candidate => Number(candidate.Id) === Number(recordId))
+      const record = await fetchCvProcessingById(Number(recordId))
       if (!record) throw notFoundError(`CV processing row ${recordId} was not found`)
       const clientId = cvProcessingClientId(record)
       const client = clientId ? (await fetchClients()).find(candidate => Number(candidate.Id) === clientId) : undefined
