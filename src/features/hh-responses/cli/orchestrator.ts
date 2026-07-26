@@ -20,6 +20,7 @@ const {
   getConfiguredClientIds,
   getConfiguredClientNames,
   selectClientsByCommonChatIds,
+  selectClientsByCommonChatIdsBestEffort,
   selectClientsByUniqueNames
 } = require('../orchestrator/clients.ts') as {
   attachHHAuthCredentials: Function
@@ -35,6 +36,7 @@ const {
   getConfiguredClientIds: Function
   getConfiguredClientNames: Function
   selectClientsByCommonChatIds: Function
+  selectClientsByCommonChatIdsBestEffort: Function
   selectClientsByUniqueNames: Function
 }
 const { runClientOrchestrator } = require('../orchestrator/client-runner.ts')
@@ -647,14 +649,62 @@ async function runSelectedClientIdsOrchestrator(
   const db = createAppDb()
   const allClients: ClientAutomationData[] =
     await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
-  const selectedClients = await attachHHAuthCredentials(
-    attachBlockedCompanies(
-      prepareSelectedClients(selectClientsByCommonChatIds(allClients, clientIds))
-    ),
+  const selection = selectClientsByCommonChatIdsBestEffort(
+    allClients,
+    clientIds
+  )
+  const missingStatuses = selection.missingIds.map((clientId: string) =>
+    makeClientPreparationErrorStatus(
+      {
+        clientName: `Unknown selected client ${clientId}`,
+        stack: '',
+        market: ORCHESTRATOR_WORK_WITH_MARKET,
+        stackSheetName: '',
+        stackScenario: '',
+        dolphinProfileId: 0,
+        commonChatId: clientId
+      },
+      new Error(`Selected client id was not found or is not enabled: ${clientId}`),
+      'client skipped before run: selected id was not found or is not enabled'
+    )
+  )
+  const credentialAttachResult = await attachHHAuthCredentialsBestEffort(
+    attachBlockedCompanies(prepareSelectedClients(selection.clients)),
     db
   )
+  const credentialSkippedStatuses = credentialAttachResult.skipped.map(
+    (skip: { client: ClientAutomationData; error: unknown }) =>
+      makeClientPreparationErrorStatus(
+        skip.client,
+        skip.error,
+        'client skipped before run: HH credentials were not matched'
+      )
+  )
+  const skippedStatuses = [...missingStatuses, ...credentialSkippedStatuses]
 
-  return runClientsOrchestrator(selectedClients)
+  for (const status of skippedStatuses) {
+    console.warn(
+      `Skipping ${status.clientName}/${status.commonChatId}/${status.market}: ${status.error ?? status.completionGap}`
+    )
+    writeLocalRunLog({
+      kind: 'client-skipped-before-run',
+      status
+    })
+  }
+
+  if (!credentialAttachResult.clients.length) {
+    writeLocalRunLog({
+      kind: 'run-results',
+      results: skippedStatuses
+    })
+    await sendRunSummaryLogWithTimeout(skippedStatuses)
+
+    return skippedStatuses
+  }
+
+  return runClientsOrchestrator(credentialAttachResult.clients, {
+    extraSummaryStatuses: skippedStatuses
+  })
 }
 
 async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {

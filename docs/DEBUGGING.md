@@ -1,7 +1,8 @@
 # Debugging
 
 Use these commands to answer common questions without starting a live HH run.
-Noco is the default source for live automation data.
+Noco is the default source for live automation data. Google Sheets is legacy or
+advisory unless a task explicitly asks for it.
 
 ## Client Not Found
 
@@ -23,6 +24,9 @@ $env:ORCHESTRATOR_WORK_WITH_MARKET='ru'
 $env:ORCHESTRATOR_RESPONSE_LIMIT='3'
 npm run orchestrator
 ```
+
+Selected-client-ID runs now report missing/disabled IDs as skipped statuses in
+the run summary instead of aborting every selected client.
 
 ## Environment
 

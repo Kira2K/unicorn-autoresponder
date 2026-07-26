@@ -109,21 +109,48 @@ function selectClientsByCommonChatIds(
   allClients: ClientAutomationData[],
   clientIds: string[]
 ): ClientAutomationData[] {
-  const selectedClients = allClients.filter(client =>
-    clientIds.includes(client.commonChatId)
-  )
-  const selectedIds = new Set(
-    selectedClients.map(client => client.commonChatId)
-  )
-  const missingIds = clientIds.filter(id => !selectedIds.has(id))
+  const result = selectClientsByCommonChatIdsBestEffort(allClients, clientIds)
 
-  if (missingIds.length) {
+  if (result.missingIds.length) {
     throw new Error(
-      `Selected client ids were not found or are not enabled: ${missingIds.join(', ')}`
+      `Selected client ids were not found or are not enabled: ${result.missingIds.join(', ')}`
     )
   }
 
-  return selectedClients
+  return result.clients
+}
+
+function selectClientsByCommonChatIdsBestEffort(
+  allClients: ClientAutomationData[],
+  clientIds: string[]
+): {
+  clients: ClientAutomationData[]
+  missingIds: string[]
+} {
+  const clientsById = new Map(
+    allClients.map(client => [client.commonChatId, client])
+  )
+  const selectedClients: ClientAutomationData[] = []
+  const selectedIds = new Set<string>()
+  const missingIds: string[] = []
+
+  for (const id of clientIds) {
+    const client = clientsById.get(id)
+
+    if (!client) {
+      missingIds.push(id)
+      continue
+    }
+
+    if (selectedIds.has(id)) continue
+    selectedIds.add(id)
+    selectedClients.push(client)
+  }
+
+  return {
+    clients: selectedClients,
+    missingIds
+  }
 }
 
 function excludeClients(
@@ -222,5 +249,6 @@ module.exports = {
   applyConfiguredClientExclusions,
   attachBlockedCompanies,
   selectClientsByCommonChatIds,
+  selectClientsByCommonChatIdsBestEffort,
   selectClientsByUniqueNames
 }

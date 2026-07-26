@@ -3,7 +3,8 @@ const assert = require('node:assert/strict')
 const {
   attachHHAuthCredentials,
   attachHHAuthCredentialsBestEffort,
-  excludeClients
+  excludeClients,
+  selectClientsByCommonChatIdsBestEffort
 } = require('./clients.ts') as {
   attachHHAuthCredentials: Function
   attachHHAuthCredentialsBestEffort: Function
@@ -16,6 +17,13 @@ const {
   ): {
     clients: ClientAutomationData[]
     excluded: ClientAutomationData[]
+  }
+  selectClientsByCommonChatIdsBestEffort(
+    clients: ClientAutomationData[],
+    clientIds: string[]
+  ): {
+    clients: ClientAutomationData[]
+    missingIds: string[]
   }
 }
 const {
@@ -126,6 +134,22 @@ function testExcludeClientsByNameAndId(): void {
   )
 }
 
+function testSelectedClientIdsBestEffortSkipsMissingIds(): void {
+  const result = selectClientsByCommonChatIdsBestEffort(
+    [
+      makeClient({ clientName: 'First', commonChatId: '-100' }),
+      makeClient({ clientName: 'Second', commonChatId: '-200' })
+    ],
+    ['-200', '-404', '-100', '-100']
+  )
+
+  assert.deepEqual(
+    result.clients.map(client => client.commonChatId),
+    ['-200', '-100']
+  )
+  assert.deepEqual(result.missingIds, ['-404'])
+}
+
 function testBlockedCompaniesMergeAndRunExtras(): void {
   assert.deepEqual(GLOBAL_BLOCKED_COMPANIES, [
     { id: 'global-comtek', name: 'Comtek' }
@@ -178,6 +202,7 @@ async function main(): Promise<void> {
   await testStrictAttachStillThrows()
   await testBestEffortAttachSkipsOnlyBrokenClients()
   testExcludeClientsByNameAndId()
+  testSelectedClientIdsBestEffortSkipsMissingIds()
   testBlockedCompaniesMergeAndRunExtras()
   testAttachBlockedCompaniesUsesRunExtras()
 
