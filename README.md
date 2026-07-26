@@ -1,6 +1,10 @@
 # HH Autoparcer
 
-For future agents: read `docs/AGENT_CONTEXT.md` first.
+For new colleagues: start with `docs/ONBOARDING.md`.
+
+For future agents: read `docs/AGENT_CONTEXT.md` first. Use
+`docs/AI_CONTEXT_FULL.md` when you need the long feature map, command map,
+source-of-truth rules, and operational safety notes.
 
 ## Canonical Commands
 

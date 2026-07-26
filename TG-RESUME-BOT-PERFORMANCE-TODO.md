@@ -1,18 +1,24 @@
 # Telegram Resume Bot Performance TODO
 
-## Goal
-Speed up `/open_my_tasks` when many CV processing rows exist.
+Status: partially implemented. `/open_my_tasks` already queries only active CV
+workflow statuses and renders a compact paged task list.
 
-## Planned Optimization
-- Query only active resume task statuses from `cv_processing` instead of loading all rows.
-- Keep compact task lists lightweight: workflow id, client id/name, market, status, and expected action.
-- Fetch full links, student contacts, and platform accounts only after a specific task is opened.
-- Refetch only the selected workflow row after save/advance operations instead of reloading all CV processing rows.
+## Goal
+Finish the remaining `/open_my_tasks` performance work for large CV workflow
+tables.
+
+## Remaining Optimization
+- Avoid fetching all clients just to enrich the active CV task rows.
+- Fetch full links, student contacts, and platform accounts only after a
+  specific task is opened.
+- In save/input flows, prefer the selected `workflowId` path and avoid falling
+  back to full task-list scans when possible.
 
 ## Expected Result
 - `/open_my_tasks` responds faster for Kira, main providers, and RU translator.
 - Task details still show full data after clicking a task.
-- Workflow statuses, commands, provider-lane rules, and Noco data stay unchanged.
+- Workflow statuses, commands, provider-lane rules, and Noco data semantics stay
+  unchanged.
 
 ## Test Checklist
 - `npm run tg:support-bot:test`

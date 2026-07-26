@@ -1,56 +1,47 @@
-# TODO: Provide Proxy
+# TODO: Existing-Profile Proxy Repair And Adoption
 
-Goal: provide a valid Dolphin proxy for new and existing accounts.
+Goal: provide a safe standalone path for repairing or adopting proxies on
+already-existing Dolphin profiles.
 
-The feature operates with existing proxies inside Dolphin. It may modify/prepare proxies, connect them to profiles, and notify clients by Telegram after assignment.
+New-profile English proxy assignment is already handled by web-console Dolphin
+profile provisioning. This TODO is for existing profiles that are missing a
+proxy, using a suspicious proxy, using a user-owned proxy that should be
+adopted, or needing a verified standard proxy name.
 
-## Intended Flow
+## Current Baseline
 
-1. Read the target profile(s).
-2. Read available proxies from Dolphin.
-3. Select a proxy according to the future proxy policy.
-4. Modify or prepare the proxy if needed.
-5. Connect the proxy to the Dolphin profile.
-6. Verify the profile has the expected proxy attached.
-7. Notify the client by Telegram.
-8. Write a local assignment report.
+- Proxy diagnostics live in `proxyProvider/checkRequiredProxy`.
+- Web-console provisioning can select an unused named proxy or `Ready N` proxy
+  for a new English profile and rename it to the standard display name.
+- Any live proxy deletion must wait for the separate real E2E safety test in
+  `real-e2e-proxy-deleting`.
 
-## Inputs
+## Remaining Work
 
-- Dolphin profile id.
-- Client name.
-- Market.
-- Common chat id or notification target.
-- Existing Dolphin proxy inventory.
-- Proxy assignment policy.
+1. Read target profiles from Noco Dolphin bindings or explicit profile ids.
+2. Read real Dolphin profile and proxy state.
+3. Build a dry-run repair/adoption plan for each target.
+4. For missing proxies, choose a safe unused proxy using the current
+   provisioning rules.
+5. For user-owned or incorrectly named proxies, plan adoption or rename without
+   deleting the old proxy.
+6. Verify profile state after every applied proxy update.
+7. Write a local report that separates selection, Dolphin update, verification,
+   notification, and manual cleanup outcomes.
 
-## Expected Result
+## Notification Policy To Decide
 
-- Dolphin profile has a valid assigned proxy.
-- Assignment is verified after update.
-- Client receives a Telegram notification.
-- Local report records:
-  - profile id
-  - client name
-  - market
-  - selected proxy id/name
-  - update status
-  - notification status
-
-## Future Decisions
-
-- Proxy selection rules.
-- Whether proxies can be reused across profiles.
-- Rotation policy.
-- How to handle dead or invalid proxies.
-- Exact Telegram notification text.
-- Whether notifications are sent immediately or returned as a send plan.
-- Whether proxy preparation belongs here or in a separate sub-feature.
+- Whether client/admin Telegram notification is sent immediately or returned as
+  a send plan.
+- Exact message text for assigned, renamed, adopted, failed, and manual-review
+  proxy outcomes.
+- Whether provider-facing notifications are ever needed.
 
 ## Safety Rules
 
-- First implementation must support dry-run mode.
+- Dry-run must be the default.
+- Apply mode must be explicit and scoped to selected targets.
 - Do not detach an existing working proxy without explicit apply mode.
+- Do not delete proxies in this feature.
 - Profile update and Telegram notification must be separately tracked.
-- If profile update succeeds but notification fails, the report must make that partial success obvious.
 - Never print proxy credentials in Telegram messages or ordinary logs.

@@ -1,33 +1,30 @@
 # Dolphin Proxy Provider
 
-Documentation-only placeholder for the future service that will manage Dolphin proxies for new and existing accounts.
+This area owns Dolphin proxy diagnostics and remaining proxy repair/adoption
+work for existing profiles.
 
-This service should own proxy selection, preparation, profile attachment, and client notification policy.
+New-profile English proxy assignment is currently handled by the web-console
+Dolphin provisioning flow. Standalone proxy work should focus on already-created
+profiles that are missing a proxy, using a suspicious proxy, using a user-owned
+proxy that should be adopted, or needing a verified standard proxy name.
 
 ## Responsibilities
 
-- Operate with existing proxies inside Dolphin.
-- Modify or prepare proxies when needed.
-- Attach proxies to Dolphin profiles.
-- Support both onboarding profiles and existing accounts.
-- Notify clients by Telegram after a proxy is assigned or changed.
+- Diagnose proxy/profile state from real Dolphin data.
+- Plan safe existing-profile proxy repair or adoption.
+- Keep proxy selection, profile update, verification, and notification outcomes
+  auditable.
+- Keep live proxy deletion behind a separate opt-in E2E safety gate.
 
 ## Feature Folders
 
-- `checkRequiredProxy/`: read-only report that checks `ПЕРС ДАННЫЕ` against real Dolphin proxy/profile state.
-- `provideProxy/`: assign or update a proxy for a Dolphin profile and prepare notification output.
+- `checkRequiredProxy/`: read-only report for profiles that need proxy review.
+- `provideProxy/`: TODO for existing-profile proxy repair/adoption.
+- `real-e2e-proxy-deleting/`: TODO for a live opt-in delete safety test.
 
-## Non-Goals For Mutation Features
+## Safety Rules
 
-- No Dolphin proxy mutations without explicit apply mode.
-- No Telegram sends from diagnostic checks.
-- No proxy credentials in ordinary logs or reports.
-
-The first real implementation should start with dry-run/report mode before changing any proxy/profile.
-
-## Shared Future Requirements
-
-- Proxy assignment must be auditable.
-- Existing proxy inventory must be read from Dolphin, not hardcoded.
-- Profile updates and Telegram notification should be treated as separate steps.
-- Failures must clearly say whether proxy selection, Dolphin update, verification, or notification failed.
+- Diagnostic checks must not mutate Dolphin or send Telegram messages.
+- Mutation features must start with dry-run/report mode.
+- Proxy deletion must not be added to normal repair/adoption flows.
+- Do not print proxy credentials in Telegram messages or ordinary logs.

@@ -7,7 +7,7 @@ state, report, and clean up.
 ## Runtime Flow
 
 1. Load enabled clients from `createAppDb()`.
-2. Attach runtime-only data, such as mocked/future `blockedCompanies`.
+2. Attach runtime data, including Noco-backed `blockedCompanies`.
 3. For each client, apply the Dolphin automation lock tag/status.
 4. Start the Dolphin profile and connect Playwright over CDP.
 5. Run saved/manual vacancies cleanup before normal responses.

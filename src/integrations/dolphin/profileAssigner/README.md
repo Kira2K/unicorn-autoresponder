@@ -1,34 +1,31 @@
 # Dolphin Profile Assigner
 
-Documentation-only placeholder for the future service that will create and normalize Dolphin browser profiles.
+This area documents remaining Dolphin profile standardization work.
 
-This service must own profile assignment standards, while low-level Dolphin API
-access should stay in `src/integrations/dolphin`.
+New missing profile creation is currently handled by the web-console Dolphin
+provisioning flow in `src/features/web-console/backend/dolphin-profile-provisioning.ts`.
+That flow creates profiles from `DOLPHIN_TEMPLATE_PROFILE_ID`, writes Noco
+Dolphin profile bindings, applies canonical tags, and handles current English
+proxy assignment rules.
 
 ## Responsibilities
 
-- Create ready Dolphin profile(s) for a new client during onboarding.
-- Normalize existing Dolphin profiles so they match our current operational standards.
-- Keep profile behavior market-specific: Ru and En profiles may have different names, settings, tags, proxies, notes, and sheet fields.
+- Keep current Dolphin profile naming, tagging, locale, and proxy standards
+  explicit.
+- Audit existing Dolphin profiles against Noco-backed web-console provisioning
+  standards.
+- Plan safe repair of existing profiles through dry-run reports before any
+  mutation.
 
 ## Feature Folders
 
-- `createProfiles/`: create one or two Dolphin profiles for a new client based on enabled markets.
-- `normalizeProfiles/`: audit and mass-fix existing profiles to match the current standards.
+- `normalizeProfiles/`: audit and repair already-created profiles so they match
+  current standards.
 
-## Non-Goals For The First TODO Stage
+## Safety Rules
 
-- No runtime implementation.
-- No CLI commands.
-- No Dolphin API mutations.
-- No Google Sheets writes.
-- No Telegram notifications.
-
-These docs exist so the implementation can be designed safely before touching real Dolphin accounts.
-
-## Shared Future Requirements
-
-- All write operations must support dry-run/report mode first.
-- Every mutation must produce a per-profile result record.
-- Profile standards must be explicit and versioned enough that old profiles can be compared against them.
-- Any sheet write-back must be separate from Dolphin mutation and confirm exactly which cells would change.
+- Dry-run/report mode must be the default for normalization.
+- Do not create new profiles from normalization jobs.
+- Do not change Noco profile ids unless a separate focused repair mode is
+  designed and reviewed.
+- Do not print proxy credentials in ordinary logs or reports.

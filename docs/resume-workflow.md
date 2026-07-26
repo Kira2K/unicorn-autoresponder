@@ -16,7 +16,9 @@ Commands:
   `RESUME_WORKFLOW_TEST_MODE=true`.
 - `/open_my_tasks` or `/tasks`: Kira/Provider private command that lists
   owned CV workflow tasks and shows inline buttons to open/advance a selected
-  client.
+  client. Provider task visibility is lane-aware: the main provider sees draft
+  and English-version tasks, while the Russian translator sees Russian-version
+  tasks.
 
 ## Live Facts
 
@@ -85,6 +87,10 @@ Commands:
   `RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS`.
 - Provider steps must be advanced by a Telegram user ID in
   `RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS`.
+- The Russian-version provider step is a separate provider lane. Telegram user
+  IDs in `RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS` can open and
+  advance `Russian version in process`; main provider users cannot advance that
+  status.
 - Provider client visibility is additionally limited by
   `RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS`, using
   `clientId:platformAccountId` pairs. With the live test default `102:473`, the
@@ -133,7 +139,8 @@ notification:
 
 - Student next: common chat message with the client mention.
 - Kira next: private Kira chat.
-- Provider next: private Provider chat.
+- Main provider next: private Provider chat, usually addressed to Yulia.
+- Russian translator next: private translator chat, usually addressed to Polina.
 
 When test mode moves a workflow to `moved to filling`, the backend also emits
 the HH-summary-channel message:
@@ -162,6 +169,8 @@ Endpoints:
 - `GET /api/bot/telegram/resume/provider/tasks`
 - `GET /api/bot/telegram/resume/workflows/:workflowId`
 - `POST /api/bot/telegram/resume/workflows/:workflowId/advance`
+- `POST /api/bot/telegram/resume/task-input`
+- `POST /api/bot/telegram/resume/kira-comments`
 
 Actor headers used by the support bot:
 
@@ -180,6 +189,7 @@ RESUME_WORKFLOW_FAKE_DATA_MODE=false
 RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS=8222949251
 RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS=102:473
 RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID=8222949251
+RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS=490903294
 RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS=7586552066
 RESUME_WORKFLOW_KIRA_PLATFORM_ACCOUNT_REFS=1:452
 RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID=7586552066
@@ -207,7 +217,8 @@ Never enable fake workflow behavior in production or manual acceptance runs.
    advancing the comments step.
 8. Use `/open_my_tasks` in the provider private chat for provider-owned
    statuses. Add the draft/EN/RU URL in Noco/Admin Console before pressing
-   `Process next step`.
+   `Process next step`. Use the Russian translator account for
+   `Russian version in process`.
 9. Repeat until the row reaches `filled`.
 10. Verify `CV processing` row `98` has status `filled`, manual source folder,
     draft link, English link, Russian link, and Kira comments.

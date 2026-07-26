@@ -1,6 +1,8 @@
 # Agent Context
 
-Read this first in future sessions to avoid rediscovering the repo.
+Read this first in future sessions to avoid rediscovering the repo. For human
+onboarding, use [ONBOARDING.md](./ONBOARDING.md). For the long AI-friendly
+feature map, use [AI_CONTEXT_FULL.md](./AI_CONTEXT_FULL.md).
 
 ## Five-Line Purpose
 

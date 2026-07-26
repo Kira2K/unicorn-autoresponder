@@ -31,6 +31,7 @@ RESUME_WORKFLOW_TEST_MODE=false
 RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS=8222949251
 RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS=102:473
 RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID=8222949251
+RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS=490903294
 RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS=7586552066
 RESUME_WORKFLOW_KIRA_PLATFORM_ACCOUNT_REFS=1:452
 RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID=7586552066
@@ -43,10 +44,14 @@ TELEGRAM_TDLIB_SEND_TIMEOUT_MS=120000
   calls the web-console API.
 - `WEB_CONSOLE_BASE_URL`: public or local URL of the web-console backend.
 - `RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS`: comma-separated Telegram user
-  IDs allowed to open and advance provider CV tasks.
+  IDs allowed to open and advance main provider CV tasks for draft and English
+  version work.
 - `RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS`: comma-separated
   `clientId:platformAccountId` pairs. Provider private task lists and provider
   advancements are limited to these client IDs.
+- `RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS`: comma-separated Telegram
+  user IDs allowed to open and advance the Russian translator provider lane for
+  `Russian version in process`.
 - `RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS`: comma-separated Telegram user IDs
   allowed to advance Kira CV approval/comment tasks.
 - `RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID` and
@@ -75,9 +80,11 @@ Do not commit real token values.
   side.
 - `/resume_reset_test`: resets the linked CV workflow row only when
   `RESUME_WORKFLOW_TEST_MODE=true`.
-- `/open_my_tasks` or `/tasks`: provider-only private command. Shows provider
-  CV tasks waiting on that provider and returns inline buttons to open/advance a
-  selected client.
+- `/open_my_tasks` or `/tasks`: Kira/provider private command. Shows CV tasks
+  waiting on that actor and returns inline buttons to open/advance a selected
+  client. Provider task rows are filtered by assigned client scope and by lane:
+  main provider for draft/English work, Russian translator for Russian-version
+  work.
 
 `/commands` is context-aware: linked student/group chats see student commands,
 while private Kira/provider chats see the private task queue command after the
@@ -106,6 +113,8 @@ GET /api/bot/telegram/chats/:chatId/resume/status
 POST /api/bot/telegram/chats/:chatId/resume/reset-test
 GET /api/bot/telegram/resume/provider/tasks
 GET /api/bot/telegram/resume/workflows/:workflowId
+POST /api/bot/telegram/resume/task-input
+POST /api/bot/telegram/resume/kira-comments
 POST /api/bot/telegram/resume/workflows/:workflowId/advance
 ```
 
@@ -122,6 +131,55 @@ Body:
   "text": "Hello from Admin Console"
 }
 ```
+
+## Web Console Feature Surface
+
+The web console is a role-based operational UI backed by the Express API in
+`src/features/web-console/backend/app.ts` and the Vue frontend in
+`src/features/web-console/frontend`.
+
+- Client role: edit profile fields, manage platform accounts, inspect/connect
+  Telegram sessions, browse dialogs/messages, send Telegram messages when
+  writing is enabled, and request Dolphin profile access when allowed.
+- Provider role: view assigned clients, inspect HH credential readiness, review
+  provider response data, and acquire Dolphin leases for assigned targets.
+- Admin role: inspect latest client data, list Telegram senders, scan admin
+  dialogs, send Telegram messages from selected accounts, message a client's
+  linked chat, tailor CVs from PDF/job requirements, and request the HH
+  responses dry-run plan.
+
+Important admin/client API surfaces:
+
+```http
+GET /api/client/me
+PATCH /api/client/me
+POST /api/client/platform-accounts
+PATCH /api/client/platform-accounts/:id
+DELETE /api/client/platform-accounts/:id
+GET /api/provider/clients
+GET /api/dolphin/profiles/status
+POST /api/dolphin/lease/acquire
+GET /api/dolphin/verification-code/latest
+POST /api/telegram/connect
+GET /api/telegram/status
+GET /api/telegram/dialogs
+GET /api/telegram/folders
+GET /api/telegram/messages
+POST /api/telegram/send
+POST /api/telegram/rename-contact
+POST /api/telegram/reauth
+DELETE /api/telegram/disconnect
+GET /api/admin/telegram/senders
+GET /api/admin/telegram/dialogs/scan
+POST /api/admin/telegram/send
+POST /api/admin/cv-tailor/from-pdf
+POST /api/admin/clients/:clientId/telegram/send
+POST /api/admin/hh-responses/start
+```
+
+`/api/admin/hh-responses/start` is intentionally dry-run only: it returns the
+planned `npm run orchestrator` command and environment for the latest client,
+but does not start Dolphin or HH automation.
 
 ## NocoDB Fields
 
@@ -182,7 +240,8 @@ Manual scenario:
 5. Send `/resume`; if Education or English level is missing, fill it in the
    Console and retry.
 6. Use `/open_my_tasks` in the provider's private chat when the workflow reaches
-   a provider-owned status.
+   a provider-owned status. Use the Russian translator account for
+   `Russian version in process`.
 7. Open the admin console, log in as admin, and use "Message to Telegram chat".
 8. Confirm the bot posts the admin message to the linked group.
 
