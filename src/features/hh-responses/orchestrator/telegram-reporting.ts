@@ -32,6 +32,22 @@ type TelegramDeliveryResult = {
   error?: string
 }
 
+type PrelaunchReadinessTarget = {
+  clientName: string
+  market?: string
+  stack?: string
+  commonChatId?: string
+  dolphinProfileId?: number
+  problems: string[]
+}
+
+type PrelaunchReadinessReport = {
+  market?: string
+  responseLimit: number
+  readyTargets: PrelaunchReadinessTarget[]
+  blockedTargets: PrelaunchReadinessTarget[]
+}
+
 function truncateText(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
     return value
@@ -652,6 +668,110 @@ function formatRunSummaryLog(results: OrchestratorStatus[]): string {
   )
 }
 
+function formatPrelaunchReadinessLog(
+  report: PrelaunchReadinessReport
+): string {
+  const blockedRows = report.blockedTargets.map(target => {
+    const name = `${target.clientName}${target.market ? ` / ${target.market}` : ''}`
+    const details = target.problems.length
+      ? target.problems.join('; ')
+      : 'unknown readiness problem'
+
+    return `- ${escapeTelegramHtml(name)}: ${escapeTelegramHtml(details)}`
+  })
+
+  return truncateText(
+    [
+      '<b>HH prelaunch readiness</b>',
+      `Market: ${escapeTelegramHtml(report.market ?? 'unknown')}`,
+      `Response limit: ${report.responseLimit}`,
+      `Ready to launch: ${report.readyTargets.length}`,
+      `Will be skipped: ${report.blockedTargets.length}`,
+      '',
+      report.blockedTargets.length
+        ? '<b>Skipped before launch</b>'
+        : 'All enabled accounts are ready for this market.',
+      ...blockedRows
+    ].join('\n'),
+    TELEGRAM_MESSAGE_LIMIT
+  )
+}
+
+async function sendPrelaunchReadinessLog(
+  report: PrelaunchReadinessReport
+): Promise<TelegramDeliveryResult> {
+  if (!SUMMARY_LOGS_CHANNEL_ID) {
+    const delivery = {
+      channel: 'summary',
+      sent: false,
+      skipped: true
+    }
+    writeLocalRunLog({
+      kind: 'prelaunch-readiness-send-skipped',
+      reason: 'summary_logs_channel_id_missing',
+      delivery,
+      market: report.market,
+      readyCount: report.readyTargets.length,
+      blockedCount: report.blockedTargets.length
+    })
+
+    return delivery
+  }
+
+  writeLocalRunLog({
+    kind: 'prelaunch-readiness-send-started',
+    channelId: SUMMARY_LOGS_CHANNEL_ID,
+    market: report.market,
+    readyCount: report.readyTargets.length,
+    blockedCount: report.blockedTargets.length
+  })
+
+  try {
+    await sendTelegramMessage(
+      SUMMARY_LOGS_CHANNEL_ID,
+      formatPrelaunchReadinessLog(report),
+      {
+        parseMode: 'html'
+      }
+    )
+    const delivery = {
+      channel: 'summary',
+      sent: true,
+      skipped: false
+    }
+    writeLocalRunLog({
+      kind: 'prelaunch-readiness-sent',
+      delivery,
+      market: report.market,
+      readyCount: report.readyTargets.length,
+      blockedCount: report.blockedTargets.length
+    })
+
+    return delivery
+  } catch (error: unknown) {
+    const delivery = {
+      channel: 'summary',
+      sent: false,
+      skipped: false,
+      error: getErrorMessage(error)
+    }
+    console.error(
+      `Failed to send prelaunch readiness report to Telegram: ${getErrorMessage(error)}`
+    )
+    writeLocalRunLog({
+      kind: 'prelaunch-readiness-send-failed',
+      delivery,
+      market: report.market,
+      readyCount: report.readyTargets.length,
+      blockedCount: report.blockedTargets.length,
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+
+    return delivery
+  }
+}
+
 async function sendRunSummaryLog(
   results: OrchestratorStatus[]
 ): Promise<TelegramDeliveryResult> {
@@ -824,6 +944,7 @@ module.exports = {
   addLifecycleEvent,
   formatCaptchaProfilesSummary,
   formatAuthProfilesSummary,
+  formatPrelaunchReadinessLog,
   formatRunSummaryLog,
   formatAuthCheckBrief,
   formatManualVacanciesCleanupBrief,
@@ -834,6 +955,7 @@ module.exports = {
   sendClientLifecycleLog,
   sendManualVacanciesToTelegram,
   sendParserLogsToTelegram,
+  sendPrelaunchReadinessLog,
   sendRunErrorLog,
   sendRunSummaryLog,
   shouldCheckAuthAfterParserStop,

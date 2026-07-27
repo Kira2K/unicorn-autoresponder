@@ -21,7 +21,8 @@ const {
   getConfiguredClientNames,
   selectClientsByCommonChatIds,
   selectClientsByCommonChatIdsBestEffort,
-  selectClientsByUniqueNames
+  selectClientsByUniqueNames,
+  selectClientsByUniqueNamesBestEffort
 } = require('../orchestrator/clients.ts') as {
   attachHHAuthCredentials: Function
   attachHHAuthCredentialsBestEffort: Function
@@ -38,14 +39,24 @@ const {
   selectClientsByCommonChatIds: Function
   selectClientsByCommonChatIdsBestEffort: Function
   selectClientsByUniqueNames: Function
+  selectClientsByUniqueNamesBestEffort: Function
 }
 const { runClientOrchestrator } = require('../orchestrator/client-runner.ts')
 const {
   isClientReportSuccessful,
+  sendPrelaunchReadinessLog,
   sendRunErrorLog,
   sendRunSummaryLog,
   writeLocalRunLog
 } = require('../orchestrator/reporting.ts')
+const {
+  loadReadinessResults
+} = require('../../../integrations/noco/hh-response-readiness/index.ts') as {
+  loadReadinessResults(options?: {
+    market?: 'Ru' | 'En'
+    clientNames?: string[]
+  }): Promise<TargetReadiness[]>
+}
 const {
   getErrorMessage,
   getErrorStack,
@@ -73,6 +84,14 @@ const {
 
 type ClientAutomationData = import('../orchestrator/types.ts').ClientAutomationData
 type OrchestratorStatus = import('../orchestrator/types.ts').OrchestratorStatus
+type TargetReadiness = {
+  clientName: string
+  market: 'Ru' | 'En'
+  stack: string
+  dolphinProfileId: number
+  commonChatId: string
+  problems: string[]
+}
 
 const RUN_REPORT_TIMEOUT_MS = Number(
   process.env.ORCHESTRATOR_FINAL_REPORT_TIMEOUT_MS ?? 30000
@@ -130,6 +149,39 @@ async function sendRunSummaryLogWithTimeout(
       kind: 'run-summary-send-failed',
       reason,
       timeoutMs: RUN_REPORT_TIMEOUT_MS,
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+  }
+}
+
+async function sendPrelaunchReadinessLogWithTimeout(options: {
+  market: 'Ru' | 'En'
+  readyTargets: TargetReadiness[]
+  blockedTargets: TargetReadiness[]
+}): Promise<void> {
+  try {
+    await withTimeout(
+      sendPrelaunchReadinessLog({
+        market: options.market,
+        responseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+        readyTargets: options.readyTargets,
+        blockedTargets: options.blockedTargets
+      }),
+      RUN_REPORT_TIMEOUT_MS,
+      `Prelaunch readiness Telegram report timed out after ${RUN_REPORT_TIMEOUT_MS}ms`
+    )
+  } catch (error: unknown) {
+    console.error(
+      `Failed to send prelaunch readiness report: ${getErrorMessage(error)}`
+    )
+    writeLocalRunLog({
+      kind: 'prelaunch-readiness-send-failed',
+      reason: 'prelaunch',
+      timeoutMs: RUN_REPORT_TIMEOUT_MS,
+      market: options.market,
+      readyCount: options.readyTargets.length,
+      blockedCount: options.blockedTargets.length,
       error: getErrorMessage(error),
       errorStack: getErrorStack(error)
     })
@@ -418,6 +470,219 @@ function getClientReadinessError(client: ClientAutomationData): Error | null {
   return null
 }
 
+function splitPrelaunchReadinessTargets(
+  results: TargetReadiness[]
+): {
+  readyTargets: TargetReadiness[]
+  blockedTargets: TargetReadiness[]
+} {
+  const readyTargets: TargetReadiness[] = []
+  const blockedTargets: TargetReadiness[] = []
+
+  for (const target of results) {
+    if (target.problems.length) {
+      blockedTargets.push(target)
+      continue
+    }
+
+    readyTargets.push(target)
+  }
+
+  return {
+    readyTargets,
+    blockedTargets
+  }
+}
+
+function targetReadinessToClientShell(
+  target: Pick<TargetReadiness, 'clientName' | 'market' | 'stack' | 'dolphinProfileId' | 'commonChatId'>
+): ClientAutomationData {
+  return {
+    clientName: target.clientName,
+    stack: target.stack ?? '',
+    market: target.market,
+    stackSheetName: '',
+    stackScenario: '',
+    dolphinProfileId: Number(target.dolphinProfileId) || 0,
+    commonChatId: target.commonChatId ?? ''
+  }
+}
+
+function makeReadinessProblemError(target: TargetReadiness): Error {
+  return new Error(
+    target.problems.length
+      ? target.problems.join('; ')
+      : 'unknown prelaunch readiness problem'
+  )
+}
+
+function makeReadinessSkippedStatuses(
+  blockedTargets: TargetReadiness[]
+): OrchestratorStatus[] {
+  return blockedTargets.map(target => {
+    const status = makeClientPreparationErrorStatus(
+      targetReadinessToClientShell(target),
+      makeReadinessProblemError(target),
+      'client skipped before run: prelaunch readiness failed'
+    )
+
+    writeLocalRunLog({
+      kind: 'client-skipped-before-run',
+      status
+    })
+
+    return status
+  })
+}
+
+function makeSelectedNameSkippedStatus(
+  clientName: string,
+  error: unknown,
+  event: string
+): OrchestratorStatus {
+  return makeClientPreparationErrorStatus(
+    {
+      clientName,
+      stack: '',
+      market: ORCHESTRATOR_WORK_WITH_MARKET,
+      stackSheetName: '',
+      stackScenario: '',
+      dolphinProfileId: 0,
+      commonChatId: ''
+    },
+    error,
+    event
+  )
+}
+
+function findReadyClientMatch(
+  candidates: ClientAutomationData[],
+  target: TargetReadiness
+): ClientAutomationData[] {
+  return candidates.filter(
+    client =>
+      client.clientName === target.clientName &&
+      client.market === target.market &&
+      client.commonChatId === target.commonChatId
+  )
+}
+
+async function fetchReadyClientsIndividually(
+  db: {
+    getAutomationTargets: (options?: {
+      market?: 'Ru' | 'En'
+      clientNames?: string[]
+    }) => Promise<ClientAutomationData[]>
+  },
+  readyTargets: TargetReadiness[]
+): Promise<{
+  clients: ClientAutomationData[]
+  skippedStatuses: OrchestratorStatus[]
+}> {
+  const clients: ClientAutomationData[] = []
+  const skippedStatuses: OrchestratorStatus[] = []
+
+  for (const target of readyTargets) {
+    try {
+      const candidates = await db.getAutomationTargets({
+        market: target.market,
+        clientNames: [target.clientName]
+      })
+      const matches = findReadyClientMatch(candidates, target)
+
+      if (matches.length !== 1) {
+        throw new Error(
+          `Ready target lookup for ${target.clientName}/${target.market}/${target.commonChatId} resolved ${matches.length} matches`
+        )
+      }
+
+      clients.push(matches[0])
+    } catch (error: unknown) {
+      const status = makeClientPreparationErrorStatus(
+        targetReadinessToClientShell(target),
+        error,
+        'client skipped before run: ready target lookup failed'
+      )
+      writeLocalRunLog({
+        kind: 'client-skipped-before-run',
+        status
+      })
+      skippedStatuses.push(status)
+    }
+  }
+
+  return {
+    clients,
+    skippedStatuses
+  }
+}
+
+async function fetchReadyClientsFromReadiness(
+  db: {
+    getAutomationTargets: (options?: {
+      market?: 'Ru' | 'En'
+      clientNames?: string[]
+    }) => Promise<ClientAutomationData[]>
+  },
+  readyTargets: TargetReadiness[]
+): Promise<{
+  clients: ClientAutomationData[]
+  skippedStatuses: OrchestratorStatus[]
+}> {
+  if (!readyTargets.length) {
+    return {
+      clients: [],
+      skippedStatuses: []
+    }
+  }
+
+  try {
+    const candidates = await db.getAutomationTargets({
+      market: ORCHESTRATOR_WORK_WITH_MARKET,
+      clientNames: [...new Set(readyTargets.map(target => target.clientName))]
+    })
+    const clients: ClientAutomationData[] = []
+    const skippedStatuses: OrchestratorStatus[] = []
+
+    for (const target of readyTargets) {
+      const matches = findReadyClientMatch(candidates, target)
+
+      if (matches.length === 1) {
+        clients.push(matches[0])
+        continue
+      }
+
+      const status = makeClientPreparationErrorStatus(
+        targetReadinessToClientShell(target),
+        new Error(
+          `Ready target lookup for ${target.clientName}/${target.market}/${target.commonChatId} resolved ${matches.length} matches`
+        ),
+        'client skipped before run: ready target lookup failed'
+      )
+      writeLocalRunLog({
+        kind: 'client-skipped-before-run',
+        status
+      })
+      skippedStatuses.push(status)
+    }
+
+    return {
+      clients,
+      skippedStatuses
+    }
+  } catch (error: unknown) {
+    writeLocalRunLog({
+      kind: 'prelaunch-ready-target-batch-fetch-failed',
+      market: ORCHESTRATOR_WORK_WITH_MARKET,
+      readyCount: readyTargets.length,
+      error: getErrorMessage(error),
+      errorStack: getErrorStack(error)
+    })
+
+    return fetchReadyClientsIndividually(db, readyTargets)
+  }
+}
+
 function splitClientsByReadiness(clients: ClientAutomationData[]): {
   clients: ClientAutomationData[]
   skippedStatuses: OrchestratorStatus[]
@@ -617,15 +882,73 @@ async function runSelectedClientsOrchestrator(
   clientNames: string[]
 ): Promise<OrchestratorStatus[]> {
   const db = createAppDb()
-  const allClients = await fetchSelectedClientsByUniqueNames(db, clientNames)
-  const selectedClients = await attachHHAuthCredentials(
-    attachBlockedCompanies(
-      prepareSelectedClients(selectClientsByUniqueNames(allClients, clientNames))
-    ),
+  const selectedFetch = await fetchSelectedClientsByUniqueNamesBestEffort(
+    db,
+    clientNames
+  )
+  const selection = selectClientsByUniqueNamesBestEffort(
+    selectedFetch.clients,
+    selectedFetch.clientNames
+  )
+  const missingStatuses = selection.missingNames.map((clientName: string) =>
+    makeSelectedNameSkippedStatus(
+      clientName,
+      new Error(`Selected client was not found or is not enabled: ${clientName}`),
+      'client skipped before run: selected name was not found or is not enabled'
+    )
+  )
+  const ambiguousStatuses = selection.ambiguousNames.map(
+    (item: { clientName: string; matchingIds: string[] }) =>
+      makeSelectedNameSkippedStatus(
+        item.clientName,
+        new Error(
+          `Selected client name is ambiguous. Matching chat ids: ${item.matchingIds.join(', ')}`
+        ),
+        'client skipped before run: selected name was ambiguous'
+      )
+  )
+  const credentialAttachResult = await attachHHAuthCredentialsBestEffort(
+    attachBlockedCompanies(prepareSelectedClients(selection.clients)),
     db
   )
+  const credentialSkippedStatuses = credentialAttachResult.skipped.map(
+    (skip: { client: ClientAutomationData; error: unknown }) =>
+      makeClientPreparationErrorStatus(
+        skip.client,
+        skip.error,
+        'client skipped before run: HH credentials were not matched'
+      )
+  )
+  const skippedStatuses = [
+    ...selectedFetch.skippedStatuses,
+    ...missingStatuses,
+    ...ambiguousStatuses,
+    ...credentialSkippedStatuses
+  ]
 
-  return runClientsOrchestrator(selectedClients)
+  for (const status of skippedStatuses) {
+    console.warn(
+      `Skipping ${status.clientName}/${status.commonChatId}/${status.market}: ${status.error ?? status.completionGap}`
+    )
+    writeLocalRunLog({
+      kind: 'client-skipped-before-run',
+      status
+    })
+  }
+
+  if (!credentialAttachResult.clients.length) {
+    writeLocalRunLog({
+      kind: 'run-results',
+      results: skippedStatuses
+    })
+    await sendRunSummaryLogWithTimeout(skippedStatuses)
+
+    return skippedStatuses
+  }
+
+  return runClientsOrchestrator(credentialAttachResult.clients, {
+    extraSummaryStatuses: skippedStatuses
+  })
 }
 
 async function fetchSelectedClientsByUniqueNames(
@@ -641,6 +964,50 @@ async function fetchSelectedClientsByUniqueNames(
     ...getConfiguredAutomationTargetOptions(),
     clientNames
   })
+}
+
+async function fetchSelectedClientsByUniqueNamesBestEffort(
+  db: {
+    getAutomationTargets: (options?: {
+      market?: 'Ru' | 'En'
+      clientNames?: string[]
+    }) => Promise<ClientAutomationData[]>
+  },
+  clientNames: string[]
+): Promise<{
+  clients: ClientAutomationData[]
+  clientNames: string[]
+  skippedStatuses: OrchestratorStatus[]
+}> {
+  const clients: ClientAutomationData[] = []
+  const fetchedClientNames: string[] = []
+  const skippedStatuses: OrchestratorStatus[] = []
+
+  for (const clientName of clientNames) {
+    try {
+      clients.push(
+        ...(await db.getAutomationTargets({
+          ...getConfiguredAutomationTargetOptions(),
+          clientNames: [clientName]
+        }))
+      )
+      fetchedClientNames.push(clientName)
+    } catch (error: unknown) {
+      skippedStatuses.push(
+        makeSelectedNameSkippedStatus(
+          clientName,
+          error,
+          'client skipped before run: selected name target fetch failed'
+        )
+      )
+    }
+  }
+
+  return {
+    clients,
+    clientNames: fetchedClientNames,
+    skippedStatuses
+  }
 }
 
 async function runSelectedClientIdsOrchestrator(
@@ -709,10 +1076,27 @@ async function runSelectedClientIdsOrchestrator(
 
 async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
   const db = createAppDb()
+  const readiness = splitPrelaunchReadinessTargets(
+    await loadReadinessResults({
+      market: ORCHESTRATOR_WORK_WITH_MARKET
+    })
+  )
+  await sendPrelaunchReadinessLogWithTimeout({
+    market: ORCHESTRATOR_WORK_WITH_MARKET,
+    readyTargets: readiness.readyTargets,
+    blockedTargets: readiness.blockedTargets
+  })
+  const prelaunchSkippedStatuses = makeReadinessSkippedStatuses(
+    readiness.blockedTargets
+  )
+  const readyClientFetch = await fetchReadyClientsFromReadiness(
+    db,
+    readiness.readyTargets
+  )
   const credentialAttachResult = await attachHHAuthCredentialsBestEffort(
     attachBlockedCompanies(
       prepareSelectedClients(
-        await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
+        readyClientFetch.clients
       )
     ),
     db
@@ -737,24 +1121,25 @@ async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
       return status
     }
   )
+  const allSkippedStatuses = [
+    ...prelaunchSkippedStatuses,
+    ...readyClientFetch.skippedStatuses,
+    ...skippedStatuses
+  ]
 
   if (!credentialAttachResult.clients.length) {
-    if (!skippedStatuses.length) {
-      return runClientsOrchestrator(credentialAttachResult.clients)
-    }
-
     console.warn('No runnable clients remained after credential preflight.')
     writeLocalRunLog({
       kind: 'run-results',
-      results: skippedStatuses
+      results: allSkippedStatuses
     })
-    await sendRunSummaryLogWithTimeout(skippedStatuses)
+    await sendRunSummaryLogWithTimeout(allSkippedStatuses)
 
-    return skippedStatuses
+    return allSkippedStatuses
   }
 
   return runClientsOrchestrator(credentialAttachResult.clients, {
-    extraSummaryStatuses: skippedStatuses
+    extraSummaryStatuses: allSkippedStatuses
   })
 }
 
@@ -863,6 +1248,8 @@ module.exports = {
   getRecommendedExternalTimeoutMs,
   getRunningDolphinBrowserProfileIds,
   fetchSelectedClientsByUniqueNames,
+  fetchSelectedClientsByUniqueNamesBestEffort,
+  fetchReadyClientsFromReadiness,
   openScenarioAndInjectIndex,
   main,
   runWithBoundedConcurrency,
@@ -872,5 +1259,6 @@ module.exports = {
   isClientReportSuccessful,
   selectClientsByCommonChatIds,
   selectClientsByUniqueNames,
+  splitPrelaunchReadinessTargets,
   splitTelegramMessage
 }

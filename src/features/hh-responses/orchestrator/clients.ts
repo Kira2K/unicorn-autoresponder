@@ -212,29 +212,69 @@ function selectClientsByUniqueNames(
   allClients: ClientAutomationData[],
   clientNames: string[]
 ): ClientAutomationData[] {
+  const result = selectClientsByUniqueNamesBestEffort(allClients, clientNames)
+
+  if (result.missingNames.length) {
+    throw new Error(
+      `Selected clients were not found or are not enabled: ${result.missingNames.join(', ')}`
+    )
+  }
+
+  if (result.ambiguousNames.length) {
+    throw new Error(
+      result.ambiguousNames
+        .map(item =>
+          `Client name "${item.clientName}" is ambiguous. Matching chat ids: ${item.matchingIds.join(', ')}`
+        )
+        .join('; ')
+    )
+  }
+
+  return result.clients
+}
+
+function selectClientsByUniqueNamesBestEffort(
+  allClients: ClientAutomationData[],
+  clientNames: string[]
+): {
+  clients: ClientAutomationData[]
+  missingNames: string[]
+  ambiguousNames: Array<{
+    clientName: string
+    matchingIds: string[]
+  }>
+} {
   const selectedClients: ClientAutomationData[] = []
+  const missingNames: string[] = []
+  const ambiguousNames: Array<{
+    clientName: string
+    matchingIds: string[]
+  }> = []
 
   for (const clientName of clientNames) {
     const matches = allClients.filter(client => client.clientName === clientName)
 
     if (!matches.length) {
-      throw new Error(
-        `Selected clients were not found or are not enabled: ${clientName}`
-      )
+      missingNames.push(clientName)
+      continue
     }
 
     if (matches.length > 1) {
-      throw new Error(
-        `Client name "${clientName}" is ambiguous. Matching chat ids: ${matches
-          .map(client => client.commonChatId)
-          .join(', ')}`
-      )
+      ambiguousNames.push({
+        clientName,
+        matchingIds: matches.map(client => client.commonChatId)
+      })
+      continue
     }
 
     selectedClients.push(matches[0])
   }
 
-  return selectedClients
+  return {
+    clients: selectedClients,
+    missingNames,
+    ambiguousNames
+  }
 }
 
 module.exports = {
@@ -250,5 +290,6 @@ module.exports = {
   attachBlockedCompanies,
   selectClientsByCommonChatIds,
   selectClientsByCommonChatIdsBestEffort,
-  selectClientsByUniqueNames
+  selectClientsByUniqueNames,
+  selectClientsByUniqueNamesBestEffort
 }
