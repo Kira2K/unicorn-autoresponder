@@ -1228,11 +1228,7 @@ async function runTests(): Promise<void> {
         `provider task list should not fetch cv_processing without a status filter: ${JSON.stringify(cvTaskListFetchCalls)}`
       )
       const clientTaskListFetchCalls = taskListFetchCalls.filter(call => call.tableId === 'mxza381054ldlza')
-      assert(clientTaskListFetchCalls.length > 0, 'provider task list should fetch only clients linked to active tasks')
-      assert(
-        clientTaskListFetchCalls.every(call => call.where.startsWith('(Id,eq,')),
-        `provider task list should not fetch all clients: ${JSON.stringify(clientTaskListFetchCalls)}`
-      )
+      assert.equal(clientTaskListFetchCalls.length, 0, `provider task list should not fetch clients: ${JSON.stringify(clientTaskListFetchCalls)}`)
       const workflowId = result.body.tasks[0].id
 
       result = await request(server.baseUrl, '/api/bot/telegram/resume/task-input', {

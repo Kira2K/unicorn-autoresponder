@@ -623,12 +623,15 @@ async function runTests() {
       async getUpdates() {
         retryPollingCalls += 1
         if (retryPollingCalls === 1) {
+          throw new TypeError('fetch failed')
+        }
+        if (retryPollingCalls === 2) {
           throw Object.assign(new Error('Too Many Requests: retry after 1'), {
             code: 'telegram_bot_api_failed',
             details: { status: 429 }
           })
         }
-        if (retryPollingCalls === 2) {
+        if (retryPollingCalls === 3) {
           throw Object.assign(new Error('Conflict: terminated by other getUpdates request; make sure that only one bot instance is running'), {
             code: 'telegram_bot_api_failed',
             details: { status: 409 }
@@ -653,7 +656,7 @@ async function runTests() {
       }
     }
   })
-  assert.equal(retryPollingCalls, 3)
+  assert.equal(retryPollingCalls, 4)
   assert.equal(retryPollingSentMessages.at(-1).text, 'Бэкенд: работает')
 
   const fallbackSendStop = new AbortController()
@@ -693,6 +696,7 @@ async function runTests() {
     console.error = realConsoleError
   }
   assert(expectedConsoleErrors.some(message => message.includes('Too Many Requests')))
+  assert(expectedConsoleErrors.some(message => message.includes('fetch failed')))
   assert(expectedConsoleErrors.some(message => message.includes('terminated by other getUpdates request')))
   assert(expectedConsoleErrors.some(message => message.includes('Failed to send Telegram bot response')))
 

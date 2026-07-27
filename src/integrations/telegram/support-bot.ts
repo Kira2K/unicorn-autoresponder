@@ -661,14 +661,19 @@ function isTransientTelegramPollingError(error: any): boolean {
   const code = String(error?.code ?? '').trim()
   if (code === 'telegram_bot_token_missing') return false
   const status = Number(error?.status ?? error?.details?.status ?? error?.details?.data?.error_code)
-  const message = String(error?.message ?? error?.details?.data?.description ?? '').toLowerCase()
+  const message = String(error?.message ?? error?.details?.data?.description ?? error?.cause?.message ?? '').toLowerCase()
+  if (status === 401 || status === 404 || message.includes('unauthorized')) return false
   return (
+    code === 'telegram_bot_api_failed' ||
     status === 409 ||
     status === 429 ||
     [500, 502, 503, 504].includes(status) ||
+    error?.name === 'AbortError' ||
     message.includes('terminated by other getupdates request') ||
     message.includes('too many requests') ||
     message.includes('timeout') ||
+    message.includes('fetch failed') ||
+    message.includes('failed to fetch') ||
     ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'].includes(code)
   )
 }

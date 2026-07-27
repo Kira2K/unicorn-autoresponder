@@ -415,12 +415,11 @@ function platformContact(platformAccounts: NocoRecord[], labels: string[]): stri
 
 function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, platformAccounts: NocoRecord[] = []): ResumeWorkflowRecord {
   const clientId = cvProcessingClientId(record) ?? Number((client as any)?.Id ?? (client as any)?.id)
-  const clientName = normalizeText(
-    (client as any)?.client_name ??
-    (client as any)?.clientName ??
-    linkedName(record.client) ??
-    record.record_key
-  )
+  const clientName =
+    normalizeText((client as any)?.client_name) ||
+    normalizeText((client as any)?.clientName) ||
+    linkedName(record.client) ||
+    normalizeText(record.record_key)
   const clientMarket =
     linkedName((client as any)?.market) ||
     normalizeText((client as any)?.market)
@@ -948,14 +947,9 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
 
     async getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]> {
       const records = await fetchCvProcessingByStatuses(RESUME_ACTIVE_TASK_STATUSES)
-      const clients = await fetchClientsByIds(records.map(cvProcessingClientId).filter((id): id is number => id !== null))
-      const clientsById = new Map(clients.map(client => [Number(client.Id), client]))
       return records
         .sort((a, b) => Number(a.Id) - Number(b.Id))
-        .map(record => {
-          const clientId = cvProcessingClientId(record)
-          return toResumeWorkflow(record, clientId ? clientsById.get(clientId) : undefined, [])
-        })
+        .map(record => toResumeWorkflow(record, undefined, []))
     },
 
     async patchResumeWorkflow(recordId: number, input: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord> {
