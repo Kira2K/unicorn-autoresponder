@@ -26,6 +26,7 @@ scheduled, prevalidated, reported, and operated by a non-technical user.
   Telegram account.
 - Verify the system is ready for AI-tailored cover letters and external
   captcha-solving services.
+- Add better logs and handling for `no_terminal_stop_reason` outcomes.
 - Simplify usage for a non-tech collegues
 - Unite with tg bot to ping students with NocoDB-measured poor filling rate
 
