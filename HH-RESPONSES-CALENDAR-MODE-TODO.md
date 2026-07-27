@@ -22,6 +22,10 @@ scheduled, prevalidated, reported, and operated by a non-technical user.
   `Komtek`.
 - Add HH vacancy/position ID-based banning; company-name banning is already
   ready.
+- Respond with the best-fitting CV only, while still saving positions as
+  successfully applied.
+- Identify Moscow-located vacancies in the En market (script + AI) and
+  respond with the current CV, including English CVs.
 - Add a reporting feature that uses the Unicorn support bot instead of Kira's
   Telegram account.
 - Verify the system is ready for AI-tailored cover letters and external
