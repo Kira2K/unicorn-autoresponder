@@ -568,12 +568,13 @@ async function runTests() {
   const runnerStop = new AbortController()
   const runnerSentMessages: any[] = []
   let runnerAllowedUpdates: string[] | undefined
+  let runnerPollTimeout: number | undefined
   await runSupportBot({
     apiClient: foundApi,
     stopSignal: runnerStop.signal,
-    pollTimeout: 0,
     botApi: {
-      async getUpdates(_offset?: number, _timeout?: number, allowedUpdates?: string[]) {
+      async getUpdates(_offset?: number, timeout?: number, allowedUpdates?: string[]) {
+        runnerPollTimeout = timeout
         runnerAllowedUpdates = allowedUpdates
         return [{
           update_id: 1,
@@ -594,6 +595,7 @@ async function runTests() {
       }
     }
   })
+  assert.equal(runnerPollTimeout, 0)
   assert.deepEqual(runnerAllowedUpdates, SUPPORT_BOT_ALLOWED_UPDATES)
   assert.equal(runnerSentMessages.at(-1).chatId, '-5216637594')
   assert.equal(runnerSentMessages.at(-1).text, [

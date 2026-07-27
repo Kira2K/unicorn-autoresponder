@@ -169,6 +169,17 @@ function backendRequestTimeoutMs(value: unknown = process.env.SUPPORT_BOT_BACKEN
   return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5000
 }
 
+function supportBotPollTimeoutSeconds(value: unknown = process.env.SUPPORT_BOT_POLL_TIMEOUT_SECONDS): number {
+  const timeoutSeconds = Number(value)
+  return Number.isFinite(timeoutSeconds) && timeoutSeconds >= 0 ? timeoutSeconds : 0
+}
+
+function supportBotIdleDelayMs(pollTimeoutSeconds: number, value: unknown = process.env.SUPPORT_BOT_IDLE_DELAY_MS): number {
+  const delayMs = Number(value)
+  if (Number.isFinite(delayMs) && delayMs >= 0) return delayMs
+  return pollTimeoutSeconds > 0 ? 0 : 2000
+}
+
 function isBackendOverloadedError(error: any): boolean {
   const code = String(error?.code ?? error?.cause?.code ?? error?.body?.error ?? '').trim()
   const status = Number(error?.status ?? error?.cause?.status ?? error?.body?.status)
@@ -697,14 +708,15 @@ async function runSupportBot(options: {
   const botApi = options.botApi ?? createTelegramBotApi()
   const apiClient = options.apiClient ?? createSupportBotApiClient()
   let offset = Number(options.initialOffset ?? 0)
-  const idleDelayMs = Number(options.idleDelayMs ?? 0)
+  const pollTimeoutSeconds = Number(options.pollTimeout ?? supportBotPollTimeoutSeconds())
+  const idleDelayMs = Number(options.idleDelayMs ?? supportBotIdleDelayMs(pollTimeoutSeconds))
   const pollErrorDelayMs = Number.isFinite(Number(options.pollErrorDelayMs)) ? Math.max(0, Number(options.pollErrorDelayMs)) : 5000
   const allowedUpdates = options.allowedUpdates ?? SUPPORT_BOT_ALLOWED_UPDATES
   const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
   while (!options.stopSignal?.aborted) {
     let updates: any[]
     try {
-      updates = await botApi.getUpdates(offset || undefined, options.pollTimeout ?? 30, allowedUpdates)
+      updates = await botApi.getUpdates(offset || undefined, pollTimeoutSeconds, allowedUpdates)
     } catch (error: any) {
       if (!isTransientTelegramPollingError(error)) throw error
       console.error(`Telegram polling failed temporarily: ${error instanceof Error ? error.message : String(error)}`)
