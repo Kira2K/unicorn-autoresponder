@@ -27,6 +27,7 @@ scheduled, prevalidated, reported, and operated by a non-technical user.
 - Verify the system is ready for AI-tailored cover letters and external
   captcha-solving services.
 - Simplify usage for a non-tech collegues
+- Unite with tg bot to ping students with NocoDB-measured poor filling rate
 
 ## Test Checklist
 - Verify the onboarding link resolves from `docs/ONBOARDING.md`.
