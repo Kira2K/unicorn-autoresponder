@@ -35,7 +35,7 @@ function createTelegramBotApi(options: {
 
   async function request(method: string, body: Record<string, unknown> = {}) {
     const token = resolveBotToken(options.token)
-    const longPollTimeoutMs = (Number(body.timeout) + 10) * 1000
+    const longPollTimeoutMs = (Number(body.timeout) + 90) * 1000
     const requestTimeoutMs = Number(options.requestTimeoutMs ?? Math.max(15000, longPollTimeoutMs || 0))
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), requestTimeoutMs)
