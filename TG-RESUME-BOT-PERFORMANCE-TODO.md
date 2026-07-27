@@ -1,13 +1,14 @@
 # Telegram Resume Bot Performance TODO
 
-Status: partially implemented. `/open_my_tasks` already queries only active CV
-workflow statuses and renders a compact paged task list.
+Status: implemented. `/open_my_tasks` queries only active CV workflow statuses,
+renders a compact paged task list, and avoids full client/platform-account
+loading until a specific task is opened.
 
 ## Goal
 Finish the remaining `/open_my_tasks` performance work for large CV workflow
 tables.
 
-## Remaining Optimization
+## Implemented Optimization
 - Avoid fetching all clients just to enrich the active CV task rows.
 - Fetch full links, student contacts, and platform accounts only after a
   specific task is opened.

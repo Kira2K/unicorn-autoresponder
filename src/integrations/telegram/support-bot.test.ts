@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict')
 const {
+  BACKEND_OVERLOADED_MESSAGE,
   BACKEND_UNAVAILABLE_MESSAGE,
   SUPPORT_BOT_ALLOWED_UPDATES,
   clearActiveTaskContextsForTest,
@@ -12,6 +13,7 @@ const {
   responseText,
   runSupportBot
 } = require('./support-bot.ts') as {
+  BACKEND_OVERLOADED_MESSAGE: string
   BACKEND_UNAVAILABLE_MESSAGE: string
   SUPPORT_BOT_ALLOWED_UPDATES: string[]
   clearActiveTaskContextsForTest(): void
@@ -603,6 +605,97 @@ async function runTests() {
     'Статус резюме для Client One: черновик в работе'
   ].join('\n'))
 
+  const expectedConsoleErrors: string[] = []
+  const realConsoleError = console.error
+  console.error = (...args: any[]) => {
+    expectedConsoleErrors.push(args.map(String).join(' '))
+  }
+  try {
+  const retryPollingStop = new AbortController()
+  const retryPollingSentMessages: any[] = []
+  let retryPollingCalls = 0
+  await runSupportBot({
+    apiClient: foundApi,
+    stopSignal: retryPollingStop.signal,
+    pollTimeout: 0,
+    pollErrorDelayMs: 0,
+    botApi: {
+      async getUpdates() {
+        retryPollingCalls += 1
+        if (retryPollingCalls === 1) {
+          throw Object.assign(new Error('Too Many Requests: retry after 1'), {
+            code: 'telegram_bot_api_failed',
+            details: { status: 429 }
+          })
+        }
+        if (retryPollingCalls === 2) {
+          throw Object.assign(new Error('Conflict: terminated by other getUpdates request; make sure that only one bot instance is running'), {
+            code: 'telegram_bot_api_failed',
+            details: { status: 409 }
+          })
+        }
+        return [{
+          update_id: 2,
+          message: {
+            text: '/backend_status',
+            chat: { id: -5216637594, type: 'supergroup' },
+            from: { id: 42, username: 'tester' }
+          }
+        }]
+      },
+      async sendMessage(input: any) {
+        retryPollingSentMessages.push(input)
+        retryPollingStop.abort()
+        return { ok: true }
+      },
+      async answerCallbackQuery() {
+        return { ok: true }
+      }
+    }
+  })
+  assert.equal(retryPollingCalls, 3)
+  assert.equal(retryPollingSentMessages.at(-1).text, 'Бэкенд: работает')
+
+  const fallbackSendStop = new AbortController()
+  let fallbackSendAttempts = 0
+  await runSupportBot({
+    apiClient: {
+      ...foundApi,
+      async findClient() {
+        throw new Error('unexpected backend handler failure')
+      }
+    },
+    stopSignal: fallbackSendStop.signal,
+    pollTimeout: 0,
+    botApi: {
+      async getUpdates() {
+        return [{
+          update_id: 3,
+          message: {
+            text: '/student',
+            chat: { id: -5216637594, type: 'supergroup' },
+            from: { id: 42, username: 'tester' }
+          }
+        }]
+      },
+      async sendMessage() {
+        fallbackSendAttempts += 1
+        fallbackSendStop.abort()
+        throw new Error('Telegram send failed')
+      },
+      async answerCallbackQuery() {
+        return { ok: true }
+      }
+    }
+  })
+  assert.equal(fallbackSendAttempts, 1)
+  } finally {
+    console.error = realConsoleError
+  }
+  assert(expectedConsoleErrors.some(message => message.includes('Too Many Requests')))
+  assert(expectedConsoleErrors.some(message => message.includes('terminated by other getUpdates request')))
+  assert(expectedConsoleErrors.some(message => message.includes('Failed to send Telegram bot response')))
+
   const notFoundApi = {
     async findClient(chatId: string) {
       return { found: false, chatId }
@@ -701,6 +794,34 @@ async function runTests() {
   assert.equal(
     responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -5216637594 } }, proxyDownApi)),
     BACKEND_UNAVAILABLE_MESSAGE
+  )
+
+  const overloadedApi = createSupportBotApiClient({
+    baseUrl: 'http://127.0.0.1:65535',
+    token: 'test-bot-token',
+    requester: async () => ({
+      ok: false,
+      status: 429,
+      async json() {
+        return { error: 'too_many_requests', message: 'Request failed with status code 429' }
+      }
+    })
+  })
+  await assert.rejects(
+    () => overloadedApi.findClient('-5216637594'),
+    (error: any) => {
+      assert.equal(error.code, 'backend_overloaded')
+      assert.equal(error.message, BACKEND_OVERLOADED_MESSAGE)
+      return true
+    }
+  )
+  assert.equal(
+    responseText(await handleSupportBotMessage({
+      text: '/open_my_tasks',
+      chat: { id: 8222949251, type: 'private' },
+      from: { id: 8222949251, username: 'veu_support' }
+    }, overloadedApi)),
+    BACKEND_OVERLOADED_MESSAGE
   )
 
   const previousResumeTestMode = process.env.RESUME_WORKFLOW_TEST_MODE

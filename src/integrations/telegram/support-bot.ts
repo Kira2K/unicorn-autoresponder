@@ -36,6 +36,8 @@ type SupportBotApiClient = {
 }
 
 const BACKEND_UNAVAILABLE_MESSAGE = 'Бэкенд сейчас недоступен. Попробуй позже.'
+const BACKEND_OVERLOADED_MESSAGE = 'Бэкенд сейчас перегружен. Попробуй позже.'
+const GENERIC_BOT_ERROR_MESSAGE = 'Команда Telegram-бота завершилась с ошибкой.'
 const SUPPORT_BOT_ALLOWED_UPDATES = ['message', 'callback_query', 'my_chat_member']
 const ACTIVE_TASK_CONTEXT_TTL_MS = 30 * 60 * 1000
 
@@ -155,9 +157,28 @@ function backendUnavailableError(cause: unknown): Error & { code: string; cause?
   })
 }
 
+function backendOverloadedError(cause: unknown): Error & { code: string; cause?: unknown } {
+  return Object.assign(new Error(BACKEND_OVERLOADED_MESSAGE), {
+    code: 'backend_overloaded',
+    cause
+  })
+}
+
 function backendRequestTimeoutMs(value: unknown = process.env.SUPPORT_BOT_BACKEND_TIMEOUT_MS): number {
   const timeoutMs = Number(value)
   return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5000
+}
+
+function isBackendOverloadedError(error: any): boolean {
+  const code = String(error?.code ?? error?.cause?.code ?? error?.body?.error ?? '').trim()
+  const status = Number(error?.status ?? error?.cause?.status ?? error?.body?.status)
+  const message = String(error?.message ?? error?.cause?.message ?? '').toLowerCase()
+  return (
+    code === 'backend_overloaded' ||
+    status === 429 ||
+    message.includes('status code 429') ||
+    message.includes('too many requests')
+  )
 }
 
 function isBackendUnavailableError(error: any): boolean {
@@ -177,6 +198,9 @@ async function withBackendStatusMessage(action: () => Promise<SupportBotResponse
   try {
     return await action()
   } catch (error: any) {
+    if (isBackendOverloadedError(error)) {
+      return BACKEND_OVERLOADED_MESSAGE
+    }
     if (isBackendUnavailableError(error)) {
       return BACKEND_UNAVAILABLE_MESSAGE
     }
@@ -219,6 +243,9 @@ function createSupportBotApiClient(options: {
     }
     const body = await response.json().catch(() => ({}))
     if (!response.ok) {
+      if (response.status === 429) {
+        throw backendOverloadedError({ status: response.status, body })
+      }
       if ([502, 503, 504].includes(response.status)) {
         throw backendUnavailableError({ status: response.status, body })
       }
@@ -605,6 +632,18 @@ async function sendBotResponse(
   })
 }
 
+async function sendBotResponseQuietly(
+  botApi: ReturnType<typeof createTelegramBotApi>,
+  chatId: string,
+  response: SupportBotResponse
+): Promise<void> {
+  try {
+    await sendBotResponse(botApi, chatId, response)
+  } catch (error: any) {
+    console.error(`Failed to send Telegram bot response: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 async function answerCallbackQueryQuietly(
   botApi: ReturnType<typeof createTelegramBotApi>,
   input: { callbackQueryId: string; text?: string }
@@ -618,6 +657,28 @@ async function answerCallbackQueryQuietly(
   }
 }
 
+function isTransientTelegramPollingError(error: any): boolean {
+  const code = String(error?.code ?? '').trim()
+  if (code === 'telegram_bot_token_missing') return false
+  const status = Number(error?.status ?? error?.details?.status ?? error?.details?.data?.error_code)
+  const message = String(error?.message ?? error?.details?.data?.description ?? '').toLowerCase()
+  return (
+    status === 409 ||
+    status === 429 ||
+    [500, 502, 503, 504].includes(status) ||
+    message.includes('terminated by other getupdates request') ||
+    message.includes('too many requests') ||
+    message.includes('timeout') ||
+    ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'].includes(code)
+  )
+}
+
+function userFacingErrorMessage(error: any): string {
+  if (isBackendOverloadedError(error)) return BACKEND_OVERLOADED_MESSAGE
+  if (isBackendUnavailableError(error)) return BACKEND_UNAVAILABLE_MESSAGE
+  return String(error?.message ?? '').trim() || GENERIC_BOT_ERROR_MESSAGE
+}
+
 async function runSupportBot(options: {
   botApi?: ReturnType<typeof createTelegramBotApi>
   apiClient?: SupportBotApiClient
@@ -626,15 +687,25 @@ async function runSupportBot(options: {
   initialOffset?: number
   stopSignal?: AbortSignal
   idleDelayMs?: number
+  pollErrorDelayMs?: number
 } = {}) {
   const botApi = options.botApi ?? createTelegramBotApi()
   const apiClient = options.apiClient ?? createSupportBotApiClient()
   let offset = Number(options.initialOffset ?? 0)
   const idleDelayMs = Number(options.idleDelayMs ?? 0)
+  const pollErrorDelayMs = Number.isFinite(Number(options.pollErrorDelayMs)) ? Math.max(0, Number(options.pollErrorDelayMs)) : 5000
   const allowedUpdates = options.allowedUpdates ?? SUPPORT_BOT_ALLOWED_UPDATES
   const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
   while (!options.stopSignal?.aborted) {
-    const updates = await botApi.getUpdates(offset || undefined, options.pollTimeout ?? 30, allowedUpdates)
+    let updates: any[]
+    try {
+      updates = await botApi.getUpdates(offset || undefined, options.pollTimeout ?? 30, allowedUpdates)
+    } catch (error: any) {
+      if (!isTransientTelegramPollingError(error)) throw error
+      console.error(`Telegram polling failed temporarily: ${error instanceof Error ? error.message : String(error)}`)
+      if (pollErrorDelayMs > 0) await wait(pollErrorDelayMs)
+      continue
+    }
     if (!updates.length && idleDelayMs > 0) await wait(idleDelayMs)
     for (const update of updates) {
       if (options.stopSignal?.aborted) break
@@ -663,17 +734,15 @@ async function runSupportBot(options: {
       } catch (error: any) {
         console.error(error instanceof Error ? error.stack || error.message : String(error))
         const chatId = String(chatMemberUpdate?.chat?.id ?? callbackQuery?.message?.chat?.id ?? callbackQuery?.from?.id ?? message?.chat?.id ?? '').trim()
+        const errorText = userFacingErrorMessage(error)
         if (callbackQuery?.id) {
           await answerCallbackQueryQuietly(botApi, {
             callbackQueryId: String(callbackQuery.id),
-            text: error?.message || 'Команда Telegram-бота завершилась с ошибкой.'
+            text: errorText
           }).catch(() => undefined)
         }
         if (chatId) {
-          await botApi.sendMessage({
-            chatId,
-            text: error?.message || 'Команда Telegram-бота завершилась с ошибкой.'
-          })
+          await sendBotResponseQuietly(botApi, chatId, errorText)
         }
       }
     }
@@ -690,6 +759,7 @@ if (require.main === module) {
 module.exports = {
   actorFromCallbackQuery,
   actorFromMessage,
+  BACKEND_OVERLOADED_MESSAGE,
   BACKEND_UNAVAILABLE_MESSAGE,
   SUPPORT_BOT_ALLOWED_UPDATES,
   commandArgument,

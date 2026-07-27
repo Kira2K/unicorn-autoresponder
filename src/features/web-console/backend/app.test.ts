@@ -1227,6 +1227,12 @@ async function runTests(): Promise<void> {
         cvTaskListFetchCalls.every(call => call.where.startsWith('(status,eq,')),
         `provider task list should not fetch cv_processing without a status filter: ${JSON.stringify(cvTaskListFetchCalls)}`
       )
+      const clientTaskListFetchCalls = taskListFetchCalls.filter(call => call.tableId === 'mxza381054ldlza')
+      assert(clientTaskListFetchCalls.length > 0, 'provider task list should fetch only clients linked to active tasks')
+      assert(
+        clientTaskListFetchCalls.every(call => call.where.startsWith('(Id,eq,')),
+        `provider task list should not fetch all clients: ${JSON.stringify(clientTaskListFetchCalls)}`
+      )
       const workflowId = result.body.tasks[0].id
 
       result = await request(server.baseUrl, '/api/bot/telegram/resume/task-input', {
@@ -1269,6 +1275,9 @@ async function runTests(): Promise<void> {
       })
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Draft in approve by Kira')
+      assert.match(result.body.message, /@client_one_tg/)
+      assert.match(result.body.message, /\+79990003344/)
+      assert.match(result.body.message, /\+79990005566/)
 
       result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}/advance`, {
         method: 'POST',
