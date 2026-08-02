@@ -334,6 +334,8 @@ usually evidence, not source changes, unless the report itself is the deliverabl
 
 ## Current TODO Docs
 
+- `HIGHEST-PRIORITY-TODO.md`: first queue for the highest-priority cross-project
+  work, currently HH captcha solving and the AI-driven development harness.
 - `TG-RESUME-BOT-PERFORMANCE-TODO.md`: remaining `/open_my_tasks` performance
   cleanup around broad client fetches and save/input fallback scans.
 - `src/integrations/dolphin/profileAssigner/normalizeProfiles/TODO.md`:

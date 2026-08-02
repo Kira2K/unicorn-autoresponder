@@ -1,5 +1,8 @@
 # HH Autoparcer
 
+Highest-priority work lives in
+[HIGHEST-PRIORITY-TODO.md](./HIGHEST-PRIORITY-TODO.md).
+
 For new colleagues: start with `docs/ONBOARDING.md`.
 
 For future agents: read `docs/AGENT_CONTEXT.md` first. Use
