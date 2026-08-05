@@ -883,6 +883,11 @@ async function runTests() {
     )
 
     const missingSourceRepository = makeWorkflowRepository()
+    const missingSourceStatusResult = await getResumeStatus('-5216637594', missingSourceRepository, { actor: studentActor })
+    assert.match(missingSourceStatusResult.message, /@veu_support/)
+    assert.match(missingSourceStatusResult.message, /clients\.google_folder/)
+    assert.doesNotMatch(missingSourceStatusResult.message, /\/resume </)
+
     const missingSourceResult = await resumeWorkflow('-5216637594', missingSourceRepository, { actor: studentActor })
     assert.equal(missingSourceResult.workflow.status, "collection student's data")
     assert.deepEqual(missingSourceResult.transitions, [])
@@ -893,11 +898,19 @@ async function runTests() {
     const nocoFolderRepository = makeWorkflowRepository(makeWorkflow({
       clientGoogleFolder: 'https://drive.google.com/drive/folders/noco-root'
     }))
+    const nocoFolderStatusResult = await getResumeStatus('-5216637594', nocoFolderRepository, { actor: studentActor })
+    assert.match(nocoFolderStatusResult.message, /отправь \/resume <ссылка на папку с самопрезентацией\/исходными данными>/)
+    assert.doesNotMatch(nocoFolderStatusResult.message, /заполнить обязательные данные в ЛК/)
+
     const nocoFolderResult = await resumeWorkflow('-5216637594', nocoFolderRepository, { actor: studentActor })
     assert.equal(nocoFolderResult.workflow.status, "collection student's data")
     assert.deepEqual(nocoFolderResult.transitions, [])
     assert.equal(nocoFolderRepository.workflowRecord.studentDataFolderUrl, '')
     assert.match(nocoFolderResult.message, /отправь \/resume <ссылка на папку с самопрезентацией\/исходными данными>/)
+    assert.equal(
+      nocoFolderResult.message.match(/\/resume <ссылка на папку с самопрезентацией\/исходными данными>/g)?.length,
+      1
+    )
 
     const suppliedStudentFolderResult = await resumeWorkflow('-5216637594', nocoFolderRepository, {
       actor: studentActor,

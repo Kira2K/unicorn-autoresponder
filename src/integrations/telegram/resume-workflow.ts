@@ -504,7 +504,7 @@ function statusInstruction(record: ResumeWorkflowRecord): string {
   return [
     `Статус резюме для ${record.clientName}: ${displayStatus(status)}`,
     `Ответственный: ${displayResponsibility(status)}`,
-    nextActionForStatus(status),
+    missingAdvanceFields(record).length ? missingDataInstruction(record) : nextActionForStatus(status),
     studentApprovalDetails(record)
   ].filter(Boolean).join('\n')
 }
@@ -1203,13 +1203,7 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
     actor,
     transitions,
     notifications: transitions.length ? buildTransitionNotifications(workflow, testMode) : [],
-    message: transitions.length
-      ? statusInstruction(workflow)
-      : [
-          statusInstruction(workflow),
-          '',
-          missingDataInstruction(workflow)
-        ].join('\n')
+    message: statusInstruction(workflow)
   }
 }
 
