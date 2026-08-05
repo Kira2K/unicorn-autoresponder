@@ -320,30 +320,7 @@ function printText(results: TargetReadiness[]): void {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
-  const db = createNocoDb()
-  const nocoClient = createNocoClient()
-  const clients = await nocoClient.fetchRecords(TABLES.clients.id, 1000)
-  const profiles = await nocoClient.fetchRecords(
-    TABLES.dolphinProfiles.id,
-    1000
-  )
-  const autoresponseRows = await nocoClient.fetchRecords(
-    TABLES.hhAutoresponses.id,
-    1000
-  )
-  const platformAccounts = await nocoClient.fetchRecords(
-    TABLES.platformAccounts.id,
-    1000
-  )
-  const stacks = await nocoClient.fetchRecords(TABLES.stacks.id, 1000)
-  const targets = buildTargets(
-    { clients, profiles, autoresponseRows, platformAccounts, stacks },
-    options.market,
-    options.clientNames
-  )
-  const results = await Promise.all(
-    targets.map(target => checkTarget(db, target))
-  )
+  const results = await loadReadinessResults(options)
   const blocked = results.filter(result => result.problems.length)
 
   if (options.json) {
@@ -368,6 +345,39 @@ async function main(): Promise<void> {
   }
 }
 
+async function loadReadinessResults(options: {
+  market?: Market
+  clientNames?: string[]
+  db?: ReturnType<typeof createNocoDb>
+  nocoClient?: ReturnType<typeof createNocoClient>
+} = {}): Promise<TargetReadiness[]> {
+  const db = options.db ?? createNocoDb()
+  const nocoClient = options.nocoClient ?? createNocoClient()
+  const clients = await nocoClient.fetchRecords(TABLES.clients.id, 1000)
+  const profiles = await nocoClient.fetchRecords(
+    TABLES.dolphinProfiles.id,
+    1000
+  )
+  const autoresponseRows = await nocoClient.fetchRecords(
+    TABLES.hhAutoresponses.id,
+    1000
+  )
+  const platformAccounts = await nocoClient.fetchRecords(
+    TABLES.platformAccounts.id,
+    1000
+  )
+  const stacks = await nocoClient.fetchRecords(TABLES.stacks.id, 1000)
+  const targets = buildTargets(
+    { clients, profiles, autoresponseRows, platformAccounts, stacks },
+    options.market,
+    options.clientNames ?? []
+  )
+
+  return await Promise.all(
+    targets.map(target => checkTarget(db, target))
+  )
+}
+
 if (require.main === module) {
   main().catch((error: unknown) => {
     console.error(error instanceof Error ? error.stack : error)
@@ -378,5 +388,6 @@ if (require.main === module) {
 module.exports = {
   buildTargets,
   checkTarget,
+  loadReadinessResults,
   parseArgs
 }

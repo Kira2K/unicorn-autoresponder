@@ -1,10 +1,22 @@
 const assert = require('node:assert/strict')
 
 const {
+  fetchSelectedClientsByUniqueNamesBestEffort,
   fetchSelectedClientsByUniqueNames,
   getRecommendedExternalTimeoutMs,
-  runWithBoundedConcurrency
+  runWithBoundedConcurrency,
+  splitPrelaunchReadinessTargets
 } = require('./orchestrator.ts') as {
+  fetchSelectedClientsByUniqueNamesBestEffort(
+    db: {
+      getAutomationTargets: (options?: unknown) => Promise<any[]>
+    },
+    clientNames: string[]
+  ): Promise<{
+    clients: any[]
+    clientNames: string[]
+    skippedStatuses: any[]
+  }>
   fetchSelectedClientsByUniqueNames(
     db: {
       getAutomationTargetByName?: (name: string, market?: 'Ru' | 'En') => Promise<any>
@@ -27,6 +39,10 @@ const {
       getWaitMessage?: (item: T, index: number, waitMs: number) => string
     }
   ): Promise<R[]>
+  splitPrelaunchReadinessTargets(results: Array<{ problems: string[] }>): {
+    readyTargets: Array<{ problems: string[] }>
+    blockedTargets: Array<{ problems: string[] }>
+  }
 }
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -105,11 +121,63 @@ async function testSelectedClientsFetchByNameWithoutAllTargets(): Promise<void> 
   assert.deepEqual(clients, [{ clientName: 'Artem', market: 'Ru' }])
 }
 
+async function testSelectedClientsFetchByNameBestEffort(): Promise<void> {
+  const calls: unknown[] = []
+  const result = await fetchSelectedClientsByUniqueNamesBestEffort(
+    {
+      getAutomationTargets: async (options?: any) => {
+        calls.push(options)
+        if (options.clientNames[0] === 'Broken') {
+          throw new Error('target build failed')
+        }
+
+        return [
+          {
+            clientName: options.clientNames[0],
+            market: 'Ru',
+            commonChatId: '-100'
+          }
+        ]
+      }
+    },
+    ['Good', 'Broken']
+  )
+
+  assert.deepEqual(calls, [
+    { market: 'Ru', clientNames: ['Good'] },
+    { market: 'Ru', clientNames: ['Broken'] }
+  ])
+  assert.deepEqual(
+    result.clients.map(client => client.clientName),
+    ['Good']
+  )
+  assert.deepEqual(result.clientNames, ['Good'])
+  assert.equal(result.skippedStatuses.length, 1)
+  assert.equal(result.skippedStatuses[0].clientName, 'Broken')
+  assert.match(result.skippedStatuses[0].error, /target build failed/)
+}
+
+function testPrelaunchReadinessSplit(): void {
+  const result = splitPrelaunchReadinessTargets([
+    { problems: [] },
+    { problems: ['missing HH credentials'] },
+    { problems: [] }
+  ])
+
+  assert.equal(result.readyTargets.length, 2)
+  assert.equal(result.blockedTargets.length, 1)
+  assert.deepEqual(result.blockedTargets[0].problems, [
+    'missing HH credentials'
+  ])
+}
+
 async function main(): Promise<void> {
   await testDefaultSerialConcurrencyShape()
   await testConfiguredConcurrencyCapsActiveRuns()
   testExternalTimeoutAccountsForClientBatches()
   await testSelectedClientsFetchByNameWithoutAllTargets()
+  await testSelectedClientsFetchByNameBestEffort()
+  testPrelaunchReadinessSplit()
 
   console.log('orchestrator cli tests passed')
 }

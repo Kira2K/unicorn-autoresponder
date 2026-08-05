@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 const {
   formatAuthProfilesSummary,
   formatCaptchaProfilesSummary,
+  formatPrelaunchReadinessLog,
   formatRunSummaryLog,
   hasClientFailure
 } = require('./telegram-reporting.ts')
@@ -101,6 +102,54 @@ function testRunSummaryIncludesAuthSupportBlock(): void {
   assert.match(summary, /@veu_support нужно проверить HH авторизацию/)
 }
 
+function testPrelaunchReadinessReportListsBlockedAccounts(): void {
+  const message = formatPrelaunchReadinessLog({
+    market: 'En',
+    responseLimit: 120,
+    readyTargets: [
+      {
+        clientName: 'Ready',
+        market: 'En',
+        problems: []
+      }
+    ],
+    blockedTargets: [
+      {
+        clientName: 'Broken',
+        market: 'En',
+        problems: ['missing HH credentials', 'missing Dolphin profile id']
+      }
+    ]
+  })
+
+  assert.match(message, /HH prelaunch readiness/)
+  assert.match(message, /Market: En/)
+  assert.match(message, /Response limit: 120/)
+  assert.match(message, /Ready to launch: 1/)
+  assert.match(message, /Will be skipped: 1/)
+  assert.match(message, /Broken \/ En/)
+  assert.match(message, /missing HH credentials; missing Dolphin profile id/)
+}
+
+function testPrelaunchReadinessReportShowsAllReady(): void {
+  const message = formatPrelaunchReadinessLog({
+    market: 'Ru',
+    responseLimit: 120,
+    readyTargets: [
+      {
+        clientName: 'Ready',
+        market: 'Ru',
+        problems: []
+      }
+    ],
+    blockedTargets: []
+  })
+
+  assert.match(message, /Ready to launch: 1/)
+  assert.match(message, /Will be skipped: 0/)
+  assert.match(message, /All enabled accounts are ready/)
+}
+
 function testTimerReachedIsOkEvenWhenResponseLimitNotMet(): void {
   const status = makeStatus({
     autoResponderStopReason: 'orchestrator_stop_after_watch',
@@ -157,6 +206,8 @@ testSingleThrownCaptchaSummary()
 testMultipleCaptchaSummary()
 testRunSummaryIncludesCaptchaBlock()
 testRunSummaryIncludesAuthSupportBlock()
+testPrelaunchReadinessReportListsBlockedAccounts()
+testPrelaunchReadinessReportShowsAllReady()
 testTimerReachedIsOkEvenWhenResponseLimitNotMet()
 testAcceptedTerminalStopsAreGreenDots()
 

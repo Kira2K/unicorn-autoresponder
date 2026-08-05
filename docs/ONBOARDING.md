@@ -207,7 +207,9 @@ unless they are inside the relevant integration layer.
   assignment already lives in web-console provisioning.
 - [Real E2E Proxy Deleting TODO](../src/integrations/dolphin/proxyProvider/real-e2e-proxy-deleting/TODO.md):
   live opt-in safety test required before any production proxy delete path.
-- [HH-responses basic scenario calendar mode](no link): HH-responses prevalidation, planning and usage for a non-tech user
+- [HH-responses basic scenario calendar mode](../HH-RESPONSES-CALENDAR-MODE-TODO.md):
+  HH-responses calendar scheduling, prevalidation, reporting, and non-technical
+  operation TODO.
 - [Tech interview to table of unique questions](no link): video of tech interview => user Console web interface (user data) => video to text => text to questions => questions to table with company to questions relation and a special table with unique questions only. Can be tested on Nazarov's collection
 - [Quiz-like bot-based test before every new stage](no link): make student go through a quiz to make sure they clearly understood the recomendations of a stage. Have they filled all required data in Console, how to fill HH-forms, respond to recruiters, etc. Add AI-driven answers validation for soft-skills training part (we really have same silly problems with every student)
 - [TDLib all client pulling performance optimisation](no link): current admin TDlib interfaces takes 60+ seconds to fetch all data from testing accounts.Requires optimisation

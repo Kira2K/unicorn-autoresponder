@@ -4,7 +4,8 @@ const {
   attachHHAuthCredentials,
   attachHHAuthCredentialsBestEffort,
   excludeClients,
-  selectClientsByCommonChatIdsBestEffort
+  selectClientsByCommonChatIdsBestEffort,
+  selectClientsByUniqueNamesBestEffort
 } = require('./clients.ts') as {
   attachHHAuthCredentials: Function
   attachHHAuthCredentialsBestEffort: Function
@@ -24,6 +25,17 @@ const {
   ): {
     clients: ClientAutomationData[]
     missingIds: string[]
+  }
+  selectClientsByUniqueNamesBestEffort(
+    clients: ClientAutomationData[],
+    clientNames: string[]
+  ): {
+    clients: ClientAutomationData[]
+    missingNames: string[]
+    ambiguousNames: Array<{
+      clientName: string
+      matchingIds: string[]
+    }>
   }
 }
 const {
@@ -150,6 +162,29 @@ function testSelectedClientIdsBestEffortSkipsMissingIds(): void {
   assert.deepEqual(result.missingIds, ['-404'])
 }
 
+function testSelectedClientNamesBestEffortSkipsMissingAndAmbiguousNames(): void {
+  const result = selectClientsByUniqueNamesBestEffort(
+    [
+      makeClient({ clientName: 'First', commonChatId: '-100' }),
+      makeClient({ clientName: 'Duplicate', commonChatId: '-200' }),
+      makeClient({ clientName: 'Duplicate', commonChatId: '-300' })
+    ],
+    ['First', 'Missing', 'Duplicate']
+  )
+
+  assert.deepEqual(
+    result.clients.map(client => client.commonChatId),
+    ['-100']
+  )
+  assert.deepEqual(result.missingNames, ['Missing'])
+  assert.deepEqual(result.ambiguousNames, [
+    {
+      clientName: 'Duplicate',
+      matchingIds: ['-200', '-300']
+    }
+  ])
+}
+
 function testBlockedCompaniesMergeAndRunExtras(): void {
   assert.deepEqual(GLOBAL_BLOCKED_COMPANIES, [
     { id: 'global-comtek', name: 'Comtek' }
@@ -203,6 +238,7 @@ async function main(): Promise<void> {
   await testBestEffortAttachSkipsOnlyBrokenClients()
   testExcludeClientsByNameAndId()
   testSelectedClientIdsBestEffortSkipsMissingIds()
+  testSelectedClientNamesBestEffortSkipsMissingAndAmbiguousNames()
   testBlockedCompaniesMergeAndRunExtras()
   testAttachBlockedCompaniesUsesRunExtras()
 
