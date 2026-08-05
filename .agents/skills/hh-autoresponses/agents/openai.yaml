@@ -1,0 +1,4 @@
+interface:
+  display_name: HH Autoresponses
+  short_description: Launch, schedule, monitor, and debug HH autoresponse orchestrator runs.
+  default_prompt: Use $hh-autoresponses to launch now or schedule the default all-profile run at 04:40 GMT+3.
