@@ -14,6 +14,7 @@ function makeRepository() {
     education: 'University',
     englishLevelId: undefined as number | undefined,
     englishLevel: '',
+    realAge: 24,
     googleFolder: '',
     telegramPersonalChatId: '@Kira_arbeitet',
     commonChatId: '-5216637594',
@@ -30,6 +31,7 @@ function makeRepository() {
     education: client.education,
     englishLevel: client.englishLevel,
     englishLevelId: client.englishLevelId,
+    realAge: client.realAge,
     status: "collection student's data",
     studentDataFolderUrl: '',
     cvDraftUrl: '',
@@ -46,6 +48,7 @@ function makeRepository() {
     workflow.education = client.education
     workflow.englishLevel = client.englishLevel
     workflow.englishLevelId = client.englishLevelId
+    workflow.realAge = client.realAge
     workflow.clientTelegramUsername = client.telegramPersonalChatId
     workflow.clientGoogleFolder = client.googleFolder
     workflow.commonChatId = client.commonChatId

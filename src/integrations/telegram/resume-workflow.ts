@@ -390,6 +390,8 @@ function displayMissingField(field: string): string {
       return 'образование'
     case 'English level':
       return 'уровень английского'
+    case 'Real age':
+      return 'реальный возраст'
     case 'root_google_folder':
       return 'корневая Google-папка'
     case 'student_data_folder_url':
@@ -478,6 +480,14 @@ function studentApprovalDetails(record: ResumeWorkflowRecord): string {
   ].join('\n')
 }
 
+function statusBlockingInstruction(record: ResumeWorkflowRecord, status: string): string {
+  if (status === "collection student's data") {
+    const hasBlockingData = missingAdvanceFields(record).length || requiredClientDataIssues(record).length
+    return hasBlockingData ? missingDataInstruction(record) : nextActionForStatus(status)
+  }
+  return missingAdvanceFields(record).length ? missingDataInstruction(record) : nextActionForStatus(status)
+}
+
 function statusInstruction(record: ResumeWorkflowRecord): string {
   const status = statusText(record)
   if (status === 'moved to filling') {
@@ -504,7 +514,7 @@ function statusInstruction(record: ResumeWorkflowRecord): string {
   return [
     `Статус резюме для ${record.clientName}: ${displayStatus(status)}`,
     `Ответственный: ${displayResponsibility(status)}`,
-    missingAdvanceFields(record).length ? missingDataInstruction(record) : nextActionForStatus(status),
+    statusBlockingInstruction(record, status),
     studentApprovalDetails(record)
   ].filter(Boolean).join('\n')
 }
@@ -666,6 +676,8 @@ function requiredClientDataIssues(record: ResumeWorkflowRecord): string[] {
   const issues: string[] = []
   if (!normalizeText(record.education)) issues.push('Education')
   if (!normalizeText(record.englishLevel) && !record.englishLevelId) issues.push('English level')
+  const realAge = Number(record.realAge)
+  if (!Number.isFinite(realAge) || realAge <= 0) issues.push('Real age')
   return issues
 }
 
@@ -734,7 +746,7 @@ function plannedPatch(record: ResumeWorkflowRecord, fakeDataMode: boolean): Resu
 
   switch (status) {
     case "collection student's data":
-      ensureRequiredClientData(record)
+      if (requiredClientDataIssues(record).length) return null
       if (missingAdvanceFields(record, fakeDataMode).length) return null
       return {
         status: "collection Kira's comments",
@@ -1002,7 +1014,16 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
 function missingDataInstruction(workflow: ResumeWorkflowRecord): string {
   const missing = missingAdvanceFields(workflow)
   if (statusText(workflow) === "collection student's data" && missing.includes('root_google_folder')) {
-    return `@veu_support пожалуйста, добавьте корневую Google-папку ученика ${workflow.clientName} в Noco: clients.google_folder`
+    return `@veu_support нужно заполнить гугл-папку ученика ${workflow.clientName}`
+  }
+  if (statusText(workflow) === "collection student's data") {
+    const requiredIssues = requiredClientDataIssues(workflow)
+    if (requiredIssues.length) {
+      return [
+        `Дальше: сначала заполни недостающие данные в ЛК: ${requiredIssues.map(displayMissingField).join(', ')}.`,
+        'После этого бот попросит добавить самопрезентацию и исходные материалы.'
+      ].join('\n')
+    }
   }
   if (statusText(workflow) === "collection student's data" && missing.includes('student_data_folder_url')) {
     const rootFolder = normalizeText(workflow.clientGoogleFolder)
@@ -1163,8 +1184,16 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
   ensureExpectedStatus(workflow, options.expectedStatus)
   ensureActorCanAdvance(workflow, actor)
 
-  const suppliedStudentDataFolderUrl = before === "collection student's data" && actor.role === 'student'
-    ? normalizeOptionalUrl(options.studentDataFolderUrl)
+  const rawStudentDataFolderUrl = before === "collection student's data" && actor.role === 'student'
+    ? normalizeText(options.studentDataFolderUrl)
+    : ''
+  const canAcceptStudentDataFolderUrl =
+    before === "collection student's data" &&
+    actor.role === 'student' &&
+    !requiredClientDataIssues(workflow).length &&
+    !missingAdvanceFields(workflow).includes('root_google_folder')
+  const suppliedStudentDataFolderUrl = rawStudentDataFolderUrl && canAcceptStudentDataFolderUrl
+    ? normalizeOptionalUrl(rawStudentDataFolderUrl)
     : ''
   if (
     suppliedStudentDataFolderUrl &&

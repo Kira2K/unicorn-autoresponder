@@ -1163,10 +1163,21 @@ async function runTests(): Promise<void> {
       })
       process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
 
-      result = await resumeByChat(newestStudentHeaders, '1003')
-      assert.equal(result.response.status, 422, JSON.stringify(result.body))
-      assert.equal(result.body.error, 'resume_required_data_missing')
-      assert.deepEqual(result.body.missingFields, ['Education', 'English level'])
+      await noco.patchRecord('mxza381054ldlza', 10, {
+        google_folder: 'https://drive.google.com/drive/folders/newest-root'
+      })
+      result = await resumeByChat(newestStudentHeaders, '1003', {
+        studentDataFolderUrl: 'https://drive.google.com/drive/folders/newest-source'
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, "collection student's data")
+      assert.equal(result.body.workflow.studentDataFolderUrl, '')
+      assert.deepEqual(result.body.transitions, [])
+      assert.match(result.body.message, /сначала заполни недостающие данные в ЛК/)
+      assert.match(result.body.message, /образование/)
+      assert.match(result.body.message, /уровень английского/)
+      assert.match(result.body.message, /реальный возраст/)
+      assert.doesNotMatch(result.body.message, /\/resume </)
 
       result = await resumeByChat(studentHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))

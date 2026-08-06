@@ -34,6 +34,7 @@ const {
   getProviderTasks,
   getResumeStatus,
   missingAdvanceFields,
+  requiredClientDataIssues,
   resetResumeWorkflowForTest,
   resolveActorForWorkflow,
   resumeWorkflowFakeDataMode,
@@ -49,6 +50,7 @@ const {
   getProviderTasks(repository: any, actor?: any, options?: any): Promise<any>
   getResumeStatus(chatId: string, repository: any, options?: any): Promise<any>
   missingAdvanceFields(workflow: any, fakeDataMode?: boolean): string[]
+  requiredClientDataIssues(workflow: any): string[]
   resetResumeWorkflowForTest(chatId: string, repository: any): Promise<any>
   resolveActorForWorkflow(actor: any, workflow?: any): any
   resumeWorkflowFakeDataMode(): boolean
@@ -872,15 +874,36 @@ async function runTests() {
     })).role, 'kira')
     assert.equal(resumeWorkflowFakeDataMode(), false)
 
-    const missingEnglishRepository = makeWorkflowRepository(makeWorkflow({ englishLevel: '', englishLevelId: undefined }))
-    await assert.rejects(
-      () => resumeWorkflow('-5216637594', missingEnglishRepository, { actor: studentActor }),
-      (error: any) => {
-        assert.equal(error.code, 'resume_required_data_missing')
-        assert.deepEqual(error.missingFields, ['English level'])
-        return true
-      }
+    const missingRequiredClientDataRepository = makeWorkflowRepository(makeWorkflow({
+      clientGoogleFolder: 'https://drive.google.com/drive/folders/noco-root',
+      education: '',
+      englishLevel: '',
+      englishLevelId: undefined,
+      realAge: undefined
+    }))
+    assert.deepEqual(
+      requiredClientDataIssues(missingRequiredClientDataRepository.workflowRecord),
+      ['Education', 'English level', 'Real age']
     )
+    const missingRequiredStatusResult = await getResumeStatus(
+      '-5216637594',
+      missingRequiredClientDataRepository,
+      { actor: studentActor }
+    )
+    assert.match(missingRequiredStatusResult.message, /сначала заполни недостающие данные в ЛК/)
+    assert.match(missingRequiredStatusResult.message, /образование/)
+    assert.match(missingRequiredStatusResult.message, /уровень английского/)
+    assert.match(missingRequiredStatusResult.message, /реальный возраст/)
+    assert.doesNotMatch(missingRequiredStatusResult.message, /\/resume </)
+
+    const missingRequiredResumeResult = await resumeWorkflow('-5216637594', missingRequiredClientDataRepository, {
+      actor: studentActor,
+      studentDataFolderUrl: 'https://drive.google.com/drive/folders/student-source'
+    })
+    assert.equal(missingRequiredResumeResult.workflow.status, "collection student's data")
+    assert.deepEqual(missingRequiredResumeResult.transitions, [])
+    assert.equal(missingRequiredClientDataRepository.workflowRecord.studentDataFolderUrl, '')
+    assert.match(missingRequiredResumeResult.message, /сначала заполни недостающие данные в ЛК/)
 
     const missingSourceRepository = makeWorkflowRepository()
     const missingSourceStatusResult = await getResumeStatus('-5216637594', missingSourceRepository, { actor: studentActor })
@@ -892,7 +915,7 @@ async function runTests() {
     assert.equal(missingSourceResult.workflow.status, "collection student's data")
     assert.deepEqual(missingSourceResult.transitions, [])
     assert.equal(missingSourceRepository.workflowRecord.studentDataFolderUrl, '')
-    assert.match(missingSourceResult.message, /@veu_support пожалуйста, добавьте корневую Google-папку ученика Test/)
+    assert.match(missingSourceResult.message, /@veu_support нужно заполнить гугл-папку ученика Test/)
     assert.deepEqual(missingAdvanceFields(missingSourceRepository.workflowRecord), ['root_google_folder', 'student_data_folder_url'])
 
     const nocoFolderRepository = makeWorkflowRepository(makeWorkflow({
