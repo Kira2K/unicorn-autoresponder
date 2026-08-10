@@ -33,6 +33,7 @@ For scheduling:
 - If the user asks to schedule without a time, schedule the next occurrence of `04:40 GMT+3`.
 - If the user says `launch now`, `run now`, or otherwise asks for an immediate run, do not schedule; start immediately.
 - If the requested schedule could mean more than one date, use the next future occurrence and state the exact date/time before registering it.
+- For schedule requests, verify Dolphin/client state immediately and schedule the same check for one hour before launch. These extra checks are silent in Telegram when OK and report only error results.
 
 Ask for clarification only when the user gives conflicting scope, a schedule time that cannot be converted safely, or a risky instruction that would bypass readiness/cleanup.
 
@@ -63,7 +64,7 @@ Remove-Item Env:\ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES -ErrorAction SilentlyConti
 
 1. Inspect the repo docs and relevant source before changing behavior.
 2. Verify no active HH orchestrator or node run is already alive.
-3. Confirm Dolphin API/preflight readiness and Noco availability.
+3. Confirm Dolphin API/preflight readiness and Noco availability. For this extra Dolphin/client-state check, send new Telegram messages only if the check errors.
 4. Start `Ru` with `ORCHESTRATOR_WORK_WITH_MARKET='Ru'` and `npm run orchestrator`.
 5. Watch until a fresh `logs/orchestrator-run-*.jsonl` appears, the readiness report is sent, and the first batch is running or an auto responder has started.
 6. After `Ru` exits, start `En` with `ORCHESTRATOR_WORK_WITH_MARKET='En'` and the same runtime defaults.
@@ -80,8 +81,20 @@ For concrete command patterns, scheduling wrappers, log parsing, and cleanup che
 - Watch for idle periods of about 10 minutes; distinguish idle from legitimate HH waiting or per-client terminal outcomes.
 - Verify every started profile is stopped, its automation tag is removed, and previous Dolphin status is restored.
 - Verify Telegram client reports and the final summary report are sent.
+- For manual status or debug checks, include Dolphin/client-state verification. Keep OK results local; send new Telegram messages only for error results.
 
 For failure classification and support/escalation rules, read `references/failure-taxonomy.md`.
+
+## Extra Dolphin And Client-State Checks
+
+- Run the extra state check at schedule time, one hour before a scheduled launch, launch preflight, and manual status/debug time.
+- Reuse existing repo mechanisms: Dolphin integration/preflight checks, Noco readiness/target inspection, process checks, local logs, and `sendTelegramMessage` from the existing Telegram messenger when an error alert is needed.
+- Check Dolphin app/API reachability, unexpected active HH orchestrator/node runs, scheduled task integrity when applicable, and whether selected Noco target state can be resolved.
+- Write every check result to local logs or the user-visible status summary.
+- Do not send new Telegram messages for OK check results.
+- For error results, immediately send one compact state alert to `summary_logs_channel_id` only.
+- Do not send extra Dolphin/client-state check alerts to client chats.
+- Do not alter existing Telegram sending behavior for readiness reports, run summaries, client final reports, manual-vacancy reports, or parser logs.
 
 ## Stop-List Rules
 

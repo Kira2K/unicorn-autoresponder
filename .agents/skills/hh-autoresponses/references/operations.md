@@ -38,6 +38,24 @@ Before starting a market:
 
 Readiness-blocked accounts are not runtime failures. They are skipped and reported.
 
+## Extra Dolphin And Client-State Checks
+
+Use this extra check at schedule time, one hour before a scheduled launch, launch preflight, and manual status/debug time.
+
+- Reuse existing repo mechanisms: Dolphin integration/preflight checks, Noco readiness or target inspection, process checks, local logs, and the existing Telegram messenger when an error alert is needed.
+- For scheduled task verification, record the task name and wrapper path in the local check log.
+- Treat an active HH orchestrator as expected only when the check is explicitly being run during a known active run; otherwise an active HH orchestrator is a reportable error.
+- Verify Dolphin local API availability at `http://localhost:3001/v1.0`.
+- Verify no unexpected active HH orchestrator or node process is already managing profiles.
+- For scheduled runs, verify the main launch task exists and points at the intended wrapper.
+- Resolve the requested Noco target scope enough to classify the state check.
+- Record every OK result in local logs or the user-visible status summary only.
+- Send no new Telegram message for OK results. Existing readiness, run-summary, client, manual-vacancy, and parser-log sends still run exactly as they already do.
+- For error results, immediately send one compact state alert to `summary_logs_channel_id` only.
+- Do not send extra Dolphin/client-state check alerts to client chats.
+
+Reportable error states include Dolphin closed/unreachable, an unexpected active orchestrator, a broken or missing scheduled task, and unresolved required target state.
+
 ## All-Market Launch Shape
 
 Run `Ru`, wait for exit, then run `En`.
@@ -124,7 +142,11 @@ When scheduling:
 - If no time is supplied, schedule the next `04:40 GMT+3`.
 - Convert the requested or default time to an absolute local date/time and include the timezone in the schedule notes.
 - Verify AM/PM and date boundaries, especially for `GMT+3` versus local machine time.
+- Run the extra Dolphin/client-state check immediately. If it is OK, do not send a new Telegram message. If it errors, report it to `summary_logs_channel_id` only.
+- Include scheduled task metadata in the local check log when a task has been registered.
 - Use the same all-market wrapper shape: `Ru` then `En`.
+- Schedule a companion extra Dolphin/client-state check for one hour before launch. If the one-hour mark is already in the past, run that check immediately instead of creating a stale task.
+- Ensure the one-hour precheck uses the same error-only Telegram rule: local logs only on OK, immediate Telegram alerts only on errors.
 - Keep wrapper stdout/stderr in `logs/`.
 - Confirm the scheduled task or background process exists and points at the intended wrapper.
 - When the scheduled time arrives, perform the startup verification steps for `Ru`, then later for `En`.

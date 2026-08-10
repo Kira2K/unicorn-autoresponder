@@ -48,12 +48,25 @@ These can stop or prevent a market run:
 
 - Dolphin local API unreachable before profiles start
 - too many open Dolphin profiles before launch
+- unexpected active HH orchestrator or node run before a launch or scheduled precheck
+- broken or missing scheduled launch task during schedule/prelaunch verification
+- unresolved required target state during an error-reporting check
 - Noco unavailable or unreadable before target selection
 - code/config error before any client can be selected or started
 - readiness pipeline failure that prevents classifying ready versus blocked accounts
 - Telegram/global report failure that prevents required prelaunch reporting
 
 When a blocker happens before profiles start, stop the sequence and report the global blocker instead of opening profiles blindly.
+
+## Extra Check Reporting Rules
+
+- Extra Dolphin/client-state checks are silent in Telegram when OK.
+- An error from an extra check at schedule time, one hour before launch, launch preflight, or manual status/debug time must immediately alert `summary_logs_channel_id` only.
+- Reuse existing Dolphin/Noco/process checks and existing Telegram sending utilities so delivery attempts are logged consistently.
+- Do not send extra Dolphin/client-state check alerts to client chats.
+- Do not change existing Telegram behavior for readiness reports, run summaries, client final reports, manual-vacancy reports, or parser logs.
+- Schedule-time and one-hour-before-launch Dolphin failures are prelaunch errors that warn without canceling unless the user explicitly asked to cancel on prelaunch errors.
+- Launch-time Dolphin failure before profiles start is a process-level blocker.
 
 ## Support Rules
 
