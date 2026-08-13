@@ -404,6 +404,13 @@ Structured logs — Definition of Done каждой LinkedIn feature.
 
 ### 4. Content
 
+#### Post Source
+
+- Посты генерируются пакетно заранее.
+- Готовые посты берутся с Google Drive.
+- После этого они распределяются по ученикам и расписанию публикаций.
+- Перед публикацией пост проходит approval.
+
 Целевые требования:
 
 - **3 posts/week/student**;
