@@ -3,9 +3,10 @@
 ## Статус
 
 `LinkedIn Automation` — отдельная локальная фича внутри текущего репозитория.
-Она объединяет независимые блоки автоматизации LinkedIn. Реализованный первый
-блок — `Profile Filler`; следующие запланированные блоки —
-`Connection Inviter` и `Comment Monitor`.
+Она объединяет общую панель учеников, lifecycle подключённых аккаунтов и три
+независимых блока автоматизации LinkedIn. `Profile Filler` реализован как
+локальный fake-backed engine; `Connection Inviter`, `Comment Monitor` и
+`Student Admin` пока существуют на уровне архитектуры.
 
 - Локальная ветка: `feature/linkedin-profile-filler-web`.
 - Commit, push, PR и deployment без отдельного подтверждения запрещены.
@@ -13,12 +14,15 @@
 - Аутентификацию пока не реализуем.
 - VDS является будущей средой выполнения, а не названием бизнес-фичи.
 
+Точная готовность блоков: [STATUS.md](STATUS.md).
+
 ## Расположение
 
 ```text
 src/features/linkedin-automation/
   ARCHITECTURE.md
   AGENTS.md
+  STATUS.md
   core/
     account/
       connected-account.ts
@@ -27,11 +31,18 @@ src/features/linkedin-automation/
     safety/
       timing-policy.ts
       redaction.ts
+      LINKEDIN_LIMITS.md
+    storage/
+      DATA_BOUNDARIES.md
     reporting/
       step-result.ts
+      logger.ts
   account-connection/
     docs/
       AUTHENTICATION_OPTIONS.md
+      ACCOUNT_LIFECYCLE.md
+  student-admin/
+    ARCHITECTURE.md
   connection-inviter/
     ARCHITECTURE.md
   comment-monitor/
@@ -55,50 +66,47 @@ src/features/linkedin-automation/
     fixtures/
 
 src/integrations/unipile/
+  ARCHITECTURE.md
   client.ts
+  docs/
+    PROFILE_CAPABILITIES.md
 ```
 
-Сейчас в Unipile integration существует только `client.ts`. Возможное будущее
-разделение на `auth.ts`, `profile.ts`, `search-parameters.ts`, `errors.ts` и
-`tests/` выполняется по мере роста клиента, а не создаётся заранее.
+Сейчас runtime Unipile integration сосредоточен в `client.ts`; отдельный
+`ARCHITECTURE.md` фиксирует будущие ports и safety gaps. Возможное разделение
+на `accounts.ts`, `profile.ts`, `relations.ts`, `posts.ts`, `errors.ts` и
+`tests/` выполняется по мере реализации, а не создаётся заранее.
 
 `src/integrations/unipile` остаётся отдельно, потому что это адаптер внешнего
 сервиса, а не бизнес-блок Profile Filler.
 
 ## Главная схема
 
-Внутренняя реализация способов подключения намеренно не раскрывается. Пока это
-два равноправных заменяемых блока.
-
 ```mermaid
-flowchart TD
-    START["Начало"] --> METHOD{"Способ подключения LinkedIn"}
+flowchart LR
+    N["NocoDB: ученики"] --> UI["Существующая Web Console"]
+    UI --> API["LinkedIn backend"]
+    API <--> DB["Application DB: настройки, jobs, общая история"]
 
-    METHOD --> TM["Tampermonkey"]
-    METHOD --> TWOFA["Собственная авторизация + 2FA"]
+    TM["Tampermonkey"] --> CA["Verified ConnectedAccount"]
+    FA["Собственная auth + 2FA"] --> CA
+    CA --> LIFE["Account lifecycle"]
+    LIFE --> API
 
-    TM --> ACCOUNT["LinkedIn подключён к Unipile<br/>получен account_id"]
-    TWOFA --> ACCOUNT
-
-    ACCOUNT --> VERIFY["Проверить владельца профиля"]
-    VERIFY --> CONFIRM["Администратор подтверждает аккаунт"]
-    CONFIRM --> PROFILE["Существующая Web Console принимает profile.json"]
-    PROFILE --> PREVIEW["Read-only preview и точный diff"]
-    PREVIEW --> QUEUE["Последовательная очередь"]
-    QUEUE --> UNIPILE["Unipile REST API"]
-    UNIPILE --> LINKEDIN["LinkedIn"]
-    LINKEDIN --> READBACK["Read-back после каждого изменения"]
-    READBACK --> QUEUE
-    QUEUE --> REPORT["Прогресс и итоговый отчёт"]
+    API --> PF["Profile Filler"]
+    API --> CI["Connection Inviter"]
+    API --> CM["Comment Monitor"]
+    PF --> COORD["Account mutation coordinator"]
+    CI --> COORD
+    CM --> COORD
+    COORD --> U["Unipile adapter"]
+    U <--> L["LinkedIn"]
+    U -->|"read-back / events"| LIFE
 ```
 
-Коротко:
-
-```text
-Tampermonkey ─────────┐
-                      ├→ ConnectedAccount → Profile Filler → Unipile → LinkedIn
-Собственная 2FA ──────┘                                      ← read-back ←
-```
+Один coordinator сериализует мутации аккаунта и расходует общий дневной и
+недельный budget. Read-only каталоги могут выполняться параллельно только если
+не мешают обязательному read-back активной мутации.
 
 ## Граница подключения аккаунта
 
@@ -122,11 +130,14 @@ ConnectedAccount
 
 До отдельного решения запрещено реализовывать auth endpoints, формы credentials,
 постоянное хранение LinkedIn password/TOTP secret, checkpoint automation и
-reconnect workflow. Backend Profile Filler при этом может временно получать
-данные текущей LinkedIn-сессии для подключения или восстановления связи; они не
-передаются в browser responses, preview или отчёты.
+конкретный reconnect auth flow. Общая реакция приложения на disconnect/recovery
+уже определена независимо от способа авторизации. Backend Profile Filler может
+временно получать данные текущей LinkedIn-сессии для подключения или
+восстановления связи; они не передаются в browser responses, preview или
+отчёты.
 
 Подробная схема вариантов: [AUTHENTICATION_OPTIONS.md](account-connection/docs/AUTHENTICATION_OPTIONS.md).
+Общий lifecycle: [ACCOUNT_LIFECYCLE.md](account-connection/docs/ACCOUNT_LIFECYCLE.md).
 
 ## Компонентные границы
 
@@ -135,9 +146,16 @@ LinkedIn Automation
   -> account connection strategy boundary
   -> shared core
      -> connected account contract
+     -> account lifecycle and mutation coordination
      -> job state contracts
      -> timing policy and secret redaction
+     -> durable storage ports and common history
      -> common step result
+  -> Student Admin
+     -> NocoDB student enrollment
+     -> verified account binding
+     -> desired / actual feature state
+     -> archive without history deletion
   -> Profile Filler
      -> validator / normalizer
      -> current-profile reader
@@ -165,6 +183,10 @@ LinkedIn Automation
 остаётся внутри `profile-filler`, дневная очередь приглашений и постоянная
 история — внутри `connection-inviter`, а мониторинг постов и комментариев —
 внутри `comment-monitor`.
+
+Границы NocoDB/Application DB/Unipile описаны в
+[DATA_BOUNDARIES.md](core/storage/DATA_BOUNDARIES.md), общие budgets и stop rules
+— в [LINKEDIN_LIMITS.md](core/safety/LINKEDIN_LIMITS.md).
 
 Существующая Web Console является единственным UI: отдельное приложение внутри
 `profile-filler` не создаётся. Frontend никогда не обращается напрямую к
@@ -236,15 +258,19 @@ Console, без deployment.
 
 ## Текущий этап
 
-До выбора auth strategy разрешена реализация Profile Filler и его подключения к
-существующей Web Console без создания auth UI:
+До выбора auth strategy разрешена локальная fake-backed реализация бизнес-логики
+без auth UI и без live LinkedIn mutation. Profile Filler уже содержит:
 
-- контрактом `profile.json`;
+- контракт `profile.json`;
 - validator/normalizer;
 - diff planner и preview;
-- job model и последовательной очередью;
+- job model и последовательную очередь;
 - fake executor и read-back verifier;
-- redaction и тестами.
+- redaction и тесты.
+
+Следующий безопасный этап — fake repositories/coordinators для Connection
+Inviter, Comment Monitor и Student Admin. Durable DB, Web Console routes и live
+Unipile adapters согласуются отдельно.
 
 Архитектура самого блока: [profile-filler/ARCHITECTURE.md](profile-filler/ARCHITECTURE.md).
 
@@ -253,3 +279,9 @@ Console, без deployment.
 
 Архитектура мониторинга комментариев к личным постам:
 [comment-monitor/ARCHITECTURE.md](comment-monitor/ARCHITECTURE.md).
+
+Архитектура панели учеников:
+[student-admin/ARCHITECTURE.md](student-admin/ARCHITECTURE.md).
+
+Архитектура внешнего адаптера:
+[src/integrations/unipile/ARCHITECTURE.md](../../integrations/unipile/ARCHITECTURE.md).

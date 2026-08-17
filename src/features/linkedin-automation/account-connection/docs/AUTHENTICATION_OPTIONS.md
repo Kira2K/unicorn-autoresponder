@@ -32,7 +32,12 @@ must not enter browser responses, preview plans, logs, analytics, reports,
 fixtures, `localStorage`, or `sessionStorage`.
 
 Do not add auth endpoints, persistent credentials, checkpoint automation, or
-reconnect behavior until one option and its security model are approved.
+the credential-side reconnect flow until one option and its security model are
+approved.
+
+The application-side reaction to status changes is already auth-neutral and is
+defined in [ACCOUNT_LIFECYCLE.md](ACCOUNT_LIFECYCLE.md). That document does not
+select or implement either authentication option.
 
 A future dedicated auth frontend may accept or display a TOTP secret and
 one-time 2FA codes. Keep these values ephemeral and clear them from component

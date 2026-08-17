@@ -7,7 +7,12 @@ These rules apply to `src/features/linkedin-automation/**`. Work affecting
 ## Required context
 
 - Read `ARCHITECTURE.md` before changing this feature.
+- Read `STATUS.md` before claiming a block is implemented or live-ready.
 - For Profile Filler work, also read `profile-filler/ARCHITECTURE.md`.
+- For account, scheduling, or persistence work, read
+  `account-connection/docs/ACCOUNT_LIFECYCLE.md`,
+  `core/safety/LINKEDIN_LIMITS.md`, and
+  `core/storage/DATA_BOUNDARIES.md`.
 - Treat the current authentication choice as unresolved.
 
 ## Isolation
@@ -73,6 +78,9 @@ Only one mutation job may own a given `account_id` at a time. Do not globally
 block independent accounts. A read-only job for an account must wait while that
 account has an active mutation job.
 
+The same account-level mutation coordinator must cover Profile Filler,
+Connection Inviter, and Comment Monitor. A feature-local lock is insufficient.
+
 ## Mutation safety
 
 - Bind every plan to one verified `account_id`.
@@ -85,6 +93,40 @@ account has an active mutation job.
 - Skills are add-only, target 100, accepted final range 95–103, maximum batch 10.
 - HTTP 2xx is not success without matching read-back.
 - Never automatically repeat an uncertain create.
+
+## Connection Inviter
+
+- Create at most one daily run per account and local calendar date.
+- Enforce both daily and weekly server-side budgets.
+- Check permanent `UNIQUE(accountId, personId)` history before every claim;
+  do not create a separate current-week history or dedup list.
+- Send sequentially, read back, and never blind-retry an uncertain invitation.
+- On disconnect, preserve history and continue only after reconnect,
+  `account.status.running`, identity verification, and reconciliation.
+- Do not create a catch-up burst after downtime.
+
+## Comment Monitor
+
+- Monitor only the connected owner's posts, loaded live from Unipile.
+- Do not copy the post catalog into NocoDB.
+- Track top-level comments and replies for exactly 48 hours from `startedAt`.
+- Poll on a jittered hourly cadence, not a fixed wall-clock minute.
+- Treat the first manual scan as baseline unless the watch starts with post
+  publication.
+- Default to `notify`; `auto_reply` requires explicit production safety gates.
+- A reply requires atomic claim, read-back, and no blind POST retry.
+
+## Students and persistence
+
+- NocoDB is the business source of students; do not change its existing schema
+  or rows under this feature scope.
+- Enroll an existing NocoDB student into the Application DB. Archive automation
+  state instead of deleting the student or LinkedIn history.
+- Keep desired feature state separate from actual runtime state.
+- In-memory repositories are test-only. Live jobs require durable storage and
+  database uniqueness constraints.
+- Never store LinkedIn posts, comments, jobs, auth payloads, or secrets in
+  NocoDB.
 
 ## Timing and limits
 
@@ -102,6 +144,11 @@ our fresh 5–20 second safety cushion. For `provider/too_many_requests`, stop f
 manual review because Unipile cannot provide a reliable retry time. After an
 uncertain write, read back before considering any retry. If an API 429 has no
 usable `Retry-After`, stop instead of inventing a retry time.
+
+Do not hardcode current external LinkedIn recommendations as permanent safe
+maxima. Recheck Unipile Dashboard and official Provider Restrictions before
+every live rollout. One daily scheduler run must still spread its actions over
+a server-controlled working window.
 
 ## Tests and public access
 
