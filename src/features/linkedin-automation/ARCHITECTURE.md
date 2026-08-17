@@ -4,7 +4,8 @@
 
 `LinkedIn Automation` — отдельная локальная фича внутри текущего репозитория.
 Она объединяет независимые блоки автоматизации LinkedIn. Реализованный первый
-блок — `Profile Filler`; второй запланированный блок — `Connection Inviter`.
+блок — `Profile Filler`; следующие запланированные блоки —
+`Connection Inviter` и `Comment Monitor`.
 
 - Локальная ветка: `feature/linkedin-profile-filler-web`.
 - Commit, push, PR и deployment без отдельного подтверждения запрещены.
@@ -32,6 +33,8 @@ src/features/linkedin-automation/
     docs/
       AUTHENTICATION_OPTIONS.md
   connection-inviter/
+    ARCHITECTURE.md
+  comment-monitor/
     ARCHITECTURE.md
   profile-filler/
     ARCHITECTURE.md
@@ -143,6 +146,14 @@ LinkedIn Automation
      -> in-memory job manager
      -> ordered executor
      -> read-back verifier
+  -> Connection Inviter
+     -> daily queue and persistent history
+  -> Comment Monitor
+     -> live personal-post catalog
+     -> 48-hour post watches
+     -> hourly comments and replies poller
+     -> notify / draft / auto-reply policy
+     -> send reconciliation and audit
   -> Unipile integration facade
   -> Unipile V2
   -> LinkedIn Classic
@@ -151,8 +162,9 @@ LinkedIn Automation
 
 `core` содержит только общие контракты и политики, которые смогут повторно
 использовать блоки LinkedIn Automation. Логика конкретных разделов профиля
-остаётся внутри `profile-filler`, а дневная очередь приглашений и постоянная
-история — внутри `connection-inviter`.
+остаётся внутри `profile-filler`, дневная очередь приглашений и постоянная
+история — внутри `connection-inviter`, а мониторинг постов и комментариев —
+внутри `comment-monitor`.
 
 Существующая Web Console является единственным UI: отдельное приложение внутри
 `profile-filler` не создаётся. Frontend никогда не обращается напрямую к
@@ -238,3 +250,6 @@ Console, без deployment.
 
 Архитектура будущей дневной отправки приглашений:
 [connection-inviter/ARCHITECTURE.md](connection-inviter/ARCHITECTURE.md).
+
+Архитектура мониторинга комментариев к личным постам:
+[comment-monitor/ARCHITECTURE.md](comment-monitor/ARCHITECTURE.md).
