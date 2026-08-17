@@ -3,8 +3,8 @@
 ## Статус
 
 `LinkedIn Automation` — отдельная локальная фича внутри текущего репозитория.
-Она объединяет независимые блоки автоматизации LinkedIn. Первый блок —
-`Profile Filler`.
+Она объединяет независимые блоки автоматизации LinkedIn. Реализованный первый
+блок — `Profile Filler`; второй запланированный блок — `Connection Inviter`.
 
 - Локальная ветка: `feature/linkedin-profile-filler-web`.
 - Commit, push, PR и deployment без отдельного подтверждения запрещены.
@@ -31,6 +31,8 @@ src/features/linkedin-automation/
   account-connection/
     docs/
       AUTHENTICATION_OPTIONS.md
+  connection-inviter/
+    ARCHITECTURE.md
   profile-filler/
     ARCHITECTURE.md
     types.ts
@@ -148,8 +150,9 @@ LinkedIn Automation
 ```
 
 `core` содержит только общие контракты и политики, которые смогут повторно
-использовать будущие блоки LinkedIn Automation. Логика конкретных разделов
-профиля остаётся внутри `profile-filler`.
+использовать блоки LinkedIn Automation. Логика конкретных разделов профиля
+остаётся внутри `profile-filler`, а дневная очередь приглашений и постоянная
+история — внутри `connection-inviter`.
 
 Существующая Web Console является единственным UI: отдельное приложение внутри
 `profile-filler` не создаётся. Frontend никогда не обращается напрямую к
@@ -232,3 +235,6 @@ Console, без deployment.
 - redaction и тестами.
 
 Архитектура самого блока: [profile-filler/ARCHITECTURE.md](profile-filler/ARCHITECTURE.md).
+
+Архитектура будущей дневной отправки приглашений:
+[connection-inviter/ARCHITECTURE.md](connection-inviter/ARCHITECTURE.md).
