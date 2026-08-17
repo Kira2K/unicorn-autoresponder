@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "headline": "QA Engineer (Manual & Automation)",
+    "about": "Updated about text",
+    "skills": {
+      "add": ["Python", "Pytest", "Playwright"],
+      "target_count": 95
+    },
+    "experience": [
+      {
+        "action": "upsert",
+        "match": {
+          "company": "Example Company",
+          "job_title": "QA Engineer",
+          "start_date": { "year": 2023, "month": 1 }
+        },
+        "data": {
+          "company": "Example Company",
+          "job_title": "QA Engineer",
+          "employment_type": "FULL_TIME",
+          "workplace_type": "REMOTE",
+          "start_date": { "year": 2023, "month": 1 },
+          "description": "Updated description",
+          "skills": ["Python", "Pytest"]
+        }
+      }
+    ],
+    "education": [],
+    "open_to_work": {
+      "job_titles": [{ "name": "QA Engineer" }],
+      "workplace_types": ["REMOTE"],
+      "locations": [{ "name": "Europe" }],
+      "start_date": "IMMEDIATELY",
+      "employment_types": ["FULL_TIME"],
+      "visibility": "RECRUITERS_ONLY"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+require('./logger.test.ts')
+require('./validator-planner.test.ts')
+require('./preview-store.test.ts')
+require('./profile-snapshot.test.ts')
+require('./job-manager.test.ts')
+require('./executor.test.ts')
+require('./service.test.ts')
+require('./network-boundary.test.ts')

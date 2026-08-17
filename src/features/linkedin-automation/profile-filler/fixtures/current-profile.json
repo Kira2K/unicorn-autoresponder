@@ -1,0 +1,36 @@
+{
+  "display_name": "Test Student",
+  "profile_url": "https://www.linkedin.com/in/test-student",
+  "description": "Junior QA Engineer",
+  "bio": "Current about text",
+  "specifics": {
+    "experience": [
+      {
+        "id": "exp-1",
+        "company": { "name": "Example Company" },
+        "job_title": { "name": "QA Engineer" },
+        "employment_type": "FULL_TIME",
+        "workplace_type": "REMOTE",
+        "start_date": "2023-01",
+        "description": "Old description",
+        "skills": [{ "name": "Manual Testing" }]
+      }
+    ],
+    "education": [
+      {
+        "id": "edu-1",
+        "school": { "name": "Example University" },
+        "degree": { "name": "Bachelor" },
+        "field_of_study": { "name": "Computer Science" },
+        "start_date": "2018-09",
+        "end_date": "2022-06",
+        "skills": []
+      }
+    ],
+    "skills": [
+      { "name": "Manual Testing" },
+      { "name": "Postman" }
+    ],
+    "is_open_to_work": false
+  }
+}
