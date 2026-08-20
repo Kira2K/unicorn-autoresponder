@@ -4,6 +4,8 @@
   "main": "index.js",
   "scripts": {
     "dolphyn": "node src/features/diagnostics/dolphyn-connector.ts",
+    "linkedin:auth": "node src/features/linkedin-automation/account-connection/cli.ts",
+    "linkedin:auth:test": "node src/features/linkedin-automation/account-connection/tests/run-all.test.ts",
     "messenger": "node src/integrations/telegram/messenger.ts",
     "orchestrator": "node src/features/hh-responses/cli/orchestrator.ts",
     "doctor": "node src/features/diagnostics/doctor.ts",
