@@ -4,7 +4,7 @@ const tests = [
   require('./profile-lock.test.ts'),
   require('./dolphin-profile-proxy.test.ts'),
   require('./proxy-input.test.ts'),
-  require('./proxy-recovery.test.ts'),
+  require('./proxy-notifier.test.ts'),
   require('./proxy.test.ts'),
   require('./cli-args.test.ts'),
   require('./noco-target.test.ts'),
