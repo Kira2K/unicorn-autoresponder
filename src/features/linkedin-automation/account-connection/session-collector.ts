@@ -14,7 +14,7 @@ const { LinkedInAuthError } = require('./errors.ts') as {
 const { acquireLinkedInProfileLock } = require('./profile-lock.ts') as {
   acquireLinkedInProfileLock(id: number): Promise<{ release(): Promise<void> }>
 }
-const { resolveOrPromptLinkedInProxy } = require('./proxy-recovery.ts') as {
+const { resolveOrPromptLinkedInProxy } = require('./proxy-notifier.ts') as {
   resolveOrPromptLinkedInProxy(id: number): Promise<any>
 }
 const { extractLinkedInSession } = require('./session-cookie.ts') as {

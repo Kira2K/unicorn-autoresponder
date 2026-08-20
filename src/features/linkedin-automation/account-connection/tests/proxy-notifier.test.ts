@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { resolveOrPromptLinkedInProxy } = require('../proxy-recovery.ts') as {
+const { resolveOrPromptLinkedInProxy } = require('../proxy-notifier.ts') as {
   resolveOrPromptLinkedInProxy(id: number, dependencies: any): Promise<any>
 }
 

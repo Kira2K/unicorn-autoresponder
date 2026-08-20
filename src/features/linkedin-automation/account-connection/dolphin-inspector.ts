@@ -5,7 +5,7 @@ const { resolveLinkedInProxy, safeProxySummary } = require('./proxy.ts') as {
   resolveLinkedInProxy(profile: any): any
   safeProxySummary(proxy: any): any
 }
-const { RECOVERABLE_CODES } = require('./proxy-recovery.ts') as {
+const { RECOVERABLE_CODES } = require('./proxy-notifier.ts') as {
   RECOVERABLE_CODES: Set<string>
 }
 
