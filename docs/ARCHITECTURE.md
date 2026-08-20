@@ -9,11 +9,13 @@ future session needs the shortest map.
 | Area | Owns |
 | --- | --- |
 | `src/features/hh-responses` | HH automation: client lifecycle, HH auth, scenario opening, browser responder injection, reporting, recovery, and HH-specific helpers. |
+| `src/features/linkedin-automation` | LinkedIn account connection and future profile, invite, and comment workflows. |
 | `src/features/diagnostics` | Read-only diagnostics such as doctor, table-state checks, and refactor safety checks. |
 | `src/platform/db` | The `createAppDb()` application data port plus Noco and Google Sheets adapters. |
 | `src/platform/browser` | Generic Playwright/page helpers that are not HH-specific. |
 | `src/integrations/dolphin` | Dolphin Cloud/Local APIs, profile locks, preflight, runtime start/stop, and Dolphin tools. |
 | `src/integrations/noco` | NocoDB core helpers, operational jobs, backups, relation checks, and migration health gates. |
+| `src/integrations/unipile` | Unipile v2 authentication and LinkedIn API boundary. |
 | `src/integrations/google-sheets` | Raw Google Sheets access and legacy comparison/mapping helpers. |
 | `src/integrations/telegram` | Telegram messaging and Telegram operational tools. |
 
@@ -26,6 +28,8 @@ is the browser responder artifact injected into HH pages.
 - `npm run doctor` and `npm run check-table` run diagnostics from
   `src/features/diagnostics`.
 - `npm run noco:*` jobs run from `src/integrations/noco`.
+- `npm run linkedin:auth -- --client "Name"` validates a LinkedIn binding;
+  add `--apply` to connect it.
 - `npm run dolphin:user-credentials:*` and `npm run proxy:check-required` run
   Dolphin integration tools.
 - `npm run tg:*` runs Telegram tools from `src/integrations/telegram`.
