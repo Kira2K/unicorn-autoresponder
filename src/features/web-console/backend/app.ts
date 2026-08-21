@@ -91,6 +91,15 @@ const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as 
     actorRole: 'client' | 'admin' | 'provider'
   }): import('./types.ts').DolphinProfileStatus
 }
+const { createLinkedInAuthRunService } = require('./linkedin-auth-runs.ts') as {
+  createLinkedInAuthRunService(): import('./linkedin-auth-types.ts').LinkedInAuthRunService
+}
+const { createMockLinkedInAuthRunService } = require('./linkedin-auth-mock.ts') as {
+  createMockLinkedInAuthRunService(): import('./linkedin-auth-types.ts').LinkedInAuthRunService
+}
+const { registerLinkedInAuthRoutes } = require('./linkedin-auth-routes.ts') as {
+  registerLinkedInAuthRoutes(options: any): void
+}
 
 type Request = import('express').Request
 type Response = import('express').Response
@@ -415,6 +424,7 @@ function createWebConsoleApp(options: {
   sendSummaryTelegramMessage?: typeof sendTelegramMessage
   telegramAdapter?: any
   telegramProxyResolver?: any
+  linkedinAuthRuns?: import('./linkedin-auth-types.ts').LinkedInAuthRunService
   useMockData?: boolean
 } = {}) {
   const repository =
@@ -426,6 +436,9 @@ function createWebConsoleApp(options: {
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
   const useMockData = options.useMockData || process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
+  const linkedinAuthRuns = options.linkedinAuthRuns ?? (useMockData
+    ? createMockLinkedInAuthRunService()
+    : createLinkedInAuthRunService())
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
     api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
@@ -702,6 +715,11 @@ function createWebConsoleApp(options: {
   }
 
   app.use(attachSession)
+  registerLinkedInAuthRoutes({
+    app,
+    requireAdmin: requireRole('admin'),
+    service: linkedinAuthRuns
+  })
 
   app.get('/api/internal/telegram-gateway/health', requireTelegramGateway, (_req: Request, res: Response) => {
     res.json(telegramGatewayController.health())

@@ -6,10 +6,12 @@ const { createLinkedInAuthLogger } = require('../auth-logger.ts') as {
 async function run(): Promise<void> {
   const lines: string[] = []
   const progress: string[] = []
+  const records: any[] = []
   const logger = createLinkedInAuthLogger({
     runId: 'test-run',
     writeLine: (line: string) => lines.push(line),
-    writeProgress: (line: string) => progress.push(line)
+    writeProgress: (line: string) => progress.push(line),
+    onEvent: (record: any) => records.push(record)
   })
 
   logger.event('proxy_summary', 'succeeded', {
@@ -40,6 +42,7 @@ async function run(): Promise<void> {
   assert.equal(proxyRecord.unipileProtocol, 'https')
   assert.equal(proxyRecord.authenticated, true)
   assert.equal(proxyRecord.proxyHost, undefined)
+  assert.equal(JSON.stringify(records).includes('SECRET_'), false)
 
   const failed = lines.map(line => JSON.parse(line)).find(record => record.status === 'failed')
   assert.equal(failed.errorCode, 'linkedin_auth_internal_error')

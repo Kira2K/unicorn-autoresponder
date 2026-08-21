@@ -26,6 +26,21 @@ export type LinkedInAuthTarget = {
   verifiedProviderId?: string
 }
 
+export type LinkedInAuthAccountRow = {
+  platformAccountId: number
+  clientId: number
+  clientName: string
+  linkedinUrl: string
+  dolphinProfileId?: number
+  readinessErrorCode?: string
+  unipileAccountId?: string
+  unipileAccountStatus?: string
+  verifiedProfileUrl?: string
+  lastVerifiedAt?: string
+  authErrorCode?: string
+  authUpdatedAt?: string
+}
+
 export type UnipileAccount = {
   object?: string
   id: string
