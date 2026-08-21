@@ -13,7 +13,8 @@ const tests = [
   require('./unipile-http.test.ts'),
   require('./account-validation.test.ts'),
   require('./auth-service-success.test.ts'),
-  require('./auth-service-errors.test.ts')
+  require('./auth-service-errors.test.ts'),
+  require('./auth-logger.test.ts')
 ] as Array<{ run(): Promise<void> }>
 
 async function run(): Promise<void> {

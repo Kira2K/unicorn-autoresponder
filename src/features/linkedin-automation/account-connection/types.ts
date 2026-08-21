@@ -59,3 +59,16 @@ export type AuthenticationCheckpoint = {
 }
 
 export type UnipileAuthIntentResult = UnipileAccount | AuthenticationCheckpoint
+
+export type LinkedInAuthDependencies = {
+  repository: any
+  adapter: any
+  collectSession(
+    profileId: number,
+    expectedUrl: string,
+    logger?: import('./auth-logger.ts').AuthLogger
+  ): Promise<any>
+  inspectProfile(profileId: number): Promise<any>
+  logger?: import('./auth-logger.ts').AuthLogger
+  unipileProxyProtocol?(proxy: LinkedInProxy): SupportedProxyProtocol
+}

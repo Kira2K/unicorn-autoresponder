@@ -56,4 +56,4 @@ function createUnipileAccountAdapter(http = createUnipileHttpClient()) {
   }
 }
 
-module.exports = { authIntentPayload, createUnipileAccountAdapter }
+module.exports = { authIntentPayload, createUnipileAccountAdapter, unipileProxyProtocol }
