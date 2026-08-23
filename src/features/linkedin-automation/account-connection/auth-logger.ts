@@ -6,26 +6,10 @@ const { getAuthErrorCode, safeErrorCode } = require('./errors.ts') as {
   safeErrorCode(value: unknown, fallback?: string): string
 }
 
-type AuthLogStatus = 'started' | 'succeeded' | 'failed'
-type AuthLogDetails = {
-  mode?: 'dry-run' | 'apply' | 'force-reauth'
-  clientId?: number
-  platformAccountId?: number
-  dolphinProfileId?: number
-  durationMs?: number
-  existingAccount?: boolean
-  dolphinProtocol?: 'http' | 'https' | 'socks4' | 'socks5'
-  unipileProtocol?: 'http' | 'https' | 'socks4' | 'socks5'
-  authenticated?: boolean
-  cookiePresent?: boolean
-  userAgentPresent?: boolean
-  ownerMatched?: boolean
-  errorCode?: string
-}
-type AuthLogger = {
-  event(stage: string, status: AuthLogStatus, details?: AuthLogDetails): void
-  run<T>(stage: string, details: AuthLogDetails, action: () => Promise<T>): Promise<T>
-}
+type AuthLogStatus = import('./auth-log-types.ts').AuthLogStatus
+type AuthLogDetails = import('./auth-log-types.ts').AuthLogDetails
+type AuthLogRecord = import('./auth-log-types.ts').AuthLogRecord
+type AuthLogger = import('./auth-log-types.ts').AuthLogger
 
 const NOOP_AUTH_LOGGER: AuthLogger = {
   event() {},
@@ -55,6 +39,7 @@ function createLinkedInAuthLogger(options: {
   logDirectory?: string
   writeLine?: (line: string) => void
   writeProgress?: (line: string) => void
+  onEvent?: (record: AuthLogRecord) => void
 } = {}): AuthLogger {
   const runId = options.runId ?? `linkedin-auth-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
   const directory = options.logDirectory ?? path.resolve(__dirname, '../../../../logs/linkedin-auth')
@@ -67,11 +52,12 @@ function createLinkedInAuthLogger(options: {
   const progress = (line: string) => { try { writeProgress(line) } catch {} }
 
   function event(stage: string, status: AuthLogStatus, details: AuthLogDetails = {}) {
-    const record = {
+    const record: AuthLogRecord = {
       at: new Date().toISOString(), runId, stage: safeErrorCode(stage, 'unknown'), status,
       ...cleanDetails(details)
     }
     try { writeLine(JSON.stringify(record)) } catch { progress('[LinkedIn auth] log_write_failed') }
+    try { options.onEvent?.(record) } catch {}
     if (status !== 'started' || stage === 'run_started') {
       progress(`[LinkedIn auth] ${record.stage}: ${status}`)
     }
@@ -96,4 +82,4 @@ function createLinkedInAuthLogger(options: {
 }
 
 module.exports = { NOOP_AUTH_LOGGER, createLinkedInAuthLogger }
-export type { AuthLogDetails, AuthLogger }
+export type { AuthLogDetails, AuthLogger, AuthLogRecord } from './auth-log-types.ts'

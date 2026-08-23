@@ -1143,3 +1143,86 @@ body {
     border-bottom: 1px solid var(--surface-border, #d7dde7);
   }
 }
+.admin-section-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.linkedin-auth-card {
+  width: 100%;
+}
+
+.linkedin-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.linkedin-table-wrap {
+  overflow-x: auto;
+}
+
+.linkedin-table {
+  border-collapse: collapse;
+  min-width: 1100px;
+  width: 100%;
+}
+
+.linkedin-table th,
+.linkedin-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.linkedin-table td > small,
+.linkedin-status small,
+.linkedin-status code {
+  display: block;
+  margin-top: 0.3rem;
+}
+
+.linkedin-status,
+.linkedin-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.linkedin-url-editor,
+.linkedin-url-value {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.linkedin-url-editor input {
+  min-width: 18rem;
+}
+
+.linkedin-status-pill {
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.25rem 0.55rem;
+  width: fit-content;
+}
+
+.linkedin-status-neutral { background: #e2e8f0; color: #334155; }
+.linkedin-status-info { background: #dbeafe; color: #1d4ed8; }
+.linkedin-status-success { background: #dcfce7; color: #15803d; }
+.linkedin-status-warning { background: #fef3c7; color: #a16207; }
+.linkedin-status-danger { background: #fee2e2; color: #b91c1c; }
+
+.linkedin-history { margin-top: 1.5rem; }
+.linkedin-history h3 { margin: 0 0 0.75rem; }
+.linkedin-history-table { min-width: 700px; }
+.linkedin-history-status { font-weight: 700; }
+.linkedin-history-succeeded { color: #15803d; }
+.linkedin-history-failed { color: #b91c1c; }
+.linkedin-history-interrupted { color: #a16207; }
+.linkedin-history-running { color: #1d4ed8; }

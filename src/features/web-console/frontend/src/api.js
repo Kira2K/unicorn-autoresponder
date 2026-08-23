@@ -79,6 +79,26 @@ export const api = {
   startHhResponsesDryRun() {
     return request('/api/admin/hh-responses/start', { method: 'POST' })
   },
+  adminLinkedInAccounts() {
+    return request('/api/admin/linkedin/accounts')
+  },
+  adminLinkedInHistory() {
+    return request('/api/admin/linkedin/runs')
+  },
+  updateAdminLinkedInAccount(platformAccountId, payload) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}`, {
+      method: 'PATCH', body: JSON.stringify(payload)
+    })
+  },
+  startAdminLinkedInRun(platformAccountId, action) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/runs`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    })
+  },
+  adminLinkedInRun(runId) {
+    return request(`/api/admin/linkedin/runs/${encodeURIComponent(runId)}`)
+  },
   telegramStatus(params = {}) {
     const query = new URLSearchParams()
     if (params.targetClientId) query.set('targetClientId', params.targetClientId)

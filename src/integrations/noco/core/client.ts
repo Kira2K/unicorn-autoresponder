@@ -31,6 +31,7 @@ function createNocoClient(options: {
   requester?: Requester
   retryDelaysMs?: number[]
   requestTimeoutMs?: number
+  pageDelayMs?: number
 } = {}) {
   const config = getNocoConfig()
   const requester: Requester =
@@ -38,6 +39,7 @@ function createNocoClient(options: {
     (request => axios.request(request))
   const retryDelaysMs = options.retryDelaysMs ?? [0, 2500, 5000, 10000, 20000]
   const requestTimeoutMs = options.requestTimeoutMs ?? 60000
+  const pageDelayMs = options.pageDelayMs ?? 0
 
   async function request<T>(
     method: RequestMethod,
@@ -93,6 +95,7 @@ function createNocoClient(options: {
       if (data.pageInfo?.isLastPage || rows.length < pageSize) {
         return all
       }
+      if (pageDelayMs) await wait(pageDelayMs)
     }
   }
 

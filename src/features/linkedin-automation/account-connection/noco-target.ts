@@ -86,4 +86,10 @@ function resolveLinkedInAuthTarget(input: {
   }
 }
 
-module.exports = { LINKEDIN_PLATFORM_ID, accountLinkedInUrl, resolveLinkedInAuthTarget }
+module.exports = {
+  LINKEDIN_PLATFORM_ID,
+  accountLinkedInUrl,
+  linkedId,
+  relatedClientId: clientId,
+  resolveLinkedInAuthTarget
+}
