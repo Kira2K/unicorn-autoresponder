@@ -17,6 +17,7 @@ const profile = {
 
 function dependencies(existing = false) {
   const successes: any[] = []
+  const logs: any[] = []
   let collected = 0
   const deps = {
     repository: {
@@ -42,9 +43,16 @@ function dependencies(existing = false) {
         proxy: { host: 'proxy.test', port: 1080, protocol: 'socks5', password: 'proxy-secret' }
       }
     },
-    async inspectProfile() { return { summary: { configured: true, protocol: 'socks5' } } }
+    async inspectProfile() { return { summary: { configured: true, protocol: 'socks5' } } },
+    logger: {
+      event(stage: string, status: string, details: any) { logs.push({ stage, status, details }) },
+      async run(_stage: string, _details: any, action: () => Promise<any>) {
+        return await action()
+      }
+    },
+    unipileProxyProtocol() { return 'https' }
   }
-  return { deps, successes, collected: () => collected }
+  return { deps, successes, logs, collected: () => collected }
 }
 
 async function run(): Promise<void> {
@@ -54,6 +62,9 @@ async function run(): Promise<void> {
   assert.equal(initial.collected(), 1)
   assert.equal(initial.successes[0].providerId, 'provider-1')
   assert.equal(JSON.stringify(initial.successes).includes('li-at-secret'), false)
+  const ready = initial.logs.find(log => log.stage === 'pre_api_ready')
+  assert.equal(ready.details.dolphinProtocol, 'socks5')
+  assert.equal(ready.details.unipileProtocol, 'https')
 
   const current = dependencies(true)
   const verified = await runLinkedInAuth({ clientName: 'Kira', apply: true }, current.deps)

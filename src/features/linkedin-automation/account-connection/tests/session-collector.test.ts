@@ -1,10 +1,18 @@
 const assert = require('node:assert/strict')
 const { collectLinkedInSession } = require('../session-collector.ts') as {
-  collectLinkedInSession(id: number, url: string, dependencies: any): Promise<any>
+  collectLinkedInSession(id: number, url: string, dependencies: any, logger?: any): Promise<any>
 }
 
 async function run(): Promise<void> {
   const events: string[] = []
+  const logStages: string[] = []
+  const logger = {
+    event(stage: string) { logStages.push(stage) },
+    async run(stage: string, _details: any, action: () => Promise<any>) {
+      logStages.push(stage)
+      return await action()
+    }
+  }
   const page = {
     async goto() { events.push('goto') },
     async waitForFunction() {},
@@ -44,13 +52,19 @@ async function run(): Promise<void> {
           }
         } } }
       }
-    }
+    },
+    logger
   )
 
   assert.equal(result.session.liAt, 'li-at-secret')
   assert.equal(result.session.userAgent, 'Dolphin Agent')
   assert.equal(result.proxy.host, 'proxy.test')
   assert.deepEqual(events, ['lock', 'stop', 'start', 'goto', 'close', 'stop', 'release'])
+  assert.deepEqual(logStages, [
+    'profile_lock_acquired', 'profile_stopped', 'proxy_validated', 'proxy_summary',
+    'profile_started', 'cdp_connected', 'linkedin_opened', 'session_validated',
+    'session_summary', 'cdp_closed', 'profile_cleanup_stopped', 'profile_lock_released'
+  ])
 }
 
 module.exports = { run }
