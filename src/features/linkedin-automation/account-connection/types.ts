@@ -36,6 +36,8 @@ export type LinkedInAuthAccountRow = {
   unipileAccountId?: string
   unipileAccountStatus?: string
   verifiedProfileUrl?: string
+  verifiedProviderId?: string
+  verifiedProfileName?: string
   lastVerifiedAt?: string
   authErrorCode?: string
   authUpdatedAt?: string

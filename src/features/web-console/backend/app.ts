@@ -92,13 +92,28 @@ const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as 
   }): import('./types.ts').DolphinProfileStatus
 }
 const { createLinkedInAuthRunService } = require('./linkedin-auth-runs.ts') as {
-  createLinkedInAuthRunService(): import('./linkedin-auth-types.ts').LinkedInAuthRunService
+  createLinkedInAuthRunService(options?: any): import('./linkedin-auth-types.ts').LinkedInAuthRunService
+}
+const { createLinkedInAuthNocoRepository } = require('../../linkedin-automation/account-connection/noco-repository.ts') as {
+  createLinkedInAuthNocoRepository(): any
 }
 const { createMockLinkedInAuthRunService } = require('./linkedin-auth-mock.ts') as {
   createMockLinkedInAuthRunService(): import('./linkedin-auth-types.ts').LinkedInAuthRunService
 }
 const { registerLinkedInAuthRoutes } = require('./linkedin-auth-routes.ts') as {
   registerLinkedInAuthRoutes(options: any): void
+}
+const { createLinkedInOperationGate } = require('./linkedin-operation-gate.ts') as {
+  createLinkedInOperationGate(): any
+}
+const { createProfileFillerService } = require('../../linkedin-automation/profile-filler/service.ts') as {
+  createProfileFillerService(options?: any): import('./profile-filler-types.ts').ProfileFillerService
+}
+const { createMockProfileFillerService } = require('./profile-filler-mock.ts') as {
+  createMockProfileFillerService(): import('./profile-filler-types.ts').ProfileFillerService
+}
+const { registerProfileFillerRoutes } = require('./profile-filler-routes.ts') as {
+  registerProfileFillerRoutes(options: any): void
 }
 
 type Request = import('express').Request
@@ -425,6 +440,8 @@ function createWebConsoleApp(options: {
   telegramAdapter?: any
   telegramProxyResolver?: any
   linkedinAuthRuns?: import('./linkedin-auth-types.ts').LinkedInAuthRunService
+  linkedinOperationGate?: any
+  profileFiller?: import('./profile-filler-types.ts').ProfileFillerService
   useMockData?: boolean
 } = {}) {
   const repository =
@@ -436,9 +453,15 @@ function createWebConsoleApp(options: {
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
   const useMockData = options.useMockData || process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
+  const linkedinOperationGate = options.linkedinOperationGate ?? createLinkedInOperationGate()
+  let linkedinRepository: any
+  const getLinkedInRepository = () => linkedinRepository ??= createLinkedInAuthNocoRepository()
   const linkedinAuthRuns = options.linkedinAuthRuns ?? (useMockData
     ? createMockLinkedInAuthRunService()
-    : createLinkedInAuthRunService())
+    : createLinkedInAuthRunService({ gate: linkedinOperationGate, repository: getLinkedInRepository() }))
+  const profileFiller = options.profileFiller ?? (useMockData
+    ? createMockProfileFillerService()
+    : createProfileFillerService({ gate: linkedinOperationGate, repository: getLinkedInRepository() }))
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
     api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
@@ -719,6 +742,11 @@ function createWebConsoleApp(options: {
     app,
     requireAdmin: requireRole('admin'),
     service: linkedinAuthRuns
+  })
+  registerProfileFillerRoutes({
+    app,
+    requireAdmin: requireRole('admin'),
+    service: profileFiller
   })
 
   app.get('/api/internal/telegram-gateway/health', requireTelegramGateway, (_req: Request, res: Response) => {

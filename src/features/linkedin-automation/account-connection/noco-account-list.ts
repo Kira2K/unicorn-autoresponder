@@ -60,6 +60,8 @@ function listLinkedInAuthAccounts(input: { clients: Row[]; accounts: Row[]; prof
         unipileAccountId: optionalText(account.unipile_account_id),
         unipileAccountStatus: optionalText(account.unipile_account_status),
         verifiedProfileUrl: optionalText(account.linkedin_verified_profile_url),
+        verifiedProviderId: optionalText(account.linkedin_verified_provider_id),
+        verifiedProfileName: optionalText(account.linkedin_verified_profile_name),
         lastVerifiedAt: optionalText(account.linkedin_last_verified_at),
         authErrorCode: account.linkedin_auth_error_code
           ? linkedinAuthErrorDisplay(account.linkedin_auth_error_code)?.code

@@ -26,7 +26,8 @@ async function run(): Promise<void> {
     apiKey: 'api-secret',
     async fetchImpl() {
       return response(false, 401, {
-        type: 'provider/invalid_credentials', detail: 'li-at-secret proxy-secret',
+        type: 'provider/invalid_credentials',
+        detail: "body/specifics/linkedin/experience/job_title must have required property 'name' li-at-secret",
         req_id: 'req_safe-123'
       })
     }
@@ -38,6 +39,10 @@ async function run(): Promise<void> {
       assert.equal(error.message.includes('li-at-secret'), false)
       assert.equal(error.message.includes('proxy-secret'), false)
       assert.equal(error.message.includes('req_safe-123'), true)
+      assert.equal(error.details.httpStatus, 401)
+      assert.equal(error.details.requestId, 'req_safe-123')
+      assert.match(error.details.diagnostic, /experience.*job_title.*required.*name/)
+      assert.equal(JSON.stringify(error.details).includes('li-at-secret'), false)
       return true
     }
   )

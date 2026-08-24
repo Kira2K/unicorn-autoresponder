@@ -1,10 +1,15 @@
 <script setup>
+import { computed } from 'vue'
 import LinkedInAuthStatus from './LinkedInAuthStatus.vue'
 import LinkedInAuthHistory from './LinkedInAuthHistory.vue'
+import ProfileFillerDialog from './ProfileFillerDialog.vue'
 import { formatDate, primaryAction, runForAccount } from './linkedin-auth-view'
 import { useLinkedInAuth } from './use-linkedin-auth'
+import { useProfileFiller } from './use-profile-filler'
 
 const auth = useLinkedInAuth()
+const filler = useProfileFiller()
+const busy = computed(() => auth.active.value || filler.active.value)
 </script>
 
 <template>
@@ -27,11 +32,11 @@ const auth = useLinkedInAuth()
               <td>
                 <div v-if="auth.editors.value[account.platformAccountId] || !account.linkedinUrl" class="linkedin-url-editor">
                   <InputText v-model="auth.drafts.value[account.platformAccountId]" placeholder="https://www.linkedin.com/in/.../" :data-testid="`linkedin-url-input-${account.platformAccountId}`" />
-                  <Button label="Save" size="small" :loading="auth.saving.value[account.platformAccountId]" :disabled="auth.active.value" :data-testid="`linkedin-url-save-${account.platformAccountId}`" @click="auth.save(account)" />
+                  <Button label="Save" size="small" :loading="auth.saving.value[account.platformAccountId]" :disabled="busy" :data-testid="`linkedin-url-save-${account.platformAccountId}`" @click="auth.save(account)" />
                 </div>
                 <div v-else class="linkedin-url-value">
                   <a :href="account.linkedinUrl" target="_blank" rel="noreferrer">Open profile</a>
-                  <Button label="Edit" size="small" severity="secondary" text :disabled="auth.active.value" :data-testid="`linkedin-url-edit-${account.platformAccountId}`" @click="auth.edit(account)" />
+                  <Button label="Edit" size="small" severity="secondary" text :disabled="busy" :data-testid="`linkedin-url-edit-${account.platformAccountId}`" @click="auth.edit(account)" />
                 </div>
               </td>
               <td>{{ account.dolphinProfileId || '—' }}</td>
@@ -39,9 +44,11 @@ const auth = useLinkedInAuth()
               <td><LinkedInAuthStatus :account="account" :run="runForAccount(auth.runs.value, account)" /></td>
               <td>{{ formatDate(account.lastVerifiedAt) }}</td>
               <td><div class="linkedin-actions">
-                <Button label="Check settings" size="small" severity="secondary" outlined :disabled="auth.active.value" :data-testid="`linkedin-check-${account.platformAccountId}`" @click="auth.start(account, 'check')" />
-                <Button :label="primaryAction(account).label" size="small" :disabled="auth.active.value || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-connect-${account.platformAccountId}`" @click="auth.start(account, primaryAction(account).action)" />
-                <Button v-if="account.unipileAccountId" label="Refresh session" size="small" severity="warn" outlined :disabled="auth.active.value || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-force-${account.platformAccountId}`" @click="auth.start(account, 'force_reauth')" />
+                <Button label="Check settings" size="small" severity="secondary" outlined :disabled="busy" :data-testid="`linkedin-check-${account.platformAccountId}`" @click="auth.start(account, 'check')" />
+                <Button :label="primaryAction(account).label" size="small" :disabled="busy || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-connect-${account.platformAccountId}`" @click="auth.start(account, primaryAction(account).action)" />
+                <Button v-if="account.unipileAccountId" label="Refresh session" size="small" severity="warn" outlined :disabled="busy || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-force-${account.platformAccountId}`" @click="auth.start(account, 'force_reauth')" />
+                <Button label="Profile Filler" size="small" severity="help" outlined
+                  :disabled="busy" :data-testid="`profile-filler-${account.platformAccountId}`" @click="filler.open(account)" />
               </div></td>
             </tr>
             <tr v-if="!auth.filtered.value.length"><td colspan="7">No LinkedIn accounts found.</td></tr>
@@ -51,4 +58,5 @@ const auth = useLinkedInAuth()
       <LinkedInAuthHistory :runs="auth.history.value" />
     </template>
   </Card>
+  <ProfileFillerDialog :filler="filler" />
 </template>

@@ -1226,3 +1226,80 @@ body {
 .linkedin-history-failed { color: #b91c1c; }
 .linkedin-history-interrupted { color: #a16207; }
 .linkedin-history-running { color: #1d4ed8; }
+
+.profile-filler-dialog { width: min(760px, 95vw); }
+.profile-filler-input,
+.profile-filler-content { display: flex; flex-direction: column; gap: 0.8rem; }
+.profile-file-drop {
+  align-items: center; border: 2px dashed #94a3b8; border-radius: 0.65rem; cursor: pointer;
+  display: flex; flex-direction: column; gap: 0.5rem; padding: 2.5rem 1rem; text-align: center;
+}
+.profile-file-drop:hover { background: #f8fafc; border-color: #0f766e; }
+.profile-file-drop input { height: 1px; opacity: 0; position: absolute; width: 1px; }
+.profile-file-selected { align-items: center; display: flex; gap: 0.5rem; }
+.profile-file-selected span { color: #64748b; margin-left: auto; }
+.profile-draft-editor {
+  border: 1px solid #cbd5e1; border-radius: 0.6rem; display: grid; gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0.8rem;
+}
+.profile-draft-editor h4,
+.profile-draft-editor fieldset,
+.profile-draft-editor .wide { grid-column: 1 / -1; }
+.profile-draft-editor h4 { margin: 0; }
+.profile-draft-editor label { display: flex; flex-direction: column; gap: 0.25rem; }
+.profile-draft-editor input,
+.profile-draft-editor textarea,
+.profile-entry-editor input,
+.profile-entry-editor textarea { border: 1px solid #94a3b8; border-radius: 0.35rem; padding: 0.5rem; }
+.profile-draft-editor textarea,
+.profile-entry-editor textarea { min-height: 5rem; resize: vertical; }
+.profile-entry-editor { display: grid; gap: 0.65rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.profile-entry-editor label { display: flex; flex-direction: column; gap: 0.25rem; }
+.profile-entry-editor .wide { grid-column: 1 / -1; }
+.profile-open-editor { display: grid; gap: 0.65rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.profile-open-editor label { display: flex; flex-direction: column; gap: 0.25rem; }
+.profile-open-editor select { border: 1px solid #94a3b8; border-radius: 0.35rem; padding: 0.5rem; }
+.profile-issues { display: flex; flex-direction: column; gap: 0.5rem; }
+.profile-issues small,
+.profile-issues code { display: block; margin-top: 0.25rem; overflow-wrap: anywhere; }
+.profile-issue-fixer {
+  border: 1px solid #f59e0b; border-radius: 0.6rem; display: flex; flex-direction: column;
+  gap: 0.75rem; padding: 0.8rem;
+}
+.profile-issue-fixer h4 { margin: 0; }
+.profile-issue-fixer article { border-top: 1px solid #e2e8f0; display: grid; gap: 0.45rem; padding-top: 0.7rem; }
+.profile-issue-fixer article > small { color: #64748b; }
+.profile-fix-search { display: flex; gap: 0.5rem; }
+.profile-fix-search input,
+.profile-issue-fixer select { border: 1px solid #94a3b8; border-radius: 0.35rem; padding: 0.5rem; width: 100%; }
+.profile-fix-search input { min-width: 0; }
+.profile-fix-ok { color: #15803d !important; }
+.profile-fix-error { color: #b91c1c !important; }
+.profile-comparison {
+  background: #cbd5e1; border: 1px solid #cbd5e1; display: grid; gap: 1px;
+  grid-template-columns: minmax(110px, 0.7fr) repeat(2, minmax(180px, 1fr)); overflow-x: auto;
+}
+.profile-comparison > * { background: white; margin: 0; min-width: 0; padding: 0.65rem; }
+.profile-comparison pre { font: inherit; overflow-wrap: anywhere; white-space: pre-wrap; }
+.profile-comparison small { display: block; margin-top: 0.25rem; }
+.profile-filler-history { border-top: 1px solid #e2e8f0; margin-top: 1rem; padding-top: 0.5rem; }
+.profile-filler-history ul { margin: 0; padding-left: 1.2rem; }
+.profile-filler-history small { display: block; overflow-wrap: anywhere; }
+.profile-history-button { background: none; border: 0; cursor: pointer; padding: 0; text-align: left; }
+.profile-history-button:hover strong { text-decoration: underline; }
+.profile-progress { border: 1px solid #cbd5e1; border-radius: 0.6rem; padding: 0.8rem; }
+.profile-progress header { display: flex; justify-content: space-between; }
+.profile-progress header span { text-align: right; }
+.profile-progress header small { color: #64748b; display: block; margin-top: 0.2rem; }
+.profile-progress ol { display: flex; flex-direction: column; gap: 0.6rem; list-style: none; padding: 0; }
+.profile-progress li { align-items: flex-start; display: flex; gap: 0.6rem; }
+.profile-progress li div { display: flex; flex-direction: column; }
+.profile-progress small { color: #64748b; }
+.profile-progress .profile-step-timer { color: #334155; font-variant-numeric: tabular-nums; }
+.profile-step-verified i { color: #15803d; }
+.profile-step-failed i { color: #b91c1c; }
+.profile-step-verification_delayed i { color: #a16207; }
+.profile-step-waiting i,
+.profile-step-writing i,
+.profile-step-write_accepted i,
+.profile-step-verifying i { color: #1d4ed8; }

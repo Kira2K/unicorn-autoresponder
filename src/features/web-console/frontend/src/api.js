@@ -99,6 +99,36 @@ export const api = {
   adminLinkedInRun(runId) {
     return request(`/api/admin/linkedin/runs/${encodeURIComponent(runId)}`)
   },
+  startAdminProfilePreview(platformAccountId, profile) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-previews`, {
+      method: 'POST', body: JSON.stringify(profile)
+    })
+  },
+  adminProfileParameters(platformAccountId, type, keywords) {
+    const query = new URLSearchParams({ type, keywords })
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-parameters?${query}`)
+  },
+  adminProfileJob(jobId) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}`)
+  },
+  adminProfileJobs() {
+    return request('/api/admin/linkedin/profile-jobs')
+  },
+  analyzeAdminProfile(profile) {
+    return request('/api/admin/linkedin/profile-analysis', {
+      method: 'POST', body: JSON.stringify(profile)
+    })
+  },
+  applyAdminProfileJob(jobId, planHash) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/apply`, {
+      method: 'POST', body: JSON.stringify({ planHash })
+    })
+  },
+  rollbackAdminProfileJob(jobId) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/rollback`, {
+      method: 'POST'
+    })
+  },
   telegramStatus(params = {}) {
     const query = new URLSearchParams()
     if (params.targetClientId) query.set('targetClientId', params.targetClientId)

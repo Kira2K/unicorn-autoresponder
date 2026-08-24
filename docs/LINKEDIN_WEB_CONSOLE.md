@@ -48,6 +48,55 @@ proxy host, port, username, and password.
 
 All routes require an admin web-console session.
 
+## Profile Filler
+
+Profile Filler builds a read-only preview before `Apply`. During execution each
+step is shown as waiting, writing, accepted, verifying, completed, or failed.
+The current checklist is stored in `linkedin_profile_jobs.result_json`, so a
+backend restart keeps the last known completed and pending steps.
+Uploaded JSON is first normalized into schema V1. Known aliases, single objects,
+date variants, and named Skill objects are converted deterministically. Each
+issue includes a path, correction hint, and example. The normalized document is
+editable in Preview and can be downloaded. Any edit disables `Apply` until a
+fresh read-only preview creates a new plan hash.
+
+MCP v2 accepts Job Title, Company, Location, and Skills by name, so Preview does
+not query their parameter catalog. Experience `employment_type` is different:
+MCP requires a LinkedIn parameter ID, therefore Preview resolves only this field
+through `EMPLOYMENT_TYPE`. If it cannot be resolved, the optional field is
+removed while the rest of Experience remains applicable. Open to Work also
+resolves the Job Title and Location IDs required by MCP. Parameter searches are
+admin-only, read-only, and their logs exclude searched values and returned IDs.
+
+Writes run sequentially. Each step gets two initial checks. A write accepted but
+not yet visible becomes `verification_delayed`, and later writes continue. At
+the end, at most two shared read-only checks run about one minute apart
+(randomized 55-65 seconds), using one profile read per check. The second runs
+only when the first did not confirm every delayed change. Only an explicitly
+rejected write stops execution. Unresolved checks finish in the warning state
+`pending_verification`.
+A fresh preview re-reads LinkedIn and contains only changes still required.
+The UI shows overall elapsed time, status age, and the countdown to each planned
+write or check. A verified step replaces its timer with a green check.
+
+Safe diagnostic events are written to `logs/linkedin-profile/*.jsonl`. Analysis,
+preview, Apply, every wait/write/read-back, progress persistence, final read-only
+verification, rollback, and completion are logged. Events contain job/step IDs,
+section, attempt, outcome, duration, payload field names, and safe error code.
+Unipile failures also keep only the HTTP status, request ID, and sanitized schema
+diagnostic. Profile values, response messages, credentials, cookies, API keys,
+and proxy data are excluded.
+
+Profile Filler routes:
+
+- `POST /api/admin/linkedin/profile-analysis`
+- `GET /api/admin/linkedin/profile-jobs`
+- `GET /api/admin/linkedin/profile-jobs/:jobId`
+- `POST /api/admin/linkedin/accounts/:id/profile-previews`
+- `GET /api/admin/linkedin/accounts/:id/profile-parameters`
+- `POST /api/admin/linkedin/profile-jobs/:jobId/apply`
+- `POST /api/admin/linkedin/profile-jobs/:jobId/rollback`
+
 ## Tests
 
 LinkedIn checks are isolated from the legacy web-console and support-bot tests:
