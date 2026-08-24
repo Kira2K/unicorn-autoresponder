@@ -59,7 +59,8 @@ export type FillStepResult = {
   message: string
   attempt?: number
   maxAttempts?: number
-  failureKind?: 'write_rejected' | 'write_uncertain' | 'write_accepted_not_visible' | 'value_mismatch'
+  failureKind?: 'write_rejected' | 'write_uncertain' | 'write_accepted_not_visible' |
+    'value_mismatch' | 'prewrite_blocked'
   errorCode?: string
   updatedAt?: string
   startedAt?: string

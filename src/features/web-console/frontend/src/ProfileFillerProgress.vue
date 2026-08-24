@@ -40,6 +40,9 @@ function failureText(kind, code) {
   }
   if (kind === 'write_rejected') return 'Unipile rejected the write request.'
   if (kind === 'write_uncertain') return 'The write response was lost or timed out; the result is uncertain.'
+  if (kind === 'prewrite_blocked') {
+    return 'The write was blocked because an existing profile entry could not be edited safely.'
+  }
   if (kind === 'write_accepted_not_visible') {
     return 'The write was accepted, but LinkedIn did not return it before the verification timeout.'
   }

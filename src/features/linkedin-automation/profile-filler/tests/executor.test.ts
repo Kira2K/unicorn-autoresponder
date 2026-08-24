@@ -1,6 +1,9 @@
 const assert = require('node:assert/strict')
 const { executeProfilePlan } = require('../executor.ts') as any
 const { createProfileLogger } = require('../profile-logger.ts') as any
+const { DEFAULT_TIMING } = require('../timing.ts') as any
+
+assert.deepEqual(DEFAULT_TIMING.ordinaryWrite, { min: 25, max: 70 })
 
 const zero = { min: 0, max: 0 }
 const timing = { firstWrite: zero, ordinaryWrite: zero, readBack: zero,
@@ -25,7 +28,7 @@ async function run() {
   assert.equal(delayed.status, 'verified')
   assert.equal(delayed.steps[0].status, 'verified')
   assert.ok(progress.some(result => result.steps[0].status === 'write_accepted'))
-  assert.equal(reads, 2)
+  assert.equal(reads, 3)
   assert.ok(progress.some(result => result.steps[0].attempt === 1))
   assert.equal(progress.some(result => result.steps[0].maxAttempts > 1), false)
   assert.ok(progress.some(result => result.steps[0].nextActionAt))
@@ -55,7 +58,7 @@ async function run() {
     random: (minimum: number) => minimum === 55 ? 60 : minimum })
   assert.equal(finalVerified.status, 'verified')
   assert.equal(finalWrites, 1)
-  assert.equal(finalReads, 2)
+  assert.equal(finalReads, 3)
   assert.deepEqual(finalWaits, [0, 0, 60000])
 
   const unchanged = await executeProfilePlan({ async updateOwnProfile() {},

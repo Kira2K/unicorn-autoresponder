@@ -11,7 +11,7 @@ export type TimingPolicy = {
 }
 
 export const DEFAULT_TIMING: TimingPolicy = {
-  firstWrite: { min: 10, max: 30 }, ordinaryWrite: { min: 45, max: 120 },
+  firstWrite: { min: 10, max: 30 }, ordinaryWrite: { min: 25, max: 70 },
   readBack: { min: 15, max: 30 }, finalReadBack: { min: 55, max: 65 },
   skillsBatch: { min: 60, max: 150 }
 }

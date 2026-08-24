@@ -78,7 +78,13 @@ IDs supplied by uploaded JSON are ignored and never forwarded.
 Writes run sequentially. Each step gets exactly one read-only check. A write
 accepted but not yet visible becomes `verification_delayed`, and later writes
 continue. At the end, exactly one shared read-only check runs for the complete
-plan after a randomized 55-65 second pause. Only an explicitly rejected write
+plan after a randomized 55-65 second pause. Immediately before every write,
+Profile Filler reads the target field again. Existing Experience and Education
+entries are edited by provider ID,
+already matching fields are skipped, and Skills payloads contain only values
+still missing at write time. Multiple matching entries block the write instead
+of selecting one and creating or editing another duplicate. LinkedIn dates
+returned as `MM/DD/YYYY` are normalized before matching. Only an explicitly rejected write
 stops execution. Unresolved checks finish in the warning state
 `pending_verification`.
 A fresh preview re-reads LinkedIn and contains only changes still required.

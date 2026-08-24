@@ -4,6 +4,7 @@ import type { Observation } from './observe.ts'
 export function failureKind(writeError: unknown, observation?: Observation) {
   if (!writeError) return observation === 'mismatch' ? 'value_mismatch' : 'write_accepted_not_visible'
   const code = profileErrorCode(writeError)
+  if (code.startsWith('profile_entry_')) return 'prewrite_blocked'
   return ['unipile_timeout', 'unipile_unreachable'].includes(code) ? 'write_uncertain' : 'write_rejected'
 }
 
@@ -15,6 +16,8 @@ export function delayedMessage(kind: string) {
     : 'Write result will be checked again after all writes.'
 }
 
-export function rejectedMessage() {
-  return 'Write was rejected and the value was not verified.'
+export function rejectedMessage(kind = 'write_rejected') {
+  return kind === 'prewrite_blocked'
+    ? 'Write was blocked before LinkedIn changed because the existing entry is ambiguous.'
+    : 'Write was rejected and the value was not verified.'
 }

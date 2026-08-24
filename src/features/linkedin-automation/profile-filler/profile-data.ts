@@ -18,7 +18,7 @@ export function section(profile: JsonObject, key: string): JsonObject[] {
 
 export function sectionReadable(profile: JsonObject, key: string) {
   const raw = specifics(profile)
-  const throttled = Array.isArray(profile.throttled_sections) ? profile.throttled_sections : []
+  const throttled = Array.isArray(raw.throttled_sections) ? raw.throttled_sections : []
   return !throttled.includes(`linkedin_${key}`) && Array.isArray(raw[key])
 }
 
@@ -29,7 +29,11 @@ export function readDate(value: unknown): YearMonth | undefined {
     if (Number.isInteger(year) && Number.isInteger(month)) return { year, month }
   }
   const match = text(value)?.match(/^(\d{4})-(0?[1-9]|1[0-2])(?:-\d{2})?$/)
-  return match ? { year: Number(match[1]), month: Number(match[2]) } : undefined
+  if (match) return { year: Number(match[1]), month: Number(match[2]) }
+  const providerDate = text(value)?.match(/^(0?[1-9]|1[0-2])\/\d{1,2}\/(\d{4})$/)
+  return providerDate
+    ? { year: Number(providerDate[2]), month: Number(providerDate[1]) }
+    : undefined
 }
 
 export function dateKey(value?: YearMonth) {
