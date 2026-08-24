@@ -68,12 +68,14 @@ removed while the rest of Experience remains applicable. Open to Work also
 resolves the Job Title and Location IDs required by MCP. Parameter searches are
 admin-only, read-only, and their logs exclude searched values and returned IDs.
 
-Writes run sequentially. Each step gets two initial checks. A write accepted but
-not yet visible becomes `verification_delayed`, and later writes continue. At
-the end, at most two shared read-only checks run about one minute apart
-(randomized 55-65 seconds), using one profile read per check. The second runs
-only when the first did not confirm every delayed change. Only an explicitly
-rejected write stops execution. Unresolved checks finish in the warning state
+The canonical generator contract and supported field enums are documented in
+[LinkedIn Profile JSON v1](LINKEDIN_PROFILE_JSON.md) and its linked JSON Schema.
+
+Writes run sequentially. Each step gets exactly one read-only check. A write
+accepted but not yet visible becomes `verification_delayed`, and later writes
+continue. At the end, exactly one shared read-only check runs for the complete
+plan after a randomized 55-65 second pause. Only an explicitly rejected write
+stops execution. Unresolved checks finish in the warning state
 `pending_verification`.
 A fresh preview re-reads LinkedIn and contains only changes still required.
 The UI shows overall elapsed time, status age, and the countdown to each planned

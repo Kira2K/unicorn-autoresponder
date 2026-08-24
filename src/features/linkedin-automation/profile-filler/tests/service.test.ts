@@ -44,7 +44,7 @@ async function run() {
     },
     store,
     gate: { acquire(kind: string) { return () => releases.push(kind) } },
-    executorOptions: { wait: async () => undefined, random: () => 0, attempts: 1, finalAttempts: 1,
+    executorOptions: { wait: async () => undefined, random: () => 0,
       logger: { event: (...args: any[]) => events.push(args) } }
   })
   const started = await service.startPreview(7, {

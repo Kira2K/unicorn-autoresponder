@@ -1,17 +1,14 @@
 import { delayedMessage, failureCode, failureKind, rejectedMessage } from './failure-state.ts'
 import { profileErrorDetails } from './errors.ts'
-import { verifyDelayed } from './final-verification.ts'
+import { verifyFinal } from './final-verification.ts'
 import { observeReadBack, type Observation } from './observe.ts'
 import { NOOP_PROFILE_LOGGER, type ProfileLogger } from './profile-logger.ts'
 import type { FillResult, FillStepResult, ProfileClient, ProfilePlan } from './plan-types.ts'
 import { createProgress, finishProgress, scheduledAt, updateProgress } from './progress-state.ts'
-import {
-  DEFAULT_FINAL_VERIFICATION_ATTEMPTS, DEFAULT_TIMING, DEFAULT_VERIFICATION_ATTEMPTS,
-  delayMilliseconds, type TimingPolicy
-} from './timing.ts'
+import { DEFAULT_TIMING, delayMilliseconds, type TimingPolicy } from './timing.ts'
 import { writeStep } from './step-write.ts'
 type ExecutorOptions = {
-  timing?: TimingPolicy; attempts?: number; finalAttempts?: number
+  timing?: TimingPolicy
   wait?: (milliseconds: number) => Promise<void>; clock?: () => number
   random?: (minimum: number, maximumExclusive: number) => number
   onStage?: (stage: string) => void; logger?: ProfileLogger
@@ -27,7 +24,6 @@ export async function executeProfilePlan(client: ProfileClient, plan: ProfilePla
   }
   const timing = options.timing ?? DEFAULT_TIMING
   const wait = options.wait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)))
-  const maxAttempts = Math.max(1, options.attempts ?? DEFAULT_VERIFICATION_ATTEMPTS)
   const clock = options.clock ?? Date.now
   const result = createProgress(plan, clock)
   const progressMany = async (updates: Array<{ index: number; patch: Partial<FillStepResult> }>) => {
@@ -55,26 +51,21 @@ export async function executeProfilePlan(client: ProfileClient, plan: ProfilePla
     const writeError = await writeStep({ client, accountId: plan.account.accountId, step, logger,
       accepted: () => progress(index,
         { status: 'write_accepted', message: 'Write accepted; waiting for LinkedIn.' }) })
+    const checkDelay = delayMilliseconds(timing.readBack, options.random)
+    options.onStage?.(`verifying:${step.id}:1/1`)
+    await progress(index, { status: 'verifying', attempt: 1, maxAttempts: 1,
+      message: 'Checking LinkedIn (1/1).', nextActionAt: scheduledAt(checkDelay, clock) })
+    await wait(checkDelay)
+    logger.event('verification_check', 'started', { stepId: step.id, section: step.section,
+      attempt: 1, maxAttempts: 1 })
     let observation: Observation | undefined
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const checkDelay = delayMilliseconds(attempt === 1 ? timing.readBack : timing.repeatedReadBack,
-        options.random)
-      options.onStage?.(`verifying:${step.id}:${attempt}/${maxAttempts}`)
-      await progress(index, { status: 'verifying', attempt, maxAttempts,
-        message: `Checking LinkedIn (${attempt}/${maxAttempts}).`,
-        nextActionAt: scheduledAt(checkDelay, clock) })
-      await wait(checkDelay)
-      logger.event('verification_check', 'started', { stepId: step.id, section: step.section,
-        attempt, maxAttempts })
-      try {
-        observation = await observeReadBack(client, plan.account.accountId, step)
-        logger.event('verification_check', 'succeeded', { stepId: step.id, section: step.section,
-          attempt, maxAttempts, observation })
-        if (observation === 'matched') break
-      } catch (error) {
-        logger.event('verification_check', 'failed', { stepId: step.id, section: step.section,
-          attempt, maxAttempts, observation: 'unavailable', ...profileErrorDetails(error) })
-      }
+    try {
+      observation = await observeReadBack(client, plan.account.accountId, step)
+      logger.event('verification_check', 'succeeded', { stepId: step.id, section: step.section,
+        attempt: 1, maxAttempts: 1, observation })
+    } catch (error) {
+      logger.event('verification_check', 'failed', { stepId: step.id, section: step.section,
+        attempt: 1, maxAttempts: 1, observation: 'unavailable', ...profileErrorDetails(error) })
     }
     if (observation !== 'matched') {
       const kind = failureKind(writeError, observation)
@@ -97,8 +88,7 @@ export async function executeProfilePlan(client: ProfileClient, plan: ProfilePla
     await progress(index, { status: 'verified', message: 'Verified in LinkedIn.' })
     logger.event('step', 'succeeded', { stepId: step.id, section: step.section })
   }
-  await verifyDelayed({ client, plan, result,
-    attempts: Math.max(1, options.finalAttempts ?? DEFAULT_FINAL_VERIFICATION_ATTEMPTS),
+  await verifyFinal({ client, plan, result,
     range: timing.finalReadBack, wait, progress: progressMany, logger, clock,
     random: options.random, onStage: options.onStage })
   const delayed = result.steps.some(step => step.status === 'verification_delayed')

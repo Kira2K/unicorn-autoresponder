@@ -4,7 +4,7 @@ const { createProfileLogger } = require('../profile-logger.ts') as any
 
 const zero = { min: 0, max: 0 }
 const timing = { firstWrite: zero, ordinaryWrite: zero, readBack: zero,
-  repeatedReadBack: zero, finalReadBack: zero, skillsBatch: zero }
+  finalReadBack: zero, skillsBatch: zero }
 const plan = { account: { accountId: 'acc_1' }, identity: {}, input: {}, issues: [], steps: [{
   id: 'headline', section: 'headline', action: 'update', summary: 'Headline',
   before: 'Old', after: 'New', payload: { specifics: { linkedin: { headline: 'New' } } },
@@ -19,17 +19,27 @@ async function run() {
   const delayed = await executeProfilePlan({
     async updateOwnProfile() {},
     async getOwnProfile() { if (++reads === 2) profile.description = 'New'; return structuredClone(profile) }
-  }, plan, { timing, attempts: 3, wait: async () => undefined,
+  }, plan, { timing, wait: async () => undefined,
     logger: { event: (...args: any[]) => events.push(args) },
     onProgress: (result: any) => progress.push(structuredClone(result)) })
   assert.equal(delayed.status, 'verified')
   assert.equal(delayed.steps[0].status, 'verified')
   assert.ok(progress.some(result => result.steps[0].status === 'write_accepted'))
-  assert.ok(progress.some(result => result.steps[0].attempt === 2))
+  assert.equal(reads, 2)
+  assert.ok(progress.some(result => result.steps[0].attempt === 1))
+  assert.equal(progress.some(result => result.steps[0].maxAttempts > 1), false)
   assert.ok(progress.some(result => result.steps[0].nextActionAt))
   assert.equal(typeof delayed.steps[0].durationMs, 'number')
   assert.ok(delayed.startedAt && delayed.finishedAt)
   assert.equal(JSON.stringify(events).includes('New'), false)
+
+  let stableReads = 0
+  const stable = await executeProfilePlan({
+    async updateOwnProfile() {},
+    async getOwnProfile() { stableReads += 1; return { description: 'New' } }
+  }, plan, { timing, wait: async () => undefined })
+  assert.equal(stable.status, 'verified')
+  assert.equal(stableReads, 2)
 
   let finalReads = 0
   let finalWrites = 0
@@ -38,34 +48,19 @@ async function run() {
     async updateOwnProfile() { finalWrites += 1 },
     async getOwnProfile() {
       finalReads += 1
-      return { description: finalReads >= 3 ? 'New' : 'Old' }
+      return { description: finalReads >= 2 ? 'New' : 'Old' }
     }
-  }, plan, { timing: { ...timing, finalReadBack: { min: 55, max: 65 } }, attempts: 2,
-    finalAttempts: 2, wait: async (milliseconds: number) => { finalWaits.push(milliseconds) },
+  }, plan, { timing: { ...timing, finalReadBack: { min: 55, max: 65 } },
+    wait: async (milliseconds: number) => { finalWaits.push(milliseconds) },
     random: (minimum: number) => minimum === 55 ? 60 : minimum })
   assert.equal(finalVerified.status, 'verified')
   assert.equal(finalWrites, 1)
-  assert.equal(finalReads, 3)
-  assert.deepEqual(finalWaits, [0, 0, 0, 60000])
-
-  let secondRead = 0
-  const secondWaits: number[] = []
-  const secondVerified = await executeProfilePlan({
-    async updateOwnProfile() {},
-    async getOwnProfile() {
-      secondRead += 1
-      return { description: secondRead >= 4 ? 'New' : 'Old' }
-    }
-  }, plan, { timing: { ...timing, finalReadBack: { min: 55, max: 65 } }, attempts: 2,
-    finalAttempts: 2, wait: async (milliseconds: number) => { secondWaits.push(milliseconds) },
-    random: (minimum: number) => minimum === 55 ? 60 : minimum })
-  assert.equal(secondVerified.status, 'verified')
-  assert.equal(secondRead, 4)
-  assert.deepEqual(secondWaits, [0, 0, 0, 60000, 60000])
+  assert.equal(finalReads, 2)
+  assert.deepEqual(finalWaits, [0, 0, 60000])
 
   const unchanged = await executeProfilePlan({ async updateOwnProfile() {},
     async getOwnProfile() { return { description: 'Old' } } }, plan,
-  { timing, attempts: 2, finalAttempts: 1, wait: async () => undefined })
+  { timing, wait: async () => undefined })
   assert.equal(unchanged.status, 'pending_verification')
   assert.equal(unchanged.steps[0].status, 'verification_delayed')
   assert.equal(unchanged.steps[0].failureKind, 'write_accepted_not_visible')
@@ -73,7 +68,7 @@ async function run() {
 
   const mismatch = await executeProfilePlan({ async updateOwnProfile() {},
     async getOwnProfile() { return { description: 'Different' } } }, plan,
-  { timing, attempts: 1, finalAttempts: 1, wait: async () => undefined })
+  { timing, wait: async () => undefined })
   assert.equal(mismatch.status, 'pending_verification')
   assert.equal(mismatch.steps[0].failureKind, 'value_mismatch')
 
@@ -83,7 +78,7 @@ async function run() {
         diagnostic: 'experience.job_title.required.name', secret: 'must-not-leak' }
     }) },
     async getOwnProfile() { return { description: 'Old' } }
-  }, plan, { timing, attempts: 1, wait: async () => undefined })
+  }, plan, { timing, wait: async () => undefined })
   assert.equal(rejected.steps[0].failureKind, 'write_rejected')
   assert.equal(rejected.steps[0].errorCode, 'unipile_rejected')
   assert.ok(JSON.stringify(events).includes('New') === false)
