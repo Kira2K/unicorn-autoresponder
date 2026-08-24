@@ -10,7 +10,6 @@ export function experiencePayload(data: ExperienceData, id?: string): JsonObject
   return linkedInPayload('experience', {
     operation: id ? 'edit' : 'create', ...(id ? { id } : {}), notify_network: false,
     job_title: { name: data.jobTitle }, company: { name: data.company },
-    ...(data.employmentType ? { employment_type: data.employmentType } : {}),
     ...(data.location ? { location: { name: data.location } } : {}),
     ...(data.workplaceType ? { workplace_type: data.workplaceType } : {}),
     ...(data.startDate ? { start_date: date(data.startDate) } : {}),

@@ -17,8 +17,8 @@ It covers only fields that Profile Filler currently writes.
       "match": { "company": "Acme", "job_title": "Engineer", "start_date": "2024-01" },
       "data": {
         "company": "Acme", "job_title": "Senior Engineer",
-        "employment_type": "FULL_TIME", "workplace_type": "REMOTE",
-        "location": "Warsaw", "start_date": "2024-01", "skills": ["Go"]
+        "workplace_type": "REMOTE", "location": "Warsaw",
+        "start_date": "2024-01", "skills": ["Go"]
       }
     }],
     "education": [{
@@ -42,14 +42,20 @@ It covers only fields that Profile Filler currently writes.
   Skills are not removed; Profile Filler adds only missing names.
 - Experience requires `company` and `job_title`. A new entry also requires
   `start_date`; an existing uniquely matched entry can be edited without a date.
-- `employment_type` is a display name in input. Preview resolves it to an
-  `EMPLOYMENT_TYPE` parameter ID; an unresolved optional value is omitted.
+- Do not include `profile.experience[].data.employment_type`. Live Unipile v2
+  currently rejects this Experience field even with an ID from its own catalog.
+  The analyzer removes it with a warning. This rule does not apply to
+  `profile.open_to_work.employment_types`.
 - Experience `workplace_type` is `ON_SITE`, `HYBRID`, or `REMOTE`.
 - Experience `source_of_hire` must use an enum listed in the JSON Schema.
 - Education requires `school`. A new entry also requires `start_date`; an
   existing uniquely matched entry can be edited without a date.
-- Open to Work requires job titles, workplaces, and visibility. Preview resolves
-  job titles with `JOB_TITLE` and locations with `LOCATION` when IDs are absent.
+- Open to Work requires job titles, workplaces, and visibility. Preview always
+  resolves job titles with `JOB_TITLE` and locations with `LOCATION`.
+- Input IDs are never trusted. Canonical JSON keeps names, and Preview always
+  resolves fresh IDs for fields where Unipile requires them.
+- Missing or ambiguous required catalog matches block Apply instead of silently
+  dropping requested data.
 - Dates use `YYYY-MM`. Profile Filler always sends `notify_network: false`.
 
 ## Product rules

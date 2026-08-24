@@ -1,9 +1,9 @@
 import type { ExperienceUpsert, ValidationIssue } from '../input-types.ts'
+import { MCP_ENUMS } from '../mcp-contract.ts'
 import { isObject, optionalDate, strings, text, warning } from './shared.ts'
 
-const WORKPLACES = new Set(['ON_SITE', 'HYBRID', 'REMOTE'])
-const SOURCES = new Set(['INDEED', 'LINKEDIN', 'COMPANY_WEBSITE', 'OTHER_JOB_SITES',
-  'REFERRAL', 'CONTACTED_BY_RECRUITER', 'STAFFING_AGENCY', 'OTHER'])
+const WORKPLACES = new Set<string>(MCP_ENUMS.workplaceType)
+const SOURCES = new Set<string>(MCP_ENUMS.sourceOfHire)
 
 export function parseExperience(value: unknown, issues: ValidationIssue[]): ExperienceUpsert[] {
   if (value === undefined) return []
@@ -47,7 +47,7 @@ export function parseExperience(value: unknown, issues: ValidationIssue[]): Expe
       },
       data: {
         company, jobTitle, startDate, workplaceType,
-        employmentType: text(data.employment_type), location: text(data.location),
+        location: text(data.location),
         endDate: optionalDate(data.end_date, `${path}.data.end_date`, issues),
         description: typeof data.description === 'string' ? data.description : undefined,
         sourceOfHire, skills

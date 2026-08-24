@@ -1,38 +1,39 @@
-import type { JsonObject, NamedParameter, ProfileInput, ValidationIssue } from '../input-types.ts'
+import type { JsonObject, ProfileInput, ValidationIssue } from '../input-types.ts'
+import { REQUIRED_ID_FIELDS } from '../mcp-contract.ts'
+import { createParameterSearch } from '../parameter-search.ts'
 import type { PlanStep, ProfileClient } from '../plan-types.ts'
+import type { ProfileLogger } from '../profile-logger.ts'
 import { linkedInPayload } from '../payloads.ts'
 import { specifics } from '../profile-data.ts'
 
-async function resolve(
-  client: ProfileClient, accountId: string, type: 'JOB_TITLE' | 'LOCATION', value: NamedParameter
-) {
-  if (value.id) return { id: value.id, name: value.name }
-  const matches = await client.searchParameters(accountId, type, value.name)
-  const exact = matches.filter(item => item.name.toLowerCase() === value.name.toLowerCase())
-  return exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined
-}
-
 export async function planOpenToWork(
   client: ProfileClient, accountId: string, desired: ProfileInput,
-  current: JsonObject, issues: ValidationIssue[]
+  current: JsonObject, issues: ValidationIssue[], logger?: ProfileLogger
 ): Promise<PlanStep[]> {
   if (!desired.openToWork) return []
+  const resolve = createParameterSearch(client, accountId, logger)
   const titles: Array<{ title: string; id: string }> = []
   for (const value of desired.openToWork.jobTitles) {
-    const match = await resolve(client, accountId, 'JOB_TITLE', value)
+    const result = await resolve(REQUIRED_ID_FIELDS.openToWorkJobTitle, value.name)
+    const match = result.exact
     if (!match) {
-      issues.push({ level: 'warning', path: 'profile.open_to_work.job_titles',
-        message: `Не удалось определить ${value.name}.`, resolution: 'Open to Work пропущен.' })
+      issues.push({ level: 'fatal', path: 'profile.open_to_work.job_titles',
+        message: `LinkedIn job title "${value.name}" was not resolved.`,
+        resolution: 'Choose one exact LinkedIn value and rebuild Preview.',
+        suggestions: result.matches.slice(0, 8).map(item => item.name) })
       return []
     }
     titles.push({ title: match.name, id: match.id })
   }
   const locations: string[] = []
   for (const value of desired.openToWork.locations) {
-    const match = await resolve(client, accountId, 'LOCATION', value)
+    const result = await resolve(REQUIRED_ID_FIELDS.openToWorkLocation, value.name)
+    const match = result.exact
     if (!match) {
-      issues.push({ level: 'warning', path: 'profile.open_to_work.locations',
-        message: `Не удалось определить ${value.name}.`, resolution: 'Open to Work пропущен.' })
+      issues.push({ level: 'fatal', path: 'profile.open_to_work.locations',
+        message: `LinkedIn location "${value.name}" was not resolved.`,
+        resolution: 'Choose one exact LinkedIn value and rebuild Preview.',
+        suggestions: result.matches.slice(0, 8).map(item => item.name) })
       return []
     }
     locations.push(match.id)

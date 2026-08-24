@@ -7,8 +7,8 @@ const emit = defineEmits(['change'])
 
 const experience = [
   ['company', 'Company', 'text'], ['job_title', 'Job title', 'text'],
-  ['employment_type', 'Employment type', 'text'], ['location', 'Location', 'text'],
-  ['workplace_type', 'Workplace type', 'text'], ['start_date', 'Start date', 'month'],
+  ['location', 'Location', 'text'], ['workplace_type', 'Workplace type', 'text'],
+  ['start_date', 'Start date', 'month'],
   ['end_date', 'End date', 'month'], ['description', 'Description', 'textarea']
 ]
 const education = [

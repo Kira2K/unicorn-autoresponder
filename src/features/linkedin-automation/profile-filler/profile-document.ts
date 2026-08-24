@@ -10,8 +10,8 @@ function experience(entry: ExperienceUpsert) {
     company: entry.match.company, job_title: entry.match.jobTitle, start_date: date(entry.match.startDate)
   }), data: clean({
     company: entry.data.company, job_title: entry.data.jobTitle,
-    employment_type: entry.data.employmentType, location: entry.data.location,
-    workplace_type: entry.data.workplaceType, start_date: date(entry.data.startDate),
+    location: entry.data.location, workplace_type: entry.data.workplaceType,
+    start_date: date(entry.data.startDate),
     end_date: date(entry.data.endDate), description: entry.data.description,
     source_of_hire: entry.data.sourceOfHire, skills: entry.data.skills
   }) }

@@ -1,6 +1,7 @@
 import type {
   EducationData, ExperienceData, JsonObject, ProfileInput, ValidationIssue
 } from './input-types.ts'
+import type { CatalogType } from './mcp-contract.ts'
 
 export type ProfileAccount = {
   platformAccountId: number
@@ -79,7 +80,6 @@ export type ProfileClient = {
   getAccount(accountId: string): Promise<JsonObject>
   getOwnProfile(accountId: string, sections?: string[]): Promise<JsonObject>
   updateOwnProfile(accountId: string, payload: JsonObject): Promise<unknown>
-  searchParameters(accountId: string,
-    type: 'JOB_TITLE' | 'LOCATION' | 'COMPANY' | 'SKILL' | 'EMPLOYMENT_TYPE', keywords: string):
+  searchParameters(accountId: string, type: CatalogType, keywords: string):
     Promise<Array<{ id: string; name: string }>>
 }

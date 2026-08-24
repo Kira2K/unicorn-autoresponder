@@ -1,29 +1,27 @@
 import type { JsonObject, ValidationIssue } from '../input-types.ts'
+import { ENTRY_FIELDS } from '../mcp-contract.ts'
 import { alias, dateValue, hint, list, names, object, required, textValue } from './shared.ts'
 
-const fields = {
-  experience: {
-    required: [['company', ['company_name', 'employer']],
-      ['job_title', ['jobTitle', 'title', 'position']]],
-    optional: [['employment_type', ['employmentType', 'job_type']], ['location', ['city']],
-      ['workplace_type', ['workplaceType', 'presence']], ['description', ['summary']],
-      ['source_of_hire', ['sourceOfHire']]]
-  },
-  education: {
-    required: [['school', ['university', 'institution']],
-      ['degree', ['degree_name']], ['field_of_study', ['fieldOfStudy', 'field']]],
-    optional: [['grade', []], ['activities', ['activities_and_societies']],
-      ['description', ['summary']]]
-  }
-} as const
-
-function normalizedData(source: JsonObject, kind: keyof typeof fields, path: string,
+function normalizedData(source: JsonObject, kind: keyof typeof ENTRY_FIELDS, path: string,
   issues: ValidationIssue[]) {
   const result: JsonObject = {}
-  for (const [key, alternatives] of [...fields[kind].required, ...fields[kind].optional]) {
+  const accepted = new Set(['start_date', 'startDate', 'start', 'end_date', 'endDate', 'end',
+    'skills', 'technologies'])
+  for (const [key, alternatives] of Object.entries(ENTRY_FIELDS[kind])) {
+    accepted.add(key)
+    alternatives.forEach((item: string) => accepted.add(item))
     const value = alias(source, key, [...alternatives], path, issues)
     if (value !== undefined) result[key] = textValue(value)
   }
+  Object.keys(source).filter(key => !accepted.has(key)).forEach(key => {
+    const disabledType = kind === 'experience' &&
+      ['employment_type', 'employmentType', 'job_type'].includes(key)
+    hint(issues, `${path}.${key}`,
+      disabledType ? 'Experience employment_type is temporarily disabled.' :
+        'Unsupported field was ignored.',
+      disabledType ? 'Remove it from JSON. Open to Work employment_types remains supported.' :
+        'Only fields supported by Profile Filler are kept.', undefined, true)
+  })
   result.start_date = dateValue(alias(source, 'start_date', ['startDate', 'start'], path, issues),
     `${path}.start_date`, issues)
   result.end_date = dateValue(alias(source, 'end_date', ['endDate', 'end'], path, issues),
@@ -32,7 +30,7 @@ function normalizedData(source: JsonObject, kind: keyof typeof fields, path: str
   return result
 }
 
-function normalizeEntry(value: unknown, kind: keyof typeof fields, index: number,
+function normalizeEntry(value: unknown, kind: keyof typeof ENTRY_FIELDS, index: number,
   issues: ValidationIssue[]) {
   const path = `profile.${kind}[${index}]`
   const entry = object(value) ? value : {}
@@ -52,7 +50,9 @@ function normalizeEntry(value: unknown, kind: keyof typeof fields, index: number
   return { action: 'upsert', match, data }
 }
 
-export function normalizeEntries(value: unknown, kind: keyof typeof fields, issues: ValidationIssue[]) {
+export function normalizeEntries(
+  value: unknown, kind: keyof typeof ENTRY_FIELDS, issues: ValidationIssue[]
+) {
   return list(value, `profile.${kind}`, issues).map((entry, index) =>
     normalizeEntry(entry, kind, index, issues))
 }

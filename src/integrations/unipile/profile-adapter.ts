@@ -1,4 +1,5 @@
 type JsonObject = import('../../features/linkedin-automation/profile-filler/input-types.ts').JsonObject
+type CatalogType = import('../../features/linkedin-automation/profile-filler/mcp-contract.ts').CatalogType
 
 const { createUnipileHttpClient } = require('./http-client.ts') as {
   createUnipileHttpClient(options?: any): {
@@ -20,8 +21,7 @@ function createUnipileProfileAdapter(http = createUnipileHttpClient()) {
     updateOwnProfile(accountId: string, payload: JsonObject) {
       return http.request<JsonObject>('PATCH', `/${encodeURIComponent(accountId)}/users/me`, payload)
     },
-    async searchParameters(accountId: string,
-      type: 'JOB_TITLE' | 'LOCATION' | 'COMPANY' | 'SKILL' | 'EMPLOYMENT_TYPE', keywords: string) {
+    async searchParameters(accountId: string, type: CatalogType, keywords: string) {
       const query = new URLSearchParams({ type, keywords, limit: '25' })
       const response = await http.request<JsonObject>('GET',
         `/${encodeURIComponent(accountId)}/linkedin/search/parameters?${query.toString()}`)

@@ -61,15 +61,19 @@ editable in Preview and can be downloaded. Any edit disables `Apply` until a
 fresh read-only preview creates a new plan hash.
 
 MCP v2 accepts Job Title, Company, Location, and Skills by name, so Preview does
-not query their parameter catalog. Experience `employment_type` is different:
-MCP requires a LinkedIn parameter ID, therefore Preview resolves only this field
-through `EMPLOYMENT_TYPE`. If it cannot be resolved, the optional field is
-removed while the rest of Experience remains applicable. Open to Work also
-resolves the Job Title and Location IDs required by MCP. Parameter searches are
-admin-only, read-only, and their logs exclude searched values and returned IDs.
+not query their parameter catalog. Experience `employment_type` is temporarily
+excluded: live Unipile v2 rejects it even with an ID returned by its own catalog.
+The analyzer removes that field with a visible warning. Open to Work
+`employment_types` remains supported. Preview resolves the Job Title and
+Location IDs required for Open to Work. Parameter searches are admin-only,
+read-only, and their logs exclude searched values and returned IDs.
 
 The canonical generator contract and supported field enums are documented in
 [LinkedIn Profile JSON v1](LINKEDIN_PROFILE_JSON.md) and its linked JSON Schema.
+Preview normalizes aliases and dates, removes unsupported fields with visible
+warnings, resolves every mandatory LinkedIn ID from the current account catalog,
+then validates the final payload against the MCP-confirmed Unipile v2 contract.
+IDs supplied by uploaded JSON are ignored and never forwarded.
 
 Writes run sequentially. Each step gets exactly one read-only check. A write
 accepted but not yet visible becomes `verification_delayed`, and later writes

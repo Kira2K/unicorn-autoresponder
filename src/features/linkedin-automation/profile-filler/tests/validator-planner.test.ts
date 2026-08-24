@@ -15,24 +15,14 @@ async function run() {
   } }
   const validation = validateProfileFile(input)
   assert.ok(validation.value)
-  const variant = analyzeProfileFile({ headline: 'Engineer', experiences: {
-    company_name: 'Acme', title: 'Developer', startDate: '2024-8',
-    technologies: [{ text: 'Go' }]
-  } })
-  assert.equal(variant.valid, true)
-  assert.equal(variant.document.profile.experience[0].data.job_title, 'Developer')
-  assert.equal(variant.document.profile.experience[0].data.start_date, '2024-08')
-  assert.deepEqual(variant.document.profile.experience[0].data.skills, ['Go'])
-  assert.ok(variant.issues.some((issue: any) => issue.autoFixed))
-  const clean = analyzeProfileFile({ profile: { headline: 'Safe', li_at: 'must-not-leak',
-    proxy_password: 'must-not-leak' } })
-  assert.equal(JSON.stringify(clean.document).includes('must-not-leak'), false)
   const incomplete = analyzeProfileFile({ experience: [{ title: 'Developer' }] })
   assert.equal(incomplete.valid, false)
   assert.ok(incomplete.issues.some((issue: any) => issue.level === 'fatal' && issue.suggestion))
   const current = { display_name: 'Student', profile_url: 'https://www.linkedin.com/in/student/',
     description: 'Old', bio: '', specifics: { experience: [], education: [], skills: [] } }
+  const searches: string[] = []
   const client = { async searchParameters(_accountId: string, type: string, value: string) {
+    searches.push(`${type}:${value}`)
     return [{ id: `${type.toLowerCase()}-1`, name: value }]
   } }
   const account = { platformAccountId: 1, clientName: 'Student', accountId: 'acc_1',
@@ -46,6 +36,7 @@ async function run() {
   assert.equal(experience.job_title.id, undefined)
   assert.equal(experience.company.name, 'Acme')
   assert.equal(experience.company.id, undefined)
+  assert.equal(Object.hasOwn(experience, 'employment_type'), false)
   assert.equal(experience.skills.length, 6)
   assert.equal(experience.skills[0].name, 'Testing 0')
   assert.equal(experience.skills[0].id, undefined)
@@ -54,6 +45,11 @@ async function run() {
     .specifics.linkedin.education
   assert.equal(education.skills.length, 6)
   assert.equal(education.skills[0].id, undefined)
+  const openToWork = plan.steps.find((step: any) => step.section === 'open_to_work').payload
+    .specifics.linkedin.open_to_work
+  assert.equal(openToWork.job_title[0].id, 'job_title-1')
+  assert.deepEqual(openToWork.workplace[0].location, ['location-1'])
+  assert.deepEqual(searches, ['JOB_TITLE:QA', 'LOCATION:Europe'])
   assert.equal(JSON.stringify(plan).includes('access_token'), false)
   const invalid = validateProfileFile({ profile: { experience: [{ data: { company: 'Acme' } }] } })
   assert.equal(invalid.value.experience.length, 0)

@@ -1,11 +1,13 @@
 import { profileErrorDetails } from './errors.ts'
+import type { CatalogType } from './mcp-contract.ts'
 import { NOOP_PROFILE_LOGGER, type ProfileLogger } from './profile-logger.ts'
 import type { ProfileClient } from './plan-types.ts'
 
-export type SearchType = 'JOB_TITLE' | 'COMPANY' | 'SKILL' | 'EMPLOYMENT_TYPE'
+export type SearchType = CatalogType
 export type Parameter = { id: string; name: string }
 
-const key = (value: string) => value.trim().toLowerCase()
+const key = (value: string) => value.normalize('NFKC').trim().toLowerCase()
+  .replace(/[_\-–—]+/g, ' ').replace(/\s+/g, ' ')
 
 export function createParameterSearch(
   client: ProfileClient, accountId: string, logger: ProfileLogger = NOOP_PROFILE_LOGGER
@@ -21,10 +23,11 @@ export function createParameterSearch(
         cache.set(cacheKey, request)
       }
       const matches = await request
-      const exact = matches.find(item => key(item.name) === key(value))
+      const exactMatches = matches.filter(item => key(item.name) === key(value))
+      const exact = exactMatches.length === 1 ? exactMatches[0] : undefined
       logger.event('parameter_search', 'succeeded', { operation: type,
         stepCount: matches.length, observation: exact ? 'matched' : 'unavailable' })
-      return { exact, matches }
+      return { exact, matches, exactCount: exactMatches.length }
     } catch (error) {
       logger.event('parameter_search', 'failed', { operation: type, ...profileErrorDetails(error) })
       throw error

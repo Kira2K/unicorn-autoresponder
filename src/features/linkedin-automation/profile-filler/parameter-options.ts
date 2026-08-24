@@ -1,9 +1,10 @@
 import { codedError } from './errors.ts'
 import { logAction } from './log-action.ts'
+import { CATALOG_TYPES, type CatalogType } from './mcp-contract.ts'
 import type { ProfileClient } from './plan-types.ts'
 import type { ProfileLogger } from './profile-logger.ts'
 
-const TYPES = new Set(['JOB_TITLE', 'COMPANY', 'SKILL'])
+const TYPES = new Set<string>(CATALOG_TYPES)
 
 export async function findParameterOptions(options: {
   repository: any
@@ -26,7 +27,7 @@ export async function findParameterOptions(options: {
     throw codedError('profile_filler_auth_required', 'Verify or reconnect LinkedIn first.')
   }
   const items = await logAction(logger, 'parameter_search', () =>
-    client.searchParameters(row.unipileAccountId, type as 'JOB_TITLE' | 'COMPANY' | 'SKILL', keywords),
+    client.searchParameters(row.unipileAccountId, type as CatalogType, keywords),
   { operation: type })
   return { type, items: items.slice(0, 8).map(item => ({ name: item.name })) }
 }

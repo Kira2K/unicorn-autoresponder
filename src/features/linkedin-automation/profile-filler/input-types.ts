@@ -16,7 +16,6 @@ export type NamedParameter = { name: string; id?: string }
 export type ExperienceData = {
   company: string
   jobTitle: string
-  employmentType?: string
   location?: string
   workplaceType?: 'ON_SITE' | 'HYBRID' | 'REMOTE'
   startDate?: YearMonth

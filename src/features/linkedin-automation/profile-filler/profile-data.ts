@@ -39,7 +39,7 @@ export function dateKey(value?: YearMonth) {
 export function normalizeExperience(item: JsonObject): JsonObject {
   return {
     company: name(item.company), job_title: name(item.job_title),
-    employment_type: text(item.employment_type), location: name(item.location),
+    location: name(item.location),
     workplace_type: text(item.workplace_type),
     start_date: dateKey(readDate(item.started_on ?? item.start_date)),
     end_date: dateKey(readDate(item.ended_on ?? item.end_date)),
@@ -50,8 +50,8 @@ export function normalizeExperience(item: JsonObject): JsonObject {
 
 export function desiredExperience(data: ExperienceData): JsonObject {
   return {
-    company: data.company, job_title: data.jobTitle, employment_type: data.employmentType,
-    location: data.location, workplace_type: data.workplaceType,
+    company: data.company, job_title: data.jobTitle, location: data.location,
+    workplace_type: data.workplaceType,
     start_date: dateKey(data.startDate), end_date: dateKey(data.endDate),
     description: data.description, skills: data.skills
   }

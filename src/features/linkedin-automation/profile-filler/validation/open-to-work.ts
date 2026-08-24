@@ -1,17 +1,23 @@
 import type { NamedParameter, OpenToWorkInput, ValidationIssue } from '../input-types.ts'
+import { MCP_ENUMS } from '../mcp-contract.ts'
 import { isObject, strings, text, warning } from './shared.ts'
 
-const WORKPLACES = new Set(['ON_SITE', 'HYBRID', 'REMOTE'])
-const EMPLOYMENT = new Set(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERNSHIP', 'TEMPORARY'])
-const START = new Set(['IMMEDIATELY', 'FLEXIBLE'])
-const VISIBILITY = new Set(['ALL', 'RECRUITERS_ONLY'])
+const WORKPLACES = new Set<string>(MCP_ENUMS.workplaceType)
+const EMPLOYMENT = new Set<string>(MCP_ENUMS.employmentType)
+const START = new Set<string>(MCP_ENUMS.startDate)
+const VISIBILITY = new Set<string>(MCP_ENUMS.visibility)
 
 function parameters(value: unknown, path: string, issues: ValidationIssue[]): NamedParameter[] {
   if (!Array.isArray(value)) { if (value !== undefined) warning(issues, path, 'Ожидался массив.'); return [] }
   return value.flatMap((item, index) => {
     const name = text(item) ?? (isObject(item) ? text(item.name ?? item.title) : undefined)
     if (!name) { warning(issues, `${path}[${index}]`, 'Не найдено название.'); return [] }
-    return [{ name, ...(isObject(item) && text(item.id) ? { id: text(item.id) } : {}) }]
+    if (isObject(item) && text(item.id)) issues.push({
+      level: 'warning', path: `${path}[${index}].id`,
+      message: 'Input LinkedIn ID was ignored.',
+      resolution: 'Preview will resolve a fresh ID from the account catalog.', autoFixed: true
+    })
+    return [{ name }]
   })
 }
 

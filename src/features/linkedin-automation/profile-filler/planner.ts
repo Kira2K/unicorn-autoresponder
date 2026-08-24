@@ -5,7 +5,7 @@ import { planEducation } from './planners/education.ts'
 import { planExperience } from './planners/experience.ts'
 import { planOpenToWork } from './planners/open-to-work.ts'
 import { planSkills } from './planners/skills.ts'
-import { resolvePlanParameters } from './parameter-resolution.ts'
+import { validatePlanPayloads } from './payload-contract.ts'
 import type { ProfileLogger } from './profile-logger.ts'
 
 const order = ['headline', 'about', 'experience-update', 'education-update', 'skills',
@@ -27,9 +27,10 @@ export async function buildProfilePlan(
     ...planExperience(desired, current, issues),
     ...planEducation(desired, current, issues),
     ...planSkills(desired, current, issues),
-    ...await planOpenToWork(client, account.accountId, desired, current, issues)
+    ...await planOpenToWork(client, account.accountId, desired, current, issues, logger)
   ].sort((left, right) => position(left) - position(right))
-  const steps = await resolvePlanParameters(client, account.accountId, planned, issues, logger)
+  const steps = planned
+  validatePlanPayloads(steps, issues, logger)
   return {
     kind: 'apply', account, input: desired,
     identity: {
