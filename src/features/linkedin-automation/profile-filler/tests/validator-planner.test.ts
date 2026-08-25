@@ -29,7 +29,7 @@ async function run() {
     providerId: 'provider-1', profileUrl: current.profile_url }
   const plan = await buildProfilePlan(client, account, validation.value, current, validation.issues)
   assert.deepEqual(plan.steps.map((step: any) => step.section),
-    ['headline', 'about', 'skills', 'experience', 'education', 'open_to_work'])
+    ['headline', 'about', 'experience', 'education', 'skills', 'open_to_work'])
   const experience = plan.steps.find((step: any) => step.section === 'experience').payload
     .specifics.linkedin.experience
   assert.equal(experience.job_title.name, 'QA')
@@ -77,6 +77,15 @@ async function run() {
   const skillsPlan = await buildProfilePlan(client, account, skillsInput.value, fullSkills, skillsInput.issues)
   assert.equal(skillsPlan.steps.length, 0)
   assert.ok(skillsPlan.issues.some((issue: any) => issue.path === 'profile.skills.add'))
+  const cappedInput = validateProfileFile({ profile: { experience: [{ data: {
+    company: 'Limit Co', job_title: 'Engineer', start_date: '2024-01', skills: ['New Skill']
+  } }] } })
+  const cappedPlan = await buildProfilePlan(client, account, cappedInput.value, fullSkills,
+    cappedInput.issues)
+  const cappedExperience = cappedPlan.steps[0].payload.specifics.linkedin.experience
+  assert.equal(Object.hasOwn(cappedExperience, 'skills'), false)
+  assert.ok(cappedPlan.issues.some((issue: any) =>
+    issue.path === 'profile.experience[0].data.skills'))
   const ambiguous = { ...current, specifics: { skills: [],
     experience: [{ id: 'exp-1', company: 'Acme', job_title: 'QA' },
       { id: 'exp-2', company: 'Acme', job_title: 'QA' }],

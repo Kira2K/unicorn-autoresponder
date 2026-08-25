@@ -1,54 +1,41 @@
 <script setup>
-import { downloadProfileFile, fileSize } from './profile-file'
+import { downloadProfileFile } from './profile-file'
 import ProfileComparison from './ProfileComparison.vue'
 import ProfileDraftEditor from './ProfileDraftEditor.vue'
+import ProfileFillerInput from './ProfileFillerInput.vue'
 import ProfileFillerProgress from './ProfileFillerProgress.vue'
 import ProfileIssues from './ProfileIssues.vue'
 import ProfileIssueFixer from './ProfileIssueFixer.vue'
-
+import { generationErrorText, profileStageText } from './profile-generation-view'
 defineProps({ filler: { type: Object, required: true } })
-
 function errorText(code) {
+  if (generationErrorText(code)) return generationErrorText(code)
   if (code === 'noco_rate_limited') return 'NocoDB is busy. Wait 30 seconds and try again.'
   if (code === 'profile_rollback_state_changed') return 'LinkedIn changed after this job. Rollback was blocked.'
   return code ? `Operation stopped: ${code}` : ''
 }
 </script>
-
 <template>
   <Dialog :visible="filler.visible.value" modal header="LinkedIn Profile Filler"
     class="profile-filler-dialog" :closable="!filler.active.value" @update:visible="v => !v && filler.close()">
     <p v-if="filler.account.value"><strong>{{ filler.account.value.clientName }}</strong></p>
     <Message v-if="filler.error.value" severity="error" :closable="false">{{ filler.error.value }}</Message>
-
-    <div v-if="!filler.job.value" class="profile-filler-input">
-      <label class="profile-file-drop" for="profile-file" @dragover.prevent @drop="filler.dropFile"
-        data-testid="profile-filler-drop">
-        <i class="pi pi-upload" /><strong>Drop profile.json here</strong>
-        <span>or click to choose a JSON file · maximum 250 KB</span>
-        <input id="profile-file" type="file" accept=".json,application/json"
-          data-testid="profile-filler-file" @change="filler.chooseFile" />
-      </label>
-      <div v-if="filler.selectedFile.value" class="profile-file-selected">
-        <i class="pi pi-file" /><strong>{{ filler.selectedFile.value.name }}</strong>
-        <span>{{ fileSize(filler.selectedFile.value.size) }}</span>
-      </div>
-      <ProfileDraftEditor v-if="filler.draft.value" :model-value="filler.draft.value"
-        @update:model-value="filler.updateDraft" />
-      <ProfileIssues :issues="filler.issues.value" />
-      <Button v-if="filler.draft.value" label="Download normalized JSON" severity="secondary" outlined
-        @click="downloadProfileFile(filler.draft.value)" />
-      <Button label="Build LinkedIn preview" :disabled="!filler.draft.value"
-        data-testid="profile-filler-preview" @click="filler.preview" />
-    </div>
-
+    <ProfileFillerInput v-if="!filler.job.value" :filler="filler" />
     <div v-else class="profile-filler-content" data-testid="profile-filler-job">
       <p><strong>Status:</strong> {{ filler.job.value.status }}</p>
-      <p><strong>Stage:</strong> {{ filler.job.value.phase }}</p>
+      <p><strong>Stage:</strong> {{ profileStageText(filler.job.value.phase) }}</p>
+      <p><strong>Elapsed:</strong> {{ filler.elapsedSeconds.value }}s</p>
+      <p v-if="filler.job.value.retry?.nextRetryAt">
+        <strong>Next retry:</strong> in {{ filler.retrySeconds.value }}s
+        (attempt {{ filler.job.value.retry.attempt }}/3)
+      </p>
       <ProgressSpinner v-if="filler.active.value" class="linkedin-spinner" stroke-width="4" />
       <ProfileFillerProgress v-if="filler.job.value.result?.steps"
         :result="filler.job.value.result" :preview-steps="filler.job.value.preview?.steps" />
       <template v-if="filler.job.value.preview">
+        <p v-if="filler.job.value.preview.generation" class="profile-generation-meta">Generated with
+          {{ filler.job.value.preview.generation.model }} &middot; proxy country
+          {{ filler.job.value.preview.generation.proxyCountry }}</p>
         <ProfileDraftEditor v-if="filler.draft.value" :model-value="filler.draft.value"
           @update:model-value="filler.updateDraft" />
         <ProfileIssues :issues="filler.issues.value" />
@@ -81,6 +68,8 @@ function errorText(code) {
       <Message v-if="filler.job.value.errorCode" severity="error" :closable="false">
         {{ errorText(filler.job.value.errorCode) }}
       </Message>
+      <Button v-if="filler.job.value.status === 'waiting_retry'" label="Resume generation"
+        severity="secondary" data-testid="profile-generation-resume" @click="filler.resume" />
       <Button v-if="filler.job.value.rollbackAvailable" label="Roll back this change"
         severity="danger" outlined data-testid="profile-filler-rollback" @click="filler.rollback" />
     </div>

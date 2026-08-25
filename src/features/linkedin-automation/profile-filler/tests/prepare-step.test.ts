@@ -25,11 +25,20 @@ async function run() {
   const edited = await prepare({ specifics: { experience: [existing] } })
   assert.equal(edited.mode, 'write')
   assert.equal(edited.step.action, 'update')
-  assert.equal(edited.step.payload.specifics.linkedin.experience.operation, 'edit')
-  assert.equal(edited.step.payload.specifics.linkedin.experience.id, 'exp-1')
+  const editPayload = edited.step.payload.specifics.linkedin.experience
+  assert.deepEqual(editPayload, { operation: 'edit', id: 'exp-1', description: 'New' })
 
   const same = await prepare({ specifics: { experience: [{ ...existing, description: 'New' }] } })
   assert.equal(same.mode, 'skip')
+
+  const update = { ...experience, action: 'update', verification: {
+    kind: 'experience', id: 'exp-1', expected: { ...expected, skills: ['Unavailable Skill'] }
+  } }
+  const fullSkills = Array.from({ length: 100 }, (_, index) => ({ name: `Skill ${index}` }))
+  const capped = await prepare({ specifics: { experience: [existing], skills: fullSkills } }, update)
+  assert.deepEqual(capped.step.payload.specifics.linkedin.experience,
+    { operation: 'edit', id: 'exp-1', description: 'New' })
+  assert.equal(capped.omittedSkills, 1)
 
   await assert.rejects(() => prepare({ specifics: { experience: [existing, { ...existing,
     id: 'exp-2' }] } }), { code: 'profile_entry_ambiguous' })
@@ -55,8 +64,8 @@ async function run() {
     school: { name: 'University' }, started_on: '09/01/2020', degree: 'Bachelor', skills: []
   }] } }, education)
   assert.equal(preparedEducation.step.action, 'update')
-  assert.equal(preparedEducation.step.payload.specifics.linkedin.education.operation, 'edit')
-  assert.equal(preparedEducation.step.payload.specifics.linkedin.education.id, 'edu-1')
+  assert.deepEqual(preparedEducation.step.payload.specifics.linkedin.education,
+    { operation: 'edit', id: 'edu-1', degree: { name: 'Master' } })
 }
 
 run().then(() => console.log('profile pre-write preparation tests passed')).catch((error: unknown) => {

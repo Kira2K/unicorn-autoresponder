@@ -8,6 +8,14 @@ const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as
 
 type FetchLike = (url: string, init: Record<string, unknown>) => Promise<any>
 
+function retryAfterMs(response: any) {
+  const value = String(response?.headers?.get?.('retry-after') ?? '').trim()
+  if (!value) return undefined
+  const seconds = Number(value)
+  const milliseconds = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(value) - Date.now()
+  return Number.isFinite(milliseconds) ? Math.max(0, Math.min(120_000, milliseconds)) : undefined
+}
+
 function unipileApiKey(): string {
   const key = String(process.env.UNIPILE_API_KEY ?? '').trim()
   if (!key) {
@@ -67,7 +75,8 @@ function createUnipileHttpClient(options: {
         `unipile_${remoteCode}`,
         `Unipile request failed with HTTP ${response.status} (${remoteCode}).` +
         (requestId ? ` Request ID: ${requestId}.` : ''),
-        safeUnipileDiagnostics(response.status, data)
+        { ...safeUnipileDiagnostics(response.status, data),
+          ...(retryAfterMs(response) !== undefined ? { retryAfterMs: retryAfterMs(response) } : {}) }
       )
     }
     return data as T

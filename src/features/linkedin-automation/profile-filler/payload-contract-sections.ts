@@ -1,5 +1,5 @@
 import type { JsonObject, ValidationIssue } from './input-types.ts'
-import { MCP_ENUMS, PAYLOAD_FIELDS } from './mcp-contract.ts'
+import { MCP_ENTRY_REQUIRED, MCP_ENUMS, PAYLOAD_FIELDS } from './mcp-contract.ts'
 import {
   booleanField, dateField, enumField, fatal, named, namedList, onlyFields, record,
   requiredFields, stringField
@@ -8,9 +8,8 @@ import {
 export function validateExperience(value: JsonObject, path: string, issues: ValidationIssue[]) {
   onlyFields(value, PAYLOAD_FIELDS.experience, path, issues)
   const operation = value.operation
-  if (operation === 'create') requiredFields(value,
-    ['operation', 'job_title', 'company', 'start_date'], path, issues)
-  else if (operation === 'edit') requiredFields(value, ['operation', 'id'], path, issues)
+  if (operation === 'create') requiredFields(value, MCP_ENTRY_REQUIRED.experience.create, path, issues)
+  else if (operation === 'edit') requiredFields(value, MCP_ENTRY_REQUIRED.experience.edit, path, issues)
   else fatal(issues, `${path}.operation`, 'Expected create or edit.')
   if (value.id !== undefined) stringField(value.id, `${path}.id`, issues)
   booleanField(value.notify_network, `${path}.notify_network`, issues)
@@ -28,8 +27,8 @@ export function validateExperience(value: JsonObject, path: string, issues: Vali
 export function validateEducation(value: JsonObject, path: string, issues: ValidationIssue[]) {
   onlyFields(value, PAYLOAD_FIELDS.education, path, issues)
   const operation = value.operation
-  if (operation === 'create') requiredFields(value, ['operation', 'school', 'start_date'], path, issues)
-  else if (operation === 'edit') requiredFields(value, ['operation', 'id'], path, issues)
+  if (operation === 'create') requiredFields(value, MCP_ENTRY_REQUIRED.education.create, path, issues)
+  else if (operation === 'edit') requiredFields(value, MCP_ENTRY_REQUIRED.education.edit, path, issues)
   else fatal(issues, `${path}.operation`, 'Expected create or edit.')
   if (value.id !== undefined) stringField(value.id, `${path}.id`, issues)
   booleanField(value.notify_network, `${path}.notify_network`, issues)

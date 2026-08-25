@@ -9,9 +9,10 @@ const props = defineProps({
 })
 const emit = defineEmits(['resolve'])
 const state = reactive({})
+const openToWorkTitle = issue => /^profile\.open_to_work\.job_titles\[\d+\]\.name$/.test(issue.path)
 const rows = computed(() => props.issues.filter(issue =>
   issue.path?.endsWith('.job_title') || issue.path?.endsWith('.company') ||
-  /\.skills(?:\.add)?\[\d+\]$/.test(issue.path)))
+  openToWorkTitle(issue) || /\.skills(?:\.add)?\[\d+\]$/.test(issue.path)))
 
 function row(issue) {
   if (!state[issue.path]) state[issue.path] = {

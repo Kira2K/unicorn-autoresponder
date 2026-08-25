@@ -3,6 +3,23 @@ import type { ProfileFillerService } from './profile-filler-types.ts'
 export function createMockProfileFillerService(): ProfileFillerService {
   const jobs = new Map<string, any>()
   return {
+    async startGeneration(platformAccountId) {
+      const now = new Date().toISOString()
+      const job: any = { jobId: `generation-${Date.now()}`, platformAccountId,
+        clientName: 'Test Client', status: 'generating_cv', phase: 'extracting_cv_facts',
+        createdAt: now, updatedAt: now }
+      jobs.set(job.jobId, job)
+      setTimeout(() => {
+        job.status = 'preview_ready'; job.phase = 'preview_ready'; job.planHash = 'mock-generated-hash'
+        job.updatedAt = new Date().toISOString()
+        job.preview = { planHash: job.planHash, issues: [], document: { schema_version: 1,
+          profile: { headline: 'Generated mock profile' } }, steps: [], generation: {
+          model: 'mock-model', proxyCountry: 'Poland', guideRevision: 'mock-guide',
+          cvRevision: 'mock-cv', generatedAt: new Date().toISOString()
+        } }
+      }, 25)
+      return structuredClone(job)
+    },
     async searchParameters(_platformAccountId, type, keywords) {
       return { type, items: [keywords, `${keywords} Specialist`].map(name => ({ name })) }
     },
@@ -54,6 +71,13 @@ export function createMockProfileFillerService(): ProfileFillerService {
         status: 'running', phase: 'writing:headline' }
       jobs.set(job.jobId, job)
       setTimeout(() => { job.status = 'succeeded'; job.phase = 'completed' }, 25)
+      return structuredClone(job)
+    },
+    async resume(jobId) {
+      const job = jobs.get(jobId)
+      if (!job) throw Object.assign(new Error('Not found'), { code: 'profile_job_not_found' })
+      job.status = 'retrying'; job.phase = 'resuming_job_titles'; job.errorCode = undefined
+      setTimeout(() => { job.status = 'preview_ready'; job.phase = 'preview_ready' }, 25)
       return structuredClone(job)
     },
     async get(jobId) { const job = jobs.get(jobId); return job && structuredClone(job) },

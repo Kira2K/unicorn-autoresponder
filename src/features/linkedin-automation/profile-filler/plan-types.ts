@@ -2,6 +2,7 @@ import type {
   EducationData, ExperienceData, JsonObject, ProfileInput, ValidationIssue
 } from './input-types.ts'
 import type { CatalogType } from './mcp-contract.ts'
+import type { GenerationMetadata } from './generation/types.ts'
 
 export type ProfileAccount = {
   platformAccountId: number
@@ -42,6 +43,7 @@ export type ProfilePlan = {
   snapshot: { capturedAt: string; values: Record<string, unknown> }
   steps: PlanStep[]
   issues: ValidationIssue[]
+  generation?: GenerationMetadata
 }
 
 export type ProfilePreview = Omit<ProfilePlan, 'input' | 'steps'> & {

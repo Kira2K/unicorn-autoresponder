@@ -26,8 +26,9 @@ function runPreview(options: {
   update(patch: Partial<ProfileJob>): void
   release(): void
   logger: ProfileLogger
+  generation?: import('./generation/types.ts').GenerationMetadata
 }) {
-  const { client, repository, store, job, input, issues, update, release, logger } = options
+  const { client, repository, store, job, input, issues, update, release, logger, generation } = options
   let released = false
   let activeStage = 'account_profile_read'
   const unlock = () => {
@@ -48,6 +49,7 @@ function runPreview(options: {
       activeStage = 'plan_build'
       logger.event('plan_build', 'started')
       const plan = await buildProfilePlan(client, account, input, profile, issues, logger)
+      if (generation) plan.generation = generation
       logger.event('plan_build', 'succeeded', { stepCount: plan.steps.length,
         issueCount: plan.issues.length })
       const hash = planHash(plan)
@@ -56,11 +58,12 @@ function runPreview(options: {
       logger.event('preview_persist', 'started')
       await store.update(job.jobId, {
         accountId: account.accountId, status: 'preview_ready', phase: 'preview_ready',
-        plan, planHash: hash, updatedAt: now
+        plan, planHash: hash, checkpoint: null, errorCode: '', updatedAt: now
       })
       logger.event('preview_persist', 'succeeded')
       unlock()
-      update({ status: 'preview_ready', phase: 'preview_ready', plan, planHash: hash, updatedAt: now })
+      update({ status: 'preview_ready', phase: 'preview_ready', plan, planHash: hash,
+        checkpoint: null, errorCode: undefined, updatedAt: now })
       activeStage = 'preview'
       logger.event('preview', 'succeeded', { stepCount: plan.steps.length,
         issueCount: plan.issues.length })

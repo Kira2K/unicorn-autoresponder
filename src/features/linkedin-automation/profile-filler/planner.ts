@@ -7,14 +7,13 @@ import { planOpenToWork } from './planners/open-to-work.ts'
 import { planSkills } from './planners/skills.ts'
 import { validatePlanPayloads } from './payload-contract.ts'
 import type { ProfileLogger } from './profile-logger.ts'
-
-const order = ['headline', 'about', 'experience-update', 'education-update', 'skills',
-  'experience-create', 'education-create', 'open_to_work']
+import { createEntrySkillBudget } from './entry-skill-budget.ts'
+import { MCP_WRITE_ORDER } from './mcp-contract.ts'
 
 function position(step: { section: string; action: string }) {
   const key = ['experience', 'education'].includes(step.section)
     ? `${step.section}-${step.action}` : step.section
-  return order.indexOf(key)
+  return MCP_WRITE_ORDER.indexOf(key as any)
 }
 
 export async function buildProfilePlan(
@@ -22,10 +21,11 @@ export async function buildProfilePlan(
   current: JsonObject, validationIssues: ValidationIssue[], logger?: ProfileLogger
 ): Promise<ProfilePlan> {
   const issues = structuredClone(validationIssues)
+  const skillBudget = createEntrySkillBudget(current)
   const planned = [
     ...planBasic(desired, current, issues),
-    ...planExperience(desired, current, issues),
-    ...planEducation(desired, current, issues),
+    ...planExperience(desired, current, issues, skillBudget),
+    ...planEducation(desired, current, issues, skillBudget),
     ...planSkills(desired, current, issues),
     ...await planOpenToWork(client, account.accountId, desired, current, issues, logger)
   ].sort((left, right) => position(left) - position(right))

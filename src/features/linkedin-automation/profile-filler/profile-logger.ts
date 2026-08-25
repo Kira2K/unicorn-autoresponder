@@ -18,6 +18,9 @@ export type ProfileLogDetails = {
   fatalCount?: number
   payloadFields?: string[]
   fieldPath?: string
+  inputTokens?: number
+  outputTokens?: number
+  cachedTokens?: number
 }
 
 export type ProfileLogger = {
@@ -32,7 +35,7 @@ const SAFE_DIAGNOSTIC_WORDS = new Set([
   'degree', 'field_of_study', 'employment_type', 'location', 'workplace_type', 'start_date',
   'end_date', 'description', 'source_of_hire', 'activities', 'grade', 'name', 'text', 'id',
   'year', 'month', 'required', 'additional', 'property', 'invalid', 'type', 'enum', 'format',
-  'minimum', 'maximum', 'missing', 'must', 'have'
+  'minimum', 'maximum', 'missing', 'must', 'have', 'json', 'schema', 'unique_items'
 ])
 
 const safeToken = (value: unknown, fallback: string) => {
@@ -46,7 +49,7 @@ function cleanDetails(details: ProfileLogDetails) {
     if (details[key]) clean[key] = safeToken(details[key], 'unknown')
   }
   for (const key of ['attempt', 'maxAttempts', 'durationMs', 'httpStatus', 'stepCount',
-    'issueCount', 'fatalCount'] as const) {
+    'issueCount', 'fatalCount', 'inputTokens', 'outputTokens', 'cachedTokens'] as const) {
     if (Number.isFinite(details[key])) clean[key] = details[key]
   }
   if (['matched', 'unchanged', 'mismatch', 'unavailable'].includes(String(details.observation))) {

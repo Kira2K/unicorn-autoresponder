@@ -6,6 +6,10 @@ The support bot owns the user-facing `/resume` flow. The web-console backend
 owns the protected API and NocoDB writes. `CV processing` is the source of truth
 for current state.
 
+The LinkedIn Profile Filler may read the newest final English CV only after the
+workflow reaches `moved to filling` or `filled`. It never changes this workflow
+or falls back to a draft. See `docs/LINKEDIN_PROFILE_GENERATION.md`.
+
 Commands:
 
 - `/resume`: starts or advances the workflow for the current Telegram group by

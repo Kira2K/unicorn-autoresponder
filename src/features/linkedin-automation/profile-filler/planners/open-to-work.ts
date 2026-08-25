@@ -13,14 +13,17 @@ export async function planOpenToWork(
   if (!desired.openToWork) return []
   const resolve = createParameterSearch(client, accountId, logger)
   const titles: Array<{ title: string; id: string }> = []
-  for (const value of desired.openToWork.jobTitles) {
+  for (const [index, value] of desired.openToWork.jobTitles.entries()) {
+    const issuePath = `profile.open_to_work.job_titles[${index}].name`
+    if (value.id) { titles.push({ title: value.name, id: value.id }); continue }
+    if (issues.some(issue => issue.level === 'fatal' && issue.path === issuePath)) return []
     const result = await resolve(REQUIRED_ID_FIELDS.openToWorkJobTitle, value.name)
     const match = result.exact
     if (!match) {
-      issues.push({ level: 'fatal', path: 'profile.open_to_work.job_titles',
+      issues.push({ level: 'fatal', path: issuePath,
         message: `LinkedIn job title "${value.name}" was not resolved.`,
         resolution: 'Choose one exact LinkedIn value and rebuild Preview.',
-        suggestions: result.matches.slice(0, 8).map(item => item.name) })
+        suggestions: result.matches.slice(0, 5).map(item => item.name) })
       return []
     }
     titles.push({ title: match.name, id: match.id })

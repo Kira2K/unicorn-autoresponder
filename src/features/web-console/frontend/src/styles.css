@@ -1303,3 +1303,13 @@ body {
 .profile-step-writing i,
 .profile-step-write_accepted i,
 .profile-step-verifying i { color: #1d4ed8; }
+.profile-filler-divider {
+  align-items: center;
+  color: var(--p-text-muted-color);
+  display: flex;
+  font-size: .85rem;
+  gap: .75rem;
+}
+.profile-filler-divider::before,
+.profile-filler-divider::after { background: var(--p-content-border-color); content: ''; flex: 1; height: 1px; }
+.profile-generation-meta { color: var(--p-text-muted-color); font-size: .85rem; }

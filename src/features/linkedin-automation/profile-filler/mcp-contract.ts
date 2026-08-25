@@ -35,3 +35,15 @@ export const REQUIRED_ID_FIELDS = {
   openToWorkJobTitle: 'JOB_TITLE',
   openToWorkLocation: 'LOCATION'
 } as const satisfies Record<string, CatalogType>
+
+export const MCP_ENTRY_REQUIRED = {
+  experience: { create: ['operation', 'job_title', 'company', 'start_date'], edit: ['operation', 'id'] },
+  education: { create: ['operation', 'school', 'start_date'], edit: ['operation', 'id'] }
+} as const
+
+export const MCP_PROFILE_SKILLS_LIMIT = 100
+
+export const MCP_WRITE_ORDER = [
+  'headline', 'about', 'experience-update', 'experience-create',
+  'education-update', 'education-create', 'skills', 'open_to_work'
+] as const

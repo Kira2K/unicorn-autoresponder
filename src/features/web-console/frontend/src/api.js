@@ -1,3 +1,5 @@
+import { cvMime } from './profile-cv-upload'
+
 async function request(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'include',
@@ -104,6 +106,11 @@ export const api = {
       method: 'POST', body: JSON.stringify(profile)
     })
   },
+  startAdminProfileGeneration(platformAccountId, file) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-generations`, {
+      method: 'POST', ...(file ? { body: file, headers: { 'Content-Type': cvMime(file) } } : {})
+    })
+  },
   adminProfileParameters(platformAccountId, type, keywords) {
     const query = new URLSearchParams({ type, keywords })
     return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-parameters?${query}`)
@@ -122,6 +129,11 @@ export const api = {
   applyAdminProfileJob(jobId, planHash) {
     return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/apply`, {
       method: 'POST', body: JSON.stringify({ planHash })
+    })
+  },
+  resumeAdminProfileJob(jobId) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/resume`, {
+      method: 'POST'
     })
   },
   rollbackAdminProfileJob(jobId) {

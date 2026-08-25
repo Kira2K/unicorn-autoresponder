@@ -6,8 +6,11 @@ const { createUnipileHttpClient } = require('./http-client.ts') as {
     request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown): Promise<T>
   }
 }
+const { createUnipileRequestScheduler } = require('./request-scheduler.ts') as
+  typeof import('./request-scheduler.ts')
 
-function createUnipileProfileAdapter(http = createUnipileHttpClient()) {
+function createUnipileProfileAdapter(http = createUnipileHttpClient(), options: any = {}) {
+  const scheduler = options.scheduler ?? createUnipileRequestScheduler(options.schedulerOptions)
   return {
     getAccount(accountId: string) {
       return http.request<JsonObject>('GET', `/accounts/${encodeURIComponent(accountId)}`)
@@ -23,8 +26,8 @@ function createUnipileProfileAdapter(http = createUnipileHttpClient()) {
     },
     async searchParameters(accountId: string, type: CatalogType, keywords: string) {
       const query = new URLSearchParams({ type, keywords, limit: '25' })
-      const response = await http.request<JsonObject>('GET',
-        `/${encodeURIComponent(accountId)}/linkedin/search/parameters?${query.toString()}`)
+      const response: JsonObject = await scheduler.run(() => http.request<JsonObject>('GET',
+        `/${encodeURIComponent(accountId)}/linkedin/search/parameters?${query.toString()}`))
       if (!Array.isArray(response.data)) return []
       return response.data.flatMap(item => {
         if (!item || typeof item !== 'object') return []

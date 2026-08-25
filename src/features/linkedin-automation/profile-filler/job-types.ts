@@ -2,7 +2,9 @@ import type { FillResult, ProfilePlan } from './plan-types.ts'
 import { profileDocument } from './profile-document.ts'
 
 export type ProfileJobStatus =
-  'previewing' | 'preview_ready' | 'running' | 'pending_verification' |
+  'generating_cv' | 'generating_profile' | 'validating' |
+  'previewing' | 'waiting_retry' | 'retrying' | 'preview_ready' |
+  'running' | 'pending_verification' |
   'succeeded' | 'failed' | 'needs_expert_review'
 
 export type ProfileJob = {
@@ -16,6 +18,7 @@ export type ProfileJob = {
   planHash?: string
   plan?: ProfilePlan
   result?: FillResult
+  checkpoint?: import('./generation/types.ts').GenerationCheckpoint | null
   errorCode?: string
   createdAt: string
   updatedAt: string
@@ -33,10 +36,12 @@ export function publicProfileJob(job: ProfileJob) {
     preview: job.plan && job.planHash ? {
       jobId: job.jobId, planHash: job.planHash, account: job.plan.account,
       identity: job.plan.identity, issues: job.plan.issues,
+      generation: job.plan.generation,
       document: job.plan.input ? profileDocument(job.plan.input) : undefined,
       steps: job.plan.steps.map(({ payload: _payload, verification: _verification, ...step }) => step)
     } : undefined,
     result: job.result, errorCode: job.errorCode,
+    retry: job.checkpoint?.retry,
     createdAt: job.createdAt, updatedAt: job.updatedAt, finishedAt: job.finishedAt
   }
 }

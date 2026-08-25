@@ -29,6 +29,7 @@ export type SafeUnipileDiagnostics = {
   httpStatus: number
   requestId?: string
   diagnostic?: string
+  retryAfterMs?: number
 }
 
 export function safeUnipileDiagnostics(status: number, data: unknown): SafeUnipileDiagnostics {

@@ -3,7 +3,8 @@ type Handler = import('express').RequestHandler
 type Service = import('./profile-filler-types').ProfileFillerService
 const { runProfileAnalysis } = require('../../linkedin-automation/profile-filler/profile-analysis.ts') as
   typeof import('../../linkedin-automation/profile-filler/profile-analysis.ts')
-
+const { cvUploadFailure, parseCvBody, readCvUpload } = require('./profile-generation-upload.ts') as
+  { cvUploadFailure(error: any): any; parseCvBody: Handler; readCvUpload(req: any): any }
 const CONFLICT_MESSAGES: Record<string, string> = {
   profile_filler_auth_required: 'Verify or reconnect LinkedIn before using Profile Filler.',
   profile_job_not_ready: 'This preview can no longer be applied. Build a fresh preview.',
@@ -13,9 +14,10 @@ const CONFLICT_MESSAGES: Record<string, string> = {
   profile_rollback_not_available: 'Rollback is not available for this run.',
   profile_rollback_state_changed: 'LinkedIn changed after this run. Build a fresh preview before rollback.',
   profile_rollback_unsupported: 'This type of change cannot be rolled back automatically.',
-  profile_already_rolled_back: 'This run has already been rolled back.'
+  profile_already_rolled_back: 'This run has already been rolled back.',
+  profile_retry_not_ready: 'This generation is not waiting for retry.',
+  profile_retry_unavailable: 'The saved generation checkpoint is unavailable.'
 }
-
 function failure(error: any) {
   const code = String(error?.code ?? 'profile_filler_internal_error')
   if (code === 'profile_parameter_search_invalid') {
@@ -25,6 +27,8 @@ function failure(error: any) {
     return { status: 400, body: { error: code, message: 'Profile JSON is invalid.',
       issues: Array.isArray(error.details) ? error.details : [] } }
   }
+  const uploadFailure = cvUploadFailure(error)
+  if (uploadFailure) return uploadFailure
   if (code === 'profile_job_not_found' || code === 'linkedin_account_not_found') {
     return { status: 404, body: { error: code, message: 'Profile Filler item was not found.' } }
   }
@@ -35,7 +39,8 @@ function failure(error: any) {
   if (['profile_filler_auth_required', 'profile_job_not_ready', 'profile_plan_hash_mismatch',
     'profile_preview_has_blocking_issues', 'linkedin_operation_active',
     'profile_rollback_not_available', 'profile_rollback_state_changed',
-    'profile_rollback_unsupported', 'profile_already_rolled_back'].includes(code)) {
+    'profile_rollback_unsupported', 'profile_already_rolled_back',
+    'profile_retry_not_ready', 'profile_retry_unavailable'].includes(code)) {
     return { status: 409, body: { error: code, message: `[${code}] ${CONFLICT_MESSAGES[code]}` } }
   }
   return { status: 500, body: { error: 'profile_filler_internal_error',
@@ -69,6 +74,15 @@ function registerProfileFillerRoutes(options: {
     try { res.status(202).json(await service.startPreview(id, req.body)) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
   })
+  app.post('/api/admin/linkedin/accounts/:id/profile-generations', requireAdmin, parseCvBody,
+    async (req, res) => {
+    const id = Number(req.params.id)
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'profile_validation_failed' }); return
+    }
+    try { res.status(202).json(await service.startGeneration(id, readCvUpload(req))) }
+    catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
+  })
   app.get('/api/admin/linkedin/accounts/:id/profile-parameters', requireAdmin, async (req, res) => {
     const id = Number(req.params.id)
     try {
@@ -78,6 +92,10 @@ function registerProfileFillerRoutes(options: {
   })
   app.post('/api/admin/linkedin/profile-jobs/:jobId/apply', requireAdmin, async (req, res) => {
     try { res.status(202).json(await service.apply(String(req.params.jobId), String(req.body?.planHash ?? ''))) }
+    catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
+  })
+  app.post('/api/admin/linkedin/profile-jobs/:jobId/resume', requireAdmin, async (req, res) => {
+    try { res.status(202).json(await service.resume(String(req.params.jobId))) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
   })
   app.post('/api/admin/linkedin/profile-jobs/:jobId/rollback', requireAdmin, async (req, res) => {

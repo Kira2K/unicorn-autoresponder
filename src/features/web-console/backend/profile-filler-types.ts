@@ -1,7 +1,10 @@
 export type ProfileFillerService = {
+  startGeneration(platformAccountId: number,
+    upload?: { bytes: Buffer; mimeType: string }): Promise<Record<string, unknown>>
   startPreview(platformAccountId: number, profileFile: unknown): Promise<Record<string, unknown>>
   apply(jobId: string, planHash: string): Promise<Record<string, unknown>>
   rollback(jobId: string): Promise<Record<string, unknown>>
+  resume(jobId: string): Promise<Record<string, unknown>>
   get(jobId: string): Promise<Record<string, unknown> | undefined>
   list(): Promise<Record<string, unknown>[]>
   searchParameters(platformAccountId: number, type: string, keywords: string):

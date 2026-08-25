@@ -1,62 +1,20 @@
-import { codedError, profileErrorDetails } from './errors.ts'
+import { profileErrorDetails } from './errors.ts'
 import type { JsonObject } from './input-types.ts'
 import type { PlanStep, ProfileClient } from './plan-types.ts'
-import { educationPayload, experiencePayload, linkedInPayload } from './payloads.ts'
-import {
-  desiredEducation, desiredExperience, name, normalizeEducation, normalizeExperience, section
-} from './profile-data.ts'
-import { differs, educationMatches, experienceMatches } from './profile-match.ts'
+import { linkedInPayload } from './payloads.ts'
+import { name, section } from './profile-data.ts'
 import type { ProfileLogger } from './profile-logger.ts'
 import { verifyProfile } from './verify.ts'
+import { MCP_PROFILE_SKILLS_LIMIT } from './mcp-contract.ts'
+import { prepareEducation, prepareExperience, type EntryPreparation } from './prepare-entry.ts'
 
-type PreparedStep = { mode: 'skip' | 'write'; step: PlanStep }
+type PreparedStep = EntryPreparation
 
 function sections(step: PlanStep) {
-  if (step.section === 'experience') return ['linkedin_experience']
-  if (step.section === 'education') return ['linkedin_education']
+  if (step.section === 'experience') return ['linkedin_experience', 'linkedin_skills']
+  if (step.section === 'education') return ['linkedin_education', 'linkedin_skills']
   if (step.section === 'skills') return ['linkedin_skills']
   return []
-}
-
-function entryError(code: string, message: string) {
-  return codedError(code, message)
-}
-
-function prepareExperience(profile: JsonObject, step: PlanStep): PreparedStep {
-  const spec = step.verification
-  if (step.action !== 'create' || spec.kind !== 'experience') return { mode: 'write', step }
-  const matches = section(profile, 'experience').filter(item => experienceMatches(item, {
-    company: spec.expected.company, jobTitle: spec.expected.jobTitle,
-    startDate: spec.expected.startDate
-  }))
-  if (matches.length > 1) throw entryError('profile_entry_ambiguous', 'Multiple Experience entries match.')
-  if (!matches.length) return { mode: 'write', step }
-  const existing = matches[0]
-  const id = typeof existing.id === 'string' ? existing.id : ''
-  if (!id) throw entryError('profile_entry_id_missing', 'Existing Experience has no ID.')
-  if (!differs(normalizeExperience(existing), desiredExperience(spec.expected))) {
-    return { mode: 'skip', step }
-  }
-  return { mode: 'write', step: { ...step, action: 'update', before: normalizeExperience(existing),
-    payload: experiencePayload(spec.expected, id), verification: { ...spec, id } } }
-}
-
-function prepareEducation(profile: JsonObject, step: PlanStep): PreparedStep {
-  const spec = step.verification
-  if (step.action !== 'create' || spec.kind !== 'education') return { mode: 'write', step }
-  const matches = section(profile, 'education').filter(item => educationMatches(item, {
-    school: spec.expected.school, startDate: spec.expected.startDate
-  }))
-  if (matches.length > 1) throw entryError('profile_entry_ambiguous', 'Multiple Education entries match.')
-  if (!matches.length) return { mode: 'write', step }
-  const existing = matches[0]
-  const id = typeof existing.id === 'string' ? existing.id : ''
-  if (!id) throw entryError('profile_entry_id_missing', 'Existing Education has no ID.')
-  if (!differs(normalizeEducation(existing), desiredEducation(spec.expected))) {
-    return { mode: 'skip', step }
-  }
-  return { mode: 'write', step: { ...step, action: 'update', before: normalizeEducation(existing),
-    payload: educationPayload(spec.expected, id), verification: { ...spec, id } } }
 }
 
 function prepareSkills(profile: JsonObject, step: PlanStep): PreparedStep {
@@ -64,7 +22,8 @@ function prepareSkills(profile: JsonObject, step: PlanStep): PreparedStep {
   if (spec.kind !== 'skills') return { mode: 'write', step }
   const current = new Set(section(profile, 'skills').map(name).filter(Boolean)
     .map(value => value!.toLowerCase()))
-  const missing = spec.expected.filter(value => !current.has(value.toLowerCase()))
+  const room = Math.max(0, MCP_PROFILE_SKILLS_LIMIT - current.size)
+  const missing = spec.expected.filter(value => !current.has(value.toLowerCase())).slice(0, room)
   if (!missing.length) return { mode: 'skip', step }
   return { mode: 'write', step: { ...step,
     payload: linkedInPayload('skills', missing.map(value => ({ name: value }))),
@@ -78,8 +37,14 @@ export async function prepareStep(client: ProfileClient, accountId: string, step
     const profile = await client.getOwnProfile(accountId, sections(step))
     let prepared = verifyProfile(profile, step.verification)
       ? { mode: 'skip' as const, step } : prepareSkills(profile, step)
-    if (prepared.mode === 'write') prepared = prepareExperience(profile, prepared.step)
-    if (prepared.mode === 'write') prepared = prepareEducation(profile, prepared.step)
+    if (prepared.mode === 'write' && step.section === 'experience') {
+      prepared = prepareExperience(profile, prepared.step)
+    }
+    if (prepared.mode === 'write' && step.section === 'education') {
+      prepared = prepareEducation(profile, prepared.step)
+    }
+    if (prepared.omittedSkills) logger.event('entry_skills_omitted', 'succeeded', {
+      stepId: step.id, section: step.section, issueCount: prepared.omittedSkills })
     logger.event('prewrite_check', 'succeeded', { stepId: step.id, section: step.section,
       observation: prepared.mode === 'skip' ? 'matched' : 'unchanged',
       operation: prepared.step.action })

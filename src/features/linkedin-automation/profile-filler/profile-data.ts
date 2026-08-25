@@ -47,6 +47,7 @@ export function normalizeExperience(item: JsonObject): JsonObject {
     workplace_type: text(item.workplace_type),
     start_date: dateKey(readDate(item.started_on ?? item.start_date)),
     end_date: dateKey(readDate(item.ended_on ?? item.end_date)),
+    source_of_hire: text(item.source_of_hire),
     description: typeof item.description === 'string' ? item.description : undefined,
     skills: Array.isArray(item.skills) ? item.skills.map(name).filter(Boolean) : []
   }
@@ -57,7 +58,7 @@ export function desiredExperience(data: ExperienceData): JsonObject {
     company: data.company, job_title: data.jobTitle, location: data.location,
     workplace_type: data.workplaceType,
     start_date: dateKey(data.startDate), end_date: dateKey(data.endDate),
-    description: data.description, skills: data.skills
+    description: data.description, source_of_hire: data.sourceOfHire, skills: data.skills
   }
 }
 

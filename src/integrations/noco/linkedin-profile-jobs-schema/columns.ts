@@ -8,6 +8,7 @@ export const LINKEDIN_PROFILE_JOB_COLUMNS = [
   { title: 'plan_hash', column_name: 'plan_hash', uidt: 'SingleLineText' },
   { title: 'plan_json', column_name: 'plan_json', uidt: 'LongText' },
   { title: 'result_json', column_name: 'result_json', uidt: 'LongText' },
+  { title: 'checkpoint_json', column_name: 'checkpoint_json', uidt: 'LongText' },
   { title: 'error_code', column_name: 'error_code', uidt: 'SingleLineText' },
   { title: 'created_at', column_name: 'created_at', uidt: 'DateTime' },
   { title: 'updated_at', column_name: 'updated_at', uidt: 'DateTime' },

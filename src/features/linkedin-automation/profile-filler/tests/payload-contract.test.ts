@@ -26,6 +26,8 @@ const valid: any[] = [
     employment_type: ['FULL_TIME'], visibility: 'RECRUITERS_ONLY'
   })
 ]
+valid.push(step('experience', { operation: 'edit', id: 'experience-id', description: 'New' }))
+valid.push(step('education', { operation: 'edit', id: 'education-id', degree: { name: 'Master' } }))
 
 const validIssues: any[] = []
 const events: any[] = []

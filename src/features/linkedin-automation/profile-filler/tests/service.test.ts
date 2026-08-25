@@ -83,12 +83,19 @@ async function run() {
     phase: 'writing:headline', createdAt: '2026-08-21T00:00:00.000Z',
     updatedAt: '2026-08-21T00:00:00.000Z'
   })
+  records.set('retryable-job', {
+    jobId: 'retryable-job', platformAccountId: 7, clientName: 'Student', status: 'retrying',
+    phase: 'retrying_job_titles', checkpoint: { version: 1 },
+    createdAt: '2026-08-21T00:00:00.000Z', updatedAt: '2026-08-21T00:00:00.000Z'
+  })
   const recovered = createProfileFillerService({ store })
   const recoveredJobs = await recovered.list()
   assert.equal(recoveredJobs.find((item: any) => item.jobId === started.jobId).result.steps[0].status, 'verified')
   const stale = recoveredJobs.find((item: any) => item.jobId === 'stale-job')
   assert.equal(stale.status, 'needs_expert_review')
   assert.equal(stale.errorCode, 'profile_job_interrupted')
+  const retryable = recoveredJobs.find((item: any) => item.jobId === 'retryable-job')
+  assert.equal(retryable.status, 'waiting_retry')
   records.set('blocked-job', {
     jobId: 'blocked-job', platformAccountId: 7, clientName: 'Student', status: 'preview_ready',
     phase: 'preview_ready', planHash: 'blocked-hash', createdAt: new Date().toISOString(),
