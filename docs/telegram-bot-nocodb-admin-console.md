@@ -31,7 +31,7 @@ RESUME_WORKFLOW_TEST_MODE=false
 RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS=8222949251
 RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS=102:473
 RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID=8222949251
-RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS=490903294
+RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS=8222949251
 RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS=7586552066
 RESUME_WORKFLOW_KIRA_PLATFORM_ACCOUNT_REFS=1:452
 RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID=7586552066
@@ -51,7 +51,10 @@ TELEGRAM_TDLIB_SEND_TIMEOUT_MS=120000
   advancements are limited to these client IDs.
 - `RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS`: comma-separated Telegram
   user IDs allowed to open and advance the Russian translator provider lane for
-  `Russian version in process`.
+  `Russian version in process` on non-RU clients. RU-only clients assign the
+  Russian version to the main provider/creator. Test/dev can configure
+  `@veu_support` in both provider and translator env lists; production should
+  use the real translator account, currently `@polinats`.
 - `RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS`: comma-separated Telegram user IDs
   allowed to advance Kira CV approval/comment tasks.
 - `RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID` and
@@ -235,13 +238,14 @@ Manual scenario:
 
 1. Send `/whoami` in the test group and confirm the chat ID.
 2. Send `/student`; the bot should reply with the linked student name.
-3. Send `/change_google_folder https://drive.google.com/drive/folders/example`.
-4. Verify `clients.google_folder` changed in NocoDB.
-5. Send `/resume`; if Education or English level is missing, fill it in the
-   Console and retry.
+3. Ensure `clients.google_folder` is filled in Console/NocoDB.
+4. Send `/resume`; if required profile data is missing, fill education,
+   English level, real age, locations, GitHub, LinkedIn, Telegram RU, and
+   Telegram EN in the Console and retry.
 6. Use `/open_my_tasks` in the provider's private chat when the workflow reaches
    a provider-owned status. Use the Russian translator account for
-   `Russian version in process`.
+   `Russian version in process` on non-RU clients; RU-only clients use the main
+   provider.
 7. Open the admin console, log in as admin, and use "Message to Telegram chat".
 8. Confirm the bot posts the admin message to the linked group.
 
