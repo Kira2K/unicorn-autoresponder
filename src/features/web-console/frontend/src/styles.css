@@ -236,6 +236,26 @@ body {
   grid-column: 1 / -1;
 }
 
+.education-editor {
+  align-items: stretch;
+}
+
+.education-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.education-row .p-button {
+  width: 42px;
+  height: 42px;
+}
+
+.education-editor > .p-button {
+  justify-self: start;
+}
+
 .form-actions {
   display: flex;
   align-items: center;
@@ -827,9 +847,14 @@ body {
 
   .profile-form,
   .account-form,
+  .education-row,
   .compact-info,
   .lease-info-list {
     grid-template-columns: 1fr;
+  }
+
+  .education-row .p-button {
+    width: 100%;
   }
 
   .dolphin-action-panel {

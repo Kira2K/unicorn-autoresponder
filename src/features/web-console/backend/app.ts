@@ -49,6 +49,8 @@ const {
   getProviderTasks,
   getResumeStatus,
   publicWorkflow,
+  rejectResumeWorkflow,
+  rejectResumeWorkflowById,
   resetResumeWorkflowForTest,
   resumeWorkflow,
   resumeWorkflowById,
@@ -59,6 +61,8 @@ const {
   getProviderTasks(repository: WebConsoleRepository, actor?: any, options?: any): Promise<any>
   getResumeStatus(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
   publicWorkflow(record: any): any
+  rejectResumeWorkflow(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
+  rejectResumeWorkflowById(workflowId: number, repository: WebConsoleRepository, options?: any): Promise<any>
   resetResumeWorkflowForTest(chatId: string, repository: WebConsoleRepository): Promise<any>
   resumeWorkflow(chatId: string, repository: WebConsoleRepository, options?: any): Promise<any>
   resumeWorkflowById(workflowId: number, repository: WebConsoleRepository, options?: any): Promise<any>
@@ -417,15 +421,15 @@ function createWebConsoleApp(options: {
   telegramProxyResolver?: any
   useMockData?: boolean
 } = {}) {
+  const useMockData = options.useMockData ?? process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
   const repository =
     options.repository ??
     createWebConsoleRepository({
-      nocoClient: options.useMockData || process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
+      nocoClient: useMockData
         ? createMockNocoClient()
         : undefined
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
-  const useMockData = options.useMockData || process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
     api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
@@ -640,7 +644,8 @@ function createWebConsoleApp(options: {
             telegramBotApi.sendMessage({
               chatId,
               ...(notification.messageThreadId ? { messageThreadId: notification.messageThreadId } : {}),
-              text: notification.text
+              text: notification.text,
+              replyMarkup: notification.replyMarkup
             }),
             notification
           )
@@ -870,6 +875,21 @@ function createWebConsoleApp(options: {
     }
   })
 
+  app.post('/api/bot/telegram/chats/:chatId/resume/reject', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const chatId = String(req.params.chatId ?? '').trim()
+      const result = await rejectResumeWorkflow(chatId, repository, {
+        actor: botActorFromRequest(req),
+        expectedStatus: req.body?.expectedStatus,
+        rejectionComment: req.body?.comment
+      })
+      const notificationWarnings = await sendResumeNotifications(result)
+      res.status(result.found ? 200 : 404).json(publicResumeResult(result, { notificationWarnings }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
   app.post('/api/bot/telegram/chats/:chatId/resume/reset-test', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const chatId = String(req.params.chatId ?? '').trim()
@@ -947,6 +967,25 @@ function createWebConsoleApp(options: {
       const result = await resumeWorkflowById(workflowId, repository, {
         actor: botActorFromRequest(req),
         expectedStatus: req.body?.expectedStatus
+      })
+      const notificationWarnings = await sendResumeNotifications(result)
+      res.status(result.found ? 200 : 404).json(publicResumeResult(result, { notificationWarnings }))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/bot/telegram/resume/workflows/:workflowId/reject', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const workflowId = Number(req.params.workflowId)
+      if (!Number.isFinite(workflowId) || workflowId <= 0) {
+        res.status(400).json({ error: 'invalid_workflow_id' })
+        return
+      }
+      const result = await rejectResumeWorkflowById(workflowId, repository, {
+        actor: botActorFromRequest(req),
+        expectedStatus: req.body?.expectedStatus,
+        rejectionComment: req.body?.comment
       })
       const notificationWarnings = await sendResumeNotifications(result)
       res.status(result.found ? 200 : 404).json(publicResumeResult(result, { notificationWarnings }))
@@ -1609,10 +1648,15 @@ function createWebConsoleApp(options: {
       })
       return
     }
+    if ((error as any)?.code === 'resume_reject_comment_too_short') {
+      res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
     if (
       (error as any)?.code === 'resume_workflow_stale_status' ||
       (error as any)?.code === 'resume_workflow_noop' ||
-      (error as any)?.code === 'resume_workflow_stopped'
+      (error as any)?.code === 'resume_workflow_stopped' ||
+      (error as any)?.code === 'resume_reject_not_allowed'
     ) {
       res.status(409).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return

@@ -36,6 +36,8 @@ const {
   missingAdvanceFields,
   requiredClientDataIssues,
   resetResumeWorkflowForTest,
+  rejectResumeWorkflow,
+  rejectResumeWorkflowById,
   resolveActorForWorkflow,
   resumeWorkflowFakeDataMode,
   resumeWorkflow,
@@ -44,7 +46,7 @@ const {
   saveProviderLinkFromChat
 } = require('./resume-workflow.ts') as {
   RESUME_STATUSES: string[]
-  callbackData(action: 'open' | 'advance', workflowId: number, expectedStatus?: string): string
+  callbackData(action: 'open' | 'advance' | 'reject', workflowId: number, expectedStatus?: string): string
   decodeCallbackStatus(value: string | undefined): string
   getProviderTaskById(workflowId: number, repository: any, actor?: any): Promise<any>
   getProviderTasks(repository: any, actor?: any, options?: any): Promise<any>
@@ -52,6 +54,8 @@ const {
   missingAdvanceFields(workflow: any, fakeDataMode?: boolean): string[]
   requiredClientDataIssues(workflow: any): string[]
   resetResumeWorkflowForTest(chatId: string, repository: any): Promise<any>
+  rejectResumeWorkflow(chatId: string, repository: any, options?: any): Promise<any>
+  rejectResumeWorkflowById(workflowId: number, repository: any, options?: any): Promise<any>
   resolveActorForWorkflow(actor: any, workflow?: any): any
   resumeWorkflowFakeDataMode(): boolean
   resumeWorkflow(chatId: string, repository: any, options?: any): Promise<any>
@@ -99,9 +103,19 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     clientPhoneEn: '+1 555 0100',
     commonChatId: '-5216637594',
     education: 'University',
+    educationEntries: [
+      { uni: 'University', faculty: '', grade: '', yearOfEnd: '' }
+    ],
     realAge: 24,
+    realLocation: 'Tbilisi, Georgia',
+    desiredLocation: 'Remote RU proxy',
     englishLevel: 'B1',
     englishLevelId: 3,
+    clientGoogleFolder: '',
+    clientGithubUrl: 'https://github.com/student-user',
+    clientGithubAccountExists: true,
+    clientLinkedInUrl: 'https://linkedin.com/in/student-user',
+    clientLinkedInAccountExists: true,
     status: "collection student's data",
     studentDataFolderUrl: '',
     cvDraftUrl: '',
@@ -109,6 +123,8 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     ruVersionUrl: '',
     additionalVersions: '',
     kirasComments: '',
+    lastRejectionComment: '',
+    rejectionHistory: '',
     lastResponsible: 'student',
     lastWorkflowError: '',
     workflowTrace: '',
@@ -184,6 +200,8 @@ async function runTests() {
   assert.equal(resolveActorForWorkflow(kiraActor, makeWorkflow()).role, 'kira')
 
   let lastResumeOptions: any
+  let lastRejectWorkflowInput: any
+  let lastRejectResumeInput: any
   const providerTaskOffsets: number[] = []
   const foundApi = {
     async backendStatus() {
@@ -214,6 +232,14 @@ async function runTests() {
     },
     async advanceWorkflow() {
       return { found: true, message: 'Статус резюме для Client One: черновик на проверке у Киры' }
+    },
+    async rejectWorkflow(workflowId: number, expectedStatus: string, comment: string, actor?: any) {
+      lastRejectWorkflowInput = { workflowId, expectedStatus, comment, actor }
+      return { found: true, message: `Резюме возвращено: ${comment}`, workflow: { id: workflowId, status: 'Draft in process' } }
+    },
+    async rejectResume(chatId: string, comment: string, actor?: any) {
+      lastRejectResumeInput = { chatId, comment, actor }
+      return { found: true, message: `Резюме возвращено из чата: ${comment}`, workflow: { status: 'Draft in process' } }
     },
     async saveKiraComments(comments: string) {
       return { message: `Комментарии Киры для Client One сохранены.\n\n${comments}`, replyMarkup: { inline_keyboard: [] } }
@@ -388,6 +414,32 @@ async function runTests() {
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
   assert.match(responseText(callbackResponse), /черновик на проверке у Киры/)
+
+  clearActiveTaskContextsForTest()
+  const rejectCallbackResponse = await handleSupportBotCallback({
+    data: callbackData('reject', 98, 'Draft in approve by student'),
+    message: { chat: { id: -5216637594, type: 'supergroup' } },
+    from: { id: 100, username: 'student_user' }
+  }, foundApi)
+  assert.match(responseText(rejectCallbackResponse), /для того чтобы вернуть на доработку введи \/resume_reject оставил комменты в резюме или кастомный комментарий/)
+  const rejectCommentResponse = await handleSupportBotMessage({
+    text: 'оставил комменты в резюме',
+    chat: { id: -5216637594, type: 'supergroup' },
+    from: { id: 100, username: 'student_user' }
+  }, foundApi)
+  assert.match(responseText(rejectCommentResponse), /Резюме возвращено/)
+  assert.equal(lastRejectWorkflowInput.workflowId, 98)
+  assert.equal(lastRejectWorkflowInput.expectedStatus, 'Draft in approve by student')
+  assert.equal(lastRejectWorkflowInput.comment, 'оставил комменты в резюме')
+
+  const rejectCommandResponse = await handleSupportBotMessage({
+    text: '/resume_reject оставил комменты в резюме',
+    chat: { id: -5216637594, type: 'supergroup' },
+    from: { id: 100, username: 'student_user' }
+  }, foundApi)
+  assert.match(responseText(rejectCommandResponse), /Резюме возвращено из чата/)
+  assert.equal(lastRejectResumeInput.chatId, '-5216637594')
+  assert.equal(lastRejectResumeInput.comment, 'оставил комменты в резюме')
 
   const longStatusCallback = callbackData('advance', 98, 'English version in approve by Kira')
   assert.equal(longStatusCallback, 'resume:advance:98:eak')
@@ -877,13 +929,22 @@ async function runTests() {
     const missingRequiredClientDataRepository = makeWorkflowRepository(makeWorkflow({
       clientGoogleFolder: 'https://drive.google.com/drive/folders/noco-root',
       education: '',
+      educationEntries: [],
       englishLevel: '',
       englishLevelId: undefined,
-      realAge: undefined
+      realAge: undefined,
+      realLocation: '',
+      desiredLocation: '',
+      clientGithubUrl: '',
+      clientGithubAccountExists: false,
+      clientLinkedInUrl: '',
+      clientLinkedInAccountExists: false,
+      clientTelegramRu: '',
+      clientTelegramEn: ''
     }))
     assert.deepEqual(
       requiredClientDataIssues(missingRequiredClientDataRepository.workflowRecord),
-      ['Education', 'English level', 'Real age']
+      ['Education', 'English level', 'Real age', 'Real location', 'Desired location', 'Github', 'LinkedIn', 'Telegram RU', 'Telegram EN']
     )
     const missingRequiredStatusResult = await getResumeStatus(
       '-5216637594',
@@ -894,6 +955,12 @@ async function runTests() {
     assert.match(missingRequiredStatusResult.message, /образование/)
     assert.match(missingRequiredStatusResult.message, /уровень английского/)
     assert.match(missingRequiredStatusResult.message, /реальный возраст/)
+    assert.match(missingRequiredStatusResult.message, /реальная локация/)
+    assert.match(missingRequiredStatusResult.message, /желаемая локация/)
+    assert.match(missingRequiredStatusResult.message, /аккаунт GitHub/)
+    assert.match(missingRequiredStatusResult.message, /аккаунт LinkedIn/)
+    assert.match(missingRequiredStatusResult.message, /Telegram RU/)
+    assert.match(missingRequiredStatusResult.message, /Telegram EN/)
     assert.doesNotMatch(missingRequiredStatusResult.message, /\/resume </)
 
     const missingRequiredResumeResult = await resumeWorkflow('-5216637594', missingRequiredClientDataRepository, {
@@ -904,6 +971,15 @@ async function runTests() {
     assert.deepEqual(missingRequiredResumeResult.transitions, [])
     assert.equal(missingRequiredClientDataRepository.workflowRecord.studentDataFolderUrl, '')
     assert.match(missingRequiredResumeResult.message, /сначала заполни недостающие данные в ЛК/)
+
+    const emptyUrlsExistingAccountsWorkflow = makeWorkflow({
+      clientGithubUrl: '',
+      clientGithubAccountExists: true,
+      clientLinkedInUrl: '',
+      clientLinkedInAccountExists: true
+    })
+    assert.equal(requiredClientDataIssues(emptyUrlsExistingAccountsWorkflow).includes('Github'), false)
+    assert.equal(requiredClientDataIssues(emptyUrlsExistingAccountsWorkflow).includes('LinkedIn'), false)
 
     const missingSourceRepository = makeWorkflowRepository()
     const missingSourceStatusResult = await getResumeStatus('-5216637594', missingSourceRepository, { actor: studentActor })
@@ -1212,6 +1288,46 @@ async function runTests() {
     assert.equal(sparseEnglishApprovalResult.workflow.status, 'Russian version in process')
     assert.deepEqual(sparseEnglishApprovalResult.transitions, ['English version in approve by student -> Russian version in process'])
 
+    const ruOnlyDraftApprovalRepository = makeWorkflowRepository(makeWorkflow({
+      clientMarket: 'Ru',
+      status: 'Draft in approve by student',
+      cvDraftUrl: 'https://drive.google.com/drive/folders/seeded-draft'
+    }))
+    const ruOnlyDraftApprovalResult = await resumeWorkflowById(98, ruOnlyDraftApprovalRepository, { actor: studentActor })
+    assert.equal(ruOnlyDraftApprovalResult.workflow.status, 'Russian version in process')
+    assert.deepEqual(ruOnlyDraftApprovalResult.transitions, ['Draft in approve by student -> Russian version in process'])
+    const ruOnlyProviderTask = await getProviderTaskById(98, ruOnlyDraftApprovalRepository, providerActor)
+    assert.equal(ruOnlyProviderTask.workflow.status, 'Russian version in process')
+    const ruOnlyTranslatorTask = await getProviderTaskById(98, ruOnlyDraftApprovalRepository, ruTranslatorActor)
+    assert.equal(ruOnlyTranslatorTask.workflow, undefined)
+    assert.match(ruOnlyTranslatorTask.message, /больше недоступна/)
+
+    const ruOnlyFillingRepository = makeWorkflowRepository(makeWorkflow({
+      clientMarket: 'Ru',
+      status: 'Russian version in approve by student',
+      ruVersionUrl: 'https://docs.google.com/document/d/test-russian-version',
+      enVersionUrl: ''
+    }))
+    const ruOnlyFillingResult = await resumeWorkflowById(98, ruOnlyFillingRepository, { actor: studentActor })
+    assert.equal(ruOnlyFillingResult.workflow.status, 'moved to filling')
+    assert.deepEqual(ruOnlyFillingResult.transitions, ['Russian version in approve by student -> moved to filling'])
+    assert.equal(ruOnlyFillingResult.notifications.some((item: any) => item.kind === 'private_kira'), true)
+    assert.equal(ruOnlyFillingResult.notifications.some((item: any) => item.kind === 'linkedin_ready'), false)
+
+    const bothMarketFillingRepository = makeWorkflowRepository(makeWorkflow({
+      clientMarket: 'both',
+      status: 'Russian version in approve by student',
+      ruVersionUrl: 'https://docs.google.com/document/d/test-russian-version',
+      enVersionUrl: 'https://docs.google.com/document/d/test-english-version'
+    }))
+    const bothMarketFillingResult = await resumeWorkflowById(98, bothMarketFillingRepository, { actor: studentActor })
+    assert.equal(bothMarketFillingResult.workflow.status, 'moved to filling')
+    assert.deepEqual(bothMarketFillingResult.transitions, ['Russian version in approve by student -> moved to filling'])
+    const bothMarketLinkedInNotification = bothMarketFillingResult.notifications.find((item: any) => item.kind === 'linkedin_ready')
+    assert.equal(bothMarketLinkedInNotification.chatId, '-1003187558078')
+    assert.equal(bothMarketLinkedInNotification.messageThreadId, 777)
+    assert.match(bothMarketLinkedInNotification.text, /^@CheMpoKaRokee, резюме Test, Python, both, готово к заполнению на LinkedIn\./)
+
     const missingApprovalLinkRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Russian version in approve by student',
       studentDataFolderUrl: '',
@@ -1224,6 +1340,64 @@ async function runTests() {
     assert.equal(missingApprovalLinkResult.workflow.status, 'Russian version in approve by student')
     assert.deepEqual(missingApprovalLinkResult.transitions, [])
     assert.match(missingApprovalLinkResult.message, /Отправь ссылку на русскую версию следующим сообщением/)
+
+    await assert.rejects(
+      () => rejectResumeWorkflowById(98, makeWorkflowRepository(makeWorkflow({
+        status: 'Draft in approve by student',
+        cvDraftUrl: 'https://docs.google.com/document/d/test-draft'
+      })), {
+        actor: studentActor,
+        rejectionComment: 'short'
+      }),
+      (error: any) => {
+        assert.equal(error.code, 'resume_reject_comment_too_short')
+        return true
+      }
+    )
+
+    const studentRejectRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in approve by student',
+      cvDraftUrl: 'https://docs.google.com/document/d/test-draft'
+    }))
+    const studentRejectResult = await rejectResumeWorkflowById(98, studentRejectRepository, {
+      actor: studentActor,
+      expectedStatus: 'Draft in approve by student',
+      rejectionComment: 'оставил комменты в резюме'
+    })
+    assert.equal(studentRejectResult.workflow.status, 'Draft in process')
+    assert.equal(studentRejectRepository.workflowRecord.cvDraftUrl, '')
+    assert.equal(studentRejectRepository.workflowRecord.lastRejectionComment, 'оставил комменты в резюме')
+    assert.match(studentRejectRepository.workflowRecord.rejectionHistory, /Draft in approve by student -> Draft in process/)
+    assert.deepEqual(studentRejectResult.transitions, ['Draft in approve by student -> Draft in process'])
+    assert.equal(studentRejectResult.notifications.some((notification: any) => notification.kind === 'private_provider'), true)
+
+    const longComment = 'Нужно исправить формат, опыт и короткое саммари.'
+    const kiraRejectRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'English version in approve by Kira',
+      enVersionUrl: 'https://docs.google.com/document/d/test-en'
+    }))
+    const kiraRejectResult = await rejectResumeWorkflow('-5216637594', kiraRejectRepository, {
+      actor: manualKiraActor,
+      expectedStatus: 'English version in approve by Kira',
+      rejectionComment: longComment
+    })
+    assert.equal(kiraRejectResult.workflow.status, 'English version in progress')
+    assert.equal(kiraRejectRepository.workflowRecord.enVersionUrl, '')
+    assert.equal(kiraRejectRepository.workflowRecord.lastRejectionComment, longComment)
+
+    await assert.rejects(
+      () => rejectResumeWorkflowById(98, makeWorkflowRepository(makeWorkflow({
+        status: 'Draft in process',
+        cvDraftUrl: 'https://docs.google.com/document/d/test-draft'
+      })), {
+        actor: providerActor,
+        rejectionComment: 'оставил комменты в резюме'
+      }),
+      (error: any) => {
+        assert.equal(error.code, 'resume_reject_not_allowed')
+        return true
+      }
+    )
 
     process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
     assert.equal(resumeWorkflowFakeDataMode(), true)
@@ -1278,6 +1452,10 @@ async function runTests() {
             assert.match(notification.text, /Telegram EN: @student_en/)
             assert.match(notification.text, /Phone RU: \+7 999 000 1122/)
             assert.match(notification.text, /Phone EN: \+1 555 0100/)
+            assert.match(notification.text, /Реальная локация: Tbilisi, Georgia/)
+            assert.match(notification.text, /Желаемая локация: Remote RU proxy/)
+            assert.match(notification.text, /GitHub: https:\/\/github\.com\/student-user/)
+            assert.match(notification.text, /LinkedIn: https:\/\/linkedin\.com\/in\/student-user/)
             assert.match(notification.text, /Реальный возраст: 24/)
             assert.match(notification.text, /Английский: B1/)
             assert.match(notification.text, /Образование: University/)
@@ -1293,7 +1471,8 @@ async function runTests() {
           const notification = lastResult.notifications.find((item: any) => item.kind === 'common_chat')
           assert.match(notification.text, /^@student_user, резюме/)
           assert.match(notification.text, /Черновик CV: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
-          assert.match(notification.text, /Чтобы согласовать, отправь:\n\/resume I approve/)
+          assert.match(notification.text, /Чтобы согласовать, нажми кнопку «Согласовать» или отправь \/resume I approve/)
+          assert.match(notification.text, /для того чтобы вернуть на доработку введи \/resume_reject оставил комменты в резюме или кастомный комментарий/)
           assert.match(notification.text, /После этого я переведу резюме на следующий шаг/)
         }
         if (step.after === 'moved to filling') {
@@ -1378,6 +1557,10 @@ async function runTests() {
     assert.match(openedProviderTask.message, /Telegram EN: @student_en/)
     assert.match(openedProviderTask.message, /Phone RU: \+7 999 000 1122/)
     assert.match(openedProviderTask.message, /Phone EN: \+1 555 0100/)
+    assert.match(openedProviderTask.message, /Реальная локация: Tbilisi, Georgia/)
+    assert.match(openedProviderTask.message, /Желаемая локация: Remote RU proxy/)
+    assert.match(openedProviderTask.message, /GitHub: https:\/\/github\.com\/student-user/)
+    assert.match(openedProviderTask.message, /LinkedIn: https:\/\/linkedin\.com\/in\/student-user/)
     assert.match(openedProviderTask.message, /Реальный возраст: 24/)
     assert.match(openedProviderTask.message, /Английский: B1/)
     assert.match(openedProviderTask.message, /Образование: University/)
@@ -1434,7 +1617,8 @@ async function runTests() {
     })
     assert.equal(kiraAdvanceResult.workflow.status, 'Draft in approve by student')
     assert.match(kiraAdvanceResult.message, /Черновик CV: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
-    assert.match(kiraAdvanceResult.message, /Чтобы согласовать, отправь:\n\/resume I approve/)
+    assert.match(kiraAdvanceResult.message, /Чтобы согласовать, нажми кнопку «Согласовать» или отправь \/resume I approve/)
+    assert.match(kiraAdvanceResult.message, /для того чтобы вернуть на доработку введи \/resume_reject оставил комменты в резюме или кастомный комментарий/)
     assert.match(kiraAdvanceResult.message, /После этого я переведу резюме на следующий шаг/)
     const mixedProviderTasks = await getProviderTasks({
       async getProviderResumeTasks() {
@@ -1456,6 +1640,21 @@ async function runTests() {
       }
     }, ruTranslatorActor)
     assert.deepEqual(mixedRuTranslatorTasks.tasks.map((task: any) => task.clientName), ['RU Client'])
+    process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = '8222949251'
+    const mixedDevProviderTranslatorTasks = await getProviderTasks({
+      async getProviderResumeTasks() {
+        return [
+          makeWorkflow({ id: 98, clientId: 102, clientName: 'Draft Client', status: 'Draft in process' }),
+          makeWorkflow({ id: 99, clientId: 102, clientName: 'English Client', status: 'English version in progress' }),
+          makeWorkflow({ id: 100, clientId: 102, clientName: 'RU Translator Client', status: 'Russian version in process' })
+        ]
+      }
+    }, providerActor)
+    assert.deepEqual(
+      mixedDevProviderTranslatorTasks.tasks.map((task: any) => task.clientName),
+      ['Draft Client', 'English Client', 'RU Translator Client']
+    )
+    process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = '490903294'
     delete process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS
     const unscopedProviderTasks = await getProviderTasks({
       async getProviderResumeTasks() {

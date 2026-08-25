@@ -12,7 +12,7 @@ const AI_TAILOR_PDF = path.join(AI_TAILOR_FIXTURE_DIR, 'Kira Samsonova React.pdf
 const AI_TAILOR_JOB_REQUIREMENTS = fs.readFileSync(path.join(AI_TAILOR_FIXTURE_DIR, 'AI-tailor-test-text.txt'), 'utf8')
 const API_PORT = 4310
 const UI_PORT = 4311
-const MOCK_PLATFORM_LABELS = ['email_en', 'hh_ru', 'linkedin', 'telegram_ru']
+const MOCK_PLATFORM_LABELS = ['email_en', 'github', 'hh_ru', 'linkedin', 'telegram_ru']
 
 function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -123,14 +123,26 @@ async function runTests(): Promise<void> {
     await page.getByTestId('profile-last-name').fill('McClient')
     await page.getByTestId('profile-fio').fill('Testy McClient Legal')
     await page.getByTestId('profile-birth-date').fill('2002-03-04')
-    await page.getByTestId('profile-education').fill('QA University')
+    await page.getByTestId('profile-education-uni-0').fill('QA University')
+    await page.getByTestId('profile-education-faculty-0').fill('Testing')
+    await page.getByTestId('profile-education-grade-0').fill('Bachelor')
+    await page.getByTestId('profile-education-year-0').fill('2021')
+    await page.getByTestId('add-education-button').click()
+    await page.getByTestId('profile-education-uni-1').fill('QA Academy')
+    await page.getByTestId('profile-education-faculty-1').fill('Automation')
+    await page.getByTestId('profile-education-grade-1').fill('Master')
+    await page.getByTestId('profile-education-year-1').fill('2023')
+    await page.getByTestId('profile-real-location').fill('Tbilisi')
+    await page.getByTestId('profile-desired-location').fill('Remote EU')
     await page.getByTestId('profile-calendar-email').fill('client@example.com')
     await page.getByTestId('profile-telegram').fill('@testy_client')
     await page.getByTestId('profile-english-level').selectOption({ label: 'B2' })
     await page.getByTestId('save-profile-button').click()
     await page.getByTestId('profile-save-message').getByText('Profile saved', { exact: false }).waitFor()
     await page.getByTestId('profile-details-accordion-header').click()
-    await assertText(page, 'QA University')
+    await assertText(page, 'QA University, Testing, Bachelor, 2021; QA Academy, Automation, Master, 2023')
+    await assertText(page, 'Tbilisi')
+    await assertText(page, 'Remote EU')
     await assertText(page, 'Testy')
     await assertText(page, 'McClient')
     await page.getByTestId('accounts-table').getByText('hh_ru', { exact: false }).first().waitFor()
@@ -256,7 +268,7 @@ async function runTests(): Promise<void> {
       await page.getByTestId('account-form').waitFor()
       await page.getByTestId('account-platform').selectOption({ label: platformLabel })
       await page.getByTestId('account-label').fill(label)
-      await page.getByTestId('account-login').fill(`all-${platformLabel}@example.com`)
+      await page.getByTestId('account-login').fill(platformLabel === 'github' ? 'https://github.com/all-platforms' : `all-${platformLabel}@example.com`)
       await page.getByTestId('account-phone').fill(`+1555000${MOCK_PLATFORM_LABELS.indexOf(platformLabel) + 1}`)
       await page.getByTestId('account-email').fill(`all-${platformLabel}@example.com`)
       await page.getByTestId('account-nickname').fill(`all-${platformLabel}`)
@@ -277,7 +289,7 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByTestId('account-form').count(), 0)
     for (const platformLabel of MOCK_PLATFORM_LABELS) {
       await page.getByTestId('accounts-table').getByText(`All platforms ${platformLabel}`, { exact: true }).waitFor()
-      await page.getByTestId('accounts-table').getByText(`all-${platformLabel}@example.com`, { exact: false }).first().waitFor()
+      await page.getByTestId('accounts-table').getByText(platformLabel === 'github' ? 'https://github.com/all-platforms' : `all-${platformLabel}@example.com`, { exact: false }).first().waitFor()
     }
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '02-client-all-platform-accounts.png'), fullPage: true })
 
@@ -353,7 +365,14 @@ async function runTests(): Promise<void> {
     await providerDrawer.getByText('Phone EN', { exact: false }).waitFor()
     await providerDrawer.getByText('+995 555 111 222', { exact: false }).waitFor()
     await providerDrawer.getByText('Github', { exact: true }).waitFor()
-    await providerDrawer.getByText('https://github.com/ilyas-provider', { exact: false }).waitFor()
+    await providerDrawer.getByText('https://github.com/ilyas-provider', { exact: true }).waitFor()
+    await providerDrawer.getByText('Provider University, Data, Master, 2023', { exact: false }).waitFor()
+    await providerDrawer.getByText('Almaty, Kazakhstan', { exact: false }).waitFor()
+    await providerDrawer.getByText('Remote EN', { exact: false }).waitFor()
+    await providerDrawer.getByText('https://github.com/ilyas-provider-client', { exact: false }).waitFor()
+    await providerDrawer.getByText('https://linkedin.com/in/ilyas-provider', { exact: false }).waitFor()
+    await providerDrawer.getByText('@ilyas_ru', { exact: false }).waitFor()
+    await providerDrawer.getByText('@ilyas_en', { exact: false }).waitFor()
     await providerDrawer.getByText('Stack preferenses / possibilities', { exact: false }).waitFor()
     await providerDrawer.getByText('Data, Backend-heavy FullStack', { exact: false }).waitFor()
     await providerDrawer.getByText('Blacklisted companies', { exact: false }).waitFor()
