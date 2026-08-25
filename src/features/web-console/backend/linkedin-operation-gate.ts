@@ -1,18 +1,26 @@
 function createLinkedInOperationGate() {
-  let active: { kind: string; id: string } | undefined
+  const active = new Map<string, { kind: string; id: string; accountKey?: string }>()
   return {
-    acquire(kind: string, id: string) {
-      if (active) throw Object.assign(new Error('Another LinkedIn operation is active.'), {
+    acquire(kind: string, id: string, accountKey?: string) {
+      const key = accountKey ? `account:${accountKey}` : '*'
+      if (active.has('*') || active.has(key) || (!accountKey && active.size)) {
+        throw Object.assign(new Error('Another LinkedIn operation is active.'), {
         code: 'linkedin_operation_active'
       })
-      active = { kind, id }
+      }
+      active.set(key, { kind, id, ...(accountKey ? { accountKey } : {}) })
       let released = false
       return () => {
-        if (!released && active?.kind === kind && active.id === id) active = undefined
+        const current = active.get(key)
+        if (!released && current?.kind === kind && current.id === id) active.delete(key)
         released = true
       }
     },
-    current() { return active && { ...active } }
+    current(accountKey?: string) {
+      const value = accountKey ? active.get(`account:${accountKey}`) ?? active.get('*')
+        : active.values().next().value
+      return value && { ...value }
+    }
   }
 }
 

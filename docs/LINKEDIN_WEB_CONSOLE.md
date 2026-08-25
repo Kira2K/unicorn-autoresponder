@@ -48,6 +48,30 @@ proxy host, port, username, and password.
 
 All routes require an admin web-console session.
 
+## Comment replies
+
+The `Comment replies` column starts a 48-hour monitor for the two latest posts.
+It shows the current stage, next check, remaining time, counters, tracked post links,
+safe errors, and a Resume action for an uncertain write.
+
+Before the first local run:
+
+```powershell
+npm run noco:linkedin-comment-monitor-schema:dry-run
+npm run noco:linkedin-comment-monitor-schema:apply
+```
+
+Generation uses `OPENAI_LINKEDIN_COMMENT_API_KEY` and
+`OPENAI_LINKEDIN_COMMENT_MODEL`, falling back to the existing LinkedIn Profile
+variables. Detailed safe events are written to `logs/linkedin-comments/*.jsonl`.
+
+Comment monitor routes:
+
+- `GET /api/admin/linkedin/comment-monitors`
+- `GET /api/admin/linkedin/comment-monitors/:jobId`
+- `PUT /api/admin/linkedin/accounts/:id/comment-monitor`
+- `POST /api/admin/linkedin/comment-monitors/:jobId/resume`
+
 ## Profile Filler
 
 Profile Filler builds a read-only preview before `Apply`. During execution each

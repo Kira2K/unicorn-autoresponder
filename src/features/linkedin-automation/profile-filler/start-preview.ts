@@ -35,7 +35,7 @@ async function startProfilePreview(options: any) {
       status: 'previewing', phase: 'queued', createdAt: now, updatedAt: now
     }
     const release = await logAction(logger, 'operation_gate', () =>
-      acquire('profile_preview', jobId))
+      acquire('profile_preview', jobId, platformAccountId))
     try { await logAction(logger, 'job_create', () => getStore().create(job)) }
     catch (error) { release(); throw error }
     jobs.set(jobId, job)

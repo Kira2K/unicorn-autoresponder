@@ -67,7 +67,7 @@ async function startRollback(options: any) {
         ['running', 'succeeded'].includes(job.status))
     if (prior) throw codedError('profile_already_rolled_back', 'This job was already rolled back.')
     const acquired = await logAction(logger, 'operation_gate', () =>
-      acquire('profile_rollback', sourceJobId))
+      acquire('profile_rollback', sourceJobId, original.platformAccountId))
     release = acquired
     const resolved = await logAction(logger, 'account_profile_read', () =>
       resolveProfileAccount(repository, client, original.platformAccountId, []))

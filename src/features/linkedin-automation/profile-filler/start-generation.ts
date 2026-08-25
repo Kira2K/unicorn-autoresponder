@@ -43,7 +43,7 @@ async function startProfileGeneration(options: any) {
       accountId: row.unipileAccountId, status: 'generating_cv', phase: 'queued',
       createdAt: now, updatedAt: now }
     const release = await logAction(logger, 'operation_gate', () =>
-      acquire('profile_generate', jobId))
+      acquire('profile_generate', jobId, platformAccountId))
     jobs.set(jobId, job)
     try { await logAction(logger, 'job_create', () => getStore().create(job)) }
     catch (error) { jobs.delete(jobId); release(); throw error }

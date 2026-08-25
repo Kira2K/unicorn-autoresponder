@@ -10,6 +10,17 @@ function run() {
   const releaseProfile = gate.acquire('profile_fill', 'job-1')
   releaseProfile()
   assert.equal(gate.current(), undefined)
+  const releaseOne = gate.acquire('comment_monitor', 'comment-1', '101')
+  const releaseTwo = gate.acquire('comment_monitor', 'comment-2', '102')
+  assert.throws(() => gate.acquire('comment_monitor', 'comment-3', '101'), {
+    code: 'linkedin_operation_active'
+  })
+  assert.throws(() => gate.acquire('profile_fill', 'job-101', '101'), {
+    code: 'linkedin_operation_active'
+  })
+  const releaseOtherProfile = gate.acquire('profile_fill', 'job-103', '103')
+  assert.throws(() => gate.acquire('profile_fill', 'job-2'), { code: 'linkedin_operation_active' })
+  releaseOne(); releaseTwo(); releaseOtherProfile()
 }
 
 try { run(); console.log('linkedin operation gate tests passed') }

@@ -38,7 +38,8 @@ function createProfileFillerService(options: any = {}) {
   const jobs = new Map<string, ProfileJob>()
   const generationStarts = new Map<number, Promise<any>>()
   const update = (job: ProfileJob, patch: Partial<ProfileJob>) => Object.assign(job, patch)
-  const acquire = (kind: string, id: string) => gate?.acquire(kind, id) ?? (() => undefined)
+  const acquire = (kind: string, id: string, platformAccountId: number) =>
+    gate?.acquire(kind, id, String(platformAccountId)) ?? (() => undefined)
   const loggerFor = (jobId: string) => options.executorOptions?.logger ?? createProfileLogger({ jobId })
   async function startPreview(platformAccountId: number, profileFile: unknown) {
     return startProfilePreview({ platformAccountId, profileFile, loggerFor, getRepository, getStore,
@@ -97,7 +98,8 @@ function createProfileFillerService(options: any = {}) {
         return stored
       })
       const plan = job.plan!
-      const release = await logAction(logger, 'operation_gate', () => acquire('profile_fill', jobId))
+      const release = await logAction(logger, 'operation_gate', () =>
+        acquire('profile_fill', jobId, job.platformAccountId))
       const now = new Date().toISOString()
       update(job, { status: 'running', phase: 'starting', updatedAt: now })
       try { await logAction(logger, 'job_start_persist', () => getStore().update(jobId,
