@@ -27,8 +27,8 @@ export function monitorJobRow(job: MonitorJob) {
     job_id: job.jobId, platform_account_id: job.platformAccountId,
     unipile_account_id: job.accountId, client_name: job.clientName,
     status: job.status, stage: job.stage, state_json: JSON.stringify(job.state),
-    next_check_at: job.nextCheckAt ?? '', last_check_at: job.lastCheckAt ?? '',
+    next_check_at: job.nextCheckAt ?? null, last_check_at: job.lastCheckAt ?? null,
     expires_at: job.expiresAt, error_code: job.errorCode ?? '', created_at: job.createdAt,
-    updated_at: job.updatedAt, finished_at: job.finishedAt ?? ''
+    updated_at: job.updatedAt, finished_at: job.finishedAt ?? null
   }
 }

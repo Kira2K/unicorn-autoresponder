@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict')
 const { LINKEDIN_COMMENT_MONITOR_COLUMNS: columns } = require('./columns.ts') as typeof import('./columns.ts')
 const { ensureLinkedInCommentMonitorTable } = require('./logic.ts') as typeof import('./logic.ts')
+const { monitorJobRow } = require('../../../features/linkedin-automation/comment-monitor/job-row.ts') as
+  typeof import('../../../features/linkedin-automation/comment-monitor/job-row.ts')
 
 async function run() {
   let table: any
@@ -18,6 +20,13 @@ async function run() {
   const repeated = await ensureLinkedInCommentMonitorTable(client, 'base', true)
   assert.equal(repeated.created, false)
   assert.deepEqual(repeated.missing, [])
+  const row = monitorJobRow({ jobId: 'job', platformAccountId: 1, accountId: 'account',
+    clientName: 'Student', status: 'starting', stage: 'queued', state: {},
+    expiresAt: '2026-08-27T00:00:00.000Z', createdAt: '2026-08-25T00:00:00.000Z',
+    updatedAt: '2026-08-25T00:00:00.000Z' } as any)
+  assert.equal(row.next_check_at, null)
+  assert.equal(row.last_check_at, null)
+  assert.equal(row.finished_at, null)
 }
 
 run().then(() => console.log('linkedin comment monitor schema tests passed'))
