@@ -1,5 +1,6 @@
 import { logged } from './logger.ts'
 import { activeStatus, publicMonitorJob, type MonitorJob } from './types.ts'
+import { clearAuthorContext } from './author-context.ts'
 
 export function createServiceActions(options: any) {
   const { assertReady, jobs, loggerFor, run, save, store } = options as {
@@ -14,7 +15,8 @@ export function createServiceActions(options: any) {
         activeStatus(row.status))
       if (!job) { audit.event('session_disable', 'succeeded', { reasonCode: 'not_enabled' }); return }
       job.status = 'disabled'; job.stage = 'disabled_by_admin'; job.nextCheckAt = undefined
-      job.finishedAt = new Date().toISOString(); await save(job, loggerFor(job))
+      job.finishedAt = new Date().toISOString(); const logger = loggerFor(job)
+      clearAuthorContext(job, logger); await save(job, logger)
       audit.event('session_disable', 'succeeded'); return publicMonitorJob(job)
     },
     async resume(jobId: string) {

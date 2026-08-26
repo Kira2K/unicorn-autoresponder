@@ -12,5 +12,9 @@ export const LINKEDIN_COMMENT_MONITOR_COLUMNS = [
   { title: 'error_code', column_name: 'error_code', uidt: 'SingleLineText' },
   { title: 'created_at', column_name: 'created_at', uidt: 'DateTime' },
   { title: 'updated_at', column_name: 'updated_at', uidt: 'DateTime' },
-  { title: 'finished_at', column_name: 'finished_at', uidt: 'DateTime' }
+  { title: 'finished_at', column_name: 'finished_at', uidt: 'DateTime' },
+  { title: 'author_headline', column_name: 'author_headline', uidt: 'SingleLineText' },
+  { title: 'author_about', column_name: 'author_about', uidt: 'LongText' },
+  { title: 'author_context_fetched_at', column_name: 'author_context_fetched_at', uidt: 'DateTime' },
+  { title: 'author_context_status', column_name: 'author_context_status', uidt: 'SingleLineText' }
 ] as const

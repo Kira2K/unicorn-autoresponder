@@ -9,4 +9,6 @@ assert.equal(validateReply('Reliable retries keep systems resilient. Extra sente
   'retries').ok, false)
 assert.equal(validateReply('Reliable systems need grounded retry strategies.', 'missing phrase',
   'retry strategies').ok, false)
+assert(validateReply('Call me at +48 123 456 789 today.', 'today', 'today').issues
+  .includes('comment_reply_format_invalid'))
 console.log('comment reply validation tests passed')

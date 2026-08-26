@@ -1,6 +1,7 @@
 import { replyDelay } from './schedule.ts'
 import { commentError, commentErrorCode } from './errors.ts'
 import { markVerified, readVerified, verifyWithRetry } from './reply-verification.ts'
+import { clearAuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorItem, MonitorJob } from './types.ts'
 
 const sleepDefault = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -22,7 +23,8 @@ export async function publishReplies(options: {
     }
     if (Date.now() >= Date.parse(job.expiresAt)) {
       job.status = 'completed'; job.stage = 'expired'; job.nextCheckAt = undefined
-      job.finishedAt = new Date().toISOString(); await options.save(); break
+      job.finishedAt = new Date().toISOString(); clearAuthorContext(job, logger)
+      await options.save(); break
     }
     item.status = 'publishing'; item.updatedAt = new Date().toISOString(); await options.save()
     logger.event('reply_publish', 'started', { publishedCount: job.state.published })

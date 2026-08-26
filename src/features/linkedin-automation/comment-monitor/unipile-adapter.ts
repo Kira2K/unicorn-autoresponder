@@ -33,6 +33,9 @@ export function createCommentUnipileAdapter(options: {
   return {
     getAccount: (accountId: string, logger: CommentLogger) => request(logger, 'account_read', 'GET',
       `/accounts/${encodeURIComponent(accountId)}`),
+    getOwnProfile: (accountId: string, logger: CommentLogger) => request(logger,
+      'own_profile_read', 'GET', `/${encodeURIComponent(accountId)}/users/me?` +
+      new URLSearchParams({ variant: 'linkedin_classic' })),
     listPosts: (accountId: string, userId: string, logger: CommentLogger, cursor?: string) => {
       const query = new URLSearchParams({ limit: '100' }); if (cursor) query.set('cursor', cursor)
       return request(logger, 'posts_page_read', 'GET', `/${encodeURIComponent(accountId)}/users/` +

@@ -27,6 +27,24 @@ async function run() {
   assert.equal(row.next_check_at, null)
   assert.equal(row.last_check_at, null)
   assert.equal(row.finished_at, null)
+  assert.equal(row.author_headline, null)
+  assert.equal(row.author_about, null)
+
+  const added: any[] = []
+  const upgradeClient = {
+    async request(method: string, _path: string, body?: any) {
+      if (method === 'post') added.push(body)
+      return { list: [{ id: 'comments', title: 'linkedin_comment_monitor_jobs' }] }
+    },
+    async fetchTableMeta() { return { columns: [...columns.slice(0, -4), ...added] } }
+  }
+  const upgrade = await ensureLinkedInCommentMonitorTable(upgradeClient, 'base', false)
+  assert.deepEqual(upgrade.missing, ['author_headline', 'author_about',
+    'author_context_fetched_at', 'author_context_status'])
+  await ensureLinkedInCommentMonitorTable(upgradeClient, 'base', true)
+  assert.equal(added.length, 4)
+  await ensureLinkedInCommentMonitorTable(upgradeClient, 'base', true)
+  assert.equal(added.length, 4)
 }
 
 run().then(() => console.log('linkedin comment monitor schema tests passed'))

@@ -1,4 +1,5 @@
 import { validateReply } from './reply-validation.ts'
+import type { AuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorItem, MonitorJob } from './types.ts'
 
 const batches = <T>(items: T[], size: number) =>
@@ -52,20 +53,33 @@ function applyOutputs(job: MonitorJob, items: MonitorItem[], output: any, logger
 
 export async function generateReplies(options: {
   job: MonitorJob; items: MonitorItem[]; openai: any; logger: CommentLogger
+  loadAuthorContext?: () => Promise<AuthorContext>
 }) {
   const { job, openai, logger } = options
   const reserved = { total: 0, threads: {} as Record<string, number> }
   const candidates = options.items.filter(item => eligible(job, item, logger, reserved))
   const queued: MonitorItem[] = []
+  const authorContext = candidates.length && options.loadAuthorContext
+    ? await options.loadAuthorContext() : {}
   for (const batch of batches(candidates, 5)) {
     batch.forEach(item => { item.status = 'generating'; item.updatedAt = new Date().toISOString() })
     try {
-      let invalid = applyOutputs(job, batch, await openai.generate({ items: batch.map(item =>
-        context(job, item)) }, logger), logger)
+      logger.event('author_context_attach', 'started', { operation: 'initial',
+        count: Object.keys(authorContext).length })
+      const initialInput = { author_context: authorContext,
+        items: batch.map(item => context(job, item)) }
+      logger.event('author_context_attach', 'succeeded', { operation: 'initial',
+        count: Object.keys(authorContext).length })
+      let invalid = applyOutputs(job, batch, await openai.generate(initialInput, logger), logger)
       if (invalid.length) {
         logger.event('reply_repair', 'started', { attempt: 1, itemCount: invalid.length })
-        invalid = applyOutputs(job, invalid, await openai.generate({ repair: true,
-          items: invalid.map(item => context(job, item)) }, logger), logger)
+        logger.event('author_context_attach', 'started', { operation: 'repair',
+          count: Object.keys(authorContext).length })
+        const repairInput = { repair: true, author_context: authorContext,
+          items: invalid.map(item => context(job, item)) }
+        logger.event('author_context_attach', 'succeeded', { operation: 'repair',
+          count: Object.keys(authorContext).length })
+        invalid = applyOutputs(job, invalid, await openai.generate(repairInput, logger), logger)
         logger.event('reply_repair', invalid.length ? 'failed' : 'succeeded', {
           attempt: 1, itemCount: invalid.length })
       }

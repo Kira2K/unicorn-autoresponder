@@ -51,6 +51,10 @@ export type MonitorJob = {
   createdAt: string
   updatedAt: string
   finishedAt?: string
+  authorHeadline?: string
+  authorAbout?: string
+  authorContextFetchedAt?: string
+  authorContextStatus?: 'ready' | 'empty' | 'failed'
 }
 
 export type CommentLogger = {
@@ -60,4 +64,9 @@ export type CommentLogger = {
 export const activeStatus = (status: MonitorStatus) =>
   ['starting', 'waiting', 'checking', 'replying', 'paused'].includes(status)
 
-export const publicMonitorJob = (job: MonitorJob) => structuredClone(job)
+export const publicMonitorJob = (job: MonitorJob) => {
+  const { authorHeadline: _headline, authorAbout: _about,
+    authorContextFetchedAt: _fetchedAt, authorContextStatus: _status,
+    ...safe } = structuredClone(job)
+  return safe
+}

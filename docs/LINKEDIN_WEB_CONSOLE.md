@@ -65,6 +65,11 @@ Generation uses `OPENAI_LINKEDIN_COMMENT_API_KEY` and
 `OPENAI_LINKEDIN_COMMENT_MODEL`, falling back to the existing LinkedIn Profile
 variables. Detailed safe events are written to `logs/linkedin-comments/*.jsonl`.
 
+When a reply is needed, the backend reads the account's current Headline and About through
+Unipile and caches them in `linkedin_comment_monitor_jobs` for 24 hours. Failed or empty reads
+are retried after 30 minutes and do not stop replies. The values are never exposed by the admin
+API or written to JSONL logs.
+
 Comment monitor routes:
 
 - `GET /api/admin/linkedin/comment-monitors`

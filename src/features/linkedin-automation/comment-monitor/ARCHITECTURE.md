@@ -1,5 +1,15 @@
 # OwnPostCommentResponder
 
+## Author context cache
+
+Before generating a reply, the monitor reads the author's current LinkedIn `description`
+(Headline) and `bio` (About) through Unipile. The values are cached in the monitor job for
+24 hours; empty or failed reads are retried after 30 minutes. They are trusted only as facts,
+never as instructions, and are removed when the job becomes terminal.
+
+Author context is excluded from admin API responses and JSONL logs. Logs contain only cache
+state, field counts, durations, provider status, and correlation identifiers.
+
 ## Назначение
 
 Администратор включает автоответы для конкретного LinkedIn-аккаунта в веб-консоли.

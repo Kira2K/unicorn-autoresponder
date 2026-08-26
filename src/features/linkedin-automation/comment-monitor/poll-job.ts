@@ -6,16 +6,17 @@ import { nextCheckAt, randomBetween } from './schedule.ts'
 import { generateReplies } from './reply-generation.ts'
 import { publishReplies } from './reply-publisher.ts'
 import { reconcileUncertain } from './reply-verification.ts'
+import { clearAuthorContext, resolveAuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorJob } from './types.ts'
-
 function retryAt(error: any, random = Math.random) {
   const supplied = Number(error?.details?.retryAfterMs)
   const delay = Number.isFinite(supplied) ? supplied : randomBetween(5 * 60_000, 10 * 60_000, random)
   return new Date(Date.now() + delay).toISOString()
 }
 
-function transient(code: string) {
-  return /too_many|rate_limit|timeout|unreachable|service_unavailable/.test(code)
+function transient(error: any, code: string) {
+  const status = Number(error?.details?.httpStatus)
+  return /too_many|rate_limit|timeout|unreachable|service_unavailable/.test(code) || status >= 500
 }
 
 export async function pollMonitorJob(options: {
@@ -26,6 +27,7 @@ export async function pollMonitorJob(options: {
   let release: undefined | (() => void)
   if (Date.now() >= Date.parse(job.expiresAt)) {
     job.status = 'completed'; job.stage = 'expired'; job.finishedAt = new Date().toISOString()
+    clearAuthorContext(job, logger)
     await saveJob(options.store, job, logger); logger.event('session_expire', 'succeeded'); return
   }
   try {
@@ -41,7 +43,9 @@ export async function pollMonitorJob(options: {
     const discovered = await discoverComments({ job, adapter: options.adapter, logger })
     const detected = job.state.items.filter(item => item.status === 'detected')
     await saveJob(options.store, job, logger)
-    const generated = await generateReplies({ job, items: detected, openai: options.openai, logger })
+    const generated = await generateReplies({ job, items: detected, openai: options.openai, logger,
+      loadAuthorContext: () => resolveAuthorContext({ job, adapter: options.adapter, logger,
+        save: () => saveJob(options.store, job, logger) }) })
     await saveJob(options.store, job, logger)
     const queued = job.state.items.filter(item => item.status === 'queued')
     job.status = queued.length ? 'replying' : 'checking'; job.stage = queued.length
@@ -52,7 +56,8 @@ export async function pollMonitorJob(options: {
     job.state.checks += 1; job.lastCheckAt = new Date().toISOString()
     if (job.state.published >= 30) {
       job.status = 'completed'; job.stage = 'limit_reached'; job.finishedAt = job.lastCheckAt
-      job.nextCheckAt = undefined; logger.event('session_limit', 'succeeded', {
+      job.nextCheckAt = undefined; clearAuthorContext(job, logger)
+      logger.event('session_limit', 'succeeded', {
         publishedCount: job.state.published })
     } else {
       job.status = 'waiting'; job.stage = 'waiting_next_check'
@@ -75,15 +80,16 @@ export async function pollMonitorJob(options: {
       job.nextCheckAt = new Date(Date.now() + randomBetween(60_000, 180_000, options.random)).toISOString()
     } else if (code === 'comment_reply_uncertain') {
       job.status = 'paused'; job.stage = 'reply_outcome_uncertain'; job.nextCheckAt = undefined
-    } else if (transient(code)) {
+    } else if (transient(error, code)) {
       job.status = 'waiting'; job.stage = 'temporary_provider_limit'; job.nextCheckAt = retryAt(error,
         options.random)
     } else {
       job.status = 'error'; job.stage = 'monitor_failed'; job.finishedAt = new Date().toISOString()
+      job.nextCheckAt = undefined; clearAuthorContext(job, logger)
     }
     job.errorCode = code
     await saveJob(options.store, job, logger).catch(() => undefined)
-    logger.event('monitor_check', 'failed', { ...errorLogDetails(error), level: transient(code)
+    logger.event('monitor_check', 'failed', { ...errorLogDetails(error), level: transient(error, code)
       ? 'warn' : 'error' })
   } finally {
     if (release) {

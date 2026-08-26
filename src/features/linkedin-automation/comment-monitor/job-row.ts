@@ -8,6 +8,11 @@ const parseState = (value: unknown): MonitorState => {
   catch { return emptyState() }
 }
 
+const parseContextStatus = (value: unknown): MonitorJob['authorContextStatus'] => {
+  const status = String(value ?? '')
+  return status === 'ready' || status === 'empty' || status === 'failed' ? status : undefined
+}
+
 export function monitorJobFromRow(row: any): MonitorJob {
   return {
     recordId: Number(row.Id), jobId: String(row.job_id ?? ''),
@@ -18,7 +23,11 @@ export function monitorJobFromRow(row: any): MonitorJob {
     lastCheckAt: String(row.last_check_at ?? '') || undefined,
     expiresAt: String(row.expires_at ?? ''), errorCode: String(row.error_code ?? '') || undefined,
     createdAt: String(row.created_at ?? ''), updatedAt: String(row.updated_at ?? ''),
-    finishedAt: String(row.finished_at ?? '') || undefined
+    finishedAt: String(row.finished_at ?? '') || undefined,
+    authorHeadline: String(row.author_headline ?? '') || undefined,
+    authorAbout: String(row.author_about ?? '') || undefined,
+    authorContextFetchedAt: String(row.author_context_fetched_at ?? '') || undefined,
+    authorContextStatus: parseContextStatus(row.author_context_status)
   }
 }
 
@@ -29,6 +38,9 @@ export function monitorJobRow(job: MonitorJob) {
     status: job.status, stage: job.stage, state_json: JSON.stringify(job.state),
     next_check_at: job.nextCheckAt ?? null, last_check_at: job.lastCheckAt ?? null,
     expires_at: job.expiresAt, error_code: job.errorCode ?? '', created_at: job.createdAt,
-    updated_at: job.updatedAt, finished_at: job.finishedAt ?? null
+    updated_at: job.updatedAt, finished_at: job.finishedAt ?? null,
+    author_headline: job.authorHeadline ?? null, author_about: job.authorAbout ?? null,
+    author_context_fetched_at: job.authorContextFetchedAt ?? null,
+    author_context_status: job.authorContextStatus ?? null
   }
 }

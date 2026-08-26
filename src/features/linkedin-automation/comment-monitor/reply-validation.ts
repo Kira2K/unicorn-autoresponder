@@ -15,7 +15,8 @@ export function validateReply(reply: unknown, grounding: unknown, context: strin
   if (!/^[A-Z]/.test(text) || !/[.!?]$/.test(text) || /[.!?].+[.!?]$/.test(text)) {
     issues.push('comment_reply_sentence_invalid')
   }
-  if (/https?:\/\/|www\.|#|\r|\n/u.test(text) || /[^\x00-\x7F]/u.test(text)) {
+  if (/https?:\/\/|www\.|#|\r|\n/u.test(text) || /[^\x00-\x7F]/u.test(text) ||
+    /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\+?\d[\d\s().-]{7,}\d/u.test(text)) {
     issues.push('comment_reply_format_invalid')
   }
   if (BANNED.some(pattern => pattern.test(text))) issues.push('comment_reply_ai_slop')

@@ -15,6 +15,7 @@ const { activeStatus, publicMonitorJob } = require('./types.ts') as typeof impor
 const { restoreMonitorJobs } = require('./restore.ts') as typeof import('./restore.ts')
 const { startCommentRetention } = require('./retention.ts') as typeof import('./retention.ts')
 const { createServiceActions } = require('./service-actions.ts') as typeof import('./service-actions.ts')
+const { clearAuthorContext } = require('./author-context.ts') as typeof import('./author-context.ts')
 const { createCommentUnipileAdapter } = require('./unipile-adapter.ts') as
   { createCommentUnipileAdapter(options?: any): any }
 
@@ -47,7 +48,8 @@ function createCommentMonitorService(options: any = {}) {
       logger, random: options.random, sleep: options.sleep }) }
     catch (error) {
       job.status = 'error'; job.stage = 'monitor_failed'; job.errorCode = commentErrorCode(error)
-      job.finishedAt = new Date().toISOString(); await save(job, logger).catch(() => undefined)
+      job.finishedAt = new Date().toISOString(); clearAuthorContext(job, logger)
+      await save(job, logger).catch(() => undefined)
       logger.event('monitor_run', 'failed', { errorCode: job.errorCode })
     }
     finally { running.delete(job.jobId) }

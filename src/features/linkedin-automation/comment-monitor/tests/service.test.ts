@@ -36,7 +36,9 @@ async function run() {
   service.stop()
 
   const publishing = { ...(await store.get(first.jobId)), status: 'replying', stage: 'publishing',
-    expiresAt: new Date(Date.now() + 60_000).toISOString() }
+    expiresAt: new Date(Date.now() + 60_000).toISOString(), authorHeadline: 'Private Headline',
+    authorAbout: 'Private About', authorContextStatus: 'ready',
+    authorContextFetchedAt: new Date().toISOString() }
   publishing.state.items = [{ incomingId: 'in', postId: 'post', threadId: 'thread',
     parentId: 'in', incomingText: 'comment', threadText: 'thread', replyText: 'A valid reply.',
     status: 'publishing', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]
@@ -47,7 +49,24 @@ async function run() {
   const paused = (await restored.list())[0]
   assert.equal(paused.status, 'paused')
   assert.equal(paused.state.items[0].status, 'uncertain')
+  assert.equal('authorHeadline' in paused, false)
+  assert.equal((await restoredStore.get(first.jobId)).authorContextStatus, 'ready')
+  await restored.disable(7)
+  const disabled = await restoredStore.get(first.jobId)
+  assert.equal(disabled.authorHeadline, undefined)
+  assert.equal(disabled.authorContextStatus, undefined)
   restored.stop()
+
+  const terminal = { ...publishing, jobId: 'terminal', status: 'completed', stage: 'expired' }
+  terminal.state.items = []
+  const terminalStore = memoryStore([terminal])
+  const terminalService = createCommentMonitorService({ autoStart: false, store: terminalStore,
+    loggerFor, repository: {}, adapter: {}, openai: {} })
+  await wait()
+  const cleaned = await terminalStore.get('terminal')
+  assert.equal(cleaned.authorContextStatus, undefined)
+  assert.equal(cleaned.authorAbout, undefined)
+  terminalService.stop()
 }
 
 run().then(() => console.log('comment monitor service tests passed'))
