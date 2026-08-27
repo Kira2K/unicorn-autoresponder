@@ -12,9 +12,14 @@ function makeRepository() {
     id: 102,
     clientName: 'Тест',
     education: 'University',
+    educationEntries: [
+      { uni: 'University', faculty: '', grade: '', yearOfEnd: '' }
+    ],
     englishLevelId: undefined as number | undefined,
     englishLevel: '',
     realAge: 24,
+    realLocation: 'Tbilisi, Georgia',
+    desiredLocation: 'Remote RU proxy',
     googleFolder: '',
     telegramPersonalChatId: '@Kira_arbeitet',
     commonChatId: '-5216637594',
@@ -32,6 +37,14 @@ function makeRepository() {
     englishLevel: client.englishLevel,
     englishLevelId: client.englishLevelId,
     realAge: client.realAge,
+    realLocation: client.realLocation,
+    desiredLocation: client.desiredLocation,
+    clientGithubUrl: 'https://github.com/visible-test',
+    clientGithubAccountExists: true,
+    clientLinkedInUrl: 'https://linkedin.com/in/visible-test',
+    clientLinkedInAccountExists: true,
+    clientTelegramRu: '@visible_ru',
+    clientTelegramEn: '@visible_en',
     status: "collection student's data",
     studentDataFolderUrl: '',
     cvDraftUrl: '',
@@ -39,6 +52,8 @@ function makeRepository() {
     ruVersionUrl: '',
     additionalVersions: '',
     kirasComments: '',
+    lastRejectionComment: '',
+    rejectionHistory: '',
     lastResponsible: 'student',
     lastWorkflowError: '',
     workflowTrace: ''
@@ -49,6 +64,8 @@ function makeRepository() {
     workflow.englishLevel = client.englishLevel
     workflow.englishLevelId = client.englishLevelId
     workflow.realAge = client.realAge
+    workflow.realLocation = client.realLocation
+    workflow.desiredLocation = client.desiredLocation
     workflow.clientTelegramUsername = client.telegramPersonalChatId
     workflow.clientGoogleFolder = client.googleFolder
     workflow.commonChatId = client.commonChatId
@@ -68,6 +85,12 @@ function makeRepository() {
     async updateClientProfile(clientId: number, patch: any) {
       assert.equal(clientId, 102)
       if (patch.education !== undefined) client.education = normalizeText(patch.education)
+      if (Array.isArray(patch.educationEntries) && patch.educationEntries.length) {
+        client.educationEntries = patch.educationEntries
+        client.education = normalizeText(patch.educationEntries[0]?.uni) || client.education
+      }
+      if (patch.realLocation !== undefined) client.realLocation = normalizeText(patch.realLocation)
+      if (patch.desiredLocation !== undefined) client.desiredLocation = normalizeText(patch.desiredLocation)
       if (patch.englishLevelId !== undefined) {
         client.englishLevelId = Number(patch.englishLevelId)
         client.englishLevel = 'B1'

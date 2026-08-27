@@ -67,8 +67,8 @@ const DEFAULT_VISIBLE_RESUME_E2E_CONFIG: VisibleResumeE2eConfig = {
   kiraUsername: 'Kira_arbeitet',
   providerUserId: '8222949251',
   providerUsername: 'veu_support',
-  rusTranslatorUserId: '490903294',
-  rusTranslatorUsername: 'polinats'
+  rusTranslatorUserId: '8222949251',
+  rusTranslatorUsername: 'veu_support'
 }
 
 function normalizeText(value: unknown): string {
@@ -83,8 +83,7 @@ function ensureRuntimeEnv(config: VisibleResumeE2eConfig): string {
   process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = config.providerAccountRef
   process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID =
     process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID || config.providerUserId
-  process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS =
-    process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS || config.rusTranslatorUserId
+  process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = config.rusTranslatorUserId
   process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS =
     process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS || config.kiraUserId
   process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID =
@@ -106,6 +105,66 @@ function addStudentUserIdMapping(clientId: number, userId: string): void {
   if (!existing.includes(nextPair)) {
     process.env.RESUME_WORKFLOW_STUDENT_USER_IDS_BY_CLIENT = [...existing, nextPair].join(',')
   }
+}
+
+function platformKey(account: any): string {
+  const relation = account?.rel_platformAccounts_platform
+  return normalizeText(account?.platform || account?.label || account?.name || account?.accountLabel || relation?.label || relation?.name)
+    .replace(/\s+/g, '_')
+    .toLowerCase()
+}
+
+function accountContact(account: any): string {
+  return normalizeText(
+    account?.login ||
+    account?.nickname ||
+    account?.phone ||
+    account?.foreignNumber ||
+    account?.email
+  )
+}
+
+async function platformIdByLabel(repository: any, label: string): Promise<number | undefined> {
+  if (typeof repository.listPlatforms !== 'function') return undefined
+  const platforms = await repository.listPlatforms()
+  const match = (platforms || []).find((platform: any) => platformKey(platform) === platformKey({ platform: label }))
+  const id = Number(match?.id)
+  return Number.isFinite(id) && id > 0 ? id : undefined
+}
+
+async function ensureVisibleTestPlatformAccount(input: {
+  repository: any
+  config: VisibleResumeE2eConfig
+  platform: string
+  accountLabel: string
+  login: string
+  platformId?: number
+}): Promise<string> {
+  if (typeof input.repository.getClientDashboard !== 'function' || typeof input.repository.createPlatformAccount !== 'function') {
+    return `${input.platform} account setup skipped: repository does not expose dashboard/account writes.`
+  }
+  const dashboard = await input.repository.getClientDashboard(input.config.testClientId, { fullAccess: true })
+  const accounts = dashboard?.platformAccounts || []
+  const existing = accounts.find((account: any) => {
+    const key = platformKey(account)
+    if (input.platform === 'linkedin') {
+      return Number(account?.platformId) === 16 || key === 'linkedin'
+    }
+    return key === input.platform
+  })
+  const value = input.platform === 'linkedin'
+    ? normalizeText(existing?.linkedInUrl)
+    : accountContact(existing)
+  if (value) return `${input.platform} account already set.`
+
+  await input.repository.createPlatformAccount(input.config.testClientId, {
+    platformId: input.platformId,
+    platform: input.platform,
+    accountLabel: input.accountLabel,
+    login: input.login,
+    linkedInUrl: input.platform === 'linkedin' ? input.login : undefined
+  })
+  return `${input.platform} account was missing and was set to a test value.`
 }
 
 function createNoopSupportBotApiClient(): any {
@@ -295,6 +354,17 @@ async function ensureTestClientData(repository: any, config: VisibleResumeE2eCon
     setup.push('Education already set.')
   }
 
+  if (!normalizeText(client.realLocation) || !normalizeText(client.desiredLocation)) {
+    await repository.updateClientProfile(config.testClientId, {
+      realLocation: normalizeText(client.realLocation) || 'Visible resume e2e real location',
+      desiredLocation: normalizeText(client.desiredLocation) || 'Visible resume e2e desired location'
+    })
+    setup.push('Location fields were missing and were set to test values.')
+    client = await repository.getClientById(config.testClientId)
+  } else {
+    setup.push('Location fields already set.')
+  }
+
   if (!client.englishLevelId) {
     const levels = await repository.listEnglishLevels()
     const b1 = levels.find((level: any) => normalizeText(level.label).toLowerCase() === 'b1') || levels[0]
@@ -306,6 +376,35 @@ async function ensureTestClientData(repository: any, config: VisibleResumeE2eCon
   }
 
   setup.push(normalizeText(client.googleFolder) ? 'Root Google folder already set.' : 'Root Google folder is not set; the workflow will wait for Noco data.')
+  setup.push(await ensureVisibleTestPlatformAccount({
+    repository,
+    config,
+    platform: 'github',
+    accountLabel: 'Visible resume e2e GitHub',
+    login: 'https://github.com/visible-resume-e2e'
+  }))
+  setup.push(await ensureVisibleTestPlatformAccount({
+    repository,
+    config,
+    platform: 'linkedin',
+    platformId: await platformIdByLabel(repository, 'linkedin'),
+    accountLabel: 'Visible resume e2e LinkedIn',
+    login: 'https://linkedin.com/in/visible-resume-e2e'
+  }))
+  setup.push(await ensureVisibleTestPlatformAccount({
+    repository,
+    config,
+    platform: 'telegram_ru',
+    accountLabel: 'Visible resume e2e Telegram RU',
+    login: '@visible_resume_ru'
+  }))
+  setup.push(await ensureVisibleTestPlatformAccount({
+    repository,
+    config,
+    platform: 'telegram_en',
+    accountLabel: 'Visible resume e2e Telegram EN',
+    login: '@visible_resume_en'
+  }))
 
   return setup
 }
@@ -321,6 +420,8 @@ async function resetWorkflow(repository: any, config: VisibleResumeE2eConfig): P
     ruVersionUrl: '',
     additionalVersions: '',
     kirasComments: '',
+    lastRejectionComment: '',
+    rejectionHistory: '',
     lastResponsible: 'student',
     lastWorkflowError: '',
     workflowTrace: `visible resume e2e reset ${new Date().toISOString()}`

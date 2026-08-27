@@ -2,13 +2,25 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
 
+function emptyEducationEntry() {
+  return {
+    uni: '',
+    faculty: '',
+    grade: '',
+    yearOfEnd: ''
+  }
+}
+
 const emptyProfileForm = {
   firstName: '',
   lastName: '',
   fio: '',
   birthDate: '',
   education: '',
+  educationEntries: [emptyEducationEntry()],
   realAge: '',
+  realLocation: '',
+  desiredLocation: '',
   stopListCompany: '',
   englishLevelId: '',
   telegramPersonalChatId: '',
@@ -130,6 +142,18 @@ const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
 const isClient = computed(() => session.value?.role === 'client')
 const accountRows = computed(() => dashboard.value?.platformAccounts || [])
+function platformKey(account) {
+  return String(account?.platform || account?.accountLabel || '').trim().replace(/\s+/g, '_').toLowerCase()
+}
+
+function accountContact(account) {
+  return account?.login || account?.nickname || account?.phone || account?.foreignNumber || account?.email || ''
+}
+
+const githubUrl = computed(() => accountContact(accountRows.value.find(account => platformKey(account) === 'github')))
+const linkedInProfileUrl = computed(() => accountRows.value.find(account => platformKey(account) === 'linkedin')?.linkedInUrl || '')
+const telegramRuContact = computed(() => accountContact(accountRows.value.find(account => platformKey(account) === 'telegram_ru')))
+const telegramEnContact = computed(() => accountContact(accountRows.value.find(account => platformKey(account) === 'telegram_en')))
 const telegramAccounts = computed(() => accountRows.value.filter(account => account.isTelegramAccount === true))
 const selectedTelegramAccount = computed(() =>
   telegramAccounts.value.find(account => Number(account.id) === Number(selectedTelegramAccountId.value)) ||
@@ -1019,18 +1043,51 @@ function blockRequiredDataAction(field, clientId) {
 
 function resetProfileForm() {
   const client = dashboard.value?.client || {}
+  const entries = Array.isArray(client.educationEntries) && client.educationEntries.length
+    ? client.educationEntries.map(entry => ({
+        uni: entry.uni || '',
+        faculty: entry.faculty || '',
+        grade: entry.grade || '',
+        yearOfEnd: entry.yearOfEnd || ''
+      }))
+    : client.education
+      ? [{ ...emptyEducationEntry(), uni: client.education }]
+      : [emptyEducationEntry()]
   profileForm.value = {
     firstName: client.firstName || '',
     lastName: client.lastName || '',
     fio: client.fio || '',
     birthDate: client.birthDate || '',
     education: client.education || '',
+    educationEntries: entries,
     realAge: client.realAge === undefined ? '' : String(client.realAge),
+    realLocation: client.realLocation || '',
+    desiredLocation: client.desiredLocation || '',
     stopListCompany: client.stopListCompany || '',
     englishLevelId: client.englishLevelId ? String(client.englishLevelId) : '',
     telegramPersonalChatId: client.telegramPersonalChatId || '',
     calendarEmail: client.calendarEmail || ''
   }
+}
+
+function addEducationEntry() {
+  profileForm.value.educationEntries = [
+    ...(profileForm.value.educationEntries || []),
+    emptyEducationEntry()
+  ]
+}
+
+function removeEducationEntry(index) {
+  const entries = [...(profileForm.value.educationEntries || [])]
+  entries.splice(index, 1)
+  profileForm.value.educationEntries = entries.length ? entries : [emptyEducationEntry()]
+}
+
+function formatEducationEntries(entries, fallback = '') {
+  const rows = Array.isArray(entries)
+    ? entries.map(entry => [entry.uni, entry.faculty, entry.grade, entry.yearOfEnd].filter(Boolean).join(', ')).filter(Boolean)
+    : []
+  return rows.length ? rows.join('; ') : (fallback || 'empty')
 }
 
 function resetAccountForm() {
@@ -1600,8 +1657,17 @@ async function saveProfile() {
   profileMessage.value = ''
   error.value = ''
   try {
+    const educationEntries = (profileForm.value.educationEntries || [])
+      .map(entry => ({
+        uni: String(entry.uni || '').trim(),
+        faculty: String(entry.faculty || '').trim(),
+        grade: String(entry.grade || '').trim(),
+        yearOfEnd: String(entry.yearOfEnd || '').trim()
+      }))
+      .filter(entry => entry.uni || entry.faculty || entry.grade || entry.yearOfEnd)
     dashboard.value = await api.updateClientProfile({
       ...profileForm.value,
+      educationEntries,
       englishLevelId: profileForm.value.englishLevelId ? Number(profileForm.value.englishLevelId) : null
     })
     resetProfileForm()
@@ -2007,7 +2073,15 @@ onUnmounted(() => {
             <dl class="info-list">
               <div><dt>Market</dt><dd>{{ selectedProviderClient.market || 'empty' }}</dd></div>
               <div><dt>Primary stack</dt><dd>{{ selectedProviderClient.primaryStack || 'empty' }}</dd></div>
+              <div><dt>Education</dt><dd>{{ formatEducationEntries(selectedProviderClient.educationEntries, selectedProviderClient.education) }}</dd></div>
+              <div><dt>Real age</dt><dd>{{ selectedProviderClient.realAge ?? 'empty' }}</dd></div>
+              <div><dt>Real location</dt><dd>{{ selectedProviderClient.realLocation || 'empty' }}</dd></div>
+              <div><dt>Desired location</dt><dd>{{ selectedProviderClient.desiredLocation || 'empty' }}</dd></div>
+              <div><dt>GitHub</dt><dd><a v-if="selectedProviderClient.githubUrl" :href="selectedProviderClient.githubUrl" target="_blank" rel="noopener noreferrer">{{ selectedProviderClient.githubUrl }}</a><span v-else>empty</span></dd></div>
+              <div><dt>LinkedIn</dt><dd><a v-if="selectedProviderClient.linkedInUrl" :href="selectedProviderClient.linkedInUrl" target="_blank" rel="noopener noreferrer">{{ selectedProviderClient.linkedInUrl }}</a><span v-else>empty</span></dd></div>
               <div><dt>LinkedIn email</dt><dd>{{ selectedProviderClient.linkedInEmail || 'empty' }}</dd></div>
+              <div><dt>Telegram RU</dt><dd>{{ selectedProviderClient.telegramRu || 'empty' }}</dd></div>
+              <div><dt>Telegram EN</dt><dd>{{ selectedProviderClient.telegramEn || 'empty' }}</dd></div>
             </dl>
           </section>
           <section class="provider-detail-section">
@@ -2352,14 +2426,28 @@ onUnmounted(() => {
                         </option>
                       </select>
                     </label>
-                    <label class="field wide-field">
+                    <div class="field wide-field education-editor">
                       <span>Education</span>
-                      <InputText v-model="profileForm.education" data-testid="profile-education" />
-                      <small>Write "no" if you have no education.</small>
-                    </label>
+                      <div v-for="(entry, index) in profileForm.educationEntries" :key="index" class="education-row">
+                        <InputText v-model="entry.uni" :data-testid="`profile-education-uni-${index}`" placeholder="University" />
+                        <InputText v-model="entry.faculty" :data-testid="`profile-education-faculty-${index}`" placeholder="Faculty" />
+                        <InputText v-model="entry.grade" :data-testid="`profile-education-grade-${index}`" placeholder="Grade" />
+                        <InputText v-model="entry.yearOfEnd" :data-testid="`profile-education-year-${index}`" placeholder="Year of end" />
+                        <Button type="button" icon="pi pi-trash" aria-label="Remove education" severity="secondary" :disabled="profileForm.educationEntries.length <= 1" @click="removeEducationEntry(index)" />
+                      </div>
+                      <Button type="button" label="Add education" icon="pi pi-plus" severity="secondary" data-testid="add-education-button" @click="addEducationEntry" />
+                    </div>
                     <label class="field">
                       <span>Real age</span>
                       <InputText v-model="profileForm.realAge" type="number" min="0" step="1" data-testid="profile-real-age" />
+                    </label>
+                    <label class="field">
+                      <span>Real location</span>
+                      <InputText v-model="profileForm.realLocation" data-testid="profile-real-location" />
+                    </label>
+                    <label class="field">
+                      <span>Desired location</span>
+                      <InputText v-model="profileForm.desiredLocation" data-testid="profile-desired-location" />
                     </label>
                     <label class="field wide-field">
                       <span>Company stop list</span>
@@ -2390,11 +2478,35 @@ onUnmounted(() => {
                     </div>
                     <div>
                       <dt>Education</dt>
-                      <dd>{{ dashboard.client.education || 'empty' }}</dd>
+                      <dd>{{ formatEducationEntries(dashboard.client.educationEntries, dashboard.client.education) }}</dd>
                     </div>
                     <div>
                       <dt>Real age</dt>
                       <dd>{{ dashboard.client.realAge ?? 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Real location</dt>
+                      <dd>{{ dashboard.client.realLocation || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Desired location</dt>
+                      <dd>{{ dashboard.client.desiredLocation || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>GitHub</dt>
+                      <dd>{{ githubUrl || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>LinkedIn</dt>
+                      <dd>{{ linkedInProfileUrl || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Telegram RU</dt>
+                      <dd>{{ telegramRuContact || 'empty' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Telegram EN</dt>
+                      <dd>{{ telegramEnContact || 'empty' }}</dd>
                     </div>
                     <div>
                       <dt>Company stop list</dt>
@@ -2452,11 +2564,35 @@ onUnmounted(() => {
               </div>
               <div>
                 <dt>Education</dt>
-                <dd>{{ dashboard.client.education || 'empty' }}</dd>
+                <dd>{{ formatEducationEntries(dashboard.client.educationEntries, dashboard.client.education) }}</dd>
               </div>
               <div>
                 <dt>Real age</dt>
                 <dd>{{ dashboard.client.realAge ?? 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Real location</dt>
+                <dd>{{ dashboard.client.realLocation || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Desired location</dt>
+                <dd>{{ dashboard.client.desiredLocation || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>GitHub</dt>
+                <dd>{{ githubUrl || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>LinkedIn</dt>
+                <dd>{{ linkedInProfileUrl || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Telegram RU</dt>
+                <dd>{{ telegramRuContact || 'empty' }}</dd>
+              </div>
+              <div>
+                <dt>Telegram EN</dt>
+                <dd>{{ telegramEnContact || 'empty' }}</dd>
               </div>
               <div>
                 <dt>Company stop list</dt>

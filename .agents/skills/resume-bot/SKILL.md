@@ -18,11 +18,16 @@ description: Work with the student resume Telegram workflow in hh-autoparcer. Us
 - `src/integrations/telegram/resume-workflow.ts` — модель статусов, переходы, проверки ролей, обязательные данные и уведомления.
 - `src/integrations/telegram/support-bot.ts` — Telegram-команды, callback-кнопки и вызовы защищённого API.
 - `src/features/web-console/backend/app.ts` — HTTP endpoint'ы resume workflow и отправка уведомлений.
+- `src/features/web-console/backend/types.ts` — типы клиента, platform accounts, provider-visible данных и `CV processing`.
 - `src/features/web-console/backend/repository.ts` — чтение и запись `CV processing` в NocoDB.
+- `src/features/web-console/frontend/src/App.vue` — ЛК клиента: профиль, platform accounts, provider drawer.
+- `src/features/web-console/frontend/src/styles.css` — стили профильной формы, repeatable education и provider drawer.
+- `src/integrations/noco/resume-workflow-schema/` — проверка/создание NocoDB-полей resume workflow и platform option `github`.
 - `src/integrations/telegram/support-bot.test.ts` — тесты команд и поведения support-бота.
 - `src/integrations/telegram/resume-visible-e2e.test.ts` — изолированные E2E-тесты resume workflow.
 - `src/integrations/telegram/resume-visible-e2e.ts` — живой видимый Telegram E2E-сценарий.
 - `src/features/web-console/backend/app.test.ts` — тесты защищённого API и переходов.
+- `src/features/web-console/e2e/web-console.e2e.ts` — браузерный e2e ЛК клиента и provider-visible деталей.
 - `.env.example` — переменные `RESUME_WORKFLOW_*` и связанные настройки.
 - `package.json` — команды запуска и тестирования.
 
@@ -32,6 +37,7 @@ description: Work with the student resume Telegram workflow in hh-autoparcer. Us
 - Для вопроса о Telegram-команде прочитать `support-bot.ts` и соответствующий тест.
 - Для вопроса об API прочитать `app.ts`, `app.test.ts` и типы backend.
 - Для вопроса о данных или статусе в NocoDB прочитать `repository.ts` и схему `CV processing`.
+- Для изменения клиентских обязательных данных прочитать `types.ts`, `repository.ts`, `App.vue`, web e2e и schema helper.
 - Для изменения поведения прочитать весь путь от команды до NocoDB и затронутые тесты.
 
 ## Инварианты
