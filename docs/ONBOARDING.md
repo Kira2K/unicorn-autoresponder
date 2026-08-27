@@ -99,7 +99,7 @@ HH and LinkedIn. The backend API lives in
 
 Telegram work has two surfaces. The Bot API worker handles student/support
 commands such as `/student`, `/change_google_folder`, `/resume`,
-`/resume_status`, and `/open_my_tasks`. TDLib-backed web-console tools handle
+`/resume_status`, `/resume_reject`, and `/open_my_tasks`. TDLib-backed web-console tools handle
 real account sessions, dialogs, messages, contact rename, reauth, disconnect,
 and admin dialog scans.
 
@@ -108,7 +108,8 @@ Kira comments, draft creation and approvals, English version creation and
 approvals, Russian version creation and approvals, then filling readiness. The
 main provider lane owns draft and English work. The Russian translator lane,
 configured by `RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS`, owns
-`Russian version in process`.
+`Russian version in process` for non-RU clients. RU-only clients skip English
+and assign the Russian version to the main creator/provider.
 
 Read [Telegram Bot, NocoDB, and Admin Console](./telegram-bot-nocodb-admin-console.md),
 [Resume Workflow](./resume-workflow.md), and

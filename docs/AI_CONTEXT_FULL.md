@@ -191,10 +191,12 @@ Support bot commands:
 Resume API endpoints:
 - `POST /api/bot/telegram/chats/:chatId/resume`
 - `GET /api/bot/telegram/chats/:chatId/resume/status`
+- `POST /api/bot/telegram/chats/:chatId/resume/reject`
 - `POST /api/bot/telegram/chats/:chatId/resume/reset-test`
 - `GET /api/bot/telegram/resume/provider/tasks`
 - `GET /api/bot/telegram/resume/workflows/:workflowId`
 - `POST /api/bot/telegram/resume/workflows/:workflowId/advance`
+- `POST /api/bot/telegram/resume/workflows/:workflowId/reject`
 - `POST /api/bot/telegram/resume/task-input`
 - `POST /api/bot/telegram/resume/kira-comments`
 
@@ -218,10 +220,11 @@ Current worktree fact: provider work is split into lanes. Main provider users
 from `RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS` handle draft and English
 version statuses. Russian translator users from
 `RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS` handle
-`Russian version in process`. Russian-version notifications mention Polina and
-go to Russian translator chat IDs; draft/English provider notifications mention
-Yulia and use provider chat IDs. Provider task lists are filtered by both client
-assignment and lane.
+`Russian version in process` for non-RU clients. RU-only clients skip English
+after draft approval and assign `Russian version in process` to the main
+provider/creator. In test/dev, `@veu_support` may be configured in both
+provider and translator env lists and can access both lanes. Provider task lists
+are filtered by both client assignment and lane.
 
 Canonical docs:
 - [Telegram Bot, NocoDB, and Admin Console](./telegram-bot-nocodb-admin-console.md)

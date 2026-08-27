@@ -77,14 +77,19 @@ function createFixtureNocoClient() {
       fio: 'Client One Legal',
       birth_date: '2000-01-01',
       education: 'Old school',
+      education_entries: JSON.stringify([
+        { uni: 'Old school', faculty: 'Math', grade: 'Bachelor', yearOfEnd: '2021' }
+      ]),
       real_age: 24,
+      real_location: 'Tbilisi, Georgia',
+      desired_location: 'Remote RU proxy',
       stop_list_company: 'BadCorp,EvilInc',
       google_folder: 'https://drive.google.com/drive/folders/client-one',
       calendar_email: 'client@example.com',
       telegram_personal_chat_id: '@client_one',
       telegram_general_chat_id: '1001',
       rel_clients_primary_stack: { Id: 9, name: 'FRONTEND' },
-      market: 'Ru',
+      market: 'En',
       english_levels_id: 3,
       'English level': { Id: 3, level: 'B1' },
       client_status: { Id: 1, title: 'studying' }
@@ -121,9 +126,18 @@ function createFixtureNocoClient() {
       last_name: 'Match',
       fio: 'Provider Match',
       calendar_email: 'provider-match@example.com',
+      education: 'Provider Match University',
+      education_entries: JSON.stringify([
+        { uni: 'Provider Match University', faculty: 'Backend', grade: 'Master', yearOfEnd: '2023' }
+      ]),
+      real_age: 27,
+      real_location: 'Almaty, Kazakhstan',
+      desired_location: 'Remote EU proxy',
       telegram_general_chat_id: '1004',
       rel_clients_primary_stack: { Id: 11, name: 'DATA' },
       market: 'En',
+      english_levels_id: 3,
+      'English level': { Id: 3, level: 'B1' },
       stop_list_company: 'StopCorp, \"Quoted LLC\"; Another Inc',
       client_status: { id: 'status-en', name: 'on en market' }
     },
@@ -219,8 +233,17 @@ function createFixtureNocoClient() {
       Id: 12,
       account_label: 'Client One LinkedIn',
       login: 'client-one.linkedin@example.com',
+      linkedin_url: 'https://linkedin.com/in/client-one',
       rel_platformAccounts_client: { Id: 1 },
       rel_platformAccounts_platform: { Id: 16, name: 'linkedin', label: 'linkedin' }
+    },
+    {
+      Id: 24,
+      platform: 'github',
+      account_label: 'Client One GitHub',
+      login: 'https://github.com/client-one',
+      rel_platformAccounts_client: { Id: 1 },
+      rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
     },
     {
       Id: 17,
@@ -276,8 +299,33 @@ function createFixtureNocoClient() {
       Id: 15,
       account_label: 'Provider Match LinkedIn',
       login: 'provider-match.linkedin@example.com',
+      linkedin_url: 'https://linkedin.com/in/provider-match',
       clients_id: 3,
       rel_platformAccounts_platform: { Id: 16 }
+    },
+    {
+      Id: 25,
+      platform: 'github',
+      account_label: 'Provider Match GitHub',
+      login: 'https://github.com/provider-match-client',
+      clients_id: 3,
+      rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
+    },
+    {
+      Id: 26,
+      platform: 'telegram_ru',
+      account_label: 'Provider Match Telegram RU',
+      login: '@provider_match_ru',
+      clients_id: 3,
+      rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
+    },
+    {
+      Id: 27,
+      platform: 'telegram_en',
+      account_label: 'Provider Match Telegram EN',
+      nickname: '@provider_match_en',
+      clients_id: 3,
+      rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
     },
     {
       Id: 20,
@@ -323,7 +371,8 @@ function createFixtureNocoClient() {
     { Id: 2, label: 'telegram_ru' },
     { Id: 4, label: 'telegram_en' },
     { Id: 7, label: 'phone_en', name: 'phone' },
-    { Id: 16, label: 'linkedin', name: 'linkedin' }
+    { Id: 16, label: 'linkedin', name: 'linkedin' },
+    { Id: 17, label: 'github', name: 'github' }
   ]
   const englishLevels: Array<Record<string, any> & { Id: number }> = [
     { Id: 3, level: 'B1', rank: 3 },
@@ -392,6 +441,8 @@ function createFixtureNocoClient() {
       ru_version_url: '',
       additional_versions: '',
       kiras_comments: '',
+      last_rejection_comment: '',
+      rejection_history: '',
       last_responsible: 'student',
       last_workflow_error: '',
       workflow_trace: ''
@@ -619,6 +670,24 @@ async function runTests(): Promise<void> {
     telegram_personal_chat_id: '@new',
     calendar_email: 'new@example.com'
   })
+  assert.deepEqual(buildClientPatch({
+    educationEntries: [
+      { uni: 'Uni A', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' },
+      { uni: 'Uni B', faculty: '', grade: 'Master', yearOfEnd: '2022' }
+    ],
+    realLocation: 'Tbilisi',
+    desiredLocation: 'Remote',
+    realAge: 27
+  }), {
+    education_entries: JSON.stringify([
+      { uni: 'Uni A', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' },
+      { uni: 'Uni B', faculty: '', grade: 'Master', yearOfEnd: '2022' }
+    ]),
+    education: 'Uni A, CS, Bachelor, 2020; Uni B, Master, 2022',
+    real_location: 'Tbilisi',
+    desired_location: 'Remote',
+    real_age: 27
+  })
   assert.deepEqual(buildAccountPatch({
     platformId: 16,
     platform: 'linkedin',
@@ -668,6 +737,8 @@ async function runTests(): Promise<void> {
     enVersionUrl: 'https://docs.google.com/document/d/en',
     ruVersionUrl: 'https://docs.google.com/document/d/ru',
     kirasComments: 'ok',
+    lastRejectionComment: 'оставил комменты в резюме',
+    rejectionHistory: 'history',
     lastResponsible: 'done',
     lastWorkflowError: '',
     workflowTrace: 'trace',
@@ -679,6 +750,8 @@ async function runTests(): Promise<void> {
     en_version_url: 'https://docs.google.com/document/d/en',
     ru_version_url: 'https://docs.google.com/document/d/ru',
     kiras_comments: 'ok',
+    last_rejection_comment: 'оставил комменты в резюме',
+    rejection_history: 'history',
     last_responsible: 'done',
     last_workflow_error: '',
     workflow_trace: 'trace'
@@ -819,6 +892,7 @@ async function runTests(): Promise<void> {
   }
   const app = createWebConsoleApp({
     repository,
+    useMockData: false,
     telegramGatewayEnv: { WEB_CONSOLE_TELEGRAM_MODE: 'local' },
     dolphinProvisioningApi: fakeDolphinProvisioningApi,
     dolphinTemplateProfileId: 123456789,
@@ -878,6 +952,8 @@ async function runTests(): Promise<void> {
       }
     },
     telegramAdapter: createFakeTdlibAdapter(),
+    summaryLogsChannelId: '',
+    sendSummaryTelegramMessage: async () => ({ ok: true }),
     cvTailoringFetch: async (url: string, init: any) => {
       const formData = init.body
       const cv = formData.get('cv')
@@ -988,12 +1064,19 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.client.clientName, 'Client One')
     assert.equal(result.body.client.firstName, 'Client')
-    assert.equal(result.body.client.education, 'Old school')
+    assert.equal(result.body.client.education, 'Old school, Math, Bachelor, 2021')
+    assert.deepEqual(result.body.client.educationEntries, [
+      { uni: 'Old school', faculty: 'Math', grade: 'Bachelor', yearOfEnd: '2021' }
+    ])
     assert.equal(result.body.client.realAge, 24)
+    assert.equal(result.body.client.realLocation, 'Tbilisi, Georgia')
+    assert.equal(result.body.client.desiredLocation, 'Remote RU proxy')
     assert.equal(result.body.client.stopListCompany, 'BadCorp,EvilInc')
     assert.equal(result.body.client.googleFolder, 'https://drive.google.com/drive/folders/client-one')
     assert.equal(result.body.client.englishLevel, 'B1')
     assert.equal(result.body.linkedInEmail, 'client-one.linkedin@example.com')
+    assert.equal(result.body.platformAccounts.find((account: any) => account.platform === 'linkedin')?.linkedInUrl, 'https://linkedin.com/in/client-one')
+    assert.equal(result.body.platformAccounts.find((account: any) => account.platform === 'github')?.login, 'https://github.com/client-one')
     assert.equal(result.body.platformAccounts[0].password, '***')
 
     result = await request(server.baseUrl, '/api/bot/status', {
@@ -1299,6 +1382,10 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.workflow.status, 'Draft in approve by student')
       assert.equal(result.body.notifications.at(-1).kind, 'common_chat')
       assert.match(telegramBotMessages.at(-1).text, /@client_one/)
+      assert.deepEqual(
+        telegramBotMessages.at(-1).replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
+        ['Согласовать', 'Вернуть с комментарием']
+      )
 
       result = await resumeByChat(studentHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
@@ -1350,8 +1437,34 @@ async function runTests(): Promise<void> {
       assert(linkedInReadyMessage)
       assert.equal(linkedInReadyMessage.chatId, '-1003187558078')
       assert.equal(linkedInReadyMessage.messageThreadId, 777)
-      assert.match(linkedInReadyMessage.text, /^@CheMpoKaRokee, резюме Client One, FRONTEND, Ru, готово к заполнению на LinkedIn\./)
+      assert.match(linkedInReadyMessage.text, /^@CheMpoKaRokee, резюме Client One, FRONTEND, En, готово к заполнению на LinkedIn\./)
       assert.match(linkedInReadyMessage.text, /Ссылка на резюме: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
+
+      await noco.patchRecord('mhiysd8l0f33bny', 98, {
+        status: 'Draft in approve by student',
+        cv_draft_url: 'https://docs.google.com/document/d/reject-draft',
+        last_rejection_comment: '',
+        rejection_history: '',
+        last_responsible: 'student'
+      })
+      result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reject', {
+        method: 'POST',
+        headers: studentHeaders,
+        body: JSON.stringify({ comment: 'short' })
+      })
+      assert.equal(result.response.status, 400, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'resume_reject_comment_too_short')
+
+      result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reject', {
+        method: 'POST',
+        headers: studentHeaders,
+        body: JSON.stringify({ comment: 'оставил комменты в резюме' })
+      })
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+      assert.equal(result.body.workflow.status, 'Draft in process')
+      assert.equal(result.body.workflow.cvDraftUrl, '')
+      assert.equal(result.body.workflow.lastRejectionComment, 'оставил комменты в резюме')
+      assert.match(result.body.workflow.rejectionHistory, /Draft in approve by student -> Draft in process/)
 
       result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reset-test', {
         method: 'POST',
@@ -1363,6 +1476,8 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.workflow.cvDraftUrl, '')
       assert.equal(result.body.workflow.enVersionUrl, '')
       assert.equal(result.body.workflow.ruVersionUrl, '')
+      assert.equal(result.body.workflow.lastRejectionComment, '')
+      assert.equal(result.body.workflow.rejectionHistory, '')
     } finally {
       if (previousResumeTestMode === undefined) {
         delete process.env.RESUME_WORKFLOW_TEST_MODE
@@ -1429,8 +1544,13 @@ async function runTests(): Promise<void> {
         lastName: 'Client',
         fio: 'Updated Client Legal',
         birthDate: '2001-02-03',
-        education: 'Updated university',
+        educationEntries: [
+          { uni: 'Updated university', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' },
+          { uni: 'Updated academy', faculty: 'AI', grade: 'Master', yearOfEnd: '2022' }
+        ],
         realAge: 25,
+        realLocation: 'Batumi, Georgia',
+        desiredLocation: 'Remote EN proxy',
         stopListCompany: 'Meta,Google',
         englishLevelId: 4,
         telegramPersonalChatId: '@updated_client',
@@ -1443,8 +1563,14 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.client.lastName, 'Client')
     assert.equal(result.body.client.fio, 'Updated Client Legal')
     assert.equal(result.body.client.birthDate, '2001-02-03')
-    assert.equal(result.body.client.education, 'Updated university')
+    assert.equal(result.body.client.education, 'Updated university, CS, Bachelor, 2020; Updated academy, AI, Master, 2022')
+    assert.deepEqual(result.body.client.educationEntries, [
+      { uni: 'Updated university', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' },
+      { uni: 'Updated academy', faculty: 'AI', grade: 'Master', yearOfEnd: '2022' }
+    ])
     assert.equal(result.body.client.realAge, 25)
+    assert.equal(result.body.client.realLocation, 'Batumi, Georgia')
+    assert.equal(result.body.client.desiredLocation, 'Remote EN proxy')
     assert.equal(result.body.client.stopListCompany, 'Meta,Google')
     assert.equal(result.body.client.englishLevelId, 4)
     assert.equal(result.body.client.englishLevel, 'B2')
@@ -1516,7 +1642,7 @@ async function runTests(): Promise<void> {
     result = await request(server.baseUrl, '/api/dolphin/profiles/status', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200)
     assert.equal(result.body.action, 'open_existing')
-    assert.deepEqual(result.body.requiredLocales, ['ru'])
+    assert.deepEqual(result.body.requiredLocales, ['ru', 'en'])
     assert.deepEqual(result.body.missingLocales, [])
     assert.deepEqual(result.body.existingProfiles.map((profile: any) => profile.id), [111111111, 111111112])
 
@@ -1926,7 +2052,38 @@ async function runTests(): Promise<void> {
       result.body.clients.find((client: any) => client.clientName === 'Newest Client')?.linkedInEmail,
       'newest.linkedin.one@example.com, newest.linkedin.two@example.com'
     )
-    assert.deepEqual(Object.keys(result.body.clients[0]).sort(), ['clientName', 'dolphinProfileStatus', 'hhCredentials', 'id', 'linkedInEmail', 'market', 'primaryStack', 'providerResponses'])
+    assert.deepEqual(Object.keys(result.body.clients[0]).sort(), [
+      'clientName',
+      'desiredLocation',
+      'dolphinProfileStatus',
+      'education',
+      'educationEntries',
+      'englishLevel',
+      'githubUrl',
+      'hhCredentials',
+      'id',
+      'linkedInEmail',
+      'linkedInUrl',
+      'market',
+      'primaryStack',
+      'providerResponses',
+      'realAge',
+      'realLocation',
+      'telegramEn',
+      'telegramRu'
+    ])
+    assert.equal(result.body.clients[0].education, 'Provider Match University, Backend, Master, 2023')
+    assert.deepEqual(result.body.clients[0].educationEntries, [
+      { uni: 'Provider Match University', faculty: 'Backend', grade: 'Master', yearOfEnd: '2023' }
+    ])
+    assert.equal(result.body.clients[0].realAge, 27)
+    assert.equal(result.body.clients[0].realLocation, 'Almaty, Kazakhstan')
+    assert.equal(result.body.clients[0].desiredLocation, 'Remote EU proxy')
+    assert.equal(result.body.clients[0].englishLevel, 'B1')
+    assert.equal(result.body.clients[0].githubUrl, 'https://github.com/provider-match-client')
+    assert.equal(result.body.clients[0].linkedInUrl, 'https://linkedin.com/in/provider-match')
+    assert.equal(result.body.clients[0].telegramRu, '@provider_match_ru')
+    assert.equal(result.body.clients[0].telegramEn, '@provider_match_en')
     assert.deepEqual(result.body.clients[0].hhCredentials, [
       {
         market: 'Ru',
