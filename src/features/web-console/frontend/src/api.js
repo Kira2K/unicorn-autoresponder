@@ -1,3 +1,5 @@
+import { cvMime } from './profile-cv-upload'
+
 async function request(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'include',
@@ -78,6 +80,66 @@ export const api = {
   },
   startHhResponsesDryRun() {
     return request('/api/admin/hh-responses/start', { method: 'POST' })
+  },
+  adminLinkedInAccounts() {
+    return request('/api/admin/linkedin/accounts')
+  },
+  adminLinkedInHistory() {
+    return request('/api/admin/linkedin/runs')
+  },
+  updateAdminLinkedInAccount(platformAccountId, payload) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}`, {
+      method: 'PATCH', body: JSON.stringify(payload)
+    })
+  },
+  startAdminLinkedInRun(platformAccountId, action) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/runs`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    })
+  },
+  adminLinkedInRun(runId) {
+    return request(`/api/admin/linkedin/runs/${encodeURIComponent(runId)}`)
+  },
+  startAdminProfilePreview(platformAccountId, profile) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-previews`, {
+      method: 'POST', body: JSON.stringify(profile)
+    })
+  },
+  startAdminProfileGeneration(platformAccountId, file) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-generations`, {
+      method: 'POST', ...(file ? { body: file, headers: { 'Content-Type': cvMime(file) } } : {})
+    })
+  },
+  adminProfileParameters(platformAccountId, type, keywords) {
+    const query = new URLSearchParams({ type, keywords })
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-parameters?${query}`)
+  },
+  adminProfileJob(jobId) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}`)
+  },
+  adminProfileJobs() {
+    return request('/api/admin/linkedin/profile-jobs')
+  },
+  analyzeAdminProfile(profile) {
+    return request('/api/admin/linkedin/profile-analysis', {
+      method: 'POST', body: JSON.stringify(profile)
+    })
+  },
+  applyAdminProfileJob(jobId, planHash) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/apply`, {
+      method: 'POST', body: JSON.stringify({ planHash })
+    })
+  },
+  resumeAdminProfileJob(jobId) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/resume`, {
+      method: 'POST'
+    })
+  },
+  rollbackAdminProfileJob(jobId) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/rollback`, {
+      method: 'POST'
+    })
   },
   telegramStatus(params = {}) {
     const query = new URLSearchParams()

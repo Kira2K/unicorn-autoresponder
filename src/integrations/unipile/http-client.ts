@@ -1,9 +1,20 @@
 const { LinkedInAuthError, safeErrorCode } = require('../../features/linkedin-automation/account-connection/errors.ts') as {
-  LinkedInAuthError: new (code: string, message: string) => Error
+  LinkedInAuthError: new (code: string, message: string,
+    details?: Record<string, string | number>) => Error
   safeErrorCode(value: unknown, fallback?: string): string
 }
+const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as
+  typeof import('./error-diagnostics.ts')
 
 type FetchLike = (url: string, init: Record<string, unknown>) => Promise<any>
+
+function retryAfterMs(response: any) {
+  const value = String(response?.headers?.get?.('retry-after') ?? '').trim()
+  if (!value) return undefined
+  const seconds = Number(value)
+  const milliseconds = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(value) - Date.now()
+  return Number.isFinite(milliseconds) ? Math.max(0, Math.min(120_000, milliseconds)) : undefined
+}
 
 function unipileApiKey(): string {
   const key = String(process.env.UNIPILE_API_KEY ?? '').trim()
@@ -26,7 +37,7 @@ function createUnipileHttpClient(options: {
   const fetchImpl = options.fetchImpl ?? fetch
   const timeoutMs = options.timeoutMs ?? 60_000
 
-  async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  async function request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown): Promise<T> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: any
@@ -63,7 +74,9 @@ function createUnipileHttpClient(options: {
       throw new LinkedInAuthError(
         `unipile_${remoteCode}`,
         `Unipile request failed with HTTP ${response.status} (${remoteCode}).` +
-        (requestId ? ` Request ID: ${requestId}.` : '')
+        (requestId ? ` Request ID: ${requestId}.` : ''),
+        { ...safeUnipileDiagnostics(response.status, data),
+          ...(retryAfterMs(response) !== undefined ? { retryAfterMs: retryAfterMs(response) } : {}) }
       )
     }
     return data as T

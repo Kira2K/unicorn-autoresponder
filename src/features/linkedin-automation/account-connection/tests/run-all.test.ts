@@ -14,7 +14,10 @@ const tests = [
   require('./account-validation.test.ts'),
   require('./auth-service-success.test.ts'),
   require('./auth-service-errors.test.ts'),
-  require('./auth-logger.test.ts')
+  require('./auth-logger.test.ts'),
+  require('./noco-account-list.test.ts'),
+  require('./noco-account-update.test.ts'),
+  require('./error-display.test.ts')
 ] as Array<{ run(): Promise<void> }>
 
 async function run(): Promise<void> {

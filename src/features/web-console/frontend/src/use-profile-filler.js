@@ -1,0 +1,114 @@
+import { computed, onUnmounted, ref } from 'vue'
+import { api } from './api'
+import { cvUploadError } from './profile-cv-upload'
+import { useProfileDraft } from './use-profile-draft'
+import { profileUploadEvents } from './profile-upload-events'
+import { jobElapsedSeconds, jobRetrySeconds } from './profile-job-timing'
+const TERMINAL = new Set([
+  'preview_ready', 'waiting_retry', 'pending_verification', 'succeeded', 'failed',
+  'needs_expert_review'
+])
+
+export function useProfileFiller() {
+  const visible = ref(false); const account = ref(null); const job = ref(null); const history = ref([])
+  const error = ref('')
+  const clock = ref(Date.now())
+  const draft = useProfileDraft()
+  let timer
+  let historyRequest = Promise.resolve()
+  const active = computed(() => ['generating_cv', 'generating_profile', 'validating',
+    'previewing', 'retrying', 'running'].includes(job.value?.status))
+  const elapsedSeconds = computed(() => jobElapsedSeconds(job.value, clock.value))
+  const retrySeconds = computed(() => jobRetrySeconds(job.value, clock.value))
+  const clockTimer = setInterval(() => { clock.value = Date.now() }, 1000)
+  const blockingIssues = computed(() =>
+    Boolean(job.value?.preview?.issues?.some(item => item.level === 'fatal')))
+  async function loadHistory() {
+    try {
+      const response = await api.adminProfileJobs()
+      history.value = response.jobs.filter(item =>
+        item.platformAccountId === account.value?.platformAccountId)
+    } catch (caught) { error.value = caught.message || 'Could not load Profile Filler history.' }
+  }
+  function open(selected) {
+    account.value = selected; job.value = null; history.value = []; error.value = ''
+    draft.reset(); visible.value = true; historyRequest = loadHistory()
+  }
+  async function selectFile(file) {
+    error.value = ''; job.value = null
+    try { await draft.load(file) }
+    catch (caught) { draft.reset(); error.value = caught.message || 'Could not analyze the selected file.' }
+  }
+  function close() { if (!active.value) visible.value = false }
+  async function poll(jobId) {
+    try {
+      job.value = await api.adminProfileJob(jobId)
+      error.value = ''
+      draft.syncPreview(job.value.preview)
+      if (!TERMINAL.has(job.value.status)) timer = setTimeout(() => poll(jobId), 1000)
+      else await loadHistory()
+    } catch (caught) { error.value = caught.message || 'Could not refresh Profile Filler.' }
+  }
+  async function preview() {
+    error.value = ''
+    if (!draft.document.value) { error.value = 'Choose a profile JSON file first.'; return }
+    try {
+      const analysis = await draft.analyze()
+      if (!analysis.valid) { error.value = 'Fix the blocking fields shown below.'; return }
+      await historyRequest
+      job.value = await api.startAdminProfilePreview(account.value.platformAccountId, draft.document.value)
+      void poll(job.value.jobId)
+    } catch (caught) { error.value = caught.message || 'Could not create preview.' }
+  }
+  async function generate(file) {
+    error.value = ''
+    const fileError = file && cvUploadError(file)
+    if (fileError) { error.value = fileError; return }
+    try {
+      await historyRequest
+      job.value = await api.startAdminProfileGeneration(account.value.platformAccountId, file)
+      void poll(job.value.jobId)
+    } catch (caught) { error.value = caught.message || 'Could not generate profile from CV.' }
+  }
+  const { chooseFile, chooseGenerationFile, dropFile, dropGenerationFile } =
+    profileUploadEvents(selectFile, generate)
+  async function apply() {
+    if (draft.dirty.value) { error.value = 'Rebuild Preview before Apply.'; return }
+    if (!window.confirm('Apply this exact preview to LinkedIn?')) return
+    error.value = ''
+    try {
+      job.value = await api.applyAdminProfileJob(job.value.jobId, job.value.planHash)
+      void poll(job.value.jobId)
+    } catch (caught) { error.value = caught.message || 'Could not apply Profile Filler.' }
+  }
+  async function resume() {
+    error.value = ''
+    try {
+      job.value = await api.resumeAdminProfileJob(job.value.jobId)
+      void poll(job.value.jobId)
+    } catch (caught) { error.value = caught.message || 'Could not resume generation.' }
+  }
+
+  async function resolveIssues(fixes) {
+    draft.fix(fixes)
+    await preview()
+  }
+
+  function showHistory(item) { job.value = item; error.value = ''; draft.syncPreview(item.preview) }
+  async function rollback() {
+    if (!window.confirm('Restore the values saved before this change?')) return
+    error.value = ''
+    try {
+      job.value = await api.rollbackAdminProfileJob(job.value.jobId); void poll(job.value.jobId)
+    } catch (caught) { error.value = caught.message || 'Could not roll back Profile Filler.' }
+  }
+
+  onUnmounted(() => { clearTimeout(timer); clearInterval(clockTimer) })
+  return { account, active, apply, blockingIssues, chooseFile, chooseGenerationFile, close,
+    draft: draft.document, dirty: draft.dirty,
+    dropFile, dropGenerationFile, error, generate, history, issues: draft.issues,
+    job, open, preview, retryPreview: preview,
+    elapsedSeconds, resolveIssues, resume, retrySeconds, rollback,
+    selectedFile: draft.selectedFile, showHistory, updateDraft: draft.update,
+    validDraft: draft.valid, visible }
+}

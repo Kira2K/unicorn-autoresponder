@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
+import LinkedInAuthTab from './LinkedInAuthTab.vue'
 
 function emptyEducationEntry() {
   return {
@@ -55,6 +56,7 @@ const selectedProviderClient = ref(null)
 const providerCredentialRevealed = ref({})
 const providerDolphinEmail = ref('')
 const dryRunResult = ref(null)
+const adminSection = ref('overview')
 const dolphinLease = ref(null)
 const dolphinLeaseError = ref('')
 const dolphinLeaseLoading = ref(false)
@@ -1925,6 +1927,11 @@ onUnmounted(() => {
         </template>
       </Toolbar>
 
+      <nav v-if="isAdmin" class="admin-section-tabs" aria-label="Admin sections">
+        <Button label="Overview" :severity="adminSection === 'overview' ? 'primary' : 'secondary'" :outlined="adminSection !== 'overview'" data-testid="admin-overview-tab" @click="adminSection = 'overview'" />
+        <Button label="LinkedIn" :severity="adminSection === 'linkedin' ? 'primary' : 'secondary'" :outlined="adminSection !== 'linkedin'" data-testid="admin-linkedin-tab" @click="adminSection = 'linkedin'" />
+      </nav>
+
       <Message v-if="error" severity="error" :closable="false" :text="error" />
       <Message v-if="dolphinLeaseError" severity="error" :closable="false" data-testid="dolphin-lease-error">
         {{ dolphinLeaseError }}
@@ -2205,7 +2212,9 @@ onUnmounted(() => {
         </template>
       </Dialog>
 
-      <Card v-if="isAdmin" class="admin-dialogs-card" data-testid="admin-dialogs-card">
+      <LinkedInAuthTab v-if="isAdmin && adminSection === 'linkedin'" />
+
+      <Card v-if="isAdmin && adminSection === 'overview'" class="admin-dialogs-card" data-testid="admin-dialogs-card">
         <template #title>
           <button type="button" class="admin-dialogs-toggle" data-testid="admin-dialogs-toggle" :aria-expanded="adminDialogsOpen ? 'true' : 'false'" @click="toggleAdminDialogsCard">
             <span>Telegram private dialogs</span><i :class="adminDialogsOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i>
@@ -2286,7 +2295,7 @@ onUnmounted(() => {
         </template>
       </Card>
 
-      <Card v-if="isAdmin" class="verification-card">
+      <Card v-if="isAdmin && adminSection === 'overview'" class="verification-card">
         <template #title>Dolphin verification code</template>
         <template #subtitle>Use this when Dolphin asks for the email code</template>
         <template #content>
@@ -2373,7 +2382,7 @@ onUnmounted(() => {
         </Card>
       </div>
 
-      <div v-else-if="dashboard" class="dashboard-grid">
+      <div v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" class="dashboard-grid">
         <Card class="profile-card">
           <template #title>
             <div class="profile-card-title-row">

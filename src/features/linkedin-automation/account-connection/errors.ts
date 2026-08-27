@@ -1,10 +1,12 @@
 class LinkedInAuthError extends Error {
   code: string
+  details?: Record<string, string | number>
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, details?: Record<string, string | number>) {
     super(message)
     this.name = 'LinkedInAuthError'
     this.code = code
+    this.details = details
   }
 }
 
