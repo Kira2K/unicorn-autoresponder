@@ -70,6 +70,13 @@ Unipile and caches them in `linkedin_comment_monitor_jobs` for 24 hours. Failed 
 are retried after 30 minutes and do not stop replies. The values are never exposed by the admin
 API or written to JSONL logs.
 
+The monitor ignores emoji-only and one-word comments, AI-authorship questions or accusations,
+explicit provocations, direct insults, and comments clearly unrelated to the post or thread.
+Unrelated trivia, abrupt topic switches, and unrelated advertising use the safe reason code
+`irrelevant_to_context`. Constructive criticism, relevant questions, and uncertain relevance
+default to a short English reply. Ignored items keep only a safe reason code and are never passed
+to the publisher.
+
 Comment monitor routes:
 
 - `GET /api/admin/linkedin/comment-monitors`

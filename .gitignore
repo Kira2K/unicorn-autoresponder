@@ -23,6 +23,10 @@ yarn-error.log*
 pnpm-debug.log*
 debug.log
 
+# Local-only LinkedIn Comment Monitor relevance evaluation
+/src/features/linkedin-automation/comment-monitor/eval/
+/src/features/linkedin-automation/comment-monitor/tests/relevance-eval.test.ts
+
 .DS_Store
 Thumbs.db
 project-f5183b61-c5a8-4384-bc9-10f265644c86.json
