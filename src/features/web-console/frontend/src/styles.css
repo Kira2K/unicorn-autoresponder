@@ -1217,6 +1217,37 @@ body {
   gap: 0.4rem;
 }
 
+.comment-monitor,
+.comment-monitor-head {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.comment-monitor {
+  min-width: 13rem;
+  flex-direction: column;
+}
+
+.comment-monitor-head {
+  align-items: center;
+}
+
+.comment-monitor-posts {
+  display: flex;
+  gap: 0.65rem;
+}
+
+.comment-monitor-error {
+  color: var(--p-red-600);
+}
+
+.comment-monitor-history > div {
+  border-top: 1px solid var(--p-surface-200);
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  white-space: normal;
+}
+
 .linkedin-url-editor,
 .linkedin-url-value {
   display: flex;

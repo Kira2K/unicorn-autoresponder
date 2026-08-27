@@ -119,6 +119,15 @@ const { createMockProfileFillerService } = require('./profile-filler-mock.ts') a
 const { registerProfileFillerRoutes } = require('./profile-filler-routes.ts') as {
   registerProfileFillerRoutes(options: any): void
 }
+const { createCommentMonitorService } = require('../../linkedin-automation/comment-monitor/service.ts') as {
+  createCommentMonitorService(options?: any): import('./comment-monitor-types.ts').CommentMonitorService
+}
+const { createMockCommentMonitorService } = require('./comment-monitor-mock.ts') as {
+  createMockCommentMonitorService(): import('./comment-monitor-types.ts').CommentMonitorService
+}
+const { registerCommentMonitorRoutes } = require('./comment-monitor-routes.ts') as {
+  registerCommentMonitorRoutes(options: any): void
+}
 
 type Request = import('express').Request
 type Response = import('express').Response
@@ -446,6 +455,7 @@ function createWebConsoleApp(options: {
   linkedinAuthRuns?: import('./linkedin-auth-types.ts').LinkedInAuthRunService
   linkedinOperationGate?: any
   profileFiller?: import('./profile-filler-types.ts').ProfileFillerService
+  commentMonitor?: import('./comment-monitor-types.ts').CommentMonitorService
   useMockData?: boolean
 } = {}) {
   const useMockData = options.useMockData ?? process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
@@ -473,6 +483,21 @@ function createWebConsoleApp(options: {
   const profileFiller = options.profileFiller ?? (useMockData
     ? createMockProfileFillerService()
     : createProfileFillerService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository }))
+  let liveCommentMonitor: import('./comment-monitor-types.ts').CommentMonitorService | undefined
+  const getLiveCommentMonitor = () => liveCommentMonitor ??= createCommentMonitorService({
+    gate: linkedinOperationGate,
+    repository: lazyLinkedInRepository
+  })
+  const lazyCommentMonitor = new Proxy({}, {
+    get(_target, property) {
+      const service = getLiveCommentMonitor() as any
+      const value = service[property]
+      return typeof value === 'function' ? value.bind(service) : value
+    }
+  }) as import('./comment-monitor-types.ts').CommentMonitorService
+  const commentMonitor = options.commentMonitor ?? (useMockData
+    ? createMockCommentMonitorService()
+    : lazyCommentMonitor)
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
     api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
@@ -759,6 +784,11 @@ function createWebConsoleApp(options: {
     app,
     requireAdmin: requireRole('admin'),
     service: profileFiller
+  })
+  registerCommentMonitorRoutes({
+    app,
+    requireAdmin: requireRole('admin'),
+    service: commentMonitor
   })
 
   app.get('/api/internal/telegram-gateway/health', requireTelegramGateway, (_req: Request, res: Response) => {

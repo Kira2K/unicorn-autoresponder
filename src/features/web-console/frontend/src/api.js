@@ -121,6 +121,19 @@ export const api = {
   adminProfileJobs() {
     return request('/api/admin/linkedin/profile-jobs')
   },
+  adminCommentMonitors() {
+    return request('/api/admin/linkedin/comment-monitors')
+  },
+  setAdminCommentMonitor(platformAccountId, enabled) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/comment-monitor`, {
+      method: 'PUT', body: JSON.stringify({ enabled })
+    })
+  },
+  resumeAdminCommentMonitor(jobId) {
+    return request(`/api/admin/linkedin/comment-monitors/${encodeURIComponent(jobId)}/resume`, {
+      method: 'POST'
+    })
+  },
   analyzeAdminProfile(profile) {
     return request('/api/admin/linkedin/profile-analysis', {
       method: 'POST', body: JSON.stringify(profile)

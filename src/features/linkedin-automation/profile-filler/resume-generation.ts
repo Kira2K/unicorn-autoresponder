@@ -21,7 +21,7 @@ async function resumeProfileGeneration(options: any) {
     throw codedError('profile_retry_unavailable', 'Profile generation checkpoint is unavailable.')
   }
   const release = await logAction(logger, 'operation_gate', () =>
-    acquire('profile_generate', jobId))
+    acquire('profile_generate', jobId, job.platformAccountId))
   const now = new Date().toISOString()
   update(job, { status: 'retrying', phase: 'resuming_job_titles', errorCode: undefined,
     updatedAt: now })

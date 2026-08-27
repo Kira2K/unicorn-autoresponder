@@ -38,7 +38,7 @@ function createLinkedInAuthRunService(options: {
   const getHistory = () => history ??= createLinkedInAuthHistoryStore()
   const execute = options.execute ?? runLocalLinkedInAuth
   const runs = new Map<string, Run>()
-  let activeRunId = ''
+  const activeRunIds = new Map<number, string>()
 
   function publicRun(run: Run): Run {
     return JSON.parse(JSON.stringify(run))
@@ -52,7 +52,9 @@ function createLinkedInAuthRunService(options: {
   }
   async function listHistory() { return await getHistory().list() }
   async function updateAccount(platformAccountId: number, input: { linkedinUrl: unknown }) {
-    if (activeRunId || gate?.current()) throw codedError('linkedin_auth_run_active', 'Another LinkedIn run is active.')
+    if (activeRunIds.has(platformAccountId) || gate?.current(String(platformAccountId))) {
+      throw codedError('linkedin_auth_run_active', 'Another LinkedIn run is active.')
+    }
     await getRepository().updateLinkedInUrl(platformAccountId, input.linkedinUrl)
     const account = (await getRepository().listAccounts())
       .find((row: any) => Number(row.platformAccountId) === platformAccountId)
@@ -62,7 +64,9 @@ function createLinkedInAuthRunService(options: {
 
   async function start(platformAccountId: number, action: Action) {
     if (!ACTIONS.has(action)) throw codedError('linkedin_auth_action_invalid', 'Invalid action.')
-    if (activeRunId || gate?.current()) throw codedError('linkedin_auth_run_active', 'Another LinkedIn run is active.')
+    if (activeRunIds.has(platformAccountId) || gate?.current(String(platformAccountId))) {
+      throw codedError('linkedin_auth_run_active', 'Another LinkedIn run is active.')
+    }
     const account = (await getRepository().listAccounts())
       .find((row: any) => Number(row.platformAccountId) === platformAccountId)
     if (!account) throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
@@ -71,12 +75,16 @@ function createLinkedInAuthRunService(options: {
       runId: crypto.randomUUID(), platformAccountId, clientName: account.clientName, action,
       status: 'running', stage: 'queued', stageStatus: 'started', startedAt: now, updatedAt: now
     }
-    const release = gate?.acquire('linkedin_auth', run.runId) ?? (() => undefined)
+    const release = gate?.acquire('linkedin_auth', run.runId,
+      String(platformAccountId)) ?? (() => undefined)
     runs.set(run.runId, run)
-    activeRunId = run.runId
+    activeRunIds.set(platformAccountId, run.runId)
     executeLinkedInAuthRun({
       account, action, execute, history: getHistory(), repository: getRepository(), run, update,
-      onDone: () => { activeRunId = ''; release() }
+      onDone: () => {
+        if (activeRunIds.get(platformAccountId) === run.runId) activeRunIds.delete(platformAccountId)
+        release()
+      }
     })
     while (runs.size > 100) {
       const oldest = runs.keys().next().value
