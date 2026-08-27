@@ -58,6 +58,17 @@ It covers only fields that Profile Filler currently writes.
   dropping requested data.
 - Dates use `YYYY-MM`. Profile Filler always sends `notify_network: false`.
 
+## Known Unipile Experience errors
+
+- Live Unipile v2 rejects Experience `employment_type` with
+  `unipile_provider_invalid_parameters`, although the field was exposed by the MCP
+  contract. Profile Filler removes it before Preview and Apply.
+- Older Experience create and edit requests without `employment_type` also returned
+  `unipile_provider_invalid_parameters`, but Unipile did not identify the invalid
+  field. The current validator therefore sends only the strict MCP allowlist.
+- The remaining support question is the exact live Experience contract, including
+  which fields require IDs from the LinkedIn parameter catalog.
+
 ## Product rules
 
 - Only `upsert` is accepted; delete is intentionally unavailable.

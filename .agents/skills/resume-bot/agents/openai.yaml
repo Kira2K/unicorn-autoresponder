@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resume Bot"
+  short_description: "Work with student resume workflow"
+  default_prompt: "Use $resume-bot to inspect or update the student resume workflow."

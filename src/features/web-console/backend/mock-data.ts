@@ -7,6 +7,17 @@ const mockClients = [
     fio: 'Test Client',
     birth_date: '2000-01-01',
     education: 'Initial school',
+    education_entries: JSON.stringify([
+      {
+        uni: 'Initial school',
+        faculty: 'Computer Science',
+        grade: 'Bachelor',
+        yearOfEnd: '2022'
+      }
+    ]),
+    real_age: 24,
+    real_location: 'Tbilisi, Georgia',
+    desired_location: 'Remote RU',
     google_folder: 'https://drive.google.com/drive/folders/mock-client',
     calendar_email: 'client@example.com',
     telegram_personal_chat_id: '@test_client',
@@ -37,6 +48,13 @@ const mockClients = [
     last_name: 'Tokhtaran',
     fio: 'Ilyas Tokhtaran',
     calendar_email: 'provider-visible@example.com',
+    education: 'Provider University',
+    education_entries: JSON.stringify([
+      { uni: 'Provider University', faculty: 'Data', grade: 'Master', yearOfEnd: '2023' }
+    ]),
+    real_age: 26,
+    real_location: 'Almaty, Kazakhstan',
+    desired_location: 'Remote EN',
     telegram_general_chat_id: '-100200301',
     rel_clients_primary_stack: { Id: 12, name: 'DATA' },
     market: 'En',
@@ -106,11 +124,24 @@ const mockPlatformAccounts = [
     Id: 103,
     account_label: 'Kira LinkedIn',
     login: 'kira.linkedin@example.com',
+    linkedin_url: 'https://linkedin.com/in/kira-test',
     phone: '',
     email: '',
     password: '',
     rel_platformAccounts_client: { Id: 1 },
     rel_platformAccounts_platform: { Id: 16, name: 'linkedin', label: 'linkedin' }
+  },
+  {
+    Id: 106,
+    platform: 'github',
+    account_label: 'Kira GitHub',
+    login: 'https://github.com/kira-test',
+    phone: '',
+    email: '',
+    password: '',
+    clients_id: 1,
+    platforms_id: 17,
+    rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
   },
   {
     Id: 102,
@@ -190,6 +221,42 @@ const mockPlatformAccounts = [
   },
   {
     Id: 205,
+    account_label: 'Ilyas LinkedIn',
+    login: 'ilyas.linkedin@example.com',
+    linkedin_url: 'https://linkedin.com/in/ilyas-provider',
+    clients_id: 2,
+    platforms_id: 16,
+    rel_platformAccounts_platform: { Id: 16, name: 'linkedin', label: 'linkedin' }
+  },
+  {
+    Id: 206,
+    platform: 'github',
+    account_label: 'Ilyas GitHub',
+    login: 'https://github.com/ilyas-provider-client',
+    clients_id: 2,
+    platforms_id: 17,
+    rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
+  },
+  {
+    Id: 207,
+    platform: 'telegram_ru',
+    account_label: 'Ilyas Telegram RU',
+    login: '@ilyas_ru',
+    clients_id: 2,
+    platforms_id: 2,
+    rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
+  },
+  {
+    Id: 208,
+    platform: 'telegram_en',
+    account_label: 'Ilyas Telegram EN',
+    nickname: '@ilyas_en',
+    clients_id: 2,
+    platforms_id: 4,
+    rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
+  },
+  {
+    Id: 209,
     platform: 'hh_en',
     account_label: 'Ilyas HH En',
     email: 'ilyas.hh-en@example.com',
@@ -198,7 +265,7 @@ const mockPlatformAccounts = [
     platforms_id: 10
   },
   {
-    Id: 206,
+    Id: 210,
     platform: 'hh_ru',
     account_label: 'Ilyas HH Ru',
     email: 'ilyas.hh-ru@example.com',
@@ -207,7 +274,7 @@ const mockPlatformAccounts = [
     platforms_id: 11
   },
   {
-    Id: 207,
+    Id: 211,
     platform: 'hh_ru',
     account_label: 'Provider Ru Visible HH Ru',
     email: 'provider.ru.hh-ru@example.com',
@@ -216,7 +283,7 @@ const mockPlatformAccounts = [
     platforms_id: 11
   },
   {
-    Id: 208,
+    Id: 212,
     platform: 'phone_en',
     account_label: 'Ilyas Phone En',
     phone: '+995 555 111 222',
@@ -231,7 +298,8 @@ const mockPlatforms = [
   { Id: 4, label: 'telegram_en' },
   { Id: 7, label: 'phone_en', name: 'phone' },
   { Id: 3, label: 'email_en', name: 'email' },
-  { Id: 16, label: 'linkedin', name: 'linkedin' }
+  { Id: 16, label: 'linkedin', name: 'linkedin' },
+  { Id: 17, label: 'github', name: 'github' }
 ]
 
 const mockEnglishLevels = [

@@ -7,6 +7,13 @@ export type WebSession = {
   clientId?: number
 }
 
+export type EducationEntry = {
+  uni: string
+  faculty: string
+  grade: string
+  yearOfEnd: string
+}
+
 export type WebClient = {
   id: number
   clientName: string
@@ -15,7 +22,10 @@ export type WebClient = {
   fio: string
   birthDate: string
   education: string
+  educationEntries: EducationEntry[]
   realAge?: number
+  realLocation?: string
+  desiredLocation?: string
   stopListCompany: string
   calendarEmail: string
   googleFolder: string
@@ -65,7 +75,10 @@ export type ClientProfilePatch = {
   fio?: string
   birthDate?: string
   education?: string
+  educationEntries?: EducationEntry[]
   realAge?: number | string | null
+  realLocation?: string
+  desiredLocation?: string
   stopListCompany?: string
   englishLevelId?: number | null
   telegramPersonalChatId?: string
@@ -111,6 +124,16 @@ export type ProviderClientRow = {
   clientName: string
   primaryStack?: string
   market?: string
+  education?: string
+  educationEntries?: EducationEntry[]
+  realAge?: number
+  realLocation?: string
+  desiredLocation?: string
+  englishLevel?: string
+  githubUrl?: string
+  linkedInUrl?: string
+  telegramRu?: string
+  telegramEn?: string
   linkedInEmail: string
   dolphinProfileStatus: DolphinProfileStatus
   hhCredentials: Array<{
@@ -153,6 +176,8 @@ export type ResumeWorkflowPatch = Partial<{
   ruVersionUrl: string
   additionalVersions: string
   kirasComments: string
+  lastRejectionComment: string
+  rejectionHistory: string
   lastResponsible: string
   lastWorkflowError: string
   workflowTrace: string
@@ -172,9 +197,16 @@ export type ResumeWorkflowRecord = {
   clientGoogleFolder?: string
   commonChatId?: string
   education?: string
+  educationEntries?: EducationEntry[]
   realAge?: number
+  realLocation?: string
+  desiredLocation?: string
   englishLevel?: string
   englishLevelId?: number
+  clientGithubUrl?: string
+  clientGithubAccountExists?: boolean
+  clientLinkedInUrl?: string
+  clientLinkedInAccountExists?: boolean
   status: string
   studentDataFolderUrl: string
   cvDraftUrl: string
@@ -182,6 +214,8 @@ export type ResumeWorkflowRecord = {
   ruVersionUrl: string
   additionalVersions: string
   kirasComments: string
+  lastRejectionComment: string
+  rejectionHistory: string
   lastResponsible: string
   lastWorkflowError: string
   workflowTrace: string

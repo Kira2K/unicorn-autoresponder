@@ -17,6 +17,7 @@ const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as 
 
 type ClientDashboard = import('./types.ts').ClientDashboard
 type ClientProfilePatch = import('./types.ts').ClientProfilePatch
+type EducationEntry = import('./types.ts').EducationEntry
 type PlatformAccountInput = import('./types.ts').PlatformAccountInput
 type WebClient = import('./types.ts').WebClient
 type WebConsoleRepository = import('./types.ts').WebConsoleRepository
@@ -31,6 +32,7 @@ type NocoSelectOption = { id?: string; Id?: string | number; title?: string; nam
 const LINKEDIN_PLATFORM_ID = 16
 const HH_PLATFORM_IDS = { Ru: 11, En: 10 } as const
 const PHONE_EN_PLATFORM_ID = 28
+const GITHUB_PLATFORM_LABEL = 'github'
 const RESUME_ACTIVE_TASK_STATUSES = [
   "collection Kira's comments",
   'Draft in process',
@@ -65,6 +67,63 @@ function normalizeId(value: unknown): string {
 
 function normalizeStatusText(value: unknown): string {
   return normalizeText(value).replace(/\s+/g, ' ').toLowerCase()
+}
+
+function normalizeEducationEntry(value: unknown): EducationEntry {
+  const record = value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {}
+  return {
+    uni: normalizeText(record.uni ?? record.university ?? record.education),
+    faculty: normalizeText(record.faculty ?? record.facultet),
+    grade: normalizeText(record.grade),
+    yearOfEnd: normalizeText(record.yearOfEnd ?? record.year_of_end ?? record.year)
+  }
+}
+
+function hasEducationEntryValue(entry: EducationEntry): boolean {
+  return Boolean(entry.uni || entry.faculty || entry.grade || entry.yearOfEnd)
+}
+
+function parseEducationEntries(value: unknown, legacyEducation: unknown = ''): EducationEntry[] {
+  let raw = value
+  if (typeof raw === 'string') {
+    const text = normalizeText(raw)
+    if (text) {
+      try {
+        raw = JSON.parse(text)
+      } catch {
+        raw = []
+      }
+    } else {
+      raw = []
+    }
+  }
+
+  const entries = Array.isArray(raw)
+    ? raw.map(normalizeEducationEntry).filter(hasEducationEntryValue)
+    : []
+  if (entries.length) return entries
+
+  const legacy = normalizeText(legacyEducation)
+  return legacy ? [{ uni: legacy, faculty: '', grade: '', yearOfEnd: '' }] : []
+}
+
+function educationSummary(entries: EducationEntry[], fallback: unknown = ''): string {
+  const summary = entries
+    .filter(hasEducationEntryValue)
+    .map(entry => [entry.uni, entry.faculty, entry.grade, entry.yearOfEnd].filter(Boolean).join(', '))
+    .filter(Boolean)
+    .join('; ')
+  return summary || normalizeText(fallback)
+}
+
+function educationEntriesFromClient(client: NocoRecord | WebClient | undefined): EducationEntry[] {
+  if (!client) return []
+  if (Array.isArray((client as WebClient).educationEntries)) {
+    return parseEducationEntries((client as WebClient).educationEntries, (client as WebClient).education)
+  }
+  return parseEducationEntries((client as NocoRecord).education_entries, (client as NocoRecord).education)
 }
 
 function linkedRecords(value: unknown): Array<Record<string, unknown>> {
@@ -205,6 +264,15 @@ function isLinkedInPlatformAccount(account: NocoRecord): boolean {
   return accountPlatformId(account) === LINKEDIN_PLATFORM_ID
 }
 
+function isPlatformAccountForLabel(account: NocoRecord, label: string): boolean {
+  const expected = normalizedPlatformLabel(label)
+  return normalizedPlatformLabel(account.platform) === expected || platformLabelFromRelation(account) === expected
+}
+
+function isGitHubPlatformAccount(account: NocoRecord): boolean {
+  return isPlatformAccountForLabel(account, GITHUB_PLATFORM_LABEL)
+}
+
 function buildLinkedInEmailByClientId(accounts: NocoRecord[]): Map<number, string> {
   const grouped = new Map<number, string[]>()
   for (const account of accounts.filter(isLinkedInPlatformAccount).sort((a, b) => Number(a.Id) - Number(b.Id))) {
@@ -218,6 +286,7 @@ function buildLinkedInEmailByClientId(accounts: NocoRecord[]): Map<number, strin
 
 function toClient(record: NocoRecord): WebClient {
   const realAge = Number(record.real_age)
+  const educationEntries = parseEducationEntries(record.education_entries, record.education)
   return {
     id: Number(record.Id),
     clientName: normalizeText(record.client_name),
@@ -225,8 +294,11 @@ function toClient(record: NocoRecord): WebClient {
     lastName: normalizeText(record.last_name),
     fio: normalizeText(record.fio),
     birthDate: normalizeText(record.birth_date),
-    education: normalizeText(record.education),
+    education: educationSummary(educationEntries, record.education),
+    educationEntries,
     realAge: Number.isFinite(realAge) ? realAge : undefined,
+    realLocation: normalizeText(record.real_location) || undefined,
+    desiredLocation: normalizeText(record.desired_location) || undefined,
     stopListCompany: normalizeText(record.stop_list_company),
     calendarEmail: normalizeText(record.calendar_email),
     googleFolder: normalizeText(record.google_folder),
@@ -248,7 +320,8 @@ function toProviderClientRow(
   record: NocoRecord,
   linkedInEmail: string,
   existingProfiles: Array<{ id: number; locale: string }>,
-  hhCredentials: ProviderClientRow['hhCredentials'] = []
+  hhCredentials: ProviderClientRow['hhCredentials'] = [],
+  platformAccounts: NocoRecord[] = []
 ): ProviderClientRow {
   const client = toClient(record)
   return {
@@ -256,6 +329,16 @@ function toProviderClientRow(
     clientName: client.clientName,
     primaryStack: client.primaryStack,
     market: client.market,
+    education: client.education,
+    educationEntries: client.educationEntries,
+    realAge: client.realAge,
+    realLocation: client.realLocation,
+    desiredLocation: client.desiredLocation,
+    englishLevel: client.englishLevel,
+    githubUrl: githubUrl(platformAccounts) || undefined,
+    linkedInUrl: linkedInUrl(platformAccounts) || undefined,
+    telegramRu: platformContact(platformAccounts, ['telegram_ru']) || undefined,
+    telegramEn: platformContact(platformAccounts, ['telegram_en']) || undefined,
     linkedInEmail,
     hhCredentials,
     dolphinProfileStatus: buildDolphinProfileStatus({ client, existingProfiles, actorRole: 'provider' })
@@ -413,6 +496,28 @@ function platformContact(platformAccounts: NocoRecord[], labels: string[]): stri
   return ''
 }
 
+function githubUrl(platformAccounts: NocoRecord[]): string {
+  const account = platformAccounts
+    .filter(isGitHubPlatformAccount)
+    .sort((a, b) => Number(a.Id) - Number(b.Id))[0]
+  return normalizeText(account?.login)
+}
+
+function linkedInUrl(platformAccounts: NocoRecord[]): string {
+  const account = platformAccounts
+    .filter(isLinkedInPlatformAccount)
+    .sort((a, b) => Number(a.Id) - Number(b.Id))[0]
+  return normalizeText(account?.linkedin_url)
+}
+
+function hasGitHubPlatformAccount(platformAccounts: NocoRecord[]): boolean {
+  return platformAccounts.some(isGitHubPlatformAccount)
+}
+
+function hasLinkedInPlatformAccount(platformAccounts: NocoRecord[]): boolean {
+  return platformAccounts.some(isLinkedInPlatformAccount)
+}
+
 function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, platformAccounts: NocoRecord[] = []): ResumeWorkflowRecord {
   const clientId = cvProcessingClientId(record) ?? Number((client as any)?.Id ?? (client as any)?.id)
   const clientName =
@@ -432,6 +537,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     linkedName((client as any)?.['English level']) ||
     normalizeText((client as any)?.englishLevel ?? (client as any)?.english_level)
   const realAge = Number((client as any)?.real_age ?? (client as any)?.realAge)
+  const educationEntries = educationEntriesFromClient(client)
   return {
     id: Number(record.Id),
     clientId,
@@ -445,10 +551,17 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     clientPhoneEn: platformContact(platformAccounts, ['phone_en']) || undefined,
     clientGoogleFolder: normalizeText((client as any)?.google_folder ?? (client as any)?.googleFolder) || undefined,
     commonChatId: normalizeText((client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId) || undefined,
-    education: normalizeText((client as any)?.education) || undefined,
+    education: educationSummary(educationEntries, (client as any)?.education) || undefined,
+    educationEntries,
     realAge: Number.isFinite(realAge) ? realAge : undefined,
+    realLocation: normalizeText((client as any)?.real_location ?? (client as any)?.realLocation) || undefined,
+    desiredLocation: normalizeText((client as any)?.desired_location ?? (client as any)?.desiredLocation) || undefined,
     englishLevel,
     englishLevelId,
+    clientGithubUrl: githubUrl(platformAccounts) || undefined,
+    clientGithubAccountExists: hasGitHubPlatformAccount(platformAccounts),
+    clientLinkedInUrl: linkedInUrl(platformAccounts) || undefined,
+    clientLinkedInAccountExists: hasLinkedInPlatformAccount(platformAccounts),
     status: normalizeText(record.status),
     studentDataFolderUrl: normalizeText(record.student_data_folder_url ?? record.student_experience_folder_url),
     cvDraftUrl: normalizeText(record.cv_draft_url),
@@ -456,6 +569,8 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     ruVersionUrl: normalizeText(record.ru_version_url),
     additionalVersions: normalizeText(record.additional_versions),
     kirasComments: normalizeText(record.kiras_comments),
+    lastRejectionComment: normalizeText(record.last_rejection_comment),
+    rejectionHistory: normalizeText(record.rejection_history),
     lastResponsible: normalizeText(record.last_responsible),
     lastWorkflowError: normalizeText(record.last_workflow_error),
     workflowTrace: normalizeText(record.workflow_trace)
@@ -471,6 +586,8 @@ function buildResumeWorkflowPatch(input: ResumeWorkflowPatch): Record<string, un
     ['ruVersionUrl', 'ru_version_url'],
     ['additionalVersions', 'additional_versions'],
     ['kirasComments', 'kiras_comments'],
+    ['lastRejectionComment', 'last_rejection_comment'],
+    ['rejectionHistory', 'rejection_history'],
     ['lastResponsible', 'last_responsible'],
     ['lastWorkflowError', 'last_workflow_error'],
     ['workflowTrace', 'workflow_trace']
@@ -558,6 +675,8 @@ function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
     ['fio', 'fio'],
     ['birthDate', 'birth_date'],
     ['education', 'education'],
+    ['realLocation', 'real_location'],
+    ['desiredLocation', 'desired_location'],
     ['stopListCompany', 'stop_list_company'],
     ['telegramPersonalChatId', 'telegram_personal_chat_id'],
     ['calendarEmail', 'calendar_email']
@@ -565,6 +684,11 @@ function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
   for (const [inputField, nocoField] of textFields) {
     const value = cleanOptionalText(input[inputField])
     if (value !== undefined) patch[nocoField] = value
+  }
+  if (input.educationEntries !== undefined) {
+    const entries = parseEducationEntries(input.educationEntries)
+    patch.education_entries = JSON.stringify(entries)
+    patch.education = educationSummary(entries, input.education)
   }
   const englishLevelId = cleanNullableId(input.englishLevelId)
   if (englishLevelId !== undefined) patch.english_levels_id = englishLevelId
@@ -581,7 +705,10 @@ function buildChangedClientPatch(current: WebClient, input: ClientProfilePatch):
     fio: current.fio,
     birth_date: current.birthDate,
     education: current.education,
+    education_entries: JSON.stringify(current.educationEntries ?? []),
     real_age: current.realAge ?? null,
+    real_location: current.realLocation ?? '',
+    desired_location: current.desiredLocation ?? '',
     stop_list_company: current.stopListCompany,
     telegram_personal_chat_id: current.telegramPersonalChatId,
     calendar_email: current.calendarEmail,
@@ -814,6 +941,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       ru_version_url: '',
       additional_versions: '',
       kiras_comments: '',
+      last_rejection_comment: '',
+      rejection_history: '',
       last_responsible: 'student',
       last_workflow_error: '',
       workflow_trace: ''
@@ -983,7 +1112,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         client,
         linkedInEmailByClientId.get(Number(client.Id)) ?? '',
         existingProfiles,
-        buildHHCredentialsForProviderClient(client, accountsForClient)
+        buildHHCredentialsForProviderClient(client, accountsForClient),
+        accountsForClient
       )
     },
 
@@ -1023,7 +1153,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
             client,
             linkedInEmailByClientId.get(Number(client.Id)) ?? '',
             profilesByClientId.get(Number(client.Id)) ?? [],
-            buildHHCredentialsForProviderClient(client, platformAccountsByClientId.get(Number(client.Id)) ?? [])
+            buildHHCredentialsForProviderClient(client, platformAccountsByClientId.get(Number(client.Id)) ?? []),
+            platformAccountsByClientId.get(Number(client.Id)) ?? []
           )
           const responses = providerResponsesByClientId.get(Number(client.Id)) ?? []
           const clientPlatformAccounts = platformAccountsByClientId.get(Number(client.Id)) ?? []

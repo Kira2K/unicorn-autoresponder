@@ -28,6 +28,13 @@ type ResumeActor = ResumeActorInput & {
   role: ResumeActorRole
 }
 
+type EducationEntry = {
+  uni: string
+  faculty: string
+  grade: string
+  yearOfEnd: string
+}
+
 type ResumeWorkflowRecord = {
   id: number
   clientId: number
@@ -42,9 +49,16 @@ type ResumeWorkflowRecord = {
   clientGoogleFolder?: string
   commonChatId?: string
   education?: string
+  educationEntries?: EducationEntry[]
   realAge?: number
+  realLocation?: string
+  desiredLocation?: string
   englishLevel?: string
   englishLevelId?: number
+  clientGithubUrl?: string
+  clientGithubAccountExists?: boolean
+  clientLinkedInUrl?: string
+  clientLinkedInAccountExists?: boolean
   status: ResumeStatus | string
   studentDataFolderUrl: string
   cvDraftUrl: string
@@ -52,6 +66,8 @@ type ResumeWorkflowRecord = {
   ruVersionUrl: string
   additionalVersions: string
   kirasComments: string
+  lastRejectionComment: string
+  rejectionHistory: string
   lastResponsible: string
   lastWorkflowError: string
   workflowTrace: string
@@ -65,6 +81,8 @@ type ResumeWorkflowPatch = Partial<{
   ruVersionUrl: string
   additionalVersions: string
   kirasComments: string
+  lastRejectionComment: string
+  rejectionHistory: string
   lastResponsible: string
   lastWorkflowError: string
   workflowTrace: string
@@ -76,6 +94,7 @@ type ResumeWorkflowNotification = {
   chatIds?: string[]
   messageThreadId?: number
   text: string
+  replyMarkup?: unknown
 }
 
 type ResumeProviderTask = {
@@ -99,6 +118,7 @@ type ResumeWorkflowOptions = {
   actor?: ResumeActorInput
   expectedStatus?: string
   studentDataFolderUrl?: string
+  rejectionComment?: string
 }
 
 type ResumeWorkflowResult = {
@@ -188,6 +208,8 @@ const DEFAULT_KIRA_PLATFORM_REFS = ['1:452']
 const DEFAULT_PROVIDER_PLATFORM_REFS: string[] = []
 const TASK_LIST_PAGE_SIZE = 15
 const TASK_LIST_MAX_MESSAGE_LENGTH = 3500
+const DEFAULT_REJECTION_COMMENT = 'оставил комменты в резюме'
+const MIN_REJECTION_COMMENT_LENGTH = 30
 
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim()
@@ -214,11 +236,39 @@ function envIdSet(name: string, fallback: string[] = []): Set<string> {
   return new Set(envList(name, fallback).map(normalizeId).filter(Boolean))
 }
 
+function envHasId(name: string, id: unknown, fallback: string[] = []): boolean {
+  const normalized = normalizeId(id)
+  return Boolean(normalized && envIdSet(name, fallback).has(normalized))
+}
+
 function envClientIdSetFromRefs(name: string, fallback: string[] = []): Set<number> {
   const clientIds = envList(name, fallback)
     .map(item => Number(normalizeText(item).split(':')[0]))
     .filter(clientId => Number.isFinite(clientId) && clientId > 0)
   return new Set(clientIds)
+}
+
+function normalizeMarket(value: unknown): string {
+  return normalizeText(value).replace(/\s+/g, '').toLowerCase()
+}
+
+function isRuOnlyWorkflow(record: ResumeWorkflowRecord): boolean {
+  const market = normalizeMarket(record.clientMarket)
+  return market === 'ru' || market === 'ру'
+}
+
+function isEnMarketWorkflow(record: ResumeWorkflowRecord): boolean {
+  const market = normalizeMarket(record.clientMarket)
+  return market === 'en' || market === 'both'
+}
+
+function accountExists(value: unknown): boolean {
+  return value === true
+}
+
+function hasEducation(record: ResumeWorkflowRecord): boolean {
+  const entries = Array.isArray(record.educationEntries) ? record.educationEntries : []
+  return entries.some(entry => normalizeText(entry?.uni)) || Boolean(normalizeText(record.education))
 }
 
 function resumeWorkflowTestMode(): boolean {
@@ -260,8 +310,8 @@ function defaultRusTranslatorNotifyChatIds(): string[] {
     .filter((item, index, items) => item && items.indexOf(item) === index)
 }
 
-function providerNotifyChatIdsForStatus(status: string): string[] {
-  return providerLaneForStatus(status) === 'rus_translator'
+function providerNotifyChatIdsForWorkflow(workflow: ResumeWorkflowRecord): string[] {
+  return providerLaneForWorkflow(workflow) === 'rus_translator'
     ? defaultRusTranslatorNotifyChatIds()
     : defaultProviderNotifyChatIds()
 }
@@ -287,13 +337,39 @@ function providerLaneForStatus(status: string): 'main' | 'rus_translator' | null
   return null
 }
 
+function providerLaneForWorkflow(workflow: ResumeWorkflowRecord): 'main' | 'rus_translator' | null {
+  const status = statusText(workflow)
+  if (status === 'Russian version in process' && isRuOnlyWorkflow(workflow)) return 'main'
+  return providerLaneForStatus(status)
+}
+
 function isRusTranslatorActor(input: ResumeActorInput | undefined): boolean {
-  const userId = normalizeId(input?.userId)
-  return Boolean(userId && envIdSet('RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS', DEFAULT_RUS_TRANSLATOR_USER_IDS).has(userId))
+  return envHasId('RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS', input?.userId, DEFAULT_RUS_TRANSLATOR_USER_IDS)
+}
+
+function isMainProviderActor(input: ResumeActorInput | undefined): boolean {
+  return envHasId('RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS', input?.userId, DEFAULT_PROVIDER_USER_IDS)
+}
+
+function providerLanesForActor(actor: ResumeActor): Set<'main' | 'rus_translator'> {
+  const lanes = new Set<'main' | 'rus_translator'>()
+  if (isMainProviderActor(actor)) lanes.add('main')
+  if (isRusTranslatorActor(actor)) lanes.add('rus_translator')
+  if (!lanes.size && actor.role === 'provider') lanes.add('main')
+  return lanes
 }
 
 function providerStatusesForActor(actor: ResumeActor): Set<string> {
-  return isRusTranslatorActor(actor) ? RUS_TRANSLATOR_RESPONSIBLE_STATUSES : MAIN_PROVIDER_RESPONSIBLE_STATUSES
+  const statuses = new Set<string>()
+  const lanes = providerLanesForActor(actor)
+  if (lanes.has('main')) {
+    for (const status of MAIN_PROVIDER_RESPONSIBLE_STATUSES) statuses.add(status)
+    for (const status of RUS_TRANSLATOR_RESPONSIBLE_STATUSES) statuses.add(status)
+  }
+  if (lanes.has('rus_translator')) {
+    for (const status of RUS_TRANSLATOR_RESPONSIBLE_STATUSES) statuses.add(status)
+  }
+  return statuses
 }
 
 function actorLabel(actor: ResumeActor): string {
@@ -312,6 +388,13 @@ function appendTrace(record: ResumeWorkflowRecord, event: string, actor?: Resume
   return previous ? `${previous}\n${line}` : line
 }
 
+function appendRejectionHistory(record: ResumeWorkflowRecord, from: string, to: string, comment: string, actor?: ResumeActor): string {
+  const previous = normalizeText(record.rejectionHistory)
+  const actorPart = actor ? ` by ${actorLabel(actor)}` : ''
+  const line = `${new Date().toISOString()} ${from} -> ${to}${actorPart}: ${comment}`
+  return previous ? `${previous}\n${line}` : line
+}
+
 function publicWorkflow(record: ResumeWorkflowRecord) {
   return {
     id: record.id,
@@ -324,6 +407,8 @@ function publicWorkflow(record: ResumeWorkflowRecord) {
     enVersionUrl: record.enVersionUrl,
     ruVersionUrl: record.ruVersionUrl,
     kirasComments: record.kirasComments,
+    lastRejectionComment: record.lastRejectionComment,
+    rejectionHistory: record.rejectionHistory,
     lastResponsible: record.lastResponsible,
     lastWorkflowError: record.lastWorkflowError
   }
@@ -392,6 +477,18 @@ function displayMissingField(field: string): string {
       return 'уровень английского'
     case 'Real age':
       return 'реальный возраст'
+    case 'Real location':
+      return 'реальная локация'
+    case 'Desired location':
+      return 'желаемая локация'
+    case 'Github':
+      return 'аккаунт GitHub'
+    case 'LinkedIn':
+      return 'аккаунт LinkedIn'
+    case 'Telegram RU':
+      return 'Telegram RU'
+    case 'Telegram EN':
+      return 'Telegram EN'
     case 'root_google_folder':
       return 'корневая Google-папка'
     case 'student_data_folder_url':
@@ -456,6 +553,14 @@ function nextActionForStatus(status: string): string {
   }
 }
 
+function isApprovalStatus(status: string): boolean {
+  return status.includes('approve by Kira') || status.includes('approve by student')
+}
+
+function rejectCommandHint(command = '/resume_reject'): string {
+  return `для того чтобы вернуть на доработку введи ${command} ${DEFAULT_REJECTION_COMMENT} или кастомный комментарий`
+}
+
 function studentApprovalDetails(record: ResumeWorkflowRecord): string {
   const status = statusText(record)
   const link = status === 'Draft in approve by student'
@@ -474,9 +579,9 @@ function studentApprovalDetails(record: ResumeWorkflowRecord): string {
   return [
     `${label}: ${link}`,
     'Проверь файл выше.',
-    'Чтобы согласовать, отправь:',
-    '/resume I approve',
-    'После этого я переведу резюме на следующий шаг.'
+    'Чтобы согласовать, нажми кнопку «Согласовать» или отправь /resume I approve.',
+    'После этого я переведу резюме на следующий шаг.',
+    rejectCommandHint('/resume_reject')
   ].join('\n')
 }
 
@@ -624,6 +729,10 @@ function taskStatusesForActor(actor: ResumeActor): Set<string> {
 
 function providerCanAccessWorkflow(workflow: ResumeWorkflowRecord, actor?: ResumeActor): boolean {
   if (actor && !providerStatusesForActor(actor).has(statusText(workflow))) return false
+  if (actor) {
+    const lane = providerLaneForWorkflow(workflow)
+    if (lane && !providerLanesForActor(actor).has(lane)) return false
+  }
   const allowedClientIds = envClientIdSetFromRefs(
     'RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS',
     DEFAULT_PROVIDER_PLATFORM_REFS
@@ -674,10 +783,16 @@ function ensureExpectedStatus(workflow: ResumeWorkflowRecord, expectedStatus?: s
 
 function requiredClientDataIssues(record: ResumeWorkflowRecord): string[] {
   const issues: string[] = []
-  if (!normalizeText(record.education)) issues.push('Education')
+  if (!hasEducation(record)) issues.push('Education')
   if (!normalizeText(record.englishLevel) && !record.englishLevelId) issues.push('English level')
   const realAge = Number(record.realAge)
   if (!Number.isFinite(realAge) || realAge <= 0) issues.push('Real age')
+  if (!normalizeText(record.realLocation)) issues.push('Real location')
+  if (!normalizeText(record.desiredLocation)) issues.push('Desired location')
+  if (!accountExists(record.clientGithubAccountExists)) issues.push('Github')
+  if (!accountExists(record.clientLinkedInAccountExists)) issues.push('LinkedIn')
+  if (!normalizeText(record.clientTelegramRu)) issues.push('Telegram RU')
+  if (!normalizeText(record.clientTelegramEn)) issues.push('Telegram EN')
   return issues
 }
 
@@ -771,7 +886,10 @@ function plannedPatch(record: ResumeWorkflowRecord, fakeDataMode: boolean): Resu
       return { status: 'Draft in approve by student', lastResponsible: 'student' }
     case 'Draft in approve by student':
       if (missingAdvanceFields(record, fakeDataMode).length) return null
-      return { status: 'English version in progress', lastResponsible: 'provider' }
+      return {
+        status: isRuOnlyWorkflow(record) ? 'Russian version in process' : 'English version in progress',
+        lastResponsible: 'provider'
+      }
     case 'English version in progress':
       if (missingAdvanceFields(record, fakeDataMode).length) return null
       return {
@@ -800,6 +918,70 @@ function plannedPatch(record: ResumeWorkflowRecord, fakeDataMode: boolean): Resu
       return { status: 'moved to filling', lastResponsible: 'done' }
     default:
       return { status: "collection student's data", lastResponsible: 'student' }
+  }
+}
+
+function normalizeRejectionComment(value: unknown): string {
+  return normalizeText(value).replace(/\s+/g, ' ')
+}
+
+function isValidRejectionComment(comment: string): boolean {
+  return comment === DEFAULT_REJECTION_COMMENT || comment.length >= MIN_REJECTION_COMMENT_LENGTH
+}
+
+function ensureValidRejectionComment(value: unknown): string {
+  const comment = normalizeRejectionComment(value)
+  if (isValidRejectionComment(comment)) return comment
+  throw Object.assign(
+    new Error(`Комментарий возврата должен быть не короче ${MIN_REJECTION_COMMENT_LENGTH} символов или ровно: ${DEFAULT_REJECTION_COMMENT}.`),
+    { code: 'resume_reject_comment_too_short', minLength: MIN_REJECTION_COMMENT_LENGTH }
+  )
+}
+
+function rejectionTargetPatch(record: ResumeWorkflowRecord, actor: ResumeActor, comment: string): ResumeWorkflowPatch {
+  const from = statusText(record)
+  let target: ResumeStatus
+  const patch: ResumeWorkflowPatch = {
+    lastResponsible: 'provider',
+    lastRejectionComment: comment
+  }
+
+  if (from === 'Draft in approve by Kira' || from === 'Draft in approve by student') {
+    target = 'Draft in process'
+    patch.cvDraftUrl = ''
+  } else if (from === 'English version in approve by Kira' || from === 'English version in approve by student') {
+    target = 'English version in progress'
+    patch.enVersionUrl = ''
+  } else if (from === 'Russian version in approve by Kira' || from === 'Russian version in approve by student') {
+    target = 'Russian version in process'
+    patch.ruVersionUrl = ''
+  } else {
+    throw Object.assign(new Error('Вернуть на доработку можно только этап согласования резюме.'), {
+      code: 'resume_reject_not_allowed',
+      status: from
+    })
+  }
+
+  patch.status = target
+  patch.rejectionHistory = appendRejectionHistory(record, from, target, comment, actor)
+  return patch
+}
+
+function ensureActorCanReject(workflow: ResumeWorkflowRecord, actor: ResumeActor): void {
+  const status = statusText(workflow)
+  const required = statusResponsibility(status)
+  if (required !== 'kira' && required !== 'student') {
+    throw Object.assign(new Error('Вернуть на доработку может только тот, кто сейчас согласует резюме.'), {
+      code: 'resume_reject_not_allowed',
+      requiredRole: required,
+      actorRole: actor.role
+    })
+  }
+  if (actor.role !== required) {
+    throw Object.assign(
+      new Error(`Этот шаг должен выполнить: ${displayResponsibility(status)}.`),
+      { code: 'forbidden', requiredRole: required, actorRole: actor.role }
+    )
   }
 }
 
@@ -843,7 +1025,7 @@ function clientLinkedInReadyLabel(record: ResumeWorkflowRecord): string {
 function responsibleMention(record: ResumeWorkflowRecord, responsible: ResumeActorRole | 'done' | 'admin'): string {
   if (responsible === 'kira') return 'Кира'
   if (responsible === 'provider') {
-    return providerLaneForStatus(statusText(record)) === 'rus_translator' ? 'Полина' : 'Юля'
+    return providerLaneForWorkflow(record) === 'rus_translator' ? 'Полина' : 'Юля'
   }
   return clientMention(record)
 }
@@ -881,7 +1063,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWor
     const chatId = normalizeId(record.commonChatId)
     if (!chatId) return null
     const text = [intro, action, studentApprovalDetails(record)].filter(Boolean).join('\n')
-    return { kind: 'common_chat', chatId, text }
+    return { kind: 'common_chat', chatId, text, replyMarkup: approvalReplyMarkup(record) }
   }
   if (responsible === 'kira') {
     const chatId = defaultKiraNotifyChatId()
@@ -897,7 +1079,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWor
     return { kind: 'private_kira', chatId, text }
   }
   if (responsible === 'provider') {
-    const chatIds = providerNotifyChatIdsForStatus(status)
+    const chatIds = providerNotifyChatIdsForWorkflow(record)
     if (!chatIds.length) return null
     const text = [
       intro,
@@ -923,12 +1105,14 @@ function movedToFillingSummary(record: ResumeWorkflowRecord, testMode: boolean):
 
 function linkedInReadyNotification(record: ResumeWorkflowRecord): ResumeWorkflowNotification | null {
   if (statusText(record) !== 'moved to filling') return null
+  if (!isEnMarketWorkflow(record)) return null
   const chatId = linkedinReadyNotifyChatId()
   if (!chatId) return null
   const messageThreadId = linkedinReadyNotifyThreadId()
+  const cvUrl = record.enVersionUrl || record.ruVersionUrl || 'n/a'
   const text = [
     `@CheMpoKaRokee, резюме ${clientLinkedInReadyLabel(record)}, готово к заполнению на LinkedIn.`,
-    `Ссылка на резюме: ${record.enVersionUrl || 'n/a'}`
+    `Ссылка на резюме: ${cvUrl}`
   ].join('\n')
   return { kind: 'linkedin_ready', chatId, messageThreadId, text }
 }
@@ -941,7 +1125,7 @@ function buildTransitionNotifications(record: ResumeWorkflowRecord, testMode: bo
   ].filter((item): item is ResumeWorkflowNotification => Boolean(item))
 }
 
-function callbackData(action: 'open' | 'advance', workflowId: number, expectedStatus?: string): string {
+function callbackData(action: 'open' | 'advance' | 'reject', workflowId: number, expectedStatus?: string): string {
   const encodedStatus = expectedStatus
     ? RESUME_STATUS_CALLBACK_CODES[normalizeText(expectedStatus)] || Buffer.from(expectedStatus, 'utf8').toString('base64url')
     : ''
@@ -967,7 +1151,22 @@ function providerTaskFromWorkflow(workflow: ResumeWorkflowRecord): ResumeProvide
   }
 }
 
+function educationDetails(workflow: ResumeWorkflowRecord): string {
+  const entries = Array.isArray(workflow.educationEntries) ? workflow.educationEntries : []
+  const rows = entries
+    .map(entry => [
+      normalizeText(entry.uni),
+      normalizeText(entry.faculty),
+      normalizeText(entry.grade),
+      normalizeText(entry.yearOfEnd)
+    ].filter(Boolean).join(', '))
+    .filter(Boolean)
+  if (rows.length) return rows.join('; ')
+  return normalizeText(workflow.education)
+}
+
 function studentInfoMessage(workflow: ResumeWorkflowRecord): string {
+  const education = educationDetails(workflow)
   const rows = [
     workflow.clientMarket ? `Рынок ученика: ${workflow.clientMarket}` : undefined,
     workflow.clientStack ? `Стек: ${workflow.clientStack}` : undefined,
@@ -975,9 +1174,13 @@ function studentInfoMessage(workflow: ResumeWorkflowRecord): string {
     workflow.clientTelegramEn ? `Telegram EN: ${workflow.clientTelegramEn}` : undefined,
     workflow.clientPhoneRu ? `Phone RU: ${workflow.clientPhoneRu}` : undefined,
     workflow.clientPhoneEn ? `Phone EN: ${workflow.clientPhoneEn}` : undefined,
+    workflow.realLocation ? `Реальная локация: ${workflow.realLocation}` : undefined,
+    workflow.desiredLocation ? `Желаемая локация: ${workflow.desiredLocation}` : undefined,
+    workflow.clientGithubUrl ? `GitHub: ${workflow.clientGithubUrl}` : undefined,
+    workflow.clientLinkedInUrl ? `LinkedIn: ${workflow.clientLinkedInUrl}` : undefined,
     Number.isFinite(Number(workflow.realAge)) ? `Реальный возраст: ${Number(workflow.realAge)}` : undefined,
     workflow.englishLevel ? `Английский: ${workflow.englishLevel}` : undefined,
-    workflow.education ? `Образование: ${workflow.education}` : undefined
+    education ? `Образование: ${education}` : undefined
   ].filter(Boolean)
   return rows.length ? ['Данные ученика:', ...rows].join('\n') : ''
 }
@@ -1001,6 +1204,7 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
     rootGoogleFolder ? `Корневая Google-папка: ${rootGoogleFolder}` : undefined,
     explicitSourceFolder && explicitSourceFolder !== rootGoogleFolder ? `Папка с исходными данными: ${explicitSourceFolder}` : undefined,
     workflow.kirasComments ? `Комментарии Киры: ${workflow.kirasComments}` : undefined,
+    workflow.lastRejectionComment ? `Комментарий возврата: ${workflow.lastRejectionComment}` : undefined,
     workflow.cvDraftUrl ? `Черновик: ${workflow.cvDraftUrl}` : undefined,
     workflow.enVersionUrl ? `EN: ${workflow.enVersionUrl}` : undefined,
     workflow.ruVersionUrl ? `RU: ${workflow.ruVersionUrl}` : undefined,
@@ -1014,7 +1218,7 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
 function missingDataInstruction(workflow: ResumeWorkflowRecord): string {
   const missing = missingAdvanceFields(workflow)
   if (statusText(workflow) === "collection student's data" && missing.includes('root_google_folder')) {
-    return `@veu_support нужно заполнить гугл-папку ученика ${workflow.clientName}`
+    return `@veu_support нужно заполнить гугл-папку ученика ${workflow.clientName} (clients.google_folder)`
   }
   if (statusText(workflow) === "collection student's data") {
     const requiredIssues = requiredClientDataIssues(workflow)
@@ -1043,12 +1247,25 @@ function taskReplyMarkup(workflow: ResumeWorkflowRecord) {
   const status = statusText(workflow)
   const buttons: Array<Array<{ text: string; callback_data: string }>> = []
   if (!missingAdvanceFields(workflow).length) {
-    buttons.push([
-      {
-        text: 'Перейти к следующему шагу',
-        callback_data: callbackData('advance', workflow.id, status)
-      }
-    ])
+    if (isApprovalStatus(status)) {
+      buttons.push([
+        {
+          text: 'Согласовать',
+          callback_data: callbackData('advance', workflow.id, status)
+        },
+        {
+          text: 'Вернуть с комментарием',
+          callback_data: callbackData('reject', workflow.id, status)
+        }
+      ])
+    } else {
+      buttons.push([
+        {
+          text: 'Перейти к следующему шагу',
+          callback_data: callbackData('advance', workflow.id, status)
+        }
+      ])
+    }
   }
   buttons.push([
     {
@@ -1058,6 +1275,23 @@ function taskReplyMarkup(workflow: ResumeWorkflowRecord) {
   ])
   return {
     inline_keyboard: buttons
+  }
+}
+
+function approvalReplyMarkup(workflow: ResumeWorkflowRecord) {
+  const status = statusText(workflow)
+  if (!isApprovalStatus(status) || missingAdvanceFields(workflow).length) return undefined
+  return {
+    inline_keyboard: [[
+      {
+        text: 'Согласовать',
+        callback_data: callbackData('advance', workflow.id, status)
+      },
+      {
+        text: 'Вернуть с комментарием',
+        callback_data: callbackData('reject', workflow.id, status)
+      }
+    ]]
   }
 }
 
@@ -1236,6 +1470,41 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
   }
 }
 
+async function rejectWorkflow(workflow: ResumeWorkflowRecord, repository: ResumeWorkflowRepository, options: ResumeWorkflowOptions = {}): Promise<ResumeWorkflowResult> {
+  const testMode = resumeWorkflowTestMode()
+  const actor = resolveActorForWorkflow(options.actor, workflow)
+  const before = statusText(workflow)
+  ensureExpectedStatus(workflow, options.expectedStatus)
+  ensureActorCanReject(workflow, actor)
+  const comment = ensureValidRejectionComment(options.rejectionComment)
+  const patch = rejectionTargetPatch(workflow, actor, comment)
+  const after = patch.status ?? before
+  workflow = await repository.patchResumeWorkflow(workflow.id, {
+    ...patch,
+    lastWorkflowError: '',
+    workflowTrace: appendTrace(workflow, `${before} -> ${after} rejected`, actor)
+  })
+
+  return {
+    found: true,
+    chatId: normalizeText(workflow.commonChatId),
+    testMode,
+    completed: false,
+    stopped: false,
+    client: { id: workflow.clientId, name: workflow.clientName },
+    workflow,
+    actor,
+    transitions: [`${before} -> ${after}`],
+    notifications: buildTransitionNotifications(workflow, testMode),
+    message: [
+      `Резюме для ${workflow.clientName} возвращено на доработку.`,
+      `Комментарий: ${comment}`,
+      '',
+      statusInstruction(workflow)
+    ].join('\n')
+  }
+}
+
 async function resumeWorkflow(chatId: string, repository: ResumeWorkflowRepository, options: ResumeWorkflowOptions = {}): Promise<ResumeWorkflowResult> {
   const testMode = resumeWorkflowTestMode()
   const workflow = await repository.getResumeWorkflowByTelegramChatId(chatId, { ensure: true })
@@ -1263,6 +1532,33 @@ async function resumeWorkflow(chatId: string, repository: ResumeWorkflowReposito
   })
 }
 
+async function rejectResumeWorkflow(chatId: string, repository: ResumeWorkflowRepository, options: ResumeWorkflowOptions = {}): Promise<ResumeWorkflowResult> {
+  const testMode = resumeWorkflowTestMode()
+  const workflow = await repository.getResumeWorkflowByTelegramChatId(chatId, { ensure: true })
+  if (!workflow) {
+    return {
+      found: false,
+      chatId,
+      testMode,
+      actor: resolveGlobalActor(options.actor),
+      message: [
+        'Для этого Telegram-чата ученик не найден.',
+        '',
+        `ID чата: ${chatId}`,
+        'Привяжи этот ID чата к ученику в админке NocoDB.'
+      ].join('\n')
+    }
+  }
+
+  return await rejectWorkflow(workflow, repository, {
+    ...options,
+    actor: {
+      ...options.actor,
+      chatId: options.actor?.chatId || chatId
+    }
+  })
+}
+
 async function resumeWorkflowById(workflowId: number, repository: ResumeWorkflowRepository, options: ResumeWorkflowOptions = {}): Promise<ResumeWorkflowResult> {
   if (!repository.getResumeWorkflowById) {
     throw new Error('Repository does not support resume workflow lookup by id.')
@@ -1278,6 +1574,23 @@ async function resumeWorkflowById(workflowId: number, repository: ResumeWorkflow
     }
   }
   return await advanceWorkflow(workflow, repository, options)
+}
+
+async function rejectResumeWorkflowById(workflowId: number, repository: ResumeWorkflowRepository, options: ResumeWorkflowOptions = {}): Promise<ResumeWorkflowResult> {
+  if (!repository.getResumeWorkflowById) {
+    throw new Error('Repository does not support resume workflow lookup by id.')
+  }
+  const workflow = await repository.getResumeWorkflowById(workflowId)
+  if (!workflow) {
+    return {
+      found: false,
+      chatId: '',
+      testMode: resumeWorkflowTestMode(),
+      actor: resolveGlobalActor(options.actor),
+      message: 'Workflow резюме не найден.'
+    }
+  }
+  return await rejectWorkflow(workflow, repository, options)
 }
 
 async function resetResumeWorkflowForTest(chatId: string, repository: ResumeWorkflowRepository): Promise<ResumeWorkflowResult> {
@@ -1304,6 +1617,8 @@ async function resetResumeWorkflowForTest(chatId: string, repository: ResumeWork
     ruVersionUrl: '',
     additionalVersions: '',
     kirasComments: '',
+    lastRejectionComment: '',
+    rejectionHistory: '',
     lastResponsible: 'student',
     lastWorkflowError: '',
     workflowTrace: appendTrace(workflow, 'reset test workflow')
@@ -1644,6 +1959,8 @@ module.exports = {
   nextActionForStatus,
   publicWorkflow,
   requiredClientDataIssues,
+  rejectResumeWorkflow,
+  rejectResumeWorkflowById,
   resetResumeWorkflowForTest,
   resolveActorForWorkflow,
   resolveGlobalActor,
