@@ -148,7 +148,7 @@ Profile Filler routes:
 ## Connection Inviter
 
 The LinkedIn table shows readiness, primary stack, the latest connection count,
-weekly limit, today's 70/30 quotas, progress, and recent invitation history.
+daily limit, today's 70/30 quotas, progress, and recent invitation history.
 The admin starts one manual weekday run. A missing stack pauses the run until a
 stack is saved, or the admin explicitly chooses recruiter-only safe mode.
 

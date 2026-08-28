@@ -35,11 +35,6 @@ export function createMemoryConnectionInviterStore() {
     async listHistory(platformAccountId: number, limit = 100) {
       return [...history.values()].filter(row => row.platformAccountId === platformAccountId)
         .sort((a, b) => b.discoveredAt.localeCompare(a.discoveredAt)).slice(0, limit).map(copy)
-    },
-    async weekSent(platformAccountId: number, weekKey: string) {
-      return [...history.values()].filter(row => row.platformAccountId === platformAccountId &&
-        Boolean(row.sentAt && row.sentAt >= weekKey) && ['sent', 'accepted', 'uncertain'].includes(row.status))
-        .map(copy)
     }
   }
 }

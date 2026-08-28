@@ -1,8 +1,7 @@
 import { verifyConnectionAccount } from './account.mts'
 import { discoverCandidates } from './discovery.ts'
 import { connectionError, connectionErrorCode } from './errors.ts'
-import { dailyAudienceQuota, dateParts, weekdayQuota, weeklyAudienceTargets,
-  weeklyInvitationLimit } from './limits.ts'
+import { dailyAudienceTargets, dailyInvitationLimit, dateParts } from './limits.ts'
 import { reconcileInvitations } from './pending.ts'
 import { publishInvitations } from './publisher.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
@@ -29,24 +28,18 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
     run.connectionCount = await verifyConnectionAccount(runtime, run)
     runtime.logger.event('account_verification', 'succeeded', { ...details,
       connectionCount: run.connectionCount })
-    run.weeklyLimit = weeklyInvitationLimit(run.connectionCount)
     const date = dateParts(runtime.now(), runtime.timeZone)
-    run.dailyQuota = weekdayQuota(run.weeklyLimit, date.isoWeekday)
-    if (!run.dailyQuota) throw connectionError('connection_day_not_scheduled',
+    if (date.isoWeekday < 1 || date.isoWeekday > 5) throw connectionError('connection_day_not_scheduled',
       'Manual invitations run only from Monday to Friday.')
-    const planned = dailyAudienceQuota(run.weeklyLimit, date.isoWeekday)
-    const sent = await runtime.store.weekSent(run.platformAccountId, run.weekKey)
-    const targets = weeklyAudienceTargets(run.weeklyLimit)
-    const used = { recruiter: sent.filter((item: any) => item.audience === 'recruiter').length,
-      technical: sent.filter((item: any) => item.audience === 'technical').length }
+    run.dailyLimit = dailyInvitationLimit(run.connectionCount)
+    const planned = dailyAudienceTargets(run.dailyLimit)
     run.audienceQuota = {
-      recruiter: Math.max(0, Math.min(planned.recruiter, targets.recruiter - used.recruiter)),
-      technical: run.safeRecruiterOnly ? 0 : Math.max(0,
-        Math.min(planned.technical, targets.technical - used.technical))
+      recruiter: planned.recruiter,
+      technical: run.safeRecruiterOnly ? 0 : planned.technical
     }
     run.dailyQuota = run.audienceQuota.recruiter + run.audienceQuota.technical
     runtime.logger.event('quota_plan', 'succeeded', { ...details,
-      connectionCount: run.connectionCount, weeklyLimit: run.weeklyLimit,
+      connectionCount: run.connectionCount, dailyLimit: run.dailyLimit,
       dailyQuota: run.dailyQuota, recruiterQuota: run.audienceQuota.recruiter,
       technicalQuota: run.audienceQuota.technical, safeRecruiterOnly: run.safeRecruiterOnly })
     run.stage = 'searching'; await save(run)

@@ -50,7 +50,7 @@ async function run() {
     await page.getByTestId('connection-run-203').click()
     await cell.getByText('Completed', { exact: true }).waitFor()
     assert.match(await cell.innerText(), /320 connections/)
-    assert.match(await cell.innerText(), /2 recruiters/)
+    assert.match(await cell.innerText(), /8 recruiters/)
     assert.match(await cell.innerText(), /Connection history/)
   } finally {
     if (browser) await browser.close(); await stop(frontend); await stop(backend)

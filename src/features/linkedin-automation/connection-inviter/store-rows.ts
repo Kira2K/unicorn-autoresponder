@@ -1,4 +1,5 @@
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
+import { dailyInvitationLimit } from './limits.ts'
 
 const parse = (value: unknown, fallback: any) => {
   try { return typeof value === 'string' ? JSON.parse(value) : value ?? fallback } catch { return fallback }
@@ -13,7 +14,7 @@ export function runRow(run: ConnectionRun) {
     stack_id: run.stackId ?? null, stack: run.stack ?? null,
     safe_recruiter_only: run.safeRecruiterOnly, local_date: run.localDate, week_key: run.weekKey,
     status: run.status, stage: run.stage, connection_count: run.connectionCount ?? null,
-    weekly_limit: run.weeklyLimit ?? null, daily_quota: run.dailyQuota ?? null,
+    weekly_limit: null, daily_quota: run.dailyQuota ?? null,
     audience_quota_json: JSON.stringify(run.audienceQuota), counters_json: JSON.stringify(run.counters),
     used_search_keys_json: JSON.stringify(run.usedSearchKeys), error_code: run.errorCode ?? null,
     created_at: run.createdAt, updated_at: run.updatedAt, finished_at: run.finishedAt ?? null
@@ -23,7 +24,7 @@ const number = (value: unknown) => value === null || value === undefined || valu
   ? undefined : Number(value)
 
 export function runFromRow(row: any): ConnectionRun {
-  const count = number(row.connection_count); const weekly = number(row.weekly_limit)
+  const count = number(row.connection_count)
   const daily = number(row.daily_quota)
   return {
     runId: String(row.run_id), runKey: String(row.run_key),
@@ -34,7 +35,7 @@ export function runFromRow(row: any): ConnectionRun {
     safeRecruiterOnly: Boolean(row.safe_recruiter_only), localDate: String(row.local_date),
     weekKey: String(row.week_key), status: row.status, stage: String(row.stage ?? ''),
     ...(count !== undefined ? { connectionCount: count } : {}),
-    ...(weekly !== undefined ? { weeklyLimit: weekly } : {}),
+    ...(count !== undefined ? { dailyLimit: dailyInvitationLimit(count) } : {}),
     ...(daily !== undefined ? { dailyQuota: daily } : {}),
     audienceQuota: parse(row.audience_quota_json, { recruiter: 0, technical: 0 }),
     counters: parse(row.counters_json, { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0 }),

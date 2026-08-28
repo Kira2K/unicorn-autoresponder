@@ -24,11 +24,11 @@ export function fixture(options: { stack?: string; sendFailure?: any } = { stack
       reads += 1
       const template = CONNECTION_SEARCH_CATALOG.find(item =>
         renderSearchKeywords(item, options.stack, !options.stack) === keywords)!
-      person += 1
-      return { items: [{ id: `ACo${person}`, display_name: `Person ${person}`,
+      return { items: Array.from({ length: 4 }, () => { person += 1; return {
+        id: `ACo${person}`, display_name: `Person ${person}`,
         headline: template.audience === 'recruiter' ? 'Technical Recruiter' :
           `${options.stack} Software Engineer`, location: `${template.city}, Region`,
-        network_distance: 2 }] }
+        network_distance: 2 } }) }
     },
     async listPendingInvitations(_accountId: string, offset = 0) { reads += 1
       return { items: [...pending].slice(offset).map(user_id => ({ user_id })) } },

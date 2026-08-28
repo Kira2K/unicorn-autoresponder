@@ -37,9 +37,9 @@ export function createMockConnectionInviterService(): ConnectionInviterService {
         safeRecruiterOnly: !stack && input.safeRecruiterOnly === true, localDate: now.slice(0, 10),
         weekKey: now.slice(0, 10), status: !stack && !input.safeRecruiterOnly ? 'paused' : 'succeeded',
         stage: !stack && !input.safeRecruiterOnly ? 'stack_required' : 'completed',
-        connectionCount: 320, weeklyLimit: 11, dailyQuota: stack ? 3 : 2,
-        audienceQuota: { recruiter: 2, technical: stack ? 1 : 0 },
-        counters: { searched: 2, discovered: 20, eligible: 6, sent: stack ? 3 : 2, skipped: 4 },
+        connectionCount: 320, dailyLimit: 11, dailyQuota: stack ? 11 : 8,
+        audienceQuota: { recruiter: 8, technical: stack ? 3 : 0 },
+        counters: { searched: 5, discovered: 20, eligible: 11, sent: stack ? 11 : 8, skipped: 4 },
         usedSearchKeys: ['recruiter-berlin', ...(stack ? ['technical-barcelona'] : [])],
         createdAt: now, updatedAt: now, finishedAt: now
       }

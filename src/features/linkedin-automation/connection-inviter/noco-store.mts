@@ -70,12 +70,6 @@ export function createConnectionInviterStore(client = createNocoClient({
     async listHistory(platformAccountId: number, limit = 100) {
       return (await client.fetchRecords((await tables()).history, limit,
         { where: `(platform_account_id,eq,${platformAccountId})`, sort: '-discovered_at' })).map(historyFromRow)
-    },
-    async weekSent(platformAccountId: number, weekKey: string) {
-      const rows = await client.fetchRecords((await tables()).history, 1000,
-        { where: `(platform_account_id,eq,${platformAccountId})~and(` +
-          `(sent_at,ge,exactDate,${weekKey} 00:00:00))` })
-      return rows.map(historyFromRow).filter((row: any) => ['sent', 'accepted', 'uncertain'].includes(row.status))
     }
   }
 }

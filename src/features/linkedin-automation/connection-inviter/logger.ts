@@ -9,7 +9,7 @@ export const NOOP_CONNECTION_LOGGER: ConnectionLogger = { event() {} }
 const SAFE_KEYS = new Set([
   'operationId', 'operation', 'level', 'durationMs', 'attempt', 'httpStatus', 'page', 'count',
   'candidateCount', 'eligibleCount', 'skippedCount', 'pendingCount', 'activeCount', 'acceptedCount',
-  'connectionCount', 'weeklyLimit', 'dailyQuota', 'recruiterQuota', 'technicalQuota', 'searchKey',
+  'connectionCount', 'dailyLimit', 'dailyQuota', 'recruiterQuota', 'technicalQuota', 'searchKey',
   'audience', 'reasonCode', 'errorCode', 'runId', 'platformAccountId', 'runStatus', 'runStage',
   'itemStatus', 'delayMs', 'sentCount', 'safeRecruiterOnly', 'created', 'cursorPresent'
 ])

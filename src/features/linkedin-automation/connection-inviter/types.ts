@@ -19,7 +19,7 @@ export type ConnectionRun = {
   status: ConnectionRunStatus
   stage: string
   connectionCount?: number
-  weeklyLimit?: number
+  dailyLimit?: number
   dailyQuota?: number
   audienceQuota: Record<SearchAudience, number>
   counters: { searched: number; discovered: number; eligible: number; sent: number; skipped: number }

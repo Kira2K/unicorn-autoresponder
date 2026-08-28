@@ -9,8 +9,8 @@ export const connectionRunActive = run => run?.status === 'running'
 export const connectionRunLabel = run => run ? LABELS[run.status] || run.status : 'Not run today'
 
 export function connectionQuotaLabel(run) {
-  if (!run?.weeklyLimit) return 'Weekly quota not calculated'
-  return `${run.connectionCount} connections · ${run.weeklyLimit}/week · ${run.dailyQuota || 0} today`
+  if (!run?.dailyLimit) return 'Daily quota not calculated'
+  return `${run.connectionCount} connections · ${run.dailyLimit}/day · ${run.dailyQuota || 0} today`
 }
 
 export function connectionAudienceLabel(run) {
