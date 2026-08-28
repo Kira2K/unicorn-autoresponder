@@ -7,7 +7,7 @@ async function run() {
     0: [{ user: { id: 'one' } }, { user: { id: 'two' } }],
     2: [{ user: { id: 'three' } }], 3: []
   }
-  const runtime: any = { adapter: () => ({
+  const runtime: any = { logger: { event() {} }, adapter: () => ({
     async listPendingInvitations(_accountId: string, offset: number) {
       offsets.push(offset); return { data: pages[offset] }
     }

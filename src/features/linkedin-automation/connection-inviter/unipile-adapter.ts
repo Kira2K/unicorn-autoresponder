@@ -1,5 +1,7 @@
 import * as httpClientModule from '../../../integrations/unipile/http-client.ts'
+import { randomUUID } from 'node:crypto'
 import { createUnipileRequestScheduler } from '../../../integrations/unipile/request-scheduler.ts'
+import { NOOP_CONNECTION_LOGGER, type ConnectionLogger } from './logger.ts'
 
 const { createUnipileHttpClient } = httpClientModule as unknown as {
   createUnipileHttpClient(options?: any): any
@@ -24,39 +26,58 @@ export function pendingPersonId(value: any): string {
   return String(person?.provider_id ?? person?.user_id ?? person?.id ?? value?.user_id ?? '').trim()
 }
 
-export function createConnectionUnipileAdapter(options: { http?: any; scheduler?: any } = {}) {
+export function createConnectionUnipileAdapter(options: {
+  http?: any; scheduler?: any; logger?: ConnectionLogger
+} = {}) {
   const http = options.http ?? createUnipileHttpClient()
   const scheduler = options.scheduler ?? sharedScheduler
-  const read = (method: 'GET' | 'POST', path: string, body?: unknown) =>
-    scheduler.run(() => http.request(method, path, body))
+  const logger = options.logger ?? NOOP_CONNECTION_LOGGER
+  async function request(operation: string, method: 'GET' | 'POST', path: string, body?: unknown) {
+    const started = Date.now(); const operationId = randomUUID()
+    logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt: 1 })
+    try {
+      const value = await scheduler.run(() => http.request(method, path, body))
+      logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId,
+        attempt: 1, durationMs: Date.now() - started, httpStatus: method === 'POST' ? 201 : 200 })
+      return value
+    } catch (error: any) {
+      logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId,
+        attempt: 1, durationMs: Date.now() - started,
+        errorCode: String(error?.code ?? 'unipile_request_failed') }); throw error
+    }
+  }
   return {
     getAccount(accountId: string) {
-      return read('GET', `/accounts/${encodeURIComponent(accountId)}`)
+      return request('account_read', 'GET', `/accounts/${encodeURIComponent(accountId)}`)
     },
     getOwnProfile(accountId: string) {
-      return read('GET', `/${encodeURIComponent(accountId)}/users/me?` +
+      return request('own_profile_read', 'GET', `/${encodeURIComponent(accountId)}/users/me?` +
         new URLSearchParams({ variant: 'linkedin_classic' }))
     },
     getProfile(accountId: string, personId: string) {
-      return read('GET', `/${encodeURIComponent(accountId)}/users/${encodeURIComponent(personId)}?` +
+      return request('candidate_profile_read', 'GET',
+        `/${encodeURIComponent(accountId)}/users/${encodeURIComponent(personId)}?` +
         new URLSearchParams({ variant: 'linkedin_classic' }))
     },
     listRelations(accountId: string, cursor?: string) {
       const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
-      return read('GET', `/${encodeURIComponent(accountId)}/users/me/relations${query}`)
+      return request('relations_read', 'GET',
+        `/${encodeURIComponent(accountId)}/users/me/relations${query}`)
     },
     searchPeople(accountId: string, keywords: string, cursor?: string) {
       const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
-      return read('POST', `/${encodeURIComponent(accountId)}/linkedin/search/people${query}`,
+      return request('people_search', 'POST',
+        `/${encodeURIComponent(accountId)}/linkedin/search/people${query}`,
         { keywords, network_distance: [2] })
     },
     listPendingInvitations(accountId: string, offset = 0) {
       const query = new URLSearchParams({ type: 'sent', offset: String(offset) })
-      return read('GET', `/${encodeURIComponent(accountId)}/users/me/relation-requests?${query}`)
+      return request('pending_invitations_read', 'GET',
+        `/${encodeURIComponent(accountId)}/users/me/relation-requests?${query}`)
     },
     sendInvitation(accountId: string, personId: string) {
-      return scheduler.run(() => http.request('POST',
-        `/${encodeURIComponent(accountId)}/users/me/relation-requests`, { user_id: personId }))
+      return request('invitation_write', 'POST',
+        `/${encodeURIComponent(accountId)}/users/me/relation-requests`, { user_id: personId })
     }
   }
 }

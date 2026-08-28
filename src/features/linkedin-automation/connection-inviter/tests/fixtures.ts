@@ -38,6 +38,7 @@ export function fixture(options: { stack?: string; sendFailure?: any } = { stack
     }
   }
   return { adapter, repository, store: createMemoryConnectionInviterStore(),
+    logger: { event() {} },
     metrics: { get sends() { return sends }, get reads() { return reads } } }
 }
 

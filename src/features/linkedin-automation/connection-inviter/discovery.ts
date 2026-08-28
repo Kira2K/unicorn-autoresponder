@@ -21,12 +21,23 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
     keys += 1; run.usedSearchKeys.push(template.sourceKey)
     let cursor = ''
     for (let page = 0; page < 3; page += 1) {
-      const response = await runtime.adapter().searchPeople(run.accountId,
-        renderSearchKeywords(template, run.stack, run.safeRecruiterOnly), cursor || undefined)
+      const log = { runId: run.runId, platformAccountId: run.platformAccountId,
+        audience, searchKey: template.sourceKey, page: page + 1 }
+      runtime.logger.event('candidate_search', 'started', log)
+      let response: any
+      try {
+        response = await runtime.adapter().searchPeople(run.accountId,
+          renderSearchKeywords(template, run.stack, run.safeRecruiterOnly), cursor || undefined)
+      } catch (error: any) {
+        runtime.logger.event('candidate_search', 'failed', { ...log,
+          errorCode: String(error?.code ?? 'candidate_search_failed') })
+        throw error
+      }
       run.counters.searched += 1
+      let pageEligible = 0; let pageSkipped = 0
       for (const raw of connectionPageItems(response)) {
         const candidate = parseConnectionCandidate(raw); run.counters.discovered += 1
-        if (!candidate.personId) { run.counters.skipped += 1; continue }
+        if (!candidate.personId) { run.counters.skipped += 1; pageSkipped += 1; continue }
         const decision = evaluateCandidate(candidate, template, run.stack, run.safeRecruiterOnly)
         const timestamp = runtime.now().toISOString()
         const history: ConnectionHistoryItem = {
@@ -38,11 +49,17 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
           status: decision.eligible ? 'eligible' : 'skipped', reasonCode: decision.reasonCode,
           discoveredAt: timestamp, updatedAt: timestamp
         }
-        if (!await runtime.store.claimHistory(history)) { run.counters.skipped += 1; continue }
-        if (decision.eligible) { queues[audience].push(history); run.counters.eligible += 1 }
-        else run.counters.skipped += 1
+        if (!await runtime.store.claimHistory(history)) {
+          run.counters.skipped += 1; pageSkipped += 1; continue
+        }
+        if (decision.eligible) {
+          queues[audience].push(history); run.counters.eligible += 1; pageEligible += 1
+        } else { run.counters.skipped += 1; pageSkipped += 1 }
       }
       cursor = connectionNextCursor(response)
+      runtime.logger.event('candidate_search', 'succeeded', { ...log,
+        candidateCount: connectionPageItems(response).length, eligibleCount: pageEligible,
+        skippedCount: pageSkipped, cursorPresent: Boolean(cursor) })
       if (!cursor || queues[audience].length >= quota[audience] * 2) break
     }
     await save(run)

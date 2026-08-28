@@ -162,6 +162,12 @@ Connection Inviter routes:
 - `PUT /api/admin/linkedin/accounts/:id/connection-stack`
 - `POST /api/admin/linkedin/accounts/:id/connection-runs`
 
+Structured Connection Inviter logs are written to
+`logs/linkedin-connections/connection-inviter-<pid>.jsonl`. They contain stages,
+statuses, durations, error codes, internal platform/run IDs, and aggregate
+counters. LinkedIn/Unipile account IDs, person IDs, names, headlines, search
+text, API keys, and request bodies are intentionally excluded.
+
 ## Tests
 
 LinkedIn checks are isolated from the legacy web-console and support-bot tests:
