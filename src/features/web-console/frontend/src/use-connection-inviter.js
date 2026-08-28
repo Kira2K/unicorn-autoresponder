@@ -12,30 +12,34 @@ export function useConnectionInviter() {
   const loading = ref({})
   const stackDrafts = ref({})
   const timers = new Map()
+  let readinessQueue = Promise.resolve()
   const active = computed(() => runs.value.some(run => run.status === 'running'))
   const runFor = account => latestConnectionRun(runs.value, account.platformAccountId)
   const stackFor = account => readiness.value[account.platformAccountId]?.stack || account.primaryStack || ''
-
   async function load() {
     try {
-      const [runResponse, stackResponse] = await Promise.all([
-        api.adminConnectionRuns(), api.adminConnectionStacks()
-      ])
+      const runResponse = await api.adminConnectionRuns()
+      const stackResponse = await api.adminConnectionStacks()
       runs.value = runResponse.runs || []; stacks.value = stackResponse.stacks || []
       if (errors.value.page) errors.value = { ...errors.value, page: '' }
     } catch (error) { errors.value = { ...errors.value, page: error.message } }
   }
-
-  async function ensure(account) {
+  function ensure(account) {
     const id = account.platformAccountId
     if (readiness.value[id]) return
-    try {
-      const result = await api.adminConnectionReadiness(id)
-      readiness.value = { ...readiness.value, [id]: result }
-      if (result.stackId) stackDrafts.value = { ...stackDrafts.value, [id]: result.stackId }
-    } catch (error) { errors.value = { ...errors.value, [id]: error.message } }
+    const verified = account.unipileAccountId && account.unipileAccountStatus === 'running' &&
+      account.lastVerifiedAt
+    if (!verified) return
+    readinessQueue = readinessQueue.then(async () => {
+      if (readiness.value[id]) return
+      try {
+        const result = await api.adminConnectionReadiness(id)
+        readiness.value = { ...readiness.value, [id]: result }
+        if (result.stackId) stackDrafts.value = { ...stackDrafts.value, [id]: result.stackId }
+      } catch (error) { errors.value = { ...errors.value, [id]: error.message } }
+    })
+    return readinessQueue
   }
-
   async function poll(account, runId) {
     try {
       const run = await api.adminConnectionRun(runId)
