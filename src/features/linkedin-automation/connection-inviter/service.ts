@@ -5,14 +5,17 @@ import { createConnectionLogger, logged } from './logger.ts'
 import { createConnectionInviterStore } from './noco-store.mts'
 import { createConnectionUnipileAdapter } from './unipile-adapter.ts'
 import { makeRun, publicHistory, publicRun } from './run-model.ts'
+import { requestRunStop } from './run-control.ts'
+import { failedRunCanRetry, prepareRunRetry } from './retry-policy.ts'
 import type { ConnectionRuntime } from './runtime.ts'
 import type { ConnectionRun } from './types.ts'
-
 export function createConnectionInviterService(options: any = {}) {
   const repository = options.repository
   if (!repository) throw new Error('Connection Inviter requires a LinkedIn repository.')
   const logger = options.logger ?? createConnectionLogger()
   let adapter: any
+  const stopRequests = new Set<string>(); const activeRuns = new Map<string, ConnectionRun>()
+  const running = new Set<string>()
   const runtime: ConnectionRuntime = {
     store: options.store ?? createConnectionInviterStore(), repository,
     adapter: () => adapter ??= options.adapter ?? createConnectionUnipileAdapter({ logger }),
@@ -20,15 +23,19 @@ export function createConnectionInviterService(options: any = {}) {
     timeZone: options.timeZone ?? process.env.LINKEDIN_CONNECTION_TIME_ZONE ?? 'Europe/Moscow',
     random: options.random ?? Math.random,
     sleep: options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))),
+    stopRequested: runId => stopRequests.has(runId),
     logger
   }
-  const running = new Set<string>()
   async function save(run: ConnectionRun) {
     run.updatedAt = runtime.now().toISOString(); await runtime.store.updateRun(run)
     logger.event('run_state_persist', 'succeeded', { runId: run.runId,
       platformAccountId: run.platformAccountId, runStatus: run.status, runStage: run.stage })
   }
-  const execute = (run: ConnectionRun) => executeConnectionRun(runtime, run, running, save)
+  const execute = async (run: ConnectionRun) => {
+    activeRuns.set(run.runId, run)
+    try { await executeConnectionRun(runtime, run, running, save) }
+    finally { activeRuns.delete(run.runId); stopRequests.delete(run.runId) }
+  }
   return {
     async list() { return logged(logger, 'runs_list', {}, async () =>
       (await runtime.store.listRuns(100)).map(publicRun)) },
@@ -67,11 +74,15 @@ export function createConnectionInviterService(options: any = {}) {
         const existing = await runtime.store.getRunByKey(`${platformAccountId}:${date.localDate}`)
         const context = await resolveContext(runtime, platformAccountId)
         if (existing) {
-          if (existing.status === 'paused' && (context.stack || input.safeRecruiterOnly)) {
-            existing.stackId = context.stackId; existing.stack = context.stack
-            existing.safeRecruiterOnly = !context.stack && input.safeRecruiterOnly === true
-            existing.status = 'running'; existing.stage = 'queued'; existing.errorCode = undefined
-            existing.finishedAt = undefined; await save(existing); void execute(existing)
+          const ready = Boolean(context.stack || input.safeRecruiterOnly)
+          const history = existing.status === 'failed'
+            ? await runtime.store.listHistory(platformAccountId, 1000) : []
+          const retry = ready && failedRunCanRetry(existing, history)
+          if ((existing.status === 'paused' && ready) || retry) {
+            prepareRunRetry(existing, context, input.safeRecruiterOnly === true)
+            if (retry) logger.event('run_retry', 'succeeded', { runId: existing.runId,
+              platformAccountId, reasonCode: 'safe_zero_send_retry' })
+            await save(existing); void execute(existing)
           }
           return publicRun(existing)
         }
@@ -83,6 +94,7 @@ export function createConnectionInviterService(options: any = {}) {
         return publicRun(created.run)
       })
     },
+    async stopRun(runId: string) { return requestRunStop(runtime, activeRuns, stopRequests, runId, save) },
     stop() {}
   }
 }

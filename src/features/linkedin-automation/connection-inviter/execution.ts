@@ -4,6 +4,7 @@ import { connectionErrorCode } from './errors.ts'
 import { dailyAudienceTargets, dailyInvitationLimit } from './limits.ts'
 import { reconcileInvitations } from './pending.ts'
 import { publishInvitations } from './publisher.ts'
+import { finishRunStop } from './run-control.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionRun } from './types.ts'
 
@@ -25,6 +26,7 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
     }
     run.stage = 'verifying_account'; await save(run)
     await reconcileInvitations(runtime, run.accountId, run.platformAccountId)
+    if (await finishRunStop(runtime, run, save)) return
     run.connectionCount = await verifyConnectionAccount(runtime, run)
     runtime.logger.event('account_verification', 'succeeded', { ...details,
       connectionCount: run.connectionCount })
@@ -39,17 +41,22 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
       connectionCount: run.connectionCount, dailyLimit: run.dailyLimit,
       dailyQuota: run.dailyQuota, recruiterQuota: run.audienceQuota.recruiter,
       technicalQuota: run.audienceQuota.technical, safeRecruiterOnly: run.safeRecruiterOnly })
+    if (await finishRunStop(runtime, run, save)) return
     run.stage = 'searching'; await save(run)
     const queues = await discoverCandidates(runtime, run, run.audienceQuota, save)
     runtime.logger.event('candidate_discovery', 'succeeded', { ...details,
       candidateCount: queues.recruiter.length + queues.technical.length })
+    if (await finishRunStop(runtime, run, save)) return
     run.stage = 'sending'; await save(run)
     await publishInvitations(runtime, run, queues, run.audienceQuota, save)
+    if (await finishRunStop(runtime, run, save)) return
     run.status = 'succeeded'; run.stage = run.counters.sent ? 'completed' : 'completed_no_candidates'
     run.finishedAt = runtime.now().toISOString(); await save(run)
     runtime.logger.event('run', 'succeeded', { ...details, sentCount: run.counters.sent,
       skippedCount: run.counters.skipped, runStage: run.stage })
   } catch (error) {
+    if (runtime.stopRequested(run.runId)) runtime.logger.event('run_stop', 'failed', { ...details,
+      errorCode: connectionErrorCode(error), reasonCode: 'in_flight_operation_failed' })
     if (String(run.status) !== 'uncertain') run.status = 'failed'
     run.stage = String(run.status) === 'uncertain' ? 'readback_required' : 'failed'
     run.errorCode = connectionErrorCode(error); run.finishedAt = runtime.now().toISOString()

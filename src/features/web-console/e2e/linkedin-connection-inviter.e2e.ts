@@ -48,6 +48,7 @@ async function run() {
     await cell.getByText('Readiness: ready').waitFor()
     page.once('dialog', (dialog: any) => dialog.accept())
     await page.getByTestId('connection-run-203').click()
+    await page.getByTestId('connection-stop-203').waitFor()
     await cell.getByText('Completed', { exact: true }).waitFor()
     assert.match(await cell.innerText(), /320 connections/)
     assert.match(await cell.innerText(), /8 recruiters/)

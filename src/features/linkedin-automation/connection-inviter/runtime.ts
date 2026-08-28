@@ -7,6 +7,7 @@ export type ConnectionRuntime = {
   timeZone: string
   random(): number
   sleep(milliseconds: number): Promise<void>
+  stopRequested(runId: string): boolean
   logger: import('./logger.ts').ConnectionLogger
 }
 

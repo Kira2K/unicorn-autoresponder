@@ -38,6 +38,10 @@ export function registerConnectionInviterRoutes(options: {
       res.json(run)
     } catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
   })
+  app.post('/api/admin/linkedin/connection-runs/:runId/stop', requireAdmin, async (req, res) => {
+    try { res.status(202).json(await service.stopRun(String(req.params.runId))) }
+    catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
+  })
   app.get('/api/admin/linkedin/connection-stacks', requireAdmin, async (_req, res) => {
     try { res.json({ stacks: await service.stacks() }) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }

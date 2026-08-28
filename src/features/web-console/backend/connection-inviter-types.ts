@@ -7,5 +7,6 @@ export type ConnectionInviterService = {
   saveStack(platformAccountId: number, stackId: number): Promise<Record<string, unknown>>
   start(platformAccountId: number, input?: { safeRecruiterOnly?: boolean }):
     Promise<Record<string, unknown>>
+  stopRun(runId: string): Promise<Record<string, unknown>>
   stop?(): void
 }

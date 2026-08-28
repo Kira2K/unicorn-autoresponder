@@ -13,6 +13,7 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
   const positions = { recruiter: 0, technical: 0 }
   let keys = 0
   while (keys < 5) {
+    if (runtime.stopRequested(run.runId)) return queues
     const needs = (['recruiter', 'technical'] as const).filter(audience =>
       queues[audience].length < quota[audience] * 2 && positions[audience] < templates[audience].length)
     if (!needs.length) break
@@ -21,6 +22,7 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
     keys += 1; run.usedSearchKeys.push(template.sourceKey)
     let cursor = ''
     for (let page = 0; page < 3; page += 1) {
+      if (runtime.stopRequested(run.runId)) return queues
       const log = { runId: run.runId, platformAccountId: run.platformAccountId,
         audience, searchKey: template.sourceKey, page: page + 1 }
       runtime.logger.event('candidate_search', 'started', log)

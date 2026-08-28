@@ -168,6 +168,15 @@ statuses, durations, error codes, internal platform/run IDs, and aggregate
 counters. LinkedIn/Unipile account IDs, person IDs, names, headlines, search
 text, API keys, and request bodies are intentionally excluded.
 
+NocoDB tracks run `status`/`stage` and candidate `status`/`reason_code`. After
+each invitation POST, the candidate is stored as `uncertain` with
+`invitation_readback_pending`; only a successful pending-invitation read-back
+changes it to `sent`.
+
+`Stop` writes `stop_requested` to the run, prevents the next search or
+invitation POST, and ends as `stopped/stopped_by_admin`. An already-started POST
+always completes its pending-invitation read-back before the run stops.
+
 ## Tests
 
 LinkedIn checks are isolated from the legacy web-console and support-bot tests:

@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict')
 const { createConnectionInviterService } = require('../service.ts') as typeof import('../service.ts')
+const { failedRunCanRetry } = require('../retry-policy.ts') as typeof import('../retry-policy.ts')
+const { makeRun } = require('../run-model.ts') as typeof import('../run-model.ts')
 const { fixture, waitRun } = require('./fixtures.ts') as typeof import('./fixtures.ts')
 
 const clock = () => new Date('2026-08-24T09:00:00Z')
@@ -33,6 +35,49 @@ async function weekendRun() {
   const completed: any = await waitRun(service, started.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.dailyQuota, 11)
 }
-Promise.all([uncertain(), missingStack(), weekendRun()])
+async function safeFailedRetry() {
+  const test = fixture({ stack: 'Frontend' }); const readProfile = test.adapter.getOwnProfile
+  let first = true
+  test.adapter.getOwnProfile = async () => {
+    if (first) { first = false; throw new Error('temporary read failure') }
+    return readProfile()
+  }
+  const service = createConnectionInviterService({ ...test, now: clock, sleep: async () => undefined })
+  const initial: any = await service.start(7); const failed: any = await waitRun(service, initial.runId)
+  assert.equal(failed.status, 'failed'); assert.equal(test.metrics.sends, 0)
+  const retried: any = await service.start(7); const completed: any = await waitRun(service, retried.runId)
+  assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.searched, 5)
+  assert.equal(test.metrics.sends, 11)
+}
+async function stoppableRun() {
+  const test = fixture({ stack: 'Frontend' }); const waits: Array<() => void> = []; const events: any[] = []
+  const service = createConnectionInviterService({ ...test, now: clock, random: () => 0,
+    sleep: async () => new Promise<void>(resolve => waits.push(resolve)),
+    logger: { event(stage: string, status: string) { events.push({ stage, status }) } } })
+  const started: any = await service.start(7)
+  for (let count = 0; count < 100 && (!waits.length || test.metrics.sends !== 1); count += 1) {
+    await new Promise(resolve => setTimeout(resolve, 2))
+  }
+  assert.equal(test.metrics.sends, 1); assert.equal(waits.length, 1)
+  const requested: any = await service.stopRun(started.runId)
+  assert.equal(requested.status, 'running'); assert.equal(requested.stage, 'stop_requested')
+  waits.shift()!(); const stopped: any = await waitRun(service, started.runId)
+  assert.equal(stopped.status, 'stopped'); assert.equal(stopped.stage, 'stopped_by_admin')
+  assert.equal(test.metrics.sends, 1)
+  assert.equal(events.some(event => event.stage === 'run_stop' && event.status === 'succeeded'), true)
+}
+async function orphanedRunStop() {
+  const test = fixture({ stack: 'Frontend' })
+  const run = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test Client',
+    linkedinUrl: 'https://www.linkedin.com/in/test/', accountId: 'acc_test', stack: 'Frontend' },
+  clock(), 'Europe/Moscow', false)
+  await test.store.createRun(run)
+  const service = createConnectionInviterService({ ...test, now: clock })
+  const stopped: any = await service.stopRun(run.runId)
+  assert.equal(stopped.status, 'stopped'); assert.equal(stopped.stage, 'stopped_by_admin')
+}
+assert.equal(failedRunCanRetry({ runId: 'run-1', status: 'failed', counters: { sent: 0 } } as any,
+  [{ runId: 'run-1', status: 'eligible' } as any]), false)
+Promise.all([uncertain(), missingStack(), weekendRun(), safeFailedRetry(), stoppableRun(), orphanedRunStop()])
   .then(() => console.log('connection safety tests passed'))
   .catch((error: unknown) => { console.error(error); process.exitCode = 1 })

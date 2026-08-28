@@ -21,7 +21,8 @@ async function run() {
     },
     async start(id: number, input: any) {
       calls.push(['start', id, input.safeRecruiterOnly]); return job
-    }
+    },
+    async stopRun(id: string) { calls.push(['stop', id]); return job }
   }
   const app = createWebConsoleApp({ useMockData: true, connectionInviter: service })
   const server = app.listen(0, '127.0.0.1')
@@ -37,6 +38,7 @@ async function run() {
     const headers = { Cookie: admin, 'Content-Type': 'application/json' }
     assert.equal((await fetch(runs, { headers })).status, 200)
     assert.equal((await fetch(`${runs}/connections-1`, { headers })).status, 200)
+    assert.equal((await fetch(`${runs}/connections-1/stop`, { method: 'POST', headers })).status, 202)
     assert.equal((await fetch(`${base}/api/admin/linkedin/connection-stacks`, { headers })).status, 200)
     const account = `${base}/api/admin/linkedin/accounts/103`
     assert.equal((await fetch(`${account}/connection-readiness`, { headers })).status, 200)
@@ -45,7 +47,7 @@ async function run() {
       body: JSON.stringify({ stackId: 7 }) })).status, 200)
     assert.equal((await fetch(`${account}/connection-runs`, { method: 'POST', headers,
       body: JSON.stringify({ safeRecruiterOnly: true }) })).status, 202)
-    assert.deepEqual(calls, [['stack', 103, 7], ['start', 103, true]])
+    assert.deepEqual(calls, [['stop', 'connections-1'], ['stack', 103, 7], ['start', 103, true]])
   } finally { await new Promise<void>((resolve, reject) =>
     server.close((error?: Error) => error ? reject(error) : resolve())) }
 }

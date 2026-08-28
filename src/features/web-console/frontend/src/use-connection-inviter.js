@@ -1,6 +1,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
-import { latestConnectionRun } from './connection-inviter-view'
+import { stopAdminConnectionRun } from './connection-inviter-api'
+import { connectionRunConfirmation, connectionStopConfirmation, latestConnectionRun } from './connection-inviter-view'
 
 export function useConnectionInviter() {
   const runs = ref([])
@@ -52,8 +53,7 @@ export function useConnectionInviter() {
 
   async function start(account, safeRecruiterOnly = false) {
     const id = account.platformAccountId
-    const mode = safeRecruiterOnly ? 'recruiters only' : 'the planned 70/30 mix'
-    if (!window.confirm(`Send today's LinkedIn connection quota for ${account.clientName} (${mode})?`)) return
+    if (!window.confirm(connectionRunConfirmation(account, runFor(account), safeRecruiterOnly))) return
     loading.value = { ...loading.value, [id]: true }; errors.value = { ...errors.value, [id]: '' }
     try {
       const run = await api.startAdminConnectionRun(id, safeRecruiterOnly)
@@ -62,6 +62,18 @@ export function useConnectionInviter() {
       else history.value = { ...history.value,
         [id]: (await api.adminConnectionHistory(id)).items || [] }
     } catch (error) { errors.value = { ...errors.value, [id]: error.message || 'Connection run failed.' } }
+    finally { loading.value = { ...loading.value, [id]: false } }
+  }
+
+  async function stop(account) {
+    const id = account.platformAccountId; const run = runFor(account)
+    if (!run || !window.confirm(connectionStopConfirmation(account))) return
+    loading.value = { ...loading.value, [id]: true }; errors.value = { ...errors.value, [id]: '' }
+    try {
+      const stopped = await stopAdminConnectionRun(run.runId)
+      runs.value = [stopped, ...runs.value.filter(row => row.runId !== stopped.runId)]
+      if (stopped.status === 'running') void poll(account, stopped.runId)
+    } catch (error) { errors.value = { ...errors.value, [id]: error.message || 'Stop failed.' } }
     finally { loading.value = { ...loading.value, [id]: false } }
   }
 
@@ -80,5 +92,5 @@ export function useConnectionInviter() {
   onMounted(load)
   onUnmounted(() => { for (const timer of timers.values()) clearTimeout(timer) })
   return { active, ensure, errors, history, loading, load, readiness, runFor, runs, saveStack,
-    stackDrafts, stackFor, stacks, start }
+    stackDrafts, stackFor, stacks, start, stop }
 }

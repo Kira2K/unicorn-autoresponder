@@ -1,6 +1,6 @@
 import type { SearchAudience } from './catalog.ts'
 
-export type ConnectionRunStatus = 'running' | 'paused' | 'succeeded' | 'failed' | 'uncertain'
+export type ConnectionRunStatus = 'running' | 'paused' | 'succeeded' | 'failed' | 'uncertain' | 'stopped'
 export type ConnectionHistoryStatus = 'discovered' | 'eligible' | 'sending' | 'sent' | 'accepted' |
   'skipped' | 'failed' | 'uncertain'
 

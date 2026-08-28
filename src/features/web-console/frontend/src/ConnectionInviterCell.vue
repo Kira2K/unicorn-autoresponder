@@ -18,12 +18,16 @@ onMounted(() => props.inviter.ensure(props.account))
         :value="connectionRunLabel(run)" />
       <Button v-if="stack" label="Run today" size="small" severity="success"
         :loading="inviter.loading.value[account.platformAccountId]"
-        :disabled="disabled || run?.status === 'running' || run?.status === 'succeeded'"
+        :disabled="disabled || ['running', 'succeeded', 'stopped'].includes(run?.status)"
         :data-testid="`connection-run-${account.platformAccountId}`" @click="inviter.start(account)" />
+      <Button v-if="run?.status === 'running'" label="Stop" size="small" severity="danger" outlined
+        :loading="inviter.loading.value[account.platformAccountId]"
+        :data-testid="`connection-stop-${account.platformAccountId}`" @click="inviter.stop(account)" />
     </div>
     <small>Readiness: {{ readiness?.ready ? 'ready' : stack ? 'checking' : 'stack required' }}</small>
     <small>Stack: {{ stack || 'missing' }}</small>
     <small v-if="!run">Connections and quota are checked when the run starts</small>
+    <small v-if="run?.stage">Stage: {{ run.stage.replaceAll('_', ' ') }}</small>
     <small v-if="run">{{ connectionQuotaLabel(run) }}</small>
     <small v-if="run">{{ connectionAudienceLabel(run) }}</small>
     <small v-if="run">Sent {{ run.counters?.sent || 0 }} · Skipped {{ run.counters?.skipped || 0 }}</small>
@@ -43,7 +47,7 @@ onMounted(() => props.inviter.ensure(props.account))
     <details v-if="accountHistory.length" class="comment-monitor-history">
       <summary>Connection history</summary>
       <div v-for="item in accountHistory.slice(0, 5)" :key="item.personId">
-        <strong>{{ item.status }}</strong>: {{ item.name }} · {{ item.audience }}
+        <strong>{{ item.status }}</strong>: {{ item.name }} · {{ item.audience }} · {{ item.reasonCode || 'no reason' }}
       </div>
     </details>
   </div>
