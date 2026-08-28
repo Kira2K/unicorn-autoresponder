@@ -145,6 +145,23 @@ Profile Filler routes:
 - `POST /api/admin/linkedin/profile-jobs/:jobId/apply`
 - `POST /api/admin/linkedin/profile-jobs/:jobId/rollback`
 
+## Connection Inviter
+
+The LinkedIn table shows readiness, primary stack, the latest connection count,
+weekly limit, today's 70/30 quotas, progress, and recent invitation history.
+The admin starts one manual weekday run. A missing stack pauses the run until a
+stack is saved, or the admin explicitly chooses recruiter-only safe mode.
+
+Connection Inviter routes:
+
+- `GET /api/admin/linkedin/connection-runs`
+- `GET /api/admin/linkedin/connection-runs/:runId`
+- `GET /api/admin/linkedin/connection-stacks`
+- `GET /api/admin/linkedin/accounts/:id/connection-readiness`
+- `GET /api/admin/linkedin/accounts/:id/connection-history`
+- `PUT /api/admin/linkedin/accounts/:id/connection-stack`
+- `POST /api/admin/linkedin/accounts/:id/connection-runs`
+
 ## Tests
 
 LinkedIn checks are isolated from the legacy web-console and support-bot tests:
@@ -153,6 +170,8 @@ LinkedIn checks are isolated from the legacy web-console and support-bot tests:
 npm run linkedin:web:test
 npm run linkedin:web:e2e
 npm run linkedin:web:check
+npm run linkedin:connections:test
+npm run linkedin:connections:e2e
 ```
 
 The last command also runs the LinkedIn authorization tests, typecheck, and the

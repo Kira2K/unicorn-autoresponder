@@ -134,6 +134,31 @@ export const api = {
       method: 'POST'
     })
   },
+  adminConnectionRuns() {
+    return request('/api/admin/linkedin/connection-runs')
+  },
+  adminConnectionRun(runId) {
+    return request(`/api/admin/linkedin/connection-runs/${encodeURIComponent(runId)}`)
+  },
+  adminConnectionStacks() {
+    return request('/api/admin/linkedin/connection-stacks')
+  },
+  adminConnectionReadiness(platformAccountId) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-readiness`)
+  },
+  adminConnectionHistory(platformAccountId) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-history`)
+  },
+  saveAdminConnectionStack(platformAccountId, stackId) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-stack`, {
+      method: 'PUT', body: JSON.stringify({ stackId })
+    })
+  },
+  startAdminConnectionRun(platformAccountId, safeRecruiterOnly = false) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-runs`, {
+      method: 'POST', body: JSON.stringify({ safeRecruiterOnly })
+    })
+  },
   analyzeAdminProfile(profile) {
     return request('/api/admin/linkedin/profile-analysis', {
       method: 'POST', body: JSON.stringify(profile)

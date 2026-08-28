@@ -2,14 +2,10 @@ const { createNocoClient } = require('../../../integrations/noco/core/client.ts'
   createNocoClient(options?: any): any
 }
 const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
-  TABLES: Record<'clients' | 'dolphinProfiles' | 'platformAccounts', { id: string }>
+  TABLES: Record<'clients' | 'dolphinProfiles' | 'platformAccounts' | 'stacks', { id: string }>
 }
-const { LINKEDIN_AUTH_COLUMNS, inspectLinkedInAuthSchema } = require('../../../integrations/noco/linkedin-auth-schema/logic.ts') as {
+const { LINKEDIN_AUTH_COLUMNS } = require('../../../integrations/noco/linkedin-auth-schema/logic.ts') as {
   LINKEDIN_AUTH_COLUMNS: ReadonlyArray<{ title: string }>
-  inspectLinkedInAuthSchema(meta: any): { ok: boolean; missing: string[] }
-}
-const { LinkedInAuthError } = require('./errors.ts') as {
-  LinkedInAuthError: new (code: string, message: string) => Error
 }
 const { resolveLinkedInAuthTarget } = require('./noco-target.ts') as {
   resolveLinkedInAuthTarget(input: any): any
@@ -27,7 +23,15 @@ const { updateLinkedInUrl } = require('./noco-account-update.ts') as {
 const { linkedInNocoError } = require('./noco-error.ts') as {
   linkedInNocoError(error: unknown): unknown
 }
-function createLinkedInAuthNocoRepository(client = createNocoClient({ pageDelayMs: 300, retryDelaysMs: [0, 30_000, 30_000] })) {
+const { listPrimaryStacks, updatePrimaryStack } = require('./noco-stacks.ts') as {
+  listPrimaryStacks(rows: any[]): Array<{ id: number; name: string }>
+  updatePrimaryStack(client: any, rows: any, clientId: number, stackId: number): Promise<{ id: number; name: string }>
+}
+const { assertLinkedInAuthNocoSchema } = require('./noco-schema-check.ts') as {
+  assertLinkedInAuthNocoSchema(client: any): Promise<void>
+}
+function createLinkedInAuthNocoRepository(client = createNocoClient({
+  pageDelayMs: 300, retryDelaysMs: [0, 30_000, 30_000] })) {
   let rowsCache: { expiresAt: number; value: any } | undefined
   let rowsRequest: Promise<any> | undefined
   async function fetchRows() {
@@ -41,7 +45,9 @@ function createLinkedInAuthNocoRepository(client = createNocoClient({ pageDelayM
       })
       await client.wait(300)
       const clients = await client.fetchRecords(TABLES.clients.id, 1000)
-      return { clients, accounts, profiles }
+      await client.wait(300)
+      const stacks = await client.fetchRecords(TABLES.stacks.id, 1000)
+      return { clients, accounts, profiles, stacks }
     } catch (error) {
       throw linkedInNocoError(error)
     }
@@ -58,18 +64,6 @@ function createLinkedInAuthNocoRepository(client = createNocoClient({ pageDelayM
       rowsRequest = undefined
     }
   }
-  async function assertSchema(): Promise<void> {
-    let meta
-    try { meta = await client.fetchTableMeta(TABLES.platformAccounts.id) }
-    catch (error) { throw linkedInNocoError(error) }
-    const result = inspectLinkedInAuthSchema(meta)
-    if (!result.ok) {
-      throw new LinkedInAuthError(
-        'noco_linkedin_auth_schema_missing',
-        `Run the LinkedIn auth schema migration. Missing: ${result.missing.join(', ')}.`
-      )
-    }
-  }
   async function resolveTarget(clientName: string, platformAccountId?: number) {
     return resolveLinkedInAuthTarget({ ...(await loadRows()), clientName, platformAccountId })
   }
@@ -81,8 +75,14 @@ function createLinkedInAuthNocoRepository(client = createNocoClient({ pageDelayM
     return linkedinUrl
   }
   return {
-    assertSchema,
+    assertSchema: () => assertLinkedInAuthNocoSchema(client),
     async listAccounts() { return listLinkedInAuthAccounts(await loadRows()) },
+    async listStacks() { return listPrimaryStacks((await loadRows()).stacks) },
+    async updatePrimaryStack(clientId: number, stackId: number) {
+      const result = await updatePrimaryStack(client, await loadRows(), clientId, stackId)
+      rowsCache = undefined
+      return result
+    },
     resolveTarget,
     updateLinkedInUrl: updateAccountUrl,
     async recordFailure(platformAccountId: number, input: any) {

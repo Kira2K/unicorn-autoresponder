@@ -1369,3 +1369,5 @@ body {
 .profile-filler-divider::before,
 .profile-filler-divider::after { background: var(--p-content-border-color); content: ''; flex: 1; height: 1px; }
 .profile-generation-meta { color: var(--p-text-muted-color); font-size: .85rem; }
+.connection-inviter { display: grid; gap: .35rem; min-width: 220px; }
+.connection-inviter-head, .connection-stack-editor { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }

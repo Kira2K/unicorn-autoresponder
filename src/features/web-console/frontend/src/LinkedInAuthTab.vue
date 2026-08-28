@@ -4,15 +4,18 @@ import LinkedInAuthStatus from './LinkedInAuthStatus.vue'
 import LinkedInAuthHistory from './LinkedInAuthHistory.vue'
 import ProfileFillerDialog from './ProfileFillerDialog.vue'
 import CommentMonitorCell from './CommentMonitorCell.vue'
+import ConnectionInviterCell from './ConnectionInviterCell.vue'
 import { formatDate, primaryAction, runForAccount } from './linkedin-auth-view'
 import { useLinkedInAuth } from './use-linkedin-auth'
 import { useProfileFiller } from './use-profile-filler'
 import { useCommentMonitor } from './use-comment-monitor'
+import { useConnectionInviter } from './use-connection-inviter'
 
 const auth = useLinkedInAuth()
 const filler = useProfileFiller()
 const comments = useCommentMonitor()
-const busy = computed(() => auth.active.value || filler.active.value)
+const connections = useConnectionInviter()
+const busy = computed(() => auth.active.value || filler.active.value || connections.active.value)
 </script>
 
 <template>
@@ -27,10 +30,12 @@ const busy = computed(() => auth.active.value || filler.active.value)
       <Message v-if="auth.error.value" severity="error" :closable="false" data-testid="linkedin-page-error">{{ auth.error.value }}</Message>
       <Message v-if="comments.errors.value.page" severity="error" :closable="false"
         data-testid="comment-monitor-page-error">{{ comments.errors.value.page }}</Message>
+      <Message v-if="connections.errors.value.page" severity="error" :closable="false"
+        data-testid="connection-inviter-page-error">{{ connections.errors.value.page }}</Message>
       <ProgressSpinner v-if="auth.loading.value" class="linkedin-spinner" stroke-width="4" />
       <div v-else class="linkedin-table-wrap">
         <table class="linkedin-table" data-testid="linkedin-accounts-table">
-          <thead><tr><th>Student</th><th>LinkedIn</th><th>Dolphin En</th><th>Unipile</th><th>Status</th><th>Last verified</th><th>Comment replies</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Student</th><th>LinkedIn</th><th>Dolphin En</th><th>Unipile</th><th>Status</th><th>Last verified</th><th>Comment replies</th><th>Connections</th><th>Actions</th></tr></thead>
           <tbody>
             <tr v-for="account in auth.filtered.value" :key="account.platformAccountId" :data-testid="`linkedin-account-${account.platformAccountId}`">
               <td><strong>{{ account.clientName }}</strong><small>#{{ account.platformAccountId }}</small></td>
@@ -49,6 +54,7 @@ const busy = computed(() => auth.active.value || filler.active.value)
               <td><LinkedInAuthStatus :account="account" :run="runForAccount(auth.runs.value, account)" /></td>
               <td>{{ formatDate(account.lastVerifiedAt) }}</td>
               <td><CommentMonitorCell :account="account" :monitor="comments" /></td>
+              <td><ConnectionInviterCell :account="account" :inviter="connections" :disabled="busy" /></td>
               <td><div class="linkedin-actions">
                 <Button label="Check settings" size="small" severity="secondary" outlined :disabled="busy" :data-testid="`linkedin-check-${account.platformAccountId}`" @click="auth.start(account, 'check')" />
                 <Button :label="primaryAction(account).label" size="small" :disabled="busy || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-connect-${account.platformAccountId}`" @click="auth.start(account, primaryAction(account).action)" />
@@ -57,7 +63,7 @@ const busy = computed(() => auth.active.value || filler.active.value)
                   :disabled="busy" :data-testid="`profile-filler-${account.platformAccountId}`" @click="filler.open(account)" />
               </div></td>
             </tr>
-            <tr v-if="!auth.filtered.value.length"><td colspan="8">No LinkedIn accounts found.</td></tr>
+            <tr v-if="!auth.filtered.value.length"><td colspan="9">No LinkedIn accounts found.</td></tr>
           </tbody>
         </table>
       </div>
