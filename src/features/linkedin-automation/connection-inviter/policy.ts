@@ -29,6 +29,13 @@ export function parseConnectionCandidate(value: any): ParsedCandidate {
 const RECRUITER = /(?:\b(?:recruit(?:er|ment|ing)?|talent\s+acquisition|talent\s+partner|sourc(?:er|ing)|staffing)\b|рекрутер|подбор\s+персонала)/i
 const TECHNICAL = /(?:\b(?:developer|engineer|engineering|qa|quality\s+assurance|tester|testing|automation|architect|analyst|data\s+scientist)\b|разработчик|инженер|тестировщик|аналитик)/i
 
+const TALENT = /\btalent\b/i
+const HIRING = /\bhiring\b/i
+
+function isRecruiterHeadline(headline: string): boolean {
+  return RECRUITER.test(headline) || (TALENT.test(headline) && HIRING.test(headline))
+}
+
 function stackTokens(stack: string): string[] {
   const normalized = lower(stack)
   const aliases: Record<string, string[]> = {
@@ -60,7 +67,7 @@ export function evaluateCandidate(candidate: ParsedCandidate, template: Connecti
     return { eligible: false, reasonCode: 'city_mismatch' }
   }
   if (template.audience === 'recruiter') {
-    return RECRUITER.test(candidate.headline)
+    return isRecruiterHeadline(candidate.headline)
       ? { eligible: true, reasonCode: safeRecruiterOnly ? 'safe_recruiter_match' : 'recruiter_match' }
       : { eligible: false, reasonCode: 'role_mismatch' }
   }

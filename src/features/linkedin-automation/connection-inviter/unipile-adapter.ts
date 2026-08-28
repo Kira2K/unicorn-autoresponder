@@ -32,13 +32,14 @@ export function createConnectionUnipileAdapter(options: {
   const http = options.http ?? createUnipileHttpClient()
   const scheduler = options.scheduler ?? sharedScheduler
   const logger = options.logger ?? NOOP_CONNECTION_LOGGER
-  async function request(operation: string, method: 'GET' | 'POST', path: string, body?: unknown) {
+  async function request(operation: string, method: 'GET' | 'POST', path: string, body?: unknown,
+    successStatus = 200) {
     const started = Date.now(); const operationId = randomUUID()
     logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt: 1 })
     try {
       const value = await scheduler.run(() => http.request(method, path, body))
       logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId,
-        attempt: 1, durationMs: Date.now() - started, httpStatus: method === 'POST' ? 201 : 200 })
+        attempt: 1, durationMs: Date.now() - started, httpStatus: successStatus })
       return value
     } catch (error: any) {
       logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId,
@@ -77,7 +78,7 @@ export function createConnectionUnipileAdapter(options: {
     },
     sendInvitation(accountId: string, personId: string) {
       return request('invitation_write', 'POST',
-        `/${encodeURIComponent(accountId)}/users/me/relation-requests`, { user_id: personId })
+        `/${encodeURIComponent(accountId)}/users/me/relation-requests`, { user_id: personId }, 201)
     }
   }
 }

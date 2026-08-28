@@ -13,21 +13,34 @@ const adapter = createConnectionUnipileAdapter({
   } }
 })
 async function run() {
+  await adapter.getAccount('acc 1')
+  await adapter.getOwnProfile('acc 1')
+  await adapter.getProfile('acc 1', 'ACo_1')
   await adapter.searchPeople('acc 1', 'Python Recruiter Berlin', 'next cursor')
   await adapter.listRelations('acc 1', 'relations cursor')
   await adapter.listPendingInvitations('acc 1', 100)
   await adapter.sendInvitation('acc 1', 'ACo_1')
-  assert.deepEqual(calls[0], { method: 'POST',
+  assert.deepEqual(calls[0], { method: 'GET', path: '/accounts/acc%201', body: undefined })
+  assert.deepEqual(calls[1], { method: 'GET',
+    path: '/acc%201/users/me?variant=linkedin_classic', body: undefined })
+  assert.deepEqual(calls[2], { method: 'GET',
+    path: '/acc%201/users/ACo_1?variant=linkedin_classic', body: undefined })
+  assert.deepEqual(calls[3], { method: 'POST',
     path: '/acc%201/linkedin/search/people?cursor=next+cursor',
     body: { keywords: 'Python Recruiter Berlin', network_distance: [2] } })
-  assert.match(calls[1].path, /users\/me\/relations\?cursor=relations\+cursor/)
-  assert.match(calls[2].path, /type=sent&offset=100/)
-  assert.deepEqual(calls[3].body, { user_id: 'ACo_1' })
-  assert.equal('message' in calls[3].body, false)
+  assert.deepEqual(calls[4], { method: 'GET',
+    path: '/acc%201/users/me/relations?cursor=relations+cursor', body: undefined })
+  assert.deepEqual(calls[5], { method: 'GET',
+    path: '/acc%201/users/me/relation-requests?type=sent&offset=100', body: undefined })
+  assert.deepEqual(calls[6], { method: 'POST', path: '/acc%201/users/me/relation-requests',
+    body: { user_id: 'ACo_1' } })
+  assert.equal('message' in calls[6].body, false)
   assert.equal(invitationRequestId({ data: { request_id: 'r' } }), 'r')
   assert.equal(pendingPersonId({ user: { provider_id: 'ACo' } }), 'ACo')
   assert.equal(events.filter(event => event.stage === 'unipile_request' &&
-    event.status === 'succeeded').length, 4)
+    event.status === 'succeeded').length, 7)
+  assert.deepEqual(events.filter(event => event.status === 'succeeded')
+    .map(event => event.details.httpStatus), [200, 200, 200, 200, 200, 200, 201])
   assert.equal(JSON.stringify(events).includes('acc 1'), false)
   assert.equal(JSON.stringify(events).includes('Python Recruiter Berlin'), false)
 }

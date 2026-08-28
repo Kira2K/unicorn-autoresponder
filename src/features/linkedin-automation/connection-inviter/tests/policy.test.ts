@@ -23,6 +23,11 @@ assert.equal(evaluateCandidate(candidate({ headline: 'Python Software Engineer' 
   'Python').eligible, true)
 assert.equal(evaluateCandidate(candidate({ headline: 'Java Software Engineer' }), technical,
   'Python').reasonCode, 'stack_mismatch')
+assert.equal(evaluateCandidate(candidate({
+  headline: 'Senior Manager - Talent | Driving Leadership and Strategic Hiring'
+}), recruiter, 'Python').eligible, true)
+assert.equal(evaluateCandidate(candidate({ headline: 'Talent Development Manager' }), recruiter,
+  'Python').reasonCode, 'role_mismatch')
 assert.equal(evaluateCandidate(candidate({ headline: 'IT-рекрутер' }), recruiter, 'Python').eligible, true)
 assert.equal(evaluateCandidate(candidate(), recruiter, undefined, true).reasonCode, 'safe_recruiter_match')
 assert.deepEqual(profileAllowsInvitation({ is_connection: true }),
