@@ -11,8 +11,8 @@ function failure(error: any) {
     'connection_inviter_unique_constraints_missing'].includes(code)) return { status: 503,
     body: { error: code, message: 'Run the Connection Inviter NocoDB migration.' } }
   if (['connection_inviter_auth_required', 'connection_count_unavailable',
-    'connection_day_not_scheduled', 'connection_uncertain_requires_review',
-    'linkedin_operation_active', 'noco_stack_not_found', 'noco_stack_relation_missing',
+    'connection_uncertain_requires_review', 'linkedin_operation_active',
+    'noco_stack_not_found', 'noco_stack_relation_missing',
     'noco_stack_update_failed'].includes(code)) return { status: 409,
     body: { error: code, message: error?.message || 'Connection Inviter cannot start.' } }
   return { status: 500, body: { error: 'connection_inviter_internal_error',

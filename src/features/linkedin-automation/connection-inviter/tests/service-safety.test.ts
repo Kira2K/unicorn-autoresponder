@@ -25,5 +25,14 @@ async function missingStack() {
   assert.equal((await service.history(7)).filter((item: any) => item.status === 'sent')
     .every((item: any) => item.audience === 'recruiter'), true)
 }
-Promise.all([uncertain(), missingStack()]).then(() => console.log('connection safety tests passed'))
+async function weekendRun() {
+  const test = fixture({ stack: 'Frontend' })
+  const service = createConnectionInviterService({ ...test,
+    now: () => new Date('2026-08-29T09:00:00Z'), sleep: async () => undefined })
+  const started: any = await service.start(7)
+  const completed: any = await waitRun(service, started.runId)
+  assert.equal(completed.status, 'succeeded'); assert.equal(completed.dailyQuota, 11)
+}
+Promise.all([uncertain(), missingStack(), weekendRun()])
+  .then(() => console.log('connection safety tests passed'))
   .catch((error: unknown) => { console.error(error); process.exitCode = 1 })

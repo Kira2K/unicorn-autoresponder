@@ -1,7 +1,7 @@
 import { verifyConnectionAccount } from './account.mts'
 import { discoverCandidates } from './discovery.ts'
-import { connectionError, connectionErrorCode } from './errors.ts'
-import { dailyAudienceTargets, dailyInvitationLimit, dateParts } from './limits.ts'
+import { connectionErrorCode } from './errors.ts'
+import { dailyAudienceTargets, dailyInvitationLimit } from './limits.ts'
 import { reconcileInvitations } from './pending.ts'
 import { publishInvitations } from './publisher.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
@@ -28,9 +28,6 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
     run.connectionCount = await verifyConnectionAccount(runtime, run)
     runtime.logger.event('account_verification', 'succeeded', { ...details,
       connectionCount: run.connectionCount })
-    const date = dateParts(runtime.now(), runtime.timeZone)
-    if (date.isoWeekday < 1 || date.isoWeekday > 5) throw connectionError('connection_day_not_scheduled',
-      'Manual invitations run only from Monday to Friday.')
     run.dailyLimit = dailyInvitationLimit(run.connectionCount)
     const planned = dailyAudienceTargets(run.dailyLimit)
     run.audienceQuota = {
