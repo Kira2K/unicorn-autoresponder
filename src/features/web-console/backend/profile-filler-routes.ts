@@ -5,6 +5,8 @@ const { runProfileAnalysis } = require('../../linkedin-automation/profile-filler
   typeof import('../../linkedin-automation/profile-filler/profile-analysis.ts')
 const { cvUploadFailure, parseCvBody, readCvUpload } = require('./profile-generation-upload.ts') as
   { cvUploadFailure(error: any): any; parseCvBody: Handler; readCvUpload(req: any): any }
+const { nocoRouteFailure } = require('./noco-route-failure.ts') as
+  typeof import('./noco-route-failure.ts')
 const CONFLICT_MESSAGES: Record<string, string> = {
   profile_filler_auth_required: 'Verify or reconnect LinkedIn before using Profile Filler.',
   profile_job_not_ready: 'This preview can no longer be applied. Build a fresh preview.',
@@ -19,6 +21,8 @@ const CONFLICT_MESSAGES: Record<string, string> = {
   profile_retry_unavailable: 'The saved generation checkpoint is unavailable.'
 }
 function failure(error: any) {
+  const nocoFailure = nocoRouteFailure(error)
+  if (nocoFailure) return nocoFailure
   const code = String(error?.code ?? 'profile_filler_internal_error')
   if (code === 'profile_parameter_search_invalid') {
     return { status: 400, body: { error: code, message: 'Enter at least two characters.' } }
@@ -31,10 +35,6 @@ function failure(error: any) {
   if (uploadFailure) return uploadFailure
   if (code === 'profile_job_not_found' || code === 'linkedin_account_not_found') {
     return { status: 404, body: { error: code, message: 'Profile Filler item was not found.' } }
-  }
-  if (code === 'noco_rate_limited' || error?.response?.status === 429) {
-    return { status: 429, body: { error: 'noco_rate_limited',
-      message: 'NocoDB is busy. Wait 30 seconds and retry.' } }
   }
   if (['profile_filler_auth_required', 'profile_job_not_ready', 'profile_plan_hash_mismatch',
     'profile_preview_has_blocking_issues', 'linkedin_operation_active',

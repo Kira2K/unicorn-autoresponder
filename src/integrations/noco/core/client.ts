@@ -3,9 +3,10 @@ const { getNocoConfig, nocoHeaders } = require('./config.ts') as {
   getNocoConfig(): { baseUrl: string; token: string }
   nocoHeaders(config?: { token: string }): Record<string, string>
 }
-const { describeError } = require('./errors.ts') as {
-  describeError(error: any): string
-}
+const { isRetryableNocoRequest, nocoErrorCode, nocoRetryAfterMs, normalizeNocoError } =
+  require('./error-policy.ts') as typeof import('./error-policy.ts')
+const { createNocoRequestCoordinator, sharedNocoRequestCoordinator } =
+  require('./request-coordinator.ts') as typeof import('./request-coordinator.ts')
 
 type NocoRecord = Record<string, unknown> & { Id: number }
 type RequestMethod = 'get' | 'post' | 'patch' | 'delete'
@@ -21,10 +22,8 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-function isRetryableNocoError(error: any): boolean {
-  const status = error?.response?.status
-  const message = describeError(error)
-  return status === 429 || String(message).includes('Too Many Requests')
+function isRetryableNocoError(error: any, method: RequestMethod = 'get'): boolean {
+  return isRetryableNocoRequest(error, method)
 }
 
 function createNocoClient(options: {
@@ -32,6 +31,10 @@ function createNocoClient(options: {
   retryDelaysMs?: number[]
   requestTimeoutMs?: number
   pageDelayMs?: number
+  readCacheTtlMs?: number
+  maxTransportRetries?: number
+  random?: () => number
+  coordinator?: ReturnType<typeof createNocoRequestCoordinator>
 } = {}) {
   const config = getNocoConfig()
   const requester: Requester =
@@ -40,6 +43,12 @@ function createNocoClient(options: {
   const retryDelaysMs = options.retryDelaysMs ?? [0, 2500, 5000, 10000, 20000]
   const requestTimeoutMs = options.requestTimeoutMs ?? 60000
   const pageDelayMs = options.pageDelayMs ?? 0
+  const readCacheTtlMs = options.readCacheTtlMs ?? (options.requester ? 0 : 15_000)
+  const maxTransportRetries = options.maxTransportRetries ?? 1
+  const random = options.random ?? (options.requester ? (() => 0) : Math.random)
+  const coordinator = options.coordinator ?? (options.requester
+    ? createNocoRequestCoordinator({ minIntervalMs: 0, cacheTtlMs: 0 })
+    : sharedNocoRequestCoordinator)
 
   async function request<T>(
     method: RequestMethod,
@@ -47,30 +56,41 @@ function createNocoClient(options: {
     body?: unknown
   ): Promise<T> {
     let lastError: any
-
-    for (const delay of retryDelaysMs) {
-      if (delay) {
-        await wait(delay)
-      }
-
-      try {
-        const response = await requester({
-          method,
-          url: `${config.baseUrl}${endpoint}`,
-          data: body,
-          headers: nocoHeaders(config),
-          timeout: requestTimeoutMs
-        })
-        return response.data as T
-      } catch (error: any) {
-        lastError = error
-        if (!isRetryableNocoError(error)) {
-          throw error
+    let transportRetries = 0
+    const execute = async () => {
+      for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
+        if (attempt) {
+          const baseDelay = Math.max(retryDelaysMs[attempt], nocoRetryAfterMs(lastError) ?? 0)
+          const jitter = Math.floor(baseDelay * 0.2 * random())
+          if (baseDelay || jitter) await wait(baseDelay + jitter)
+        }
+        try {
+          const response = await coordinator.schedule(() => requester({
+            method,
+            url: `${config.baseUrl}${endpoint}`,
+            data: body,
+            headers: nocoHeaders(config),
+            timeout: requestTimeoutMs
+          }))
+          return response.data as T
+        } catch (error: any) {
+          lastError = error
+          const code = nocoErrorCode(error)
+          if (code !== 'noco_rate_limited') transportRetries += 1
+          if (!isRetryableNocoError(error, method) || attempt === retryDelaysMs.length - 1 ||
+            (code !== 'noco_rate_limited' && transportRetries > maxTransportRetries)) {
+            throw normalizeNocoError(error)
+          }
         }
       }
+      throw normalizeNocoError(lastError ??
+        new Error(`NocoDB request failed: ${method.toUpperCase()} ${endpoint}`))
     }
-
-    throw lastError ?? new Error(`NocoDB request failed: ${method.toUpperCase()} ${endpoint}`)
+    if (method === 'get') {
+      const key = `${config.baseUrl}\u0000${config.token}\u0000${endpoint}`
+      return coordinator.read(key, execute, readCacheTtlMs)
+    }
+    return coordinator.mutate(execute)
   }
 
   async function fetchTableMeta(tableId: string): Promise<any> {

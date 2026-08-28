@@ -1,11 +1,13 @@
-const SAFE_PREFIXES = ['unipile_', 'openai_', 'comment_monitor_', 'linkedin_']
+import { nocoErrorCode } from '../../../integrations/noco/core/error-policy.ts'
+
+const SAFE_PREFIXES = ['unipile_', 'openai_', 'comment_monitor_', 'linkedin_', 'noco_']
 
 export function commentError(code: string, message: string, details?: unknown) {
   return Object.assign(new Error(message), { code, details })
 }
 
 export function commentErrorCode(error: unknown) {
-  const code = String((error as any)?.code ?? '')
+  const code = nocoErrorCode(error) ?? String((error as any)?.code ?? '')
   return SAFE_PREFIXES.some(prefix => code.startsWith(prefix))
     ? code.slice(0, 120) : 'comment_monitor_internal_error'
 }

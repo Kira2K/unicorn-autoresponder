@@ -8,8 +8,9 @@ const { routeFailure } = require('./linkedin-auth-routes.ts') as {
 
 async function run(): Promise<void> {
   const limited = routeFailure({ response: { status: 429 } })
-  assert.equal(limited.status, 503)
+  assert.equal(limited.status, 429)
   assert.equal(limited.body.error, 'noco_rate_limited')
+  assert.equal(routeFailure({ code: 'noco_timeout' }).status, 503)
   const calls: any[] = []
   const updates: any[] = []
   const history = [{ runId: 'old-run', status: 'succeeded' }]

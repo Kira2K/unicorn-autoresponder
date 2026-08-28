@@ -7,6 +7,7 @@ import { createConnectionUnipileAdapter } from './unipile-adapter.ts'
 import { makeRun, publicHistory, publicRun } from './run-model.ts'
 import { requestRunStop } from './run-control.ts'
 import { failedRunCanRetry, prepareRunRetry } from './retry-policy.ts'
+import { connectionError } from './errors.ts'
 import type { ConnectionRuntime } from './runtime.ts'
 import type { ConnectionRun } from './types.ts'
 export function createConnectionInviterService(options: any = {}) {
@@ -41,6 +42,8 @@ export function createConnectionInviterService(options: any = {}) {
       (await runtime.store.listRuns(100)).map(publicRun)) },
     async get(runId: string) {
       return logged(logger, 'run_read', { runId }, async () => {
+        const active = activeRuns.get(runId)
+        if (active) return publicRun(active)
         const run = await runtime.store.getRun(runId); return run && publicRun(run)
       })
     },
@@ -83,6 +86,10 @@ export function createConnectionInviterService(options: any = {}) {
             if (retry) logger.event('run_retry', 'succeeded', { runId: existing.runId,
               platformAccountId, reasonCode: 'safe_zero_send_retry' })
             await save(existing); void execute(existing)
+          }
+          if (existing.status === 'failed' && !retry) {
+            throw connectionError('connection_run_retry_blocked',
+              'This failed run may have reached an invitation write and requires review.')
           }
           return publicRun(existing)
         }

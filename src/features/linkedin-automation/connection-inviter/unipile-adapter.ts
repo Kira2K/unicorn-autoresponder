@@ -2,6 +2,7 @@ import * as httpClientModule from '../../../integrations/unipile/http-client.ts'
 import { randomUUID } from 'node:crypto'
 import { createUnipileRequestScheduler } from '../../../integrations/unipile/request-scheduler.ts'
 import { NOOP_CONNECTION_LOGGER, type ConnectionLogger } from './logger.ts'
+import { retryableUnipileRead } from '../../../integrations/unipile/read-retry.ts'
 
 const { createUnipileHttpClient } = httpClientModule as unknown as {
   createUnipileHttpClient(options?: any): any
@@ -27,25 +28,32 @@ export function pendingPersonId(value: any): string {
 }
 
 export function createConnectionUnipileAdapter(options: {
-  http?: any; scheduler?: any; logger?: ConnectionLogger
+  http?: any; scheduler?: any; logger?: ConnectionLogger; maxReadAttempts?: number
 } = {}) {
   const http = options.http ?? createUnipileHttpClient()
   const scheduler = options.scheduler ?? sharedScheduler
   const logger = options.logger ?? NOOP_CONNECTION_LOGGER
+  const maxReadAttempts = Math.max(1, options.maxReadAttempts ?? 3)
   async function request(operation: string, method: 'GET' | 'POST', path: string, body?: unknown,
     successStatus = 200) {
-    const started = Date.now(); const operationId = randomUUID()
-    logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt: 1 })
-    try {
-      const value = await scheduler.run(() => http.request(method, path, body))
-      logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId,
-        attempt: 1, durationMs: Date.now() - started, httpStatus: successStatus })
-      return value
-    } catch (error: any) {
-      logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId,
-        attempt: 1, durationMs: Date.now() - started,
-        errorCode: String(error?.code ?? 'unipile_request_failed') }); throw error
+    const operationId = randomUUID()
+    for (let attempt = 1; attempt <= (method === 'GET' ? maxReadAttempts : 1); attempt += 1) {
+      const started = Date.now()
+      logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt })
+      try {
+        const value = await scheduler.run(() => http.request(method, path, body))
+        logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId,
+          attempt, durationMs: Date.now() - started, httpStatus: successStatus })
+        return value
+      } catch (error: any) {
+        const willRetry = method === 'GET' && attempt < maxReadAttempts && retryableUnipileRead(error)
+        logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId,
+          attempt, durationMs: Date.now() - started,
+          errorCode: String(error?.code ?? 'unipile_request_failed'), willRetry })
+        if (!willRetry) throw error
+      }
     }
+    throw new Error('Unipile read attempts exhausted.')
   }
   return {
     getAccount(accountId: string) {

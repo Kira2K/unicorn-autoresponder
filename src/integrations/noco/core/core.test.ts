@@ -4,8 +4,11 @@ const path = require('node:path')
 
 const { createNocoClient, isRetryableNocoError } = require('./client.ts') as {
   createNocoClient(options?: any): any
-  isRetryableNocoError(error: any): boolean
+  isRetryableNocoError(error: any, method?: 'get' | 'post' | 'patch' | 'delete'): boolean
 }
+const { createNocoRequestCoordinator } = require('./request-coordinator.ts') as
+  typeof import('./request-coordinator.ts')
+const { nocoErrorCode } = require('./error-policy.ts') as typeof import('./error-policy.ts')
 const { parseJobArgs } = require('./job.ts') as {
   parseJobArgs(args?: string[]): { mode: string; apply: boolean; dryRun: boolean; test: boolean }
 }
@@ -61,6 +64,22 @@ async function runTests(): Promise<void> {
 
   assert.equal(isRetryableNocoError(httpError(429, 'Too Many Requests')), true)
   assert.equal(isRetryableNocoError(httpError(400, 'Bad Request')), false)
+  const timeout: any = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
+  assert.equal(nocoErrorCode(timeout), 'noco_timeout')
+  assert.equal(isRetryableNocoError(timeout, 'get'), true)
+  assert.equal(isRetryableNocoError(timeout, 'post'), false)
+
+  let loads = 0
+  const coordinator = createNocoRequestCoordinator({ minIntervalMs: 0, cacheTtlMs: 15_000 })
+  const load = async () => { loads += 1; await Promise.resolve(); return { value: loads } }
+  const [first, duplicate] = await Promise.all([
+    coordinator.read('records', load), coordinator.read('records', load)
+  ])
+  assert.deepEqual(first, { value: 1 }); assert.deepEqual(duplicate, { value: 1 })
+  assert.deepEqual(await coordinator.read('records', load), { value: 1 })
+  assert.equal(loads, 1)
+  await coordinator.mutate(async () => ({ ok: true }))
+  assert.deepEqual(await coordinator.read('records', load), { value: 2 })
 
   const paged = createMockRequester([
     { list: [{ Id: 1 }], pageInfo: { isLastPage: false } },
@@ -70,6 +89,16 @@ async function runTests(): Promise<void> {
   const records = await client.fetchRecords('table', 1)
   assert.deepEqual(records.map((record: any) => record.Id), [1, 2])
   assert.equal(paged.calls.length, 2)
+
+  const patchRetry = createMockRequester([timeout, { Id: 7 }])
+  await createNocoClient({ requester: patchRetry.requester, retryDelaysMs: [0, 0] })
+    .patchRecord('table', 7, { status: 'waiting' })
+  assert.equal(patchRetry.calls.length, 2)
+  const postNoRetry = createMockRequester([timeout, { Id: 8 }])
+  await assert.rejects(() => createNocoClient({ requester: postNoRetry.requester,
+    retryDelaysMs: [0, 0] }).createRecord('table', { status: 'new' }),
+  (error: any) => error.code === 'noco_timeout')
+  assert.equal(postNoRetry.calls.length, 1)
 
   assert.deepEqual(uniqueRelatedIds([1, 1, 2, 0]), [1, 2])
   assert.deepEqual(buildLinkPayloads([1, 1, 2]), [

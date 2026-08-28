@@ -2,17 +2,15 @@ type ExpressApp = import('express').Express
 type RequestHandler = import('express').RequestHandler
 type RunService = import('./linkedin-auth-types.ts').LinkedInAuthRunService
 type Action = import('./linkedin-auth-types.ts').LinkedInAuthAction
+const { nocoRouteFailure } = require('./noco-route-failure.ts') as
+  typeof import('./noco-route-failure.ts')
 
 const ACTIONS = new Set<Action>(['check', 'connect', 'force_reauth'])
 
 function routeFailure(error: any) {
+  const nocoFailure = nocoRouteFailure(error)
+  if (nocoFailure) return nocoFailure
   const code = String(error?.code ?? 'linkedin_auth_internal_error')
-  if (error?.response?.status === 429) {
-    return {
-      status: 503,
-      body: { error: 'noco_rate_limited', message: 'NocoDB is busy. Wait a minute and refresh the list.' }
-    }
-  }
   if (code === 'linkedin_auth_run_active') {
     return { status: 409, body: { error: code, message: 'Another LinkedIn run is active.' } }
   }

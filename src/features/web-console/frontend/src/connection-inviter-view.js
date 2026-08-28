@@ -7,6 +7,7 @@ export const latestConnectionRun = (runs, platformAccountId) => runs.find(run =>
 
 export const connectionRunActive = run => run?.status === 'running'
 export const connectionRunLabel = run => run ? LABELS[run.status] || run.status : 'Not run today'
+export const connectionPollDelay = hidden => hidden ? 15_000 : 5_000
 
 export function connectionRunConfirmation(account, run, safeRecruiterOnly = false) {
   const quota = Number(run?.dailyLimit) > 0 ? `up to ${run.dailyLimit}` : 'the calculated daily quota of'

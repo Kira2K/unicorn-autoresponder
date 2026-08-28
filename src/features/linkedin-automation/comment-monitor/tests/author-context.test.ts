@@ -40,6 +40,15 @@ async function run() {
     http: { async request(_method: string, path: string) { endpoint = path; return {} } } })
   await realAdapter.getOwnProfile('account', logger)
   assert.equal(endpoint, '/account/users/me?variant=linkedin_classic')
+  let retryReads = 0
+  const retryAdapter = createCommentUnipileAdapter({
+    scheduler: { run: (action: any) => action() },
+    http: { async request() { retryReads += 1
+      if (retryReads < 3) throw Object.assign(new Error('timeout'), { code: 'unipile_timeout' })
+      return {} } }
+  })
+  await retryAdapter.getOwnProfile('account', logger)
+  assert.equal(retryReads, 3)
 
   const partial = job()
   assert.deepEqual(await resolveAuthorContext({ job: partial, logger, now: () => now,

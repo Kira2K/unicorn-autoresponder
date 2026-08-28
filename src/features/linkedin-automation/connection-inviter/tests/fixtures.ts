@@ -1,8 +1,10 @@
 import { CONNECTION_SEARCH_CATALOG, renderSearchKeywords } from '../catalog.ts'
 import { createMemoryConnectionInviterStore } from '../memory-store.ts'
 
-export function fixture(options: { stack?: string; sendFailure?: any } = { stack: 'Frontend' }) {
+export function fixture(options: { stack?: string; sendFailure?: any; pendingReadFailure?: any;
+  stablePeople?: boolean } = { stack: 'Frontend' }) {
   const pending = new Set<string>(); let person = 0; let sends = 0; let reads = 0
+  let pendingReadFailure = options.pendingReadFailure
   const account = { platformAccountId: 7, clientId: 3, clientName: 'Test Client',
     linkedinUrl: 'https://www.linkedin.com/in/test-client/', unipileAccountId: 'acc_test',
     unipileAccountStatus: 'running', lastVerifiedAt: '2026-08-20T00:00:00Z',
@@ -24,13 +26,18 @@ export function fixture(options: { stack?: string; sendFailure?: any } = { stack
       reads += 1
       const template = CONNECTION_SEARCH_CATALOG.find(item =>
         renderSearchKeywords(item, options.stack, !options.stack) === keywords)!
-      return { items: Array.from({ length: 4 }, () => { person += 1; return {
-        id: `ACo${person}`, display_name: `Person ${person}`,
-        headline: template.audience === 'recruiter' ? 'Technical Recruiter' :
-          `${options.stack} Software Engineer`, location: `${template.city}, Region`,
-        network_distance: 2 } }) }
+      return { items: Array.from({ length: 4 }, (_value, index) => { person += 1
+        const personId = options.stablePeople ? `ACo_${template.priority}_${index}` : `ACo${person}`
+        return {
+          id: personId, display_name: `Person ${personId}`,
+          headline: template.audience === 'recruiter' ? 'Technical Recruiter' :
+            `${options.stack} Software Engineer`, location: `${template.city}, Region`,
+          network_distance: 2
+        }
+      }) }
     },
     async listPendingInvitations(_accountId: string, offset = 0) { reads += 1
+      if (pendingReadFailure) { const error = pendingReadFailure; pendingReadFailure = undefined; throw error }
       return { items: [...pending].slice(offset).map(user_id => ({ user_id })) } },
     async sendInvitation(_accountId: string, personId: string) {
       sends += 1; if (options.sendFailure) throw options.sendFailure

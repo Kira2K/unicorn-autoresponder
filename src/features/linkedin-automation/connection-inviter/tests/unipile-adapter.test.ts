@@ -43,6 +43,33 @@ async function run() {
     .map(event => event.details.httpStatus), [200, 200, 200, 200, 200, 200, 201])
   assert.equal(JSON.stringify(events).includes('acc 1'), false)
   assert.equal(JSON.stringify(events).includes('Python Recruiter Berlin'), false)
+
+  let readAttempts = 0; const retryEvents: any[] = []
+  const retryAdapter = createConnectionUnipileAdapter({
+    scheduler: { run(operation: any) { return operation() } },
+    http: { async request() {
+      readAttempts += 1
+      if (readAttempts < 3) throw Object.assign(new Error('timeout'), { code: 'unipile_timeout' })
+      return { items: [] }
+    } },
+    logger: { event(stage: string, status: string, details: any) {
+      retryEvents.push({ stage, status, details })
+    } }
+  })
+  await retryAdapter.listPendingInvitations('acc 1')
+  assert.equal(readAttempts, 3)
+  assert.deepEqual(retryEvents.filter(event => event.status === 'failed')
+    .map(event => [event.details.attempt, event.details.willRetry]), [[1, true], [2, true]])
+
+  let writeAttempts = 0
+  const noWriteRetry = createConnectionUnipileAdapter({
+    scheduler: { run(operation: any) { return operation() } }, logger: { event() {} },
+    http: { async request() { writeAttempts += 1
+      throw Object.assign(new Error('timeout'), { code: 'unipile_timeout' }) } }
+  })
+  await assert.rejects(() => noWriteRetry.sendInvitation('acc 1', 'ACo_1'),
+    (error: any) => error.code === 'unipile_timeout')
+  assert.equal(writeAttempts, 1)
 }
 run().then(() => console.log('connection Unipile adapter tests passed'))
   .catch((error: unknown) => { console.error(error); process.exitCode = 1 })

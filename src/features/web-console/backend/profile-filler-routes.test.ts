@@ -12,8 +12,9 @@ async function login(base: string, email: string, password: string) {
 
 async function run() {
   assert.deepEqual(failure({ code: 'noco_rate_limited' }), { status: 429, body: {
-    error: 'noco_rate_limited', message: 'NocoDB is busy. Wait 30 seconds and retry.'
+    error: 'noco_rate_limited', message: 'NocoDB is busy. Wait and retry.'
   } })
+  assert.equal(failure({ code: 'noco_timeout' }).status, 503)
   assert.equal(failure({ response: { status: 429 } }).body.error, 'noco_rate_limited')
   assert.equal(failure({ code: 'linkedin_operation_active' }).body.message,
     '[linkedin_operation_active] Another LinkedIn operation is running. Wait for it to finish and retry.')

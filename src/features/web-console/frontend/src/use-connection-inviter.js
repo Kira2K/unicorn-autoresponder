@@ -1,7 +1,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
 import { stopAdminConnectionRun } from './connection-inviter-api'
-import { connectionRunConfirmation, connectionStopConfirmation, latestConnectionRun } from './connection-inviter-view'
+import { connectionPollDelay, connectionRunConfirmation, connectionStopConfirmation,
+  latestConnectionRun } from './connection-inviter-view'
 
 export function useConnectionInviter() {
   const runs = ref([])
@@ -44,7 +45,8 @@ export function useConnectionInviter() {
     try {
       const run = await api.adminConnectionRun(runId)
       runs.value = [run, ...runs.value.filter(row => row.runId !== run.runId)]
-      if (run.status === 'running') timers.set(runId, setTimeout(() => poll(account, runId), 1000))
+      if (run.status === 'running') timers.set(runId,
+        setTimeout(() => poll(account, runId), connectionPollDelay(document.hidden)))
       else {
         timers.delete(runId)
         history.value = { ...history.value,

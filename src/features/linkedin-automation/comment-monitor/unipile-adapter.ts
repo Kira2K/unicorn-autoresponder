@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createUnipileRequestScheduler } from '../../../integrations/unipile/request-scheduler.ts'
 import { errorLogDetails } from './errors.ts'
 import type { CommentLogger } from './types.ts'
+import { retryableUnipileRead } from '../../../integrations/unipile/read-retry.ts'
 
 const { createUnipileHttpClient } = httpClientModule as unknown as {
   createUnipileHttpClient(options?: any): any
@@ -10,25 +11,30 @@ const { createUnipileHttpClient } = httpClientModule as unknown as {
 const sharedScheduler = createUnipileRequestScheduler()
 
 export function createCommentUnipileAdapter(options: {
-  http?: any; scheduler?: any
+  http?: any; scheduler?: any; maxReadAttempts?: number
 } = {}) {
   const http = options.http ?? createUnipileHttpClient()
   const scheduler = options.scheduler ?? sharedScheduler
+  const maxReadAttempts = Math.max(1, options.maxReadAttempts ?? 3)
   async function request(logger: CommentLogger, operation: string, method: 'GET' | 'POST',
     path: string, body?: unknown) {
-    const started = Date.now()
     const operationId = randomUUID()
-    logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt: 1 })
-    try {
-      const result = await scheduler.run(() => http.request(method, path, body))
-      logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId, attempt: 1,
-        durationMs: Date.now() - started, httpStatus: method === 'POST' ? 201 : 200 })
-      return result
-    } catch (error) {
-      logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId, attempt: 1,
-        durationMs: Date.now() - started, ...errorLogDetails(error) })
-      throw error
+    for (let attempt = 1; attempt <= (method === 'GET' ? maxReadAttempts : 1); attempt += 1) {
+      const started = Date.now()
+      logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt })
+      try {
+        const result = await scheduler.run(() => http.request(method, path, body))
+        logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId, attempt,
+          durationMs: Date.now() - started, httpStatus: method === 'POST' ? 201 : 200 })
+        return result
+      } catch (error) {
+        const willRetry = method === 'GET' && attempt < maxReadAttempts && retryableUnipileRead(error)
+        logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId, attempt,
+          durationMs: Date.now() - started, ...errorLogDetails(error), willRetry })
+        if (!willRetry) throw error
+      }
     }
+    throw new Error('Unipile read attempts exhausted.')
   }
   return {
     getAccount: (accountId: string, logger: CommentLogger) => request(logger, 'account_read', 'GET',

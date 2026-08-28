@@ -4,12 +4,14 @@ import { selectTemplates } from './run-model.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 import { connectionNextCursor, connectionPageItems } from './unipile-adapter.ts'
+import { claimRunCandidate } from './history-claim.ts'
 
 export async function discoverCandidates(runtime: ConnectionRuntime, run: ConnectionRun,
   quota: Record<SearchAudience, number>, save: SaveRun) {
   const catalog = (await runtime.store.listCatalog?.()) ?? CONNECTION_SEARCH_CATALOG
   const templates = selectTemplates(catalog, await runtime.store.listRuns(1000), run)
   const queues: Record<SearchAudience, ConnectionHistoryItem[]> = { recruiter: [], technical: [] }
+  const queuedPeople = new Set<string>()
   const positions = { recruiter: 0, technical: 0 }
   let keys = 0
   while (keys < 5) {
@@ -51,11 +53,13 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
           status: decision.eligible ? 'eligible' : 'skipped', reasonCode: decision.reasonCode,
           discoveredAt: timestamp, updatedAt: timestamp
         }
-        if (!await runtime.store.claimHistory(history)) {
+        const claimed = await claimRunCandidate(runtime.store, history)
+        if (!claimed || queuedPeople.has(candidate.personId)) {
           run.counters.skipped += 1; pageSkipped += 1; continue
         }
         if (decision.eligible) {
-          queues[audience].push(history); run.counters.eligible += 1; pageEligible += 1
+          queues[audience].push(claimed); queuedPeople.add(candidate.personId)
+          run.counters.eligible += 1; pageEligible += 1
         } else { run.counters.skipped += 1; pageSkipped += 1 }
       }
       cursor = connectionNextCursor(response)

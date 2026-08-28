@@ -49,6 +49,17 @@ async function safeFailedRetry() {
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.searched, 5)
   assert.equal(test.metrics.sends, 11)
 }
+async function safeHistoryRetry() {
+  const timeout = Object.assign(new Error('timeout'), { code: 'unipile_timeout' })
+  const test = fixture({ stack: 'Frontend', pendingReadFailure: timeout, stablePeople: true })
+  const service = createConnectionInviterService({ ...test, now: clock, sleep: async () => undefined })
+  const initial: any = await service.start(7); const failed: any = await waitRun(service, initial.runId)
+  const history = await service.history(7)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.counters.sent, 0)
+  assert.equal(history.some((item: any) => item.status === 'eligible'), true)
+  const retried: any = await service.start(7); const completed: any = await waitRun(service, retried.runId)
+  assert.equal(completed.status, 'succeeded'); assert.equal(test.metrics.sends, 11)
+}
 async function stoppableRun() {
   const test = fixture({ stack: 'Frontend' }); const waits: Array<() => void> = []; const events: any[] = []
   const service = createConnectionInviterService({ ...test, now: clock, random: () => 0,
@@ -76,8 +87,13 @@ async function orphanedRunStop() {
   const stopped: any = await service.stopRun(run.runId)
   assert.equal(stopped.status, 'stopped'); assert.equal(stopped.stage, 'stopped_by_admin')
 }
-assert.equal(failedRunCanRetry({ runId: 'run-1', status: 'failed', counters: { sent: 0 } } as any,
-  [{ runId: 'run-1', status: 'eligible' } as any]), false)
-Promise.all([uncertain(), missingStack(), weekendRun(), safeFailedRetry(), stoppableRun(), orphanedRunStop()])
+const failedRun = { runId: 'run-1', status: 'failed', counters: { sent: 0 } } as any
+assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'eligible' } as any]), true)
+assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'skipped' } as any]), true)
+assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'sending' } as any]), false)
+assert.equal(failedRunCanRetry(failedRun,
+  [{ runId: 'run-1', status: 'failed', sentAt: clock().toISOString() } as any]), false)
+Promise.all([uncertain(), missingStack(), weekendRun(), safeFailedRetry(), safeHistoryRetry(),
+  stoppableRun(), orphanedRunStop()])
   .then(() => console.log('connection safety tests passed'))
   .catch((error: unknown) => { console.error(error); process.exitCode = 1 })

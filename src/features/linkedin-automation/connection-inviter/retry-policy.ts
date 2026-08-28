@@ -1,8 +1,10 @@
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 
 export function failedRunCanRetry(run: ConnectionRun, history: ConnectionHistoryItem[]) {
-  return run.status === 'failed' && run.counters.sent === 0 &&
-    !history.some(item => item.runId === run.runId)
+  const unsafe = new Set(['sending', 'sent', 'accepted', 'uncertain'])
+  const runHistory = history.filter(item => item.runId === run.runId)
+  return run.status === 'failed' && run.counters.sent === 0 && runHistory.every(item =>
+    !unsafe.has(item.status) && !item.sentAt && !item.requestId)
 }
 
 export function prepareRunRetry(run: ConnectionRun, context: any, safeRecruiterOnly: boolean) {

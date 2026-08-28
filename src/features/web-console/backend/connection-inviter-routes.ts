@@ -1,8 +1,11 @@
 type App = import('express').Express
 type Handler = import('express').RequestHandler
 type Service = import('./connection-inviter-types.ts').ConnectionInviterService
+import { nocoRouteFailure } from './noco-route-failure.ts'
 
 function failure(error: any) {
+  const nocoFailure = nocoRouteFailure(error)
+  if (nocoFailure) return nocoFailure
   const code = String(error?.code ?? 'connection_inviter_internal_error')
   if (['linkedin_account_not_found', 'connection_run_not_found'].includes(code)) return {
     status: 404, body: { error: code, message: 'LinkedIn account or connection run was not found.' }
@@ -12,6 +15,7 @@ function failure(error: any) {
     body: { error: code, message: 'Run the Connection Inviter NocoDB migration.' } }
   if (['connection_inviter_auth_required', 'connection_count_unavailable',
     'connection_uncertain_requires_review', 'linkedin_operation_active',
+    'connection_run_retry_blocked',
     'noco_stack_not_found', 'noco_stack_relation_missing',
     'noco_stack_update_failed'].includes(code)) return { status: 409,
     body: { error: code, message: error?.message || 'Connection Inviter cannot start.' } }

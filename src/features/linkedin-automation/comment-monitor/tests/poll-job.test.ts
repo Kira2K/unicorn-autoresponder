@@ -37,6 +37,18 @@ async function run() {
   assert.equal(terminalJob.nextCheckAt, undefined); assert.ok(terminalJob.finishedAt)
   assert.equal(terminalJob.authorContextStatus, undefined)
   assert.equal(terminalEvents.find(event => event.stage === 'monitor_check').level, 'error')
+
+  const nocoEvents: any[] = []; const nocoJob = job(); let saves = 0
+  await pollMonitorJob({ job: nocoJob, ...dependencies(new Error('must not read'), nocoEvents),
+    store: { async update() {
+      saves += 1
+      if (saves === 1) throw Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
+    } } })
+  assert.equal(nocoJob.status, 'waiting')
+  assert.equal(nocoJob.stage, 'temporary_provider_limit')
+  assert.equal(nocoJob.errorCode, 'noco_timeout')
+  assert.equal(nocoJob.authorContextStatus, 'ready')
+  assert.equal(nocoEvents.find(event => event.stage === 'monitor_check').level, 'warn')
 }
 
 run().then(() => console.log('comment monitor polling tests passed'))

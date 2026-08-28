@@ -1,8 +1,11 @@
 type App = import('express').Express
 type Handler = import('express').RequestHandler
 type Service = import('./comment-monitor-types.ts').CommentMonitorService
+import { nocoRouteFailure } from './noco-route-failure.ts'
 
 function failure(error: any) {
+  const nocoFailure = nocoRouteFailure(error)
+  if (nocoFailure) return nocoFailure
   const code = String(error?.code ?? 'comment_monitor_internal_error')
   if (code === 'comment_monitor_job_not_found') return { status: 404,
     body: { error: code, message: 'Comment monitor was not found.' } }
