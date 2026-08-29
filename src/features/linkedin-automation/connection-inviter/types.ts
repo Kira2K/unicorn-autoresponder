@@ -30,10 +30,21 @@ export type ConnectionTimerState = {
   nextActionAt: string
 }
 
+export type ConnectionSearchStreamState = {
+  keyIndex: number
+  sourceKey?: string
+  city?: string
+  page: number
+  nextCursor?: string
+}
+
 export type ConnectionSearchProgress = {
   audience?: SearchAudience
+  nextAudience?: SearchAudience
   keyIndex: Record<SearchAudience, number>
   keyTotal: Record<SearchAudience, number>
+  streams: Record<SearchAudience, ConnectionSearchStreamState>
+  recentSearchAt: string[]
   sourceKey?: string
   city?: string
   page: number

@@ -15,6 +15,10 @@ const canStart = computed(() => connectionRunCanStart(run.value, Boolean(stack.v
 const timer = computed(() => props.inviter.countdownFor(run.value))
 const recruiterSent = computed(() => Number(run.value?.counters?.sentByAudience?.recruiter || 0))
 const technicalSent = computed(() => Number(run.value?.counters?.sentByAudience?.technical || 0))
+const recruiterQueued = computed(() => (run.value?.searchProgress?.pendingCandidates || [])
+  .filter(item => item.audience === 'recruiter').length)
+const technicalQueued = computed(() => (run.value?.searchProgress?.pendingCandidates || [])
+  .filter(item => item.audience === 'technical').length)
 const keysProcessed = computed(() => Number(run.value?.searchProgress?.keyIndex?.recruiter || 0) +
   Number(run.value?.searchProgress?.keyIndex?.technical || 0))
 const keysTotal = computed(() => Number(run.value?.searchProgress?.keyTotal?.recruiter || 0) +
@@ -62,6 +66,10 @@ onMounted(() => props.inviter.ensure(props.account))
     <small v-if="run?.searchProgress">
       Search keys {{ keysProcessed }} / {{ keysTotal }} / {{ run.searchProgress.audience || '-' }} /
       {{ run.searchProgress.city || '-' }} / page {{ run.searchProgress.page || 0 }}
+    </small>
+    <small v-if="run?.searchProgress">
+      Next slot: {{ run.searchProgress.nextAudience || '-' }} /
+      queued {{ recruiterQueued }} recruiters · {{ technicalQueued }} technical
     </small>
     <small v-if="run?.searchProgress">
       Found {{ run.searchProgress.found }} / Checked {{ run.searchProgress.checked }} /

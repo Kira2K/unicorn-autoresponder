@@ -10,8 +10,6 @@ import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 import { invitationRequestId, pendingPersonId } from './unipile-adapter.ts'
 
-const AUDIENCES: SearchAudience[] = ['recruiter', 'technical']
-
 async function updateHistory(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun,
   item: ConnectionHistoryItem) {
   await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
@@ -133,53 +131,62 @@ async function sendWithSafety(runtime: ConnectionRuntime, run: ConnectionRun, sa
   }
 }
 
-export async function publishInvitations(runtime: ConnectionRuntime, run: ConnectionRun,
-  queues: Record<SearchAudience, ConnectionHistoryItem[]>, quota: Record<SearchAudience, number>,
+export async function createInvitationPublisher(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun) {
   const details = { runId: run.runId, platformAccountId: run.platformAccountId }
-  runtime.logger.event('invitation_publish', 'started', details)
   let pending = await pendingIds(runtime, run, save)
   let sentAny = run.counters.sent > 0
-  try {
-    audienceLoop: for (const audience of AUDIENCES) {
-      let audienceSent = 0
-      for (const candidate of queues[audience]) {
-        if (audienceSent >= quota[audience]) break
-        if (runtime.stopRequested(run.runId)) break audienceLoop
-        if (pending.has(candidate.personId)) {
-          countSkip(runtime, run, candidate, 'pending_invitation'); continue
+  return {
+    async publish(audience: SearchAudience, candidates: ConnectionHistoryItem[], sentLimit = 1) {
+      runtime.logger.event('invitation_publish', 'started', { ...details, audience, sentLimit })
+      const processedPersonIds: string[] = []; let sentCount = 0
+      try {
+        for (const candidate of candidates) {
+          if (sentCount >= sentLimit || runtime.stopRequested(run.runId)) break
+          if (pending.has(candidate.personId)) {
+            countSkip(runtime, run, candidate, 'pending_invitation')
+            processedPersonIds.push(candidate.personId); continue
+          }
+          const profile = await withConnectionRetry(runtime, run, save, 'unipile',
+            'candidate_profile_read', () => runtime.adapter().getProfile(run.accountId, candidate.personId))
+          const preflight = profileAllowsInvitation(profile)
+          if (!preflight.allowed) {
+            countSkip(runtime, run, candidate, preflight.reasonCode)
+            processedPersonIds.push(candidate.personId); continue
+          }
+          run.counters.filterFunnel[audience].preflightPassed += 1
+          runtime.logger.event('candidate_preflight', 'succeeded', { ...details, audience,
+            reasonCode: preflight.reasonCode })
+          if (sentAny) {
+            const delayMs = sendDelay(runtime.random)
+            runtime.logger.event('invitation_delay', 'succeeded', { ...details, delayMs })
+            if (!await waitWithRunTimer(runtime, run, save, 'invitation_delay',
+              'invitation_delay', delayMs, true)) break
+          }
+          if (runtime.stopRequested(run.runId)) break
+          candidate.status = 'sending'; candidate.reasonCode = 'invitation_claimed'
+          candidate.updatedAt = runtime.now().toISOString()
+          const item = await claim(runtime, run, save, candidate)
+          if (!item) {
+            countSkip(runtime, run, candidate, 'lifetime_history_block')
+            processedPersonIds.push(candidate.personId); continue
+          }
+          run.counters.filterFunnel[audience].claimed += 1
+          run.stage = 'sending'; await save(run, 'stage_changed')
+          runtime.logger.event('invitation_claim', 'succeeded', { ...details, audience })
+          const sent = await sendWithSafety(runtime, run, save, item)
+          processedPersonIds.push(candidate.personId)
+          if (sent) {
+            sentCount += 1; sentAny = true; pending.add(item.personId)
+          }
         }
-        const profile = await withConnectionRetry(runtime, run, save, 'unipile',
-          'candidate_profile_read', () => runtime.adapter().getProfile(run.accountId, candidate.personId))
-        const preflight = profileAllowsInvitation(profile)
-        if (!preflight.allowed) {
-          countSkip(runtime, run, candidate, preflight.reasonCode); continue
-        }
-        run.counters.filterFunnel[audience].preflightPassed += 1
-        runtime.logger.event('candidate_preflight', 'succeeded', { ...details, audience,
-          reasonCode: preflight.reasonCode })
-        if (sentAny) {
-          const delayMs = sendDelay(runtime.random)
-          runtime.logger.event('invitation_delay', 'succeeded', { ...details, delayMs })
-          if (!await waitWithRunTimer(runtime, run, save, 'invitation_delay',
-            'invitation_delay', delayMs, true)) break audienceLoop
-        }
-        if (runtime.stopRequested(run.runId)) break audienceLoop
-        candidate.status = 'sending'; candidate.reasonCode = 'invitation_claimed'
-        candidate.updatedAt = runtime.now().toISOString()
-        const item = await claim(runtime, run, save, candidate)
-        if (!item) { countSkip(runtime, run, candidate, 'lifetime_history_block'); continue }
-        run.counters.filterFunnel[audience].claimed += 1
-        run.stage = 'sending'; await save(run, 'stage_changed')
-        runtime.logger.event('invitation_claim', 'succeeded', { ...details, audience })
-        if (await sendWithSafety(runtime, run, save, item)) {
-          audienceSent += 1; sentAny = true; pending.add(item.personId)
-        }
+        runtime.logger.event('invitation_publish', 'succeeded', { ...details, audience,
+          sentCount: run.counters.sent })
+        return { processedPersonIds, sentCount }
+      } catch (error) {
+        runtime.logger.event('invitation_publish', 'failed', { ...details, audience,
+          errorCode: connectionErrorCode(error) }); throw error
       }
     }
-    runtime.logger.event('invitation_publish', 'succeeded', { ...details, sentCount: run.counters.sent })
-  } catch (error) {
-    runtime.logger.event('invitation_publish', 'failed', { ...details,
-      errorCode: connectionErrorCode(error) }); throw error
   }
 }

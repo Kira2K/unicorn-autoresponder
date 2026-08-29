@@ -29,7 +29,7 @@ async function searchRetriesSameCursor() {
   const completed: any = await waitRun(service, started.runId)
   assert.equal(completed.status, 'succeeded')
   assert.deepEqual(failedCursors, ['same-cursor', 'same-cursor', 'same-cursor'])
-  assert.deepEqual(retryDelays.slice(0, 3), [90_000, 180_000, 270_000])
+  assert.deepEqual(retryDelays.slice(0, 3), [180_000, 90_000, 180_000])
 }
 
 async function invitation429ReadbackThenRetry() {

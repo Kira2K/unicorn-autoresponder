@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { CONNECTION_SEARCH_CATALOG, renderSearchKeywords } = require('../catalog.ts') as
+const { CONNECTION_SEARCH_CATALOG, renderSearchKeywords, stackSearchAliases } = require('../catalog.ts') as
   typeof import('../catalog.ts')
 
 assert.equal(CONNECTION_SEARCH_CATALOG.length, 400)
@@ -16,8 +16,17 @@ assert.deepEqual(new Set(CONNECTION_SEARCH_CATALOG.map(item => item.audience)),
 const template = CONNECTION_SEARCH_CATALOG.find(item => item.city === 'Barcelona' &&
   item.audience === 'recruiter')!
 assert.equal(renderSearchKeywords(template, 'Python').includes('Python'), false)
-assert.match(renderSearchKeywords(template, 'Python'), /Barcelona$/)
+assert.match(renderSearchKeywords(template, 'Python'), /"Talent Acquisition"/)
+assert.match(renderSearchKeywords(template, 'Python'), /AND "Barcelona"$/)
 const legacy = { ...template, keywordTemplate: 'Technical Recruiter {stack} Barcelona' }
-assert.equal(renderSearchKeywords(legacy, 'GO'), 'Technical Recruiter Barcelona')
-assert.equal(renderSearchKeywords(legacy, undefined, true), 'Technical Recruiter Barcelona')
+assert.equal(renderSearchKeywords(legacy, 'GO').includes('"GO"'), false)
+assert.equal(renderSearchKeywords(legacy, undefined, true).includes('"Recruiter"'), true)
+const technical = CONNECTION_SEARCH_CATALOG.find(item => item.city === 'Barcelona' &&
+  item.audience === 'technical')!
+const technicalKeywords = renderSearchKeywords(technical, 'GO')
+assert.match(technicalKeywords, /^\("Go" OR "Golang"\) AND/)
+assert.match(technicalKeywords, /"Backend Engineer"/)
+assert.match(technicalKeywords, /AND "Barcelona"$/)
+assert.deepEqual(stackSearchAliases('go'), ['Go', 'Golang'])
+assert.deepEqual(stackSearchAliases('C#'), ['C#'])
 console.log('connection search catalog tests passed')

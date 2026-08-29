@@ -1,118 +1,78 @@
 # Connection Inviter
 
-## Назначение
+## Бизнес-цель
 
-Администратор вручную запускает дневную норму LinkedIn-приглашений без сообщения. Норма зависит
-от текущего числа connections, строго делится на 70% recruiters и 30% technical и не заменяет
-одну аудиторию другой. Недельного hard cap нет; rolling seven-day показатель только информационный.
+Администратор вручную запускает норму LinkedIn-приглашений без сообщения. Норма зависит от числа
+connections и делится строго на 70% recruiters и 30% technical без замещения аудитории.
+OpenAI и расписание не используются.
 
-В фиче нет OpenAI и расписания. Единственный live writer явно включается переменными
-`LINKEDIN_CONNECTION_WRITER_ENABLED=true` и `LINKEDIN_CONNECTION_WRITER_ID=<stable-id>`.
+Live writer включается только через:
 
-## Поток выполнения
+- `LINKEDIN_CONNECTION_WRITER_ENABLED=true`;
+- `LINKEDIN_CONNECTION_WRITER_ID=<stable-id>`.
 
-```mermaid
-flowchart LR
-    U[Ручной запуск] --> G[Account-scoped operation gate]
-    G --> R[Recovery и pending read-back]
-    R --> A[Проверка account и дневной нормы]
-    A --> S[Стабильно перемешанный полный каталог]
-    S --> F[Детерминированный фильтр]
-    F --> C[Noco atomic claim: sending]
-    C --> P[Invitation POST без message]
-    P --> B[Обязательный pending/profile read-back]
-    B --> H[Noco lifetime history]
-```
+## Поиск и отправка
 
-Поиск идёт до заполнения обеих квот или полного исчерпания каталога: максимум три cursor-страницы
-на ключ. Recruiter-запросы не зависят от stack; для technical stack подтверждается исходным
-поисковым запросом, а профиль обязан иметь техническую роль. Порядок
-ключей стабильно зависит от `runId`: сначала ещё не использованные, затем использованные ранее.
+Каталог содержит столицы и крупные IT-хабы. Порядок городов стабильно перемешивается по `runId`;
+сначала используются города, которых ещё не было в прошлых запусках аккаунта.
 
-Обычный pacing: 5–15 секунд между search-запросами, 30–90 секунд после каждых пяти ключей и
-15–180 секунд между invitation POST.
+На каждый город строятся Boolean-запросы:
 
-## Retry и безопасность mutation
+- recruiter: роли recruiting, sourcing, Talent Acquisition, HRBP и People-функции без stack;
+- technical: aliases stack и технические роли; для GO используются `Go OR Golang`.
 
-Transient NocoDB/Unipile ошибки не завершают run. `ConnectionRetryState` хранит provider, operation,
-attempt, error code, delay и время следующей попытки. Интервал растёт на 90 секунд: 90–180 секунд
-для первой попытки, 180–270 для второй и так далее. После потолка используется 28,5–30 минут.
-Явный `Retry-After` имеет приоритет и может быть больше 30 минут. Stop проверяется не реже раза
-в секунду.
+В запрос всегда передаётся `network_distance: [2]`. Город является поисковым сегментом и мягким
+сигналом политики, но не блокирует кандидата.
 
-- Noco reads и idempotent patches повторяются автоматически; unique create повторяется только
-  после read-back, подтвердившего отсутствие записи.
-- Unipile reads и Classic People Search POST считаются семантически read-only и повторяются.
-- До invitation POST Noco обязан подтвердить `sending`; при недоступной Noco POST запрещён.
-- Invitation `429` требует отрицательного pending read-back, затем сохраняется `deferred` и POST
-  разрешается повторить после backoff.
-- Timeout, unreachable и `5xx` переводят invitation в `uncertain`: повторяется только read-back,
-  сам POST вслепую не повторяется.
-- `2xx` без invitation в pending также остаётся в `resolving_uncertain` до достоверного результата.
-- Детерминированный `4xx` отклоняет только кандидата.
+Для recruiter и technical сохраняются независимые cursor-потоки. Город меняется только после
+отсутствия `next_cursor`; ограничения количества страниц нет. Последовательность отправок:
 
-Gate удерживается во время обычных и overload-таймеров, но scoped по LinkedIn account, поэтому
-другие аккаунты могут работать. Если gate занят более приоритетной операцией того же аккаунта,
-Inviter остаётся в `waiting_gate` и пробует снова, не прерывая её. После рестарта восстанавливаются сегодняшние `running`,
-`waiting_retry`, `sending` и `resolving_uncertain`; сохранённый таймер сначала досчитывается.
+`R, R, T, R, R, T, R, R, T, R`.
+
+После страницы с eligible-кандидатами поиск останавливается. Кандидаты помещаются в небольшую
+очередь, после чего выполняется:
+
+`profile preflight -> Noco sending claim -> invitation POST -> pending/profile read-back`.
+
+Только подтверждённый read-back увеличивает счётчик квоты. Новая поисковая страница запрашивается
+только когда в очереди нет кандидата для следующего слота.
+
+## Pacing и retry
+
+- Не чаще одного Search-запроса в 60–90 секунд.
+- Не более пяти Search-запросов за скользящие десять минут.
+- Между подтверждёнными invitation-циклами — случайно 15–180 секунд.
+- Search timestamps и оба cursor-потока сохраняются в `search_progress_json`.
+
+Для последовательных Unipile `429` используется backoff с jitter 0–60 секунд:
+
+`3 -> 6 -> 12 -> 24 -> 30 минут`.
+
+`Retry-After` задаёт нижнюю границу, если он больше расчётной. Успешная операция сбрасывает attempt.
+Остальные transient-сбои используют общий линейный retry. Stop проверяется не реже раза в секунду.
+
+Invitation POST не повторяется вслепую:
+
+- `429` требует отрицательного pending read-back до повторной отправки;
+- timeout, unreachable и `5xx` переводят запись в `uncertain`, повторяется только read-back;
+- deterministic `4xx` отклоняет кандидата;
+- Noco обязан подтвердить `sending` до mutation.
 
 ## Состояние и NocoDB
 
-- `linkedin_connection_search_catalog` — 400 поисковых шаблонов.
-- `linkedin_connection_runs` — один run на `platformAccountId + localDate`.
+- `linkedin_connection_search_catalog` — каталог городов.
+- `linkedin_connection_runs` — один запуск на `platformAccountId + localDate`.
 - `linkedin_connection_history` — lifetime-запись на `accountId + personId`.
 
-Run хранит retry/timer, cursor/search progress, агрегаты skip-причин, `next_action_at`, executor и
-heartbeat. Небольшая очередь найденных eligible-кандидатов хранится внутри `search_progress_json`,
-чтобы restart между search и preflight не терял страницу. Детерминированные skips не создают history rows; подробности остаются в безопасном JSONL,
-а в Noco сохраняются агрегаты. Lifetime-блокируют только `sending`, `sent`, `pending`, `accepted` и
-`uncertain`; старые mismatch-решения можно переоценить.
+Skipped-профили не создают history rows. Lifetime-блокируют только `sending`, `sent`, `pending`,
+`accepted` и `uncertain`. Run snapshot сохраняется не чаще раза в 120 секунд, кроме retry, Stop,
+critical и terminal transitions. Web Console получает оперативный прогресс через SSE.
 
-Если каталог исчерпан, итог — `status: partial`, `stage: search_exhausted` с точным недобором.
-Повторный ручной запуск в тот же день начинает новый стабильный проход, но никогда не превышает
-дневной предел.
+`completed` выставляется только после полной подтверждённой квоты. `stopped` возможен только по Stop.
+Полное исчерпание всех городов для обязательной аудитории считается критической ошибкой конфигурации
+`connection_search_space_exhausted`, а не ложным успешным или partial-результатом.
 
-## Candidate policy and Noco request budget
-
-Candidate discovery returns one `CandidatePolicyEvaluation` with all hard reasons and soft signals.
-City and missing location are diagnostic signals only. Technical candidates must have a technical role;
-the stack is trusted from the source search and does not have to be repeated in the headline. Recruiter
-search accepts recruiting, sourcing, staffing, HR and explicit People-function roles, including localized
-titles. A generic use of the word `people` is not enough.
-
-The run funnel is recorded separately for recruiters and technical candidates:
-`found -> structurally valid -> role matched -> history clear -> preflight passed -> claimed -> sent`.
-Candidate diagnostics in JSONL contain only the source key, audience, run-scoped candidate hash,
-match categories and reason codes. They do not contain names, URLs or full headlines. Deterministic skips
-do not create lifetime-history rows.
-
-Noco traffic is bounded by these rules:
-
-- the catalog is cached for 15 minutes and concurrent reads share one request;
-- previous runs are filtered by account;
-- lifetime history is read per search page in batches of at most 20 person IDs;
-- the current run history and open write states are loaded once at startup;
-- a new history row is created directly as `sending`, immediately before the invitation POST;
-- ordinary stage and timer changes are emitted from memory over SSE;
-- run snapshots are persisted at most once per 120 seconds, except retry, Stop, critical and terminal states;
-- writer leases expire after five minutes; a heartbeat is written only when no other checkpoint was saved;
-- final read-back recalculates daily sent counters from history.
-
-Feature-local request counters are written as a terminal `noco_request_summary` JSONL event. The mock
-40-invitation scenario enforces a ceiling of 220 Noco HTTP operations.
-
-## Realtime Web Console
-
-`GET /api/admin/linkedin/connection-runs/:runId/events` — защищённый admin-session SSE endpoint.
-Он отправляет snapshot, stage/progress/timer/retry/invitation и terminal events, а также keepalive
-каждые 15 секунд. Браузер считает countdown локально; при недоступном SSE polling выполняется раз
-в 15 секунд. Закрытие вкладки не останавливает backend executor.
-
-Карточка показывает общий и audience progress, каталог, текущие город/страницу, найдено/eligible/
-skipped, hard skips, soft signals, их пересечения, funnel по аудиториям, текущий таймер, retry attempt,
-rolling seven-day sent и примерный ETA.
-
-## Выпуск
+## Проверка
 
 ```powershell
 npm run typecheck
@@ -123,6 +83,5 @@ npm run web:build
 git diff --check
 ```
 
-Noco rollout выполняется отдельно: backup → contract check → dry-run → apply → read-back. Затем
-разрешена только live read-only проверка. Первый реальный invitation POST требует отдельного
-подтверждения администратора.
+Все автоматические проверки используют mock-адаптеры. Первый live invitation POST после изменения
+требует отдельного подтверждения администратора.

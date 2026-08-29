@@ -99,8 +99,9 @@ async function queuedCandidatesSurviveRestart() {
   const service = createConnectionInviterService({ ...test, now: () => now,
     autoRecover: false, sleep: async () => undefined })
   await service.recover()
-  const partial: any = await waitRun(service, run.runId)
-  assert.equal(partial.status, 'partial'); assert.equal(partial.counters.sent, 1)
+  const failed: any = await waitRun(service, run.runId)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.counters.sent, 1)
+  assert.equal(failed.errorCode, 'connection_search_space_exhausted')
   assert.equal(test.metrics.sends, 1)
 }
 

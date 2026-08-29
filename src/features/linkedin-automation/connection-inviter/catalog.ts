@@ -43,15 +43,18 @@ const CAPITALS_AND_TECH_HUBS = [
 ] as const
 
 const RECRUITER_ROLES = [
-  'IT Recruiter', 'Technical Recruiter', 'Tech Talent Acquisition',
-  'Talent Acquisition Partner', 'Engineering Recruiter', 'Technology Recruiter',
-  'IT Recruitment Consultant'
+  'IT Recruiter', 'Technical Recruiter', 'Recruiter', 'Sourcer',
+  'Talent Acquisition', 'HRBP', 'People Partner', 'People Operations'
 ] as const
 
 const TECHNICAL_ROLES = [
-  '{stack} Software Engineer', '{stack} Developer', '{stack} QA Engineer',
-  '{stack} Test Automation Engineer'
+  'Developer', 'Engineer', 'Software Engineer', 'Backend Developer',
+  'Backend Engineer', 'Tech Lead', 'Architect'
 ] as const
+
+const STACK_ALIASES: Record<string, readonly string[]> = {
+  GO: ['Go', 'Golang']
+}
 
 function slug(value: string): string {
   return value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -59,14 +62,12 @@ function slug(value: string): string {
 
 export function buildConnectionSearchCatalog(): ConnectionSearchTemplate[] {
   return CAPITALS_AND_TECH_HUBS.flatMap((city, index) => {
-    const recruiterRole = RECRUITER_ROLES[index % RECRUITER_ROLES.length]
-    const technicalRole = TECHNICAL_ROLES[index % TECHNICAL_ROLES.length]
     return [
       {
         sourceKey: `recruiter-${slug(city)}`,
         audience: 'recruiter' as const,
         city,
-        keywordTemplate: `${recruiterRole} ${city}`,
+        keywordTemplate: `recruiter-roles:${city}`,
         priority: index + 1,
         enabled: true
       },
@@ -74,7 +75,7 @@ export function buildConnectionSearchCatalog(): ConnectionSearchTemplate[] {
         sourceKey: `technical-${slug(city)}`,
         audience: 'technical' as const,
         city,
-        keywordTemplate: `${technicalRole} ${city}`,
+        keywordTemplate: `{stack}-technical-roles:${city}`,
         priority: index + 1,
         enabled: true
       }
@@ -82,11 +83,27 @@ export function buildConnectionSearchCatalog(): ConnectionSearchTemplate[] {
   })
 }
 
+function quoted(value: string) {
+  const safe = value.normalize('NFKC').replace(/["\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return `"${safe}"`
+}
+
+export function stackSearchAliases(stack: string | undefined): string[] {
+  const normalized = String(stack ?? '').normalize('NFKC').trim()
+  if (!normalized) return []
+  return [...(STACK_ALIASES[normalized.toUpperCase()] ?? [normalized])]
+}
+
 export function renderSearchKeywords(template: ConnectionSearchTemplate, stack: string | undefined,
   safeRecruiterOnly = false): string {
-  const replacement = template.audience === 'recruiter' ? '' :
-    safeRecruiterOnly ? 'IT' : String(stack ?? '').trim()
-  return template.keywordTemplate.replaceAll('{stack}', replacement).replace(/\s+/g, ' ').trim()
+  const city = quoted(template.city)
+  if (template.audience === 'recruiter' || safeRecruiterOnly) {
+    return `(${RECRUITER_ROLES.map(quoted).join(' OR ')}) AND ${city}`
+  }
+  const aliases = stackSearchAliases(stack)
+  if (!aliases.length) throw new Error('Technical connection search requires a stack.')
+  return `(${aliases.map(quoted).join(' OR ')}) AND ` +
+    `(${TECHNICAL_ROLES.map(quoted).join(' OR ')}) AND ${city}`
 }
 
 export const CONNECTION_SEARCH_CATALOG = buildConnectionSearchCatalog()

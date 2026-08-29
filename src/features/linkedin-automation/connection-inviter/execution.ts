@@ -1,10 +1,11 @@
 import { verifyConnectionAccount } from './account.mts'
-import { discoverCandidates } from './discovery.ts'
+import { nextConnectionAudience } from './audience-sequence.ts'
+import { createCandidateDiscovery } from './discovery.ts'
 import { remainingAudienceQuota } from './daily-progress.ts'
-import { connectionErrorCode } from './errors.ts'
+import { connectionError, connectionErrorCode } from './errors.ts'
 import { dailyAudienceTargets, dailyInvitationLimit } from './limits.ts'
 import { reconcileInvitations } from './pending.ts'
-import { publishInvitations } from './publisher.ts'
+import { createInvitationPublisher } from './publisher.ts'
 import { finishRunStop } from './run-control.ts'
 import { waitOrStop } from './run-control.ts'
 import { withConnectionRetry } from './retry-state.ts'
@@ -13,11 +14,6 @@ import type { ConnectionRun } from './types.ts'
 
 const quotaEmpty = (quota: { recruiter: number; technical: number }) =>
   quota.recruiter <= 0 && quota.technical <= 0
-
-const queuedProgressCandidates = (run: ConnectionRun) => ({
-  recruiter: run.searchProgress.pendingCandidates.filter(item => item.audience === 'recruiter'),
-  technical: run.searchProgress.pendingCandidates.filter(item => item.audience === 'technical')
-})
 
 const progressFromCounters = (run: ConnectionRun) => ({
   sent: { ...run.counters.sentByAudience },
@@ -93,54 +89,45 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
       technicalRemaining: progress.remaining.technical, safeRecruiterOnly: run.safeRecruiterOnly })
     if (await finishRunStop(runtime, run, save)) return
 
-    const deferred = { recruiter: history.filter(item => item.status === 'deferred' &&
-      item.audience === 'recruiter'), technical: history.filter(item => item.status === 'deferred' &&
-      item.audience === 'technical') }
-    if (deferred.recruiter.length || deferred.technical.length) {
-      run.stage = 'sending'; await save(run, 'stage_changed')
-      await publishInvitations(runtime, run, deferred, progress.remaining, save)
-      progress = progressFromCounters(run)
+    const queuedIds = new Set(run.searchProgress.pendingCandidates.map(item => item.personId))
+    for (const item of history.filter(candidate => candidate.status === 'deferred')) {
+      if (!queuedIds.has(item.personId)) {
+        run.searchProgress.pendingCandidates.push(item); queuedIds.add(item.personId)
+      }
     }
-
-    if (run.searchProgress.pendingCandidates.length && !quotaEmpty(progress.remaining)) {
-      run.stage = 'sending'; await save(run, 'stage_changed')
-      await publishInvitations(runtime, run, queuedProgressCandidates(run), progress.remaining, save)
-      if (await finishRunStop(runtime, run, save)) return
-      run.searchProgress.pendingCandidates = []; await save(run, 'progress')
-      progress = progressFromCounters(run)
-    }
+    const publisher = await createInvitationPublisher(runtime, run, save)
+    let discovery: Awaited<ReturnType<typeof createCandidateDiscovery>> | undefined
 
     while (!quotaEmpty(progress.remaining)) {
-      run.stage = 'searching'; await save(run, 'stage_changed')
-      const queues = await discoverCandidates(runtime, run, progress.remaining, save)
-      runtime.logger.event('candidate_discovery', 'succeeded', { ...details,
-        candidateCount: queues.recruiter.length + queues.technical.length })
-      if (await finishRunStop(runtime, run, save)) return
-      if (queues.recruiter.length || queues.technical.length) {
-        run.stage = 'sending'; await save(run, 'stage_changed')
-        await publishInvitations(runtime, run, queues, progress.remaining, save)
-        if (await finishRunStop(runtime, run, save)) return
-        run.searchProgress.pendingCandidates = []; await save(run, 'progress')
+      const audience = nextConnectionAudience(run.counters.sentByAudience, run.audienceQuota)
+      if (!audience) break
+      run.searchProgress.nextAudience = audience
+      let candidates = run.searchProgress.pendingCandidates
+        .filter(item => item.audience === audience)
+      if (!candidates.length) {
+        run.stage = 'searching'; await save(run, 'stage_changed')
+        discovery ??= await createCandidateDiscovery(runtime, run, save)
+        candidates = await discovery.next(audience)
+        runtime.logger.event('candidate_discovery', 'succeeded', { ...details, audience,
+          candidateCount: candidates.length })
       }
+      if (await finishRunStop(runtime, run, save)) return
+      if (!candidates.length) {
+        if (run.searchProgress.exhausted[audience]) {
+          throw connectionError('connection_search_space_exhausted',
+            `Connection search exhausted for ${audience} before its quota was reached.`)
+        }
+        continue
+      }
+      run.stage = 'sending'; await save(run, 'stage_changed')
+      const result = await publisher.publish(audience, candidates, 1)
+      const processed = new Set(result.processedPersonIds)
+      run.searchProgress.pendingCandidates = run.searchProgress.pendingCandidates
+        .filter(item => !processed.has(item.personId))
+      if (await finishRunStop(runtime, run, save)) return
+      await save(run, 'progress')
       progress = progressFromCounters(run)
       runtime.emit(run, 'progress')
-      if (quotaEmpty(progress.remaining)) break
-      const exhausted = (progress.remaining.recruiter <= 0 || run.searchProgress.exhausted.recruiter) &&
-        (progress.remaining.technical <= 0 || run.searchProgress.exhausted.technical)
-      if (exhausted) {
-        const finalHistory = await withConnectionRetry(runtime, run, save, 'noco',
-          'final_history_readback', () => runtime.store.listRunHistory(run.runId, 1000))
-        progress = remainingAudienceQuota(run, finalHistory, run.audienceQuota)
-        run.counters.sent = progress.sentTotal; run.counters.sentByAudience = progress.sent
-        run.status = 'partial'; run.stage = 'search_exhausted'
-        run.errorCode = `search_exhausted_recruiter_${progress.remaining.recruiter}` +
-          `_technical_${progress.remaining.technical}`
-        run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
-        run.finishedAt = runtime.now().toISOString(); await save(run, 'partial', 'critical')
-        runtime.logger.event('run', 'succeeded', { ...details, sentCount: run.counters.sent,
-          skippedCount: run.counters.skipped, runStage: run.stage })
-        return
-      }
     }
 
     const finalHistory = await withConnectionRetry(runtime, run, save, 'noco',

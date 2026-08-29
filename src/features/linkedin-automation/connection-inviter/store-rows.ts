@@ -33,13 +33,26 @@ const number = (value: unknown) => value === null || value === undefined || valu
 function searchProgressFromRow(value: unknown): ConnectionSearchProgress {
   const fallback: ConnectionSearchProgress = { keyIndex: { recruiter: 0, technical: 0 },
     keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
+    streams: { recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 } },
+    recentSearchAt: [],
     eligible: 0, skipped: 0, exhausted: { recruiter: false, technical: false }, pass: 1,
     pendingCandidates: [] }
   const progress = parse(value, fallback)
+  const legacyAudience = progress.audience === 'technical' ? 'technical' : 'recruiter'
+  const legacyStream = progress.sourceKey ? { keyIndex: progress.keyIndex?.[legacyAudience] ?? 0,
+    sourceKey: progress.sourceKey, city: progress.city, page: progress.page ?? 0,
+    ...(progress.nextCursor ? { nextCursor: progress.nextCursor } : {}) } : undefined
   return { ...fallback, ...progress,
     keyIndex: { ...fallback.keyIndex, ...progress.keyIndex },
     keyTotal: { ...fallback.keyTotal, ...progress.keyTotal },
+    streams: {
+      recruiter: { ...fallback.streams.recruiter, ...progress.streams?.recruiter,
+        ...(legacyStream && legacyAudience === 'recruiter' ? legacyStream : {}) },
+      technical: { ...fallback.streams.technical, ...progress.streams?.technical,
+        ...(legacyStream && legacyAudience === 'technical' ? legacyStream : {}) }
+    },
     exhausted: { ...fallback.exhausted, ...progress.exhausted },
+    recentSearchAt: Array.isArray(progress.recentSearchAt) ? progress.recentSearchAt : [],
     pendingCandidates: Array.isArray(progress.pendingCandidates) ? progress.pendingCandidates : [] }
 }
 

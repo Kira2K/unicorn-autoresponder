@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict')
 const { CONNECTION_SEARCH_CATALOG } = require('../catalog.ts') as typeof import('../catalog.ts')
 const { selectTemplates } = require('../run-model.ts') as typeof import('../run-model.ts')
+const { nextConnectionAudience } = require('../audience-sequence.ts') as
+  typeof import('../audience-sequence.ts')
 
 const run = {
   runId: 'random-city-order-2026-08-29', platformAccountId: 7, safeRecruiterOnly: false
@@ -21,5 +23,20 @@ const historical = [{ ...run, usedSearchKeys: [usedKey] }] as any
 const rotated = selectTemplates(CONNECTION_SEARCH_CATALOG, historical, run)
 assert.notEqual(rotated.recruiter[0].sourceKey, usedKey)
 assert.equal(rotated.recruiter.at(-1)?.sourceKey, usedKey)
+
+const sent = { recruiter: 0, technical: 0 }
+const sequence: string[] = []
+for (let index = 0; index < 40; index += 1) {
+  const audience = nextConnectionAudience(sent, { recruiter: 28, technical: 12 })!
+  sequence.push(audience); sent[audience] += 1
+}
+assert.deepEqual(sequence.slice(0, 10), [
+  'recruiter', 'recruiter', 'technical', 'recruiter', 'recruiter',
+  'technical', 'recruiter', 'recruiter', 'technical', 'recruiter'
+])
+assert.deepEqual(sent, { recruiter: 28, technical: 12 })
+
+const unbalanced = { recruiter: 5, technical: 0 }
+assert.equal(nextConnectionAudience(unbalanced, { recruiter: 28, technical: 12 }), 'technical')
 
 console.log('connection search rotation tests passed')

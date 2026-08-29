@@ -1,4 +1,5 @@
-import { connectionError, connectionErrorCode, transientConnectionError } from './errors.ts'
+import { connectionError, connectionErrorCode, connectionHttpStatus,
+  transientConnectionError } from './errors.ts'
 import { waitOrStop } from './run-control.ts'
 import type { ConnectionRunStage, ConnectionRetryState, ConnectionRun } from './types.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
@@ -6,6 +7,9 @@ import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 const STEP_MS = 90_000
 const MAX_MS = 30 * 60_000
 const CAP_FLOOR_MS = 28.5 * 60_000
+const UNIPILE_RATE_LIMIT_BASE_MS = 3 * 60_000
+const UNIPILE_RATE_LIMIT_CAP_MS = 30 * 60_000
+const UNIPILE_RATE_LIMIT_JITTER_MS = 60_000
 
 const boundedRandom = (value: number) => Math.min(1, Math.max(0, value))
 
@@ -34,19 +38,38 @@ export function connectionRetryDelay(attempt: number, random: () => number,
   return Math.round(lower + boundedRandom(random()) * (upper - lower))
 }
 
+export function unipileRateLimitDelay(attempt: number, random: () => number,
+  explicitRetryAfterMs?: number) {
+  const exponent = Math.max(0, Math.min(10, attempt - 1))
+  const adaptive = Math.min(UNIPILE_RATE_LIMIT_CAP_MS,
+    UNIPILE_RATE_LIMIT_BASE_MS * (2 ** exponent))
+  const base = Math.max(adaptive, explicitRetryAfterMs ?? 0)
+  return Math.round(base + boundedRandom(random()) * UNIPILE_RATE_LIMIT_JITTER_MS)
+}
+
 export function connectionRetryProvider(error: unknown): 'noco' | 'unipile' {
   return connectionErrorCode(error).startsWith('noco_') ? 'noco' : 'unipile'
 }
 
 export function makeRetryState(runtime: ConnectionRuntime, run: ConnectionRun,
   provider: 'noco' | 'unipile', operation: string, error: unknown): ConnectionRetryState {
-  const previous = run.retryState?.provider === provider && run.retryState.operation === operation
+  const errorCode = connectionErrorCode(error)
+  const rateLimited = provider === 'unipile' && (connectionHttpStatus(error) === 429 ||
+    errorCode.includes('too_many_requests') || errorCode.includes('rate_limit'))
+  const candidate = run.retryState?.provider === provider && run.retryState.operation === operation
     ? run.retryState : undefined
+  const previousRateLimited = candidate?.provider === 'unipile' &&
+    (candidate.errorCode.includes('429') || candidate.errorCode.includes('too_many_requests') ||
+      candidate.errorCode.includes('rate_limit'))
+  const previous = candidate && previousRateLimited === rateLimited ? candidate : undefined
   const attempt = (previous?.attempt ?? 0) + 1
   const failedAt = runtime.now()
-  const delayMs = connectionRetryDelay(attempt, runtime.random, retryAfterMilliseconds(error))
+  const explicitRetryAfter = retryAfterMilliseconds(error)
+  const delayMs = rateLimited
+    ? unipileRateLimitDelay(attempt, runtime.random, explicitRetryAfter)
+    : connectionRetryDelay(attempt, runtime.random, explicitRetryAfter)
   return {
-    provider, operation, attempt, errorCode: connectionErrorCode(error), delayMs,
+    provider, operation, attempt, errorCode, delayMs,
     nextRetryAt: new Date(failedAt.getTime() + delayMs).toISOString(),
     firstFailedAt: previous?.firstFailedAt ?? failedAt.toISOString(),
     lastFailedAt: failedAt.toISOString()
@@ -104,7 +127,4 @@ export async function waitWithRunTimer(runtime: ConnectionRuntime, run: Connecti
 }
 
 export const searchRequestDelay = (random: () => number) =>
-  5_000 + Math.floor(boundedRandom(random()) * 10_000)
-
-export const searchBatchDelay = (random: () => number) =>
-  30_000 + Math.floor(boundedRandom(random()) * 60_000)
+  60_000 + Math.floor(boundedRandom(random()) * 30_000)

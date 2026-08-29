@@ -30,7 +30,7 @@ async function run() {
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.sent, 11)
   const retry = events.find(event => event.stage === 'retry' && event.status === 'failed')
   assert.equal(retry?.details?.attempt, 1)
-  assert.equal(retry?.details?.delayMs, 90_000)
+  assert.equal(retry?.details?.delayMs, 180_000)
 }
 
 run().then(() => console.log('connection transient pause tests passed'))
