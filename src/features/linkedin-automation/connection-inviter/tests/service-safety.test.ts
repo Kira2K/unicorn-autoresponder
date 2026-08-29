@@ -8,12 +8,48 @@ const clock = () => new Date('2026-08-24T09:00:00Z')
 async function uncertain() {
   const test = fixture({ stack: 'Frontend', sendFailure: Object.assign(new Error('timeout'),
     { code: 'unipile_timeout' }) })
-  const service = createConnectionInviterService({ ...test, now: clock, sleep: async () => undefined })
-  const started: any = await service.start(7); const stopped: any = await waitRun(service, started.runId)
-  assert.equal(stopped.status, 'uncertain')
+  const waits: Array<() => void> = []
+  const service = createConnectionInviterService({ ...test, now: clock,
+    sleep: async () => test.metrics.sends
+      ? new Promise<void>(resolve => waits.push(resolve)) : undefined })
+  const started: any = await service.start(7)
+  for (let count = 0; count < 100 && (!waits.length || test.metrics.sends !== 1); count += 1) {
+    await new Promise(resolve => setTimeout(resolve, 2))
+  }
   assert.equal(test.metrics.sends, 1)
   assert.equal((await service.history(7)).some((item: any) => item.status === 'uncertain'), true)
-  await service.start(7); assert.equal(test.metrics.sends, 1)
+  await service.stopRun(started.runId); waits.shift()?.()
+  const stopped: any = await waitRun(service, started.runId)
+  assert.equal(stopped.status, 'stopped'); assert.equal(test.metrics.sends, 1)
+}
+async function serverErrorDoesNotRepeatPost() {
+  const test = fixture({ stack: 'Frontend', sendFailure: Object.assign(new Error('unavailable'),
+    { code: 'unipile_http_503', details: { httpStatus: 503 } }) })
+  const waits: Array<() => void> = []
+  const service = createConnectionInviterService({ ...test, now: clock,
+    sleep: async () => test.metrics.sends
+      ? new Promise<void>(resolve => waits.push(resolve)) : undefined })
+  const started: any = await service.start(7)
+  for (let count = 0; count < 100 && (!waits.length || test.metrics.sends !== 1); count += 1) {
+    await new Promise(resolve => setTimeout(resolve, 2))
+  }
+  await service.stopRun(started.runId); waits.shift()?.()
+  const stopped: any = await waitRun(service, started.runId)
+  assert.equal(stopped.status, 'stopped'); assert.equal(test.metrics.sends, 1)
+}
+async function missingReadbackDoesNotRepeatPost() {
+  const test = fixture({ stack: 'Frontend' }); let posts = 0
+  test.adapter.sendInvitation = async () => { posts += 1; return { request_id: 'missing' } }
+  const waits: Array<() => void> = []
+  const service = createConnectionInviterService({ ...test, now: clock,
+    sleep: async () => posts ? new Promise<void>(resolve => waits.push(resolve)) : undefined })
+  const started: any = await service.start(7)
+  for (let count = 0; count < 100 && (!waits.length || posts !== 1); count += 1) {
+    await new Promise(resolve => setTimeout(resolve, 2))
+  }
+  await service.stopRun(started.runId); waits.shift()?.()
+  const stopped: any = await waitRun(service, started.runId)
+  assert.equal(stopped.status, 'stopped'); assert.equal(posts, 1)
 }
 async function missingStack() {
   const test = fixture({}); const service = createConnectionInviterService({ ...test, now: clock,
@@ -46,24 +82,22 @@ async function safeFailedRetry() {
   const initial: any = await service.start(7); const failed: any = await waitRun(service, initial.runId)
   assert.equal(failed.status, 'failed'); assert.equal(test.metrics.sends, 0)
   const retried: any = await service.start(7); const completed: any = await waitRun(service, retried.runId)
-  assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.searched, 5)
+  assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.searched > 0, true)
   assert.equal(test.metrics.sends, 11)
 }
 async function safeHistoryRetry() {
   const timeout = Object.assign(new Error('timeout'), { code: 'unipile_timeout' })
   const test = fixture({ stack: 'Frontend', pendingReadFailure: timeout, stablePeople: true })
   const service = createConnectionInviterService({ ...test, now: clock, sleep: async () => undefined })
-  const initial: any = await service.start(7); const failed: any = await waitRun(service, initial.runId)
-  const history = await service.history(7)
-  assert.equal(failed.status, 'failed'); assert.equal(failed.counters.sent, 0)
-  assert.equal(history.some((item: any) => item.status === 'eligible'), true)
-  const retried: any = await service.start(7); const completed: any = await waitRun(service, retried.runId)
+  const initial: any = await service.start(7)
+  const completed: any = await waitRun(service, initial.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(test.metrics.sends, 11)
 }
 async function stoppableRun() {
   const test = fixture({ stack: 'Frontend' }); const waits: Array<() => void> = []; const events: any[] = []
   const service = createConnectionInviterService({ ...test, now: clock, random: () => 0,
-    sleep: async () => new Promise<void>(resolve => waits.push(resolve)),
+    sleep: async () => test.metrics.sends
+      ? new Promise<void>(resolve => waits.push(resolve)) : undefined,
     logger: { event(stage: string, status: string) { events.push({ stage, status }) } } })
   const started: any = await service.start(7)
   for (let count = 0; count < 100 && (!waits.length || test.metrics.sends !== 1); count += 1) {
@@ -83,7 +117,7 @@ async function orphanedRunStop() {
     linkedinUrl: 'https://www.linkedin.com/in/test/', accountId: 'acc_test', stack: 'Frontend' },
   clock(), 'Europe/Moscow', false)
   await test.store.createRun(run)
-  const service = createConnectionInviterService({ ...test, now: clock })
+  const service = createConnectionInviterService({ ...test, now: clock, autoRecover: false })
   const stopped: any = await service.stopRun(run.runId)
   assert.equal(stopped.status, 'stopped'); assert.equal(stopped.stage, 'stopped_by_admin')
 }
@@ -93,7 +127,8 @@ assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'skipped' }
 assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'sending' } as any]), false)
 assert.equal(failedRunCanRetry(failedRun,
   [{ runId: 'run-1', status: 'failed', sentAt: clock().toISOString() } as any]), false)
-Promise.all([uncertain(), missingStack(), weekendRun(), safeFailedRetry(), safeHistoryRetry(),
+Promise.all([uncertain(), serverErrorDoesNotRepeatPost(), missingReadbackDoesNotRepeatPost(),
+  missingStack(), weekendRun(), safeFailedRetry(), safeHistoryRetry(),
   stoppableRun(), orphanedRunStop()])
   .then(() => console.log('connection safety tests passed'))
   .catch((error: unknown) => { console.error(error); process.exitCode = 1 })

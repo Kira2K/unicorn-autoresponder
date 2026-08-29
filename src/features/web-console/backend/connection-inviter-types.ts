@@ -8,5 +8,8 @@ export type ConnectionInviterService = {
   start(platformAccountId: number, input?: { safeRecruiterOnly?: boolean }):
     Promise<Record<string, unknown>>
   stopRun(runId: string): Promise<Record<string, unknown>>
+  subscribe?(runId: string, listener: (event: { id: number; type: string; at: string;
+    run: Record<string, unknown> }) => void): () => void
+  recover?(): Promise<void>
   stop?(): void
 }

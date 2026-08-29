@@ -3,7 +3,8 @@ const { createConnectionInviterService } = require('../service.ts') as typeof im
 const { fixture, waitRun } = require('./fixtures.ts') as typeof import('./fixtures.ts')
 
 async function run() {
-  const test = fixture({ stack: 'Frontend' }); const sleeps: number[] = []; const gate: any[] = []
+  const test = fixture({ stack: 'GO', connectionCount: 1663, preflightRejectCount: 4 })
+  const sleeps: number[] = []; const gate: any[] = []
   const events: Array<{ stage: string; status: string }> = []
   const historyStatuses: string[] = []; const runStages: string[] = []
   const updateHistory = test.store.updateHistory.bind(test.store)
@@ -22,20 +23,24 @@ async function run() {
   const started: any = await service.start(7)
   const completed: any = await waitRun(service, started.runId)
   assert.equal(completed.status, 'succeeded')
-  assert.equal(completed.dailyLimit, 11)
-  assert.equal(completed.dailyQuota, 11)
-  assert.deepEqual(completed.audienceQuota, { recruiter: 8, technical: 3 })
-  assert.equal(completed.counters.sent, 11)
-  assert.equal(test.metrics.sends, 11)
-  assert.equal(sleeps.reduce((total, value) => total + value, 0), 150_000)
+  assert.equal(completed.dailyLimit, 40)
+  assert.equal(completed.dailyQuota, 40)
+  assert.deepEqual(completed.audienceQuota, { recruiter: 28, technical: 12 })
+  assert.equal(completed.usedSearchKeys.some((key: string) => key.startsWith('recruiter-')), true)
+  assert.equal(completed.usedSearchKeys.some((key: string) => key.startsWith('technical-')), true)
+  assert.equal(completed.counters.sent, 40)
+  assert.equal(completed.stage, 'completed')
+  assert.equal(completed.counters.skipped, 4)
+  assert.equal(test.metrics.sends, 40)
+  assert.equal(sleeps.reduce((total, value) => total + value, 0), 760_000)
   assert.equal(sleeps.every(value => value === 1000), true)
   const history: any[] = await service.history(7)
-  assert.equal(history.filter(item => item.status === 'sent' && item.audience === 'recruiter').length, 8)
-  assert.equal(history.filter(item => item.status === 'sent' && item.audience === 'technical').length, 3)
+  assert.equal(history.filter(item => item.status === 'sent' && item.audience === 'recruiter').length, 28)
+  assert.equal(history.filter(item => item.status === 'sent' && item.audience === 'technical').length, 12)
   assert.equal(history.some(item => 'accountId' in item), false)
   const repeated: any = await service.start(7)
   assert.equal(repeated.runId, completed.runId)
-  assert.equal(test.metrics.sends, 11)
+  assert.equal(test.metrics.sends, 40)
   assert.deepEqual(gate, [['connection_inviter'], ['released']])
   for (const stage of ['run', 'quota_plan', 'candidate_search', 'invitation_write',
     'invitation_readback']) {

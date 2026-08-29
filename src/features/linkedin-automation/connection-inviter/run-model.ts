@@ -26,8 +26,16 @@ export function makeRun(context: ConnectionAccountContext, now: Date, timeZone: 
     status: context.stack || safeRecruiterOnly ? 'running' : 'paused',
     stage: context.stack || safeRecruiterOnly ? 'queued' : 'stack_required',
     audienceQuota: { recruiter: 0, technical: 0 },
-    counters: { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0 },
-    usedSearchKeys: [], createdAt: timestamp, updatedAt: timestamp
+    counters: { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0,
+      sentByAudience: { recruiter: 0, technical: 0 } },
+    usedSearchKeys: [], seenPersonIds: [], skipReasonCounters: {},
+    searchProgress: {
+      keyIndex: { recruiter: 0, technical: 0 }, keyTotal: { recruiter: 0, technical: 0 },
+      page: 0, found: 0, checked: 0, eligible: 0, skipped: 0,
+      exhausted: { recruiter: false, technical: safeRecruiterOnly }, pass: 1,
+      pendingCandidates: []
+    },
+    createdAt: timestamp, updatedAt: timestamp
   }
 }
 
@@ -39,11 +47,22 @@ export function selectTemplates(catalog: ConnectionSearchTemplate[], runs: Conne
   for (const audience of ['recruiter', 'technical'] as const) {
     if (run.safeRecruiterOnly && audience === 'technical') continue
     const matches = catalog.filter(item => item.enabled && item.audience === audience)
-      .sort((a, b) => a.priority - b.priority || a.sourceKey.localeCompare(b.sourceKey))
-    result[audience] = [...matches.filter(item => !used.has(item.sourceKey)),
-      ...matches.filter(item => used.has(item.sourceKey))]
+    const randomOrder = (items: ConnectionSearchTemplate[], bucket: string) => [...items]
+      .sort((a, b) => templateRank(`${run.runId}:${bucket}`, a.sourceKey) -
+        templateRank(`${run.runId}:${bucket}`, b.sourceKey) || a.sourceKey.localeCompare(b.sourceKey))
+    result[audience] = [...randomOrder(matches.filter(item => !used.has(item.sourceKey)), 'new'),
+      ...randomOrder(matches.filter(item => used.has(item.sourceKey)), 'used')]
   }
   return result
+}
+
+function templateRank(seed: string, value: string): number {
+  let hash = 2166136261
+  for (const character of `${seed}:${value}`) {
+    hash ^= character.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
 }
 
 export const sendDelay = (random: () => number) =>

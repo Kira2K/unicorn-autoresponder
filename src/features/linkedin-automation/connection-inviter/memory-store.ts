@@ -15,7 +15,9 @@ export function createMemoryConnectionInviterStore() {
     },
     async getRun(runId: string) { const run = runs.get(runId); return run && copy(run) },
     async getRunByKey(runKey: string) {
-      const id = runKeys.get(runKey); const run = id && runs.get(id); return run && copy(run)
+      const id = runKeys.get(runKey)
+      if (!id) return undefined
+      const run = runs.get(id); return run ? copy(run) : undefined
     },
     async createRun(run: ConnectionRun) {
       const existingId = runKeys.get(run.runKey)

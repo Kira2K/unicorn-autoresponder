@@ -10,8 +10,10 @@ const SAFE_KEYS = new Set([
   'operationId', 'operation', 'level', 'durationMs', 'attempt', 'httpStatus', 'page', 'count',
   'candidateCount', 'eligibleCount', 'skippedCount', 'pendingCount', 'activeCount', 'acceptedCount',
   'connectionCount', 'dailyLimit', 'dailyQuota', 'recruiterQuota', 'technicalQuota', 'searchKey',
+  'sentToday', 'recruiterRemaining', 'technicalRemaining',
   'audience', 'reasonCode', 'errorCode', 'runId', 'platformAccountId', 'runStatus', 'runStage',
-  'itemStatus', 'delayMs', 'sentCount', 'safeRecruiterOnly', 'created', 'cursorPresent'
+  'itemStatus', 'delayMs', 'sentCount', 'safeRecruiterOnly', 'created', 'cursorPresent',
+  'provider', 'nextRetryAt', 'firstFailedAt', 'lastFailedAt', 'keyIndex', 'keyTotal'
 ])
 
 const token = (value: unknown, fallback = 'unknown') => {

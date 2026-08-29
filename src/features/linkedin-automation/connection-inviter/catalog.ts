@@ -66,7 +66,7 @@ export function buildConnectionSearchCatalog(): ConnectionSearchTemplate[] {
         sourceKey: `recruiter-${slug(city)}`,
         audience: 'recruiter' as const,
         city,
-        keywordTemplate: `${recruiterRole} {stack} ${city}`,
+        keywordTemplate: `${recruiterRole} ${city}`,
         priority: index + 1,
         enabled: true
       },
@@ -84,7 +84,8 @@ export function buildConnectionSearchCatalog(): ConnectionSearchTemplate[] {
 
 export function renderSearchKeywords(template: ConnectionSearchTemplate, stack: string | undefined,
   safeRecruiterOnly = false): string {
-  const replacement = safeRecruiterOnly ? 'IT' : String(stack ?? '').trim()
+  const replacement = template.audience === 'recruiter' ? '' :
+    safeRecruiterOnly ? 'IT' : String(stack ?? '').trim()
   return template.keywordTemplate.replaceAll('{stack}', replacement).replace(/\s+/g, ' ').trim()
 }
 

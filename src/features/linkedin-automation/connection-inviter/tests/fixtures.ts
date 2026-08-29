@@ -2,8 +2,10 @@ import { CONNECTION_SEARCH_CATALOG, renderSearchKeywords } from '../catalog.ts'
 import { createMemoryConnectionInviterStore } from '../memory-store.ts'
 
 export function fixture(options: { stack?: string; sendFailure?: any; pendingReadFailure?: any;
-  stablePeople?: boolean } = { stack: 'Frontend' }) {
+  stablePeople?: boolean; preflightRejectCount?: number; connectionCount?: number } =
+  { stack: 'Frontend' }) {
   const pending = new Set<string>(); let person = 0; let sends = 0; let reads = 0
+  let profileReads = 0
   let pendingReadFailure = options.pendingReadFailure
   const account = { platformAccountId: 7, clientId: 3, clientName: 'Test Client',
     linkedinUrl: 'https://www.linkedin.com/in/test-client/', unipileAccountId: 'acc_test',
@@ -20,14 +22,16 @@ export function fixture(options: { stack?: string; sendFailure?: any; pendingRea
     async getAccount() { reads += 1; return { provider: 'linkedin', status: 'running',
       is_locked: false, user_id: 'ACoOwner' } },
     async getOwnProfile() { reads += 1; return { public_identifier: 'test-client',
-      provider_id: 'ACoOwner', connections_count: 300 } },
-    async getProfile() { reads += 1; return { network_distance: 2 } },
+      provider_id: 'ACoOwner', connections_count: options.connectionCount ?? 300 } },
+    async getProfile() { reads += 1; profileReads += 1
+      return { network_distance: profileReads <= (options.preflightRejectCount ?? 0) ? 1 : 2 } },
     async searchPeople(_accountId: string, keywords: string) {
       reads += 1
       const template = CONNECTION_SEARCH_CATALOG.find(item =>
         renderSearchKeywords(item, options.stack, !options.stack) === keywords)!
       return { items: Array.from({ length: 4 }, (_value, index) => { person += 1
-        const personId = options.stablePeople ? `ACo_${template.priority}_${index}` : `ACo${person}`
+        const personId = options.stablePeople ?
+          `ACo_${template.audience}_${template.priority}_${index}` : `ACo${person}`
         return {
           id: personId, display_name: `Person ${personId}`,
           headline: template.audience === 'recruiter' ? 'Technical Recruiter' :
@@ -44,7 +48,7 @@ export function fixture(options: { stack?: string; sendFailure?: any; pendingRea
       pending.add(personId); return { request_id: `request-${personId}` }
     }
   }
-  return { adapter, repository, store: createMemoryConnectionInviterStore(),
+  return { adapter, repository, store: createMemoryConnectionInviterStore(), writerEnabled: true,
     logger: { event() {} },
     metrics: { get sends() { return sends }, get reads() { return reads } } }
 }

@@ -38,6 +38,14 @@ async function run() {
     const headers = { Cookie: admin, 'Content-Type': 'application/json' }
     assert.equal((await fetch(runs, { headers })).status, 200)
     assert.equal((await fetch(`${runs}/connections-1`, { headers })).status, 200)
+    assert.equal((await fetch(`${runs}/connections-1/events`)).status, 401)
+    const eventsAbort = new AbortController()
+    const events = await fetch(`${runs}/connections-1/events`, { headers, signal: eventsAbort.signal })
+    assert.equal(events.status, 200)
+    assert.match(events.headers.get('content-type') || '', /text\/event-stream/)
+    const firstEvent = await events.body!.getReader().read()
+    assert.match(new TextDecoder().decode(firstEvent.value), /event: snapshot/)
+    eventsAbort.abort()
     assert.equal((await fetch(`${runs}/connections-1/stop`, { method: 'POST', headers })).status, 202)
     assert.equal((await fetch(`${base}/api/admin/linkedin/connection-stacks`, { headers })).status, 200)
     const account = `${base}/api/admin/linkedin/accounts/103`

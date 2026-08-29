@@ -15,7 +15,7 @@ function failure(error: any) {
     body: { error: code, message: 'Run the Connection Inviter NocoDB migration.' } }
   if (['connection_inviter_auth_required', 'connection_count_unavailable',
     'connection_uncertain_requires_review', 'linkedin_operation_active',
-    'connection_run_retry_blocked',
+    'connection_run_retry_blocked', 'connection_writer_disabled', 'connection_writer_active',
     'noco_stack_not_found', 'noco_stack_relation_missing',
     'noco_stack_update_failed'].includes(code)) return { status: 409,
     body: { error: code, message: error?.message || 'Connection Inviter cannot start.' } }
@@ -41,6 +41,31 @@ export function registerConnectionInviterRoutes(options: {
       if (!run) { res.status(404).json({ error: 'connection_run_not_found' }); return }
       res.json(run)
     } catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
+  })
+  app.get('/api/admin/linkedin/connection-runs/:runId/events', requireAdmin, async (req, res) => {
+    try {
+      const runId = String(req.params.runId)
+      const run = await service.get(runId)
+      if (!run) { res.status(404).json({ error: 'connection_run_not_found' }); return }
+      res.status(200)
+      res.setHeader('Content-Type', 'text/event-stream')
+      res.setHeader('Cache-Control', 'no-cache, no-transform')
+      res.setHeader('Connection', 'keep-alive')
+      res.flushHeaders?.()
+      const send = (type: string, data: unknown, id?: number) => {
+        if (id !== undefined) res.write(`id: ${id}\n`)
+        res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`)
+      }
+      send('snapshot', { type: 'snapshot', run })
+      const unsubscribe = service.subscribe?.(runId, event => send(event.type, event, event.id)) ??
+        (() => undefined)
+      const keepalive = setInterval(() => res.write(': keepalive\n\n'), 15_000)
+      keepalive.unref?.()
+      req.on('close', () => { clearInterval(keepalive); unsubscribe() })
+    } catch (error) {
+      if (res.headersSent) { res.end(); return }
+      const result = failure(error); res.status(result.status).json(result.body)
+    }
   })
   app.post('/api/admin/linkedin/connection-runs/:runId/stop', requireAdmin, async (req, res) => {
     try { res.status(202).json(await service.stopRun(String(req.params.runId))) }

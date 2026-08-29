@@ -1,6 +1,9 @@
 import { connectionError } from './errors.ts'
 import { profileIsConnected } from './relation-policy.ts'
-import type { ConnectionRuntime } from './runtime.ts'
+import { waitOrStop } from './run-control.ts'
+import { makeRetryState, withConnectionRetry } from './retry-state.ts'
+import type { ConnectionRuntime, SaveRun } from './runtime.ts'
+import type { ConnectionRun } from './types.ts'
 import { connectionPageItems, pendingPersonId } from './unipile-adapter.ts'
 
 export async function listAllPending(runtime: ConnectionRuntime, accountId: string) {
@@ -20,38 +23,53 @@ export async function listAllPending(runtime: ConnectionRuntime, accountId: stri
     'Pending invitations exceeded the safe read-back pagination limit.')
 }
 
-export async function reconcileInvitations(runtime: ConnectionRuntime, accountId: string,
-  platformAccountId: number) {
-  const history = await runtime.store.listHistory(platformAccountId, 1000)
-  const active = history.filter((item: any) => item.status === 'sent' || item.status === 'uncertain')
+export async function reconcileInvitations(runtime: ConnectionRuntime, run: ConnectionRun,
+  save: SaveRun) {
+  const history = await withConnectionRetry(runtime, run, save, 'noco', 'history_list', () =>
+    runtime.store.listHistory(run.platformAccountId, 1000))
+  const active = history.filter(item => ['sending', 'deferred', 'sent', 'uncertain'].includes(item.status))
   if (!active.length) {
-    runtime.logger.event('invitation_reconcile', 'succeeded', { platformAccountId, activeCount: 0 })
+    runtime.logger.event('invitation_reconcile', 'succeeded', {
+      platformAccountId: run.platformAccountId, activeCount: 0 })
     return
   }
-  const pending = new Set((await listAllPending(runtime, accountId)).map(pendingPersonId).filter(Boolean))
-  let unresolved = false; let accepted = 0
+  let accepted = 0
   for (const item of active) {
-    if (pending.has(item.personId)) {
-      if (item.status === 'uncertain') {
-        item.status = 'sent'; item.reasonCode = 'pending_readback_confirmed'
-        item.verifiedAt = runtime.now().toISOString(); await runtime.store.updateHistory(item)
+    while (true) {
+      if (runtime.stopRequested(run.runId)) return
+      const pendingRows = await withConnectionRetry(runtime, run, save, 'unipile',
+        'pending_invitations_read', () => listAllPending(runtime, run.accountId))
+      const pending = new Set(pendingRows.map(pendingPersonId).filter(Boolean))
+      if (pending.has(item.personId)) {
+        if (item.status !== 'sent') {
+          item.status = 'sent'; item.reasonCode = 'pending_readback_confirmed'
+          item.verifiedAt = runtime.now().toISOString()
+          await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
+            runtime.store.updateHistory(item))
+        }
+        break
       }
-      continue
+      const profile = await withConnectionRetry(runtime, run, save, 'unipile',
+        'candidate_profile_readback', () => runtime.adapter().getProfile(run.accountId, item.personId))
+      if (profileIsConnected(profile)) {
+        item.status = 'accepted'; item.reasonCode = 'connection_accepted'
+        item.verifiedAt = runtime.now().toISOString()
+        await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
+          runtime.store.updateHistory(item))
+        accepted += 1; break
+      }
+      if (item.status === 'sent' || item.status === 'deferred') break
+      const synthetic = connectionError('unipile_readback_pending',
+        'Invitation result is not visible yet.', { httpStatus: 503 })
+      run.status = 'running'; run.stage = 'resolving_uncertain'
+      run.retryState = makeRetryState(runtime, run, 'unipile', 'invitation_result_readback', synthetic)
+      run.nextActionAt = run.retryState.nextRetryAt
+      run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
+        nextActionAt: run.retryState.nextRetryAt }
+      await save(run, 'retry_scheduled')
+      if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) return
     }
-    const profile = await runtime.adapter().getProfile(accountId, item.personId)
-    if (profileIsConnected(profile)) {
-      item.status = 'accepted'; item.reasonCode = 'connection_accepted'
-      item.verifiedAt = runtime.now().toISOString(); await runtime.store.updateHistory(item)
-      accepted += 1
-    } else if (item.status === 'uncertain') unresolved = true
   }
-  if (unresolved) {
-    runtime.logger.event('invitation_reconcile', 'failed', { platformAccountId,
-      activeCount: active.length, acceptedCount: accepted, pendingCount: pending.size,
-      errorCode: 'connection_uncertain_requires_review' })
-    throw connectionError('connection_uncertain_requires_review',
-      'A previous invitation still has an uncertain result.')
-  }
-  runtime.logger.event('invitation_reconcile', 'succeeded', { platformAccountId,
-    activeCount: active.length, acceptedCount: accepted, pendingCount: pending.size })
+  runtime.logger.event('invitation_reconcile', 'succeeded', { platformAccountId: run.platformAccountId,
+    activeCount: active.length, acceptedCount: accepted })
 }

@@ -1,4 +1,5 @@
-import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
+import type { ConnectionHistoryItem, ConnectionRun, ConnectionRunStage,
+  ConnectionSearchProgress } from './types.ts'
 import { dailyInvitationLimit } from './limits.ts'
 
 const parse = (value: unknown, fallback: any) => {
@@ -16,12 +17,31 @@ export function runRow(run: ConnectionRun) {
     status: run.status, stage: run.stage, connection_count: run.connectionCount ?? null,
     weekly_limit: null, daily_quota: run.dailyQuota ?? null,
     audience_quota_json: JSON.stringify(run.audienceQuota), counters_json: JSON.stringify(run.counters),
-    used_search_keys_json: JSON.stringify(run.usedSearchKeys), error_code: run.errorCode ?? null,
+    used_search_keys_json: JSON.stringify(run.usedSearchKeys),
+    retry_state_json: run.retryState ? JSON.stringify(run.retryState) : null,
+    search_progress_json: JSON.stringify(run.searchProgress),
+    skip_reason_counters_json: JSON.stringify(run.skipReasonCounters),
+    next_action_at: run.nextActionAt ?? null, paused_at: run.pausedAt ?? null,
+    executor_id: run.executorId ?? null, heartbeat_at: run.heartbeatAt ?? null,
+    error_code: run.errorCode ?? null,
     created_at: run.createdAt, updated_at: run.updatedAt, finished_at: run.finishedAt ?? null
   }
 }
 const number = (value: unknown) => value === null || value === undefined || value === ''
   ? undefined : Number(value)
+
+function searchProgressFromRow(value: unknown): ConnectionSearchProgress {
+  const fallback: ConnectionSearchProgress = { keyIndex: { recruiter: 0, technical: 0 },
+    keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
+    eligible: 0, skipped: 0, exhausted: { recruiter: false, technical: false }, pass: 1,
+    pendingCandidates: [] }
+  const progress = parse(value, fallback)
+  return { ...fallback, ...progress,
+    keyIndex: { ...fallback.keyIndex, ...progress.keyIndex },
+    keyTotal: { ...fallback.keyTotal, ...progress.keyTotal },
+    exhausted: { ...fallback.exhausted, ...progress.exhausted },
+    pendingCandidates: Array.isArray(progress.pendingCandidates) ? progress.pendingCandidates : [] }
+}
 
 export function runFromRow(row: any): ConnectionRun {
   const count = number(row.connection_count)
@@ -33,13 +53,26 @@ export function runFromRow(row: any): ConnectionRun {
     ...(Number(row.stack_id) > 0 ? { stackId: Number(row.stack_id) } : {}),
     ...(String(row.stack ?? '').trim() ? { stack: String(row.stack).trim() } : {}),
     safeRecruiterOnly: Boolean(row.safe_recruiter_only), localDate: String(row.local_date),
-    weekKey: String(row.week_key), status: row.status, stage: String(row.stage ?? ''),
+    weekKey: String(row.week_key), status: row.status,
+    stage: String(row.stage ?? '') as ConnectionRunStage,
     ...(count !== undefined ? { connectionCount: count } : {}),
     ...(count !== undefined ? { dailyLimit: dailyInvitationLimit(count) } : {}),
     ...(daily !== undefined ? { dailyQuota: daily } : {}),
     audienceQuota: parse(row.audience_quota_json, { recruiter: 0, technical: 0 }),
-    counters: parse(row.counters_json, { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0 }),
+    counters: (() => {
+      const counters = parse(row.counters_json,
+        { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0 })
+      return { ...counters, sentByAudience: counters.sentByAudience ?? { recruiter: 0, technical: 0 } }
+    })(),
     usedSearchKeys: parse(row.used_search_keys_json, []),
+    seenPersonIds: [],
+    searchProgress: searchProgressFromRow(row.search_progress_json),
+    skipReasonCounters: parse(row.skip_reason_counters_json, {}),
+    ...(parse(row.retry_state_json, undefined) ? { retryState: parse(row.retry_state_json, undefined) } : {}),
+    ...(String(row.next_action_at ?? '').trim() ? { nextActionAt: String(row.next_action_at) } : {}),
+    ...(String(row.paused_at ?? '').trim() ? { pausedAt: String(row.paused_at) } : {}),
+    ...(String(row.executor_id ?? '').trim() ? { executorId: String(row.executor_id) } : {}),
+    ...(String(row.heartbeat_at ?? '').trim() ? { heartbeatAt: String(row.heartbeat_at) } : {}),
     ...(String(row.error_code ?? '').trim() ? { errorCode: String(row.error_code) } : {}),
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     ...(String(row.finished_at ?? '').trim() ? { finishedAt: String(row.finished_at) } : {}),

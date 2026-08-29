@@ -40,6 +40,13 @@ async function run() {
     await waitForHttp(`http://127.0.0.1:${API_PORT}/api/auth/me`)
     await waitForHttp(`http://127.0.0.1:${UI_PORT}`)
     browser = await chromium.launch(); const page = await browser.newPage()
+    let fallbackPolls = 0
+    const fallbackUrls: string[] = []
+    page.on('request', (request: any) => {
+      if (/\/api\/admin\/linkedin\/connection-runs\/connections-203$/.test(request.url())) {
+        fallbackPolls += 1; fallbackUrls.push(request.url())
+      }
+    })
     await page.goto(`http://127.0.0.1:${UI_PORT}`)
     await page.getByTestId('email-input').fill('unicornveryevil@gmail.com')
     await page.locator('input[type="password"]').fill('101010')
@@ -49,10 +56,14 @@ async function run() {
     page.once('dialog', (dialog: any) => dialog.accept())
     await page.getByTestId('connection-run-203').click()
     await page.getByTestId('connection-stop-203').waitFor()
-    await cell.getByText('Completed', { exact: true }).waitFor()
-    assert.match(await cell.innerText(), /320 connections/)
-    assert.match(await cell.innerText(), /8 recruiters/)
-    assert.match(await cell.innerText(), /Connection history/)
+    await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+    const reloadedCell = page.getByTestId('connection-inviter-203')
+    await reloadedCell.getByText('Completed', { exact: true }).waitFor()
+    await reloadedCell.getByText('Connection history', { exact: true }).waitFor()
+    assert.match(await reloadedCell.innerText(), /320 connections/)
+    assert.match(await reloadedCell.innerText(), /8 recruiters/)
+    assert.match(await reloadedCell.innerText(), /Connection history/)
+    assert.equal(fallbackPolls, 0, JSON.stringify(fallbackUrls))
   } finally {
     if (browser) await browser.close(); await stop(frontend); await stop(backend)
   }
