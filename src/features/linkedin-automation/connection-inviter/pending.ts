@@ -25,21 +25,20 @@ export async function listAllPending(runtime: ConnectionRuntime, accountId: stri
 
 export async function reconcileInvitations(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun) {
-  const history = await withConnectionRetry(runtime, run, save, 'noco', 'history_list', () =>
-    runtime.store.listHistory(run.platformAccountId, 1000))
-  const active = history.filter(item => ['sending', 'deferred', 'sent', 'uncertain'].includes(item.status))
+  const active = await withConnectionRetry(runtime, run, save, 'noco', 'open_history_list', () =>
+    runtime.store.listOpenHistory(run.platformAccountId, 1000))
   if (!active.length) {
     runtime.logger.event('invitation_reconcile', 'succeeded', {
       platformAccountId: run.platformAccountId, activeCount: 0 })
     return
   }
   let accepted = 0
+  const initialPendingRows = await withConnectionRetry(runtime, run, save, 'unipile',
+    'pending_invitations_read', () => listAllPending(runtime, run.accountId))
+  let pending = new Set(initialPendingRows.map(pendingPersonId).filter(Boolean))
   for (const item of active) {
     while (true) {
       if (runtime.stopRequested(run.runId)) return
-      const pendingRows = await withConnectionRetry(runtime, run, save, 'unipile',
-        'pending_invitations_read', () => listAllPending(runtime, run.accountId))
-      const pending = new Set(pendingRows.map(pendingPersonId).filter(Boolean))
       if (pending.has(item.personId)) {
         if (item.status !== 'sent') {
           item.status = 'sent'; item.reasonCode = 'pending_readback_confirmed'
@@ -66,8 +65,11 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
       run.nextActionAt = run.retryState.nextRetryAt
       run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
         nextActionAt: run.retryState.nextRetryAt }
-      await save(run, 'retry_scheduled')
+      await save(run, 'retry_scheduled', 'critical')
       if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) return
+      const pendingRows = await withConnectionRetry(runtime, run, save, 'unipile',
+        'pending_invitations_read', () => listAllPending(runtime, run.accountId))
+      pending = new Set(pendingRows.map(pendingPersonId).filter(Boolean))
     }
   }
   runtime.logger.event('invitation_reconcile', 'succeeded', { platformAccountId: run.platformAccountId,

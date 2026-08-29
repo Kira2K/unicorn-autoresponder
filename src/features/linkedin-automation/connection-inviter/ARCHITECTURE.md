@@ -25,7 +25,8 @@ flowchart LR
 ```
 
 Поиск идёт до заполнения обеих квот или полного исчерпания каталога: максимум три cursor-страницы
-на ключ. Recruiter-запросы не зависят от stack; technical-профили проверяются по stack. Порядок
+на ключ. Recruiter-запросы не зависят от stack; для technical stack подтверждается исходным
+поисковым запросом, а профиль обязан иметь техническую роль. Порядок
 ключей стабильно зависит от `runId`: сначала ещё не использованные, затем использованные ранее.
 
 Обычный pacing: 5–15 секунд между search-запросами, 30–90 секунд после каждых пяти ключей и
@@ -39,7 +40,8 @@ attempt, error code, delay и время следующей попытки. Ин
 Явный `Retry-After` имеет приоритет и может быть больше 30 минут. Stop проверяется не реже раза
 в секунду.
 
-- Noco reads, idempotent patches и create-after-read-back повторяются автоматически.
+- Noco reads и idempotent patches повторяются автоматически; unique create повторяется только
+  после read-back, подтвердившего отсутствие записи.
 - Unipile reads и Classic People Search POST считаются семантически read-only и повторяются.
 - До invitation POST Noco обязан подтвердить `sending`; при недоступной Noco POST запрещён.
 - Invitation `429` требует отрицательного pending read-back, затем сохраняется `deferred` и POST
@@ -70,6 +72,35 @@ heartbeat. Небольшая очередь найденных eligible-кан�
 Повторный ручной запуск в тот же день начинает новый стабильный проход, но никогда не превышает
 дневной предел.
 
+## Candidate policy and Noco request budget
+
+Candidate discovery returns one `CandidatePolicyEvaluation` with all hard reasons and soft signals.
+City and missing location are diagnostic signals only. Technical candidates must have a technical role;
+the stack is trusted from the source search and does not have to be repeated in the headline. Recruiter
+search accepts recruiting, sourcing, staffing, HR and explicit People-function roles, including localized
+titles. A generic use of the word `people` is not enough.
+
+The run funnel is recorded separately for recruiters and technical candidates:
+`found -> structurally valid -> role matched -> history clear -> preflight passed -> claimed -> sent`.
+Candidate diagnostics in JSONL contain only the source key, audience, run-scoped candidate hash,
+match categories and reason codes. They do not contain names, URLs or full headlines. Deterministic skips
+do not create lifetime-history rows.
+
+Noco traffic is bounded by these rules:
+
+- the catalog is cached for 15 minutes and concurrent reads share one request;
+- previous runs are filtered by account;
+- lifetime history is read per search page in batches of at most 20 person IDs;
+- the current run history and open write states are loaded once at startup;
+- a new history row is created directly as `sending`, immediately before the invitation POST;
+- ordinary stage and timer changes are emitted from memory over SSE;
+- run snapshots are persisted at most once per 120 seconds, except retry, Stop, critical and terminal states;
+- writer leases expire after five minutes; a heartbeat is written only when no other checkpoint was saved;
+- final read-back recalculates daily sent counters from history.
+
+Feature-local request counters are written as a terminal `noco_request_summary` JSONL event. The mock
+40-invitation scenario enforces a ceiling of 220 Noco HTTP operations.
+
 ## Realtime Web Console
 
 `GET /api/admin/linkedin/connection-runs/:runId/events` — защищённый admin-session SSE endpoint.
@@ -78,7 +109,8 @@ heartbeat. Небольшая очередь найденных eligible-кан�
 в 15 секунд. Закрытие вкладки не останавливает backend executor.
 
 Карточка показывает общий и audience progress, каталог, текущие город/страницу, найдено/eligible/
-skipped, основные reason codes, текущий таймер, retry attempt, rolling seven-day sent и примерный ETA.
+skipped, hard skips, soft signals, их пересечения, funnel по аудиториям, текущий таймер, retry attempt,
+rolling seven-day sent и примерный ETA.
 
 ## Выпуск
 

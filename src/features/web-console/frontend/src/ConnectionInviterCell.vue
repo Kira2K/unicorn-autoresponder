@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
-import { connectionAudienceLabel, connectionCountdown, connectionEta, connectionProgressPercent,
-  connectionQuotaLabel, connectionRunCanStart, connectionRunLabel } from './connection-inviter-view'
+import { connectionAudienceLabel, connectionCountdown, connectionEta, connectionFilterDiagnostics,
+  connectionFunnelLabel, connectionProgressPercent, connectionQuotaLabel, connectionRunCanStart,
+  connectionRunLabel } from './connection-inviter-view'
 
 const props = defineProps({ account: Object, inviter: Object, disabled: Boolean })
 const run = computed(() => props.inviter.runFor(props.account))
@@ -18,16 +19,15 @@ const keysProcessed = computed(() => Number(run.value?.searchProgress?.keyIndex?
   Number(run.value?.searchProgress?.keyIndex?.technical || 0))
 const keysTotal = computed(() => Number(run.value?.searchProgress?.keyTotal?.recruiter || 0) +
   Number(run.value?.searchProgress?.keyTotal?.technical || 0))
-const reasons = computed(() => Object.entries(run.value?.skipReasonCounters || {})
-  .sort((left, right) => right[1] - left[1]).slice(0, 4))
+const hardReasons = computed(() => connectionFilterDiagnostics(run.value, 'hard'))
+const softSignals = computed(() => connectionFilterDiagnostics(run.value, 'soft'))
+const intersections = computed(() => connectionFilterDiagnostics(run.value, 'intersection', 3))
 const severity = computed(() => run.value?.status === 'failed' ? 'danger' :
   ['partial', 'paused', 'uncertain'].includes(run.value?.status) ||
     run.value?.stage === 'waiting_retry' ? 'warn' :
     run.value?.status === 'succeeded' ? 'success' : run.value?.status === 'running' ? 'info' : 'secondary')
 
-watch(() => run.value?.runId, () => {
-  props.inviter.ensure(props.account)
-})
+watch(() => run.value?.runId, () => props.inviter.ensure(props.account))
 onMounted(() => props.inviter.ensure(props.account))
 </script>
 
@@ -60,21 +60,25 @@ onMounted(() => props.inviter.ensure(props.account))
     </div>
 
     <small v-if="run?.searchProgress">
-      Search keys {{ keysProcessed }} / {{ keysTotal }} · {{ run.searchProgress.audience || '—' }} ·
-      {{ run.searchProgress.city || '—' }} · page {{ run.searchProgress.page || 0 }}
+      Search keys {{ keysProcessed }} / {{ keysTotal }} / {{ run.searchProgress.audience || '-' }} /
+      {{ run.searchProgress.city || '-' }} / page {{ run.searchProgress.page || 0 }}
     </small>
     <small v-if="run?.searchProgress">
-      Found {{ run.searchProgress.found }} · Checked {{ run.searchProgress.checked }} ·
-      Eligible {{ run.searchProgress.eligible }} · Skipped {{ run.searchProgress.skipped }}
+      Found {{ run.searchProgress.found }} / Checked {{ run.searchProgress.checked }} /
+      Eligible {{ run.searchProgress.eligible }} / Skipped {{ run.searchProgress.skipped }}
     </small>
-    <small v-if="reasons.length">Top skips: {{ reasons.map(([code, count]) => `${code} ${count}`).join(' · ') }}</small>
-    <small v-if="run">Seven days: {{ readiness?.sevenDaySent || 0 }} sent · {{ connectionEta(run) }}</small>
+    <small v-if="hardReasons.length">Hard skips: {{ hardReasons.map(([code, count]) => `${code} ${count}`).join(' / ') }}</small>
+    <small v-if="softSignals.length">Soft signals: {{ softSignals.map(([code, count]) => `${code} ${count}`).join(' / ') }}</small>
+    <small v-if="intersections.length">Intersections: {{ intersections.map(([code, count]) => `${code} ${count}`).join(' / ') }}</small>
+    <small v-if="run">{{ connectionFunnelLabel(run, 'recruiter') }}</small>
+    <small v-if="run && !run.safeRecruiterOnly">{{ connectionFunnelLabel(run, 'technical') }}</small>
+    <small v-if="run">Seven days: {{ readiness?.sevenDaySent || 0 }} sent / {{ connectionEta(run) }}</small>
 
     <div v-if="timer" class="connection-timer">
       <strong>{{ run?.timerState?.kind?.replaceAll('_', ' ') || 'waiting' }}</strong>
       <span>{{ connectionCountdown(timer) }}</span>
       <small v-if="run?.retryState">
-        {{ run.retryState.provider }} · {{ run.retryState.errorCode }} · attempt {{ run.retryState.attempt }} ·
+        {{ run.retryState.provider }} / {{ run.retryState.errorCode }} / attempt {{ run.retryState.attempt }} /
         retry {{ new Date(run.retryState.nextRetryAt).toLocaleTimeString() }}
       </small>
     </div>
@@ -83,12 +87,10 @@ onMounted(() => props.inviter.ensure(props.account))
       <Select v-model="inviter.stackDrafts.value[account.platformAccountId]" :options="inviter.stacks.value"
         option-label="name" option-value="id" placeholder="Select stack"
         :data-testid="`connection-stack-${account.platformAccountId}`" />
-      <Button label="Save and run" size="small"
-        :disabled="!inviter.stackDrafts.value[account.platformAccountId]"
+      <Button label="Save and run" size="small" :disabled="!inviter.stackDrafts.value[account.platformAccountId]"
         :data-testid="`connection-stack-save-${account.platformAccountId}`" @click="inviter.saveStack(account)" />
-      <Button label="Recruiters only" size="small" severity="secondary" outlined
-        :disabled="!canStart" :data-testid="`connection-safe-run-${account.platformAccountId}`"
-        @click="inviter.start(account, true)" />
+      <Button label="Recruiters only" size="small" severity="secondary" outlined :disabled="!canStart"
+        :data-testid="`connection-safe-run-${account.platformAccountId}`" @click="inviter.start(account, true)" />
     </div>
     <small v-if="run?.errorCode" class="comment-monitor-error">{{ run.errorCode }}</small>
     <small v-if="pause" class="comment-monitor-warning">{{ pause.message }}</small>
@@ -98,7 +100,7 @@ onMounted(() => props.inviter.ensure(props.account))
     <details v-if="accountHistory.length" class="comment-monitor-history">
       <summary>Connection history</summary>
       <div v-for="item in accountHistory.slice(0, 5)" :key="item.personId">
-        <strong>{{ item.status }}</strong>: {{ item.name }} · {{ item.audience }} · {{ item.reasonCode || 'no reason' }}
+        <strong>{{ item.status }}</strong>: {{ item.name }} / {{ item.audience }} / {{ item.reasonCode || 'no reason' }}
       </div>
     </details>
   </div>

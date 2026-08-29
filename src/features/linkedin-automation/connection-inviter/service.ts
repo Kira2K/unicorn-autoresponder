@@ -32,6 +32,8 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
   const activeRuns = new Map<string, ConnectionRun>()
   const running = new Set<string>()
   const persistQueues = new Map<string, Promise<void>>()
+  const lastPersistedAt = new Map<string, number>()
+  const checkpointIntervalMs = 120_000
   let adapter: ReturnType<ConnectionRuntime['adapter']> | undefined
   const writerEnabled = options.writerEnabled ??
     String(process.env.LINKEDIN_CONNECTION_WRITER_ENABLED ?? '').toLowerCase() === 'true'
@@ -53,11 +55,18 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     const next = previous.catch(() => undefined).then(() =>
       runtime.store.updateRun(structuredClone(run)))
     persistQueues.set(run.runId, next)
-    try { await next }
+    try { await next; lastPersistedAt.set(run.runId, runtime.now().getTime()) }
     finally { if (persistQueues.get(run.runId) === next) persistQueues.delete(run.runId) }
   }
 
-  const save: SaveRun = async (run, event = 'progress') => {
+  const save: SaveRun = async (run, event = 'progress', mode = 'checkpoint') => {
+    const now = runtime.now().getTime()
+    run.updatedAt = new Date(now).toISOString()
+    const elapsed = now - (lastPersistedAt.get(run.runId) ?? 0)
+    if (mode !== 'critical' && elapsed < checkpointIntervalMs) {
+      runtime.emit(run, event)
+      return
+    }
     const resumeStage = run.stage
     const outerRetry = run.retryState?.provider !== 'noco' ? structuredClone(run.retryState) : undefined
     const outerTimer = outerRetry && run.timerState ? structuredClone(run.timerState) : undefined
@@ -86,6 +95,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       } catch (error) {
         if (!transientConnectionError(error)) throw error
         nocoRetried = true
+        runtime.store.recordRetry?.()
         run.retryState = makeRetryState(runtime, run, 'noco', 'update_run', error)
         run.stage = 'waiting_retry'; run.errorCode = run.retryState.errorCode
         run.pausedAt = runtime.now().toISOString(); run.nextActionAt = run.retryState.nextRetryAt
@@ -107,7 +117,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     if (!runtime.writerEnabled) return false
     if (!run.executorId || run.executorId === runtime.writerId) return true
     const heartbeat = Date.parse(run.heartbeatAt ?? '')
-    return !Number.isFinite(heartbeat) || runtime.now().getTime() - heartbeat > 90_000
+    return !Number.isFinite(heartbeat) || runtime.now().getTime() - heartbeat > 5 * 60_000
   }
 
   const execute = async (run: ConnectionRun) => {
@@ -120,6 +130,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     activeRuns.set(run.runId, run)
     const heartbeat = setInterval(() => {
       if (!activeRuns.has(run.runId) || run.status !== 'running') return
+      if (runtime.now().getTime() - (lastPersistedAt.get(run.runId) ?? 0) < checkpointIntervalMs) return
       run.heartbeatAt = runtime.now().toISOString()
       void persistRunSnapshot(run).catch(error => logger.event('writer_heartbeat', 'failed', {
         runId: run.runId, platformAccountId: run.platformAccountId,
@@ -140,7 +151,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
         run.localDate === today && activeRunStatus(run) && ownsWriterLease(run))
       for (const run of recoverable) {
         run.status = 'running'; run.stage = 'recovering'; run.finishedAt = undefined
-        await save(run, 'stage_changed'); void execute(run)
+        await save(run, 'stage_changed', 'critical'); void execute(run)
       }
     } catch (error) {
       logger.event('run_recovery', 'failed', { errorCode: connectionErrorCode(error) })
@@ -168,8 +179,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     async readiness(platformAccountId: number) {
       return logged(logger, 'readiness', { platformAccountId }, async () => {
         const context = await resolveContext(runtime, platformAccountId)
-        const accountRuns = (await runtime.store.listRuns(100)).filter(run =>
-          run.platformAccountId === platformAccountId)
+        const accountRuns = await runtime.store.listRunsForAccount(platformAccountId, 100)
         const latest = accountRuns[0]
         const sevenDaySent = accountRuns.filter(run => runtime.now().getTime() -
           Date.parse(`${run.localDate}T00:00:00+03:00`) < 7 * 86_400_000)
@@ -208,7 +218,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           if (stackResume || retry || topUp || resume) {
             if (topUp || resume) prepareRunTopUp(existing, context, input.safeRecruiterOnly === true)
             else prepareRunRetry(existing, context, input.safeRecruiterOnly === true)
-            await save(existing, 'stage_changed'); void execute(existing)
+            await save(existing, 'stage_changed', 'critical'); void execute(existing)
           }
           if (existing.status === 'failed' && !retry) {
             throw connectionError('connection_run_retry_blocked',
@@ -219,6 +229,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
         const run = makeRun(context, runtime.now(), runtime.timeZone, input.safeRecruiterOnly === true)
         run.executorId = runtime.writerId; run.heartbeatAt = runtime.now().toISOString()
         const created = await runtime.store.createRun(run)
+        lastPersistedAt.set(created.run.runId, runtime.now().getTime())
         logger.event('run_create', 'succeeded', { runId: created.run.runId, platformAccountId,
           created: created.created, runStatus: created.run.status, runStage: created.run.stage })
         runtime.emit(created.run, 'snapshot')

@@ -64,12 +64,13 @@ export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: Co
         run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
         run.pausedAt = undefined; run.errorCode = undefined; run.stage = resumeStage
         runtime.emit(run, 'retry_succeeded')
-        if (provider === 'unipile') await save(run, 'retry_succeeded')
+        if (provider === 'unipile') await save(run, 'retry_succeeded', 'critical')
       }
       return result
     } catch (error) {
       if (!transientConnectionError(error)) throw error
       retried = true
+      runtime.store.recordRetry?.()
       run.retryState = makeRetryState(runtime, run, provider, operation, error)
       run.status = 'running'; run.stage = 'waiting_retry'; run.errorCode = run.retryState.errorCode
       run.pausedAt = runtime.now().toISOString(); run.nextActionAt = run.retryState.nextRetryAt
@@ -80,7 +81,7 @@ export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: Co
         errorCode: run.retryState.errorCode, delayMs: run.retryState.delayMs,
         nextRetryAt: run.retryState.nextRetryAt })
       runtime.emit(run, 'retry_scheduled')
-      if (provider === 'unipile') await save(run, 'retry_scheduled')
+      if (provider === 'unipile') await save(run, 'retry_scheduled', 'critical')
       if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) {
         throw connectionError('connection_stop_requested', 'Connection run stop was requested.')
       }

@@ -62,7 +62,13 @@ export function runFromRow(row: any): ConnectionRun {
     counters: (() => {
       const counters = parse(row.counters_json,
         { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0 })
-      return { ...counters, sentByAudience: counters.sentByAudience ?? { recruiter: 0, technical: 0 } }
+      const emptyFunnel = { found: 0, structurallyValid: 0, roleMatched: 0, historyClear: 0,
+        preflightPassed: 0, claimed: 0, sent: 0 }
+      return { ...counters, sentByAudience: counters.sentByAudience ?? { recruiter: 0, technical: 0 },
+        filterFunnel: {
+          recruiter: { ...emptyFunnel, ...counters.filterFunnel?.recruiter },
+          technical: { ...emptyFunnel, ...counters.filterFunnel?.technical }
+        } }
     })(),
     usedSearchKeys: parse(row.used_search_keys_json, []),
     seenPersonIds: [],

@@ -19,6 +19,15 @@ const queuedProgressCandidates = (run: ConnectionRun) => ({
   technical: run.searchProgress.pendingCandidates.filter(item => item.audience === 'technical')
 })
 
+const progressFromCounters = (run: ConnectionRun) => ({
+  sent: { ...run.counters.sentByAudience },
+  sentTotal: run.counters.sent,
+  remaining: {
+    recruiter: Math.max(0, run.audienceQuota.recruiter - run.counters.sentByAudience.recruiter),
+    technical: Math.max(0, run.audienceQuota.technical - run.counters.sentByAudience.technical)
+  }
+})
+
 async function acquireAccountGate(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun) {
   while (true) {
     try {
@@ -42,6 +51,7 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
   if (running.has(run.runId) || run.status !== 'running' || !runtime.writerEnabled) return
   running.add(run.runId); let release: (() => void) | undefined
   const details = { runId: run.runId, platformAccountId: run.platformAccountId }
+  const nocoStart = runtime.store.requestStats?.()
   runtime.logger.event('run', 'started', details)
   try {
     runtime.logger.event('operation_gate_acquire', 'started', details)
@@ -71,8 +81,8 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
     run.audienceQuota = { recruiter: planned.recruiter,
       technical: run.safeRecruiterOnly ? 0 : planned.technical }
     run.dailyQuota = run.audienceQuota.recruiter + run.audienceQuota.technical
-    const history = await withConnectionRetry(runtime, run, save, 'noco', 'history_list', () =>
-      runtime.store.listHistory(run.platformAccountId, 1000))
+    const history = await withConnectionRetry(runtime, run, save, 'noco', 'run_history_list', () =>
+      runtime.store.listRunHistory(run.runId, 1000))
     let progress = remainingAudienceQuota(run, history, run.audienceQuota)
     run.counters.sent = progress.sentTotal; run.counters.sentByAudience = progress.sent
     runtime.logger.event('quota_plan', 'succeeded', { ...details,
@@ -89,10 +99,7 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
     if (deferred.recruiter.length || deferred.technical.length) {
       run.stage = 'sending'; await save(run, 'stage_changed')
       await publishInvitations(runtime, run, deferred, progress.remaining, save)
-      const refreshed = await withConnectionRetry(runtime, run, save, 'noco', 'history_list', () =>
-        runtime.store.listHistory(run.platformAccountId, 1000))
-      progress = remainingAudienceQuota(run, refreshed, run.audienceQuota)
-      run.counters.sent = progress.sentTotal; run.counters.sentByAudience = progress.sent
+      progress = progressFromCounters(run)
     }
 
     if (run.searchProgress.pendingCandidates.length && !quotaEmpty(progress.remaining)) {
@@ -100,10 +107,7 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
       await publishInvitations(runtime, run, queuedProgressCandidates(run), progress.remaining, save)
       if (await finishRunStop(runtime, run, save)) return
       run.searchProgress.pendingCandidates = []; await save(run, 'progress')
-      const refreshed = await withConnectionRetry(runtime, run, save, 'noco', 'history_list', () =>
-        runtime.store.listHistory(run.platformAccountId, 1000))
-      progress = remainingAudienceQuota(run, refreshed, run.audienceQuota)
-      run.counters.sent = progress.sentTotal; run.counters.sentByAudience = progress.sent
+      progress = progressFromCounters(run)
     }
 
     while (!quotaEmpty(progress.remaining)) {
@@ -118,29 +122,35 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
         if (await finishRunStop(runtime, run, save)) return
         run.searchProgress.pendingCandidates = []; await save(run, 'progress')
       }
-      const refreshedHistory = await withConnectionRetry(runtime, run, save, 'noco',
-        'history_list', () => runtime.store.listHistory(run.platformAccountId, 1000))
-      progress = remainingAudienceQuota(run, refreshedHistory, run.audienceQuota)
-      run.counters.sent = progress.sentTotal; run.counters.sentByAudience = progress.sent
+      progress = progressFromCounters(run)
       runtime.emit(run, 'progress')
       if (quotaEmpty(progress.remaining)) break
       const exhausted = (progress.remaining.recruiter <= 0 || run.searchProgress.exhausted.recruiter) &&
         (progress.remaining.technical <= 0 || run.searchProgress.exhausted.technical)
       if (exhausted) {
+        const finalHistory = await withConnectionRetry(runtime, run, save, 'noco',
+          'final_history_readback', () => runtime.store.listRunHistory(run.runId, 1000))
+        progress = remainingAudienceQuota(run, finalHistory, run.audienceQuota)
+        run.counters.sent = progress.sentTotal; run.counters.sentByAudience = progress.sent
         run.status = 'partial'; run.stage = 'search_exhausted'
         run.errorCode = `search_exhausted_recruiter_${progress.remaining.recruiter}` +
           `_technical_${progress.remaining.technical}`
         run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
-        run.finishedAt = runtime.now().toISOString(); await save(run, 'partial')
+        run.finishedAt = runtime.now().toISOString(); await save(run, 'partial', 'critical')
         runtime.logger.event('run', 'succeeded', { ...details, sentCount: run.counters.sent,
           skippedCount: run.counters.skipped, runStage: run.stage })
         return
       }
     }
 
+    const finalHistory = await withConnectionRetry(runtime, run, save, 'noco',
+      'final_history_readback', () => runtime.store.listRunHistory(run.runId, 1000))
+    progress = remainingAudienceQuota(run, finalHistory, run.audienceQuota)
+    run.counters.sent = progress.sentTotal; run.counters.sentByAudience = progress.sent
+
     run.status = 'succeeded'; run.stage = 'completed'; run.errorCode = undefined
     run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
-    run.finishedAt = runtime.now().toISOString(); await save(run, 'completed')
+    run.finishedAt = runtime.now().toISOString(); await save(run, 'completed', 'critical')
     runtime.logger.event('run', 'succeeded', { ...details, sentCount: run.counters.sent,
       skippedCount: run.counters.skipped, runStage: run.stage })
   } catch (error) {
@@ -154,8 +164,21 @@ export async function executeConnectionRun(runtime: ConnectionRuntime, run: Conn
     run.finishedAt = runtime.now().toISOString()
     runtime.logger.event('run', 'failed', { ...details, errorCode,
       runStatus: run.status, runStage: run.stage })
-    await save(run, 'stage_changed').catch(() => undefined)
+    await save(run, 'stage_changed', 'critical').catch(() => undefined)
   } finally {
+    const currentStats = runtime.store.requestStats?.()
+    const stats = currentStats && nocoStart ? {
+      reads: currentStats.reads - nocoStart.reads,
+      pages: currentStats.pages - nocoStart.pages,
+      creates: currentStats.creates - nocoStart.creates,
+      patches: currentStats.patches - nocoStart.patches,
+      conflicts: currentStats.conflicts - nocoStart.conflicts,
+      retries: currentStats.retries - nocoStart.retries
+    } : currentStats
+    if (stats) runtime.logger.event('noco_request_summary', 'succeeded', { ...details,
+      nocoReads: stats.reads, nocoPages: stats.pages, nocoCreates: stats.creates,
+      nocoPatches: stats.patches, nocoConflicts: stats.conflicts, nocoRetries: stats.retries,
+      nocoRequests: stats.pages + stats.creates + stats.patches })
     if (release) {
       try {
         release(); runtime.logger.event('operation_gate_release', 'succeeded', details)

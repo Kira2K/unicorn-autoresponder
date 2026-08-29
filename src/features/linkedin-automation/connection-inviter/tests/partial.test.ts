@@ -11,7 +11,7 @@ async function run() {
       keywordTemplate: '{stack} Engineer', priority: 2, enabled: true }
   ]
   test.adapter.searchPeople = async () => ({ items: [{ id: 'wrong-city',
-    display_name: 'Wrong City', headline: 'Recruiter and GO Engineer',
+    display_name: 'Wrong City', headline: 'Account Executive',
     location: 'London', network_distance: 2 }] })
   const service = createConnectionInviterService({ ...test,
     now: () => new Date('2026-08-29T09:00:00Z'), random: () => 0,
@@ -22,6 +22,8 @@ async function run() {
   assert.equal(partial.counters.sent, 0); assert.equal(test.metrics.sends, 0)
   assert.equal(partial.searchProgress.exhausted.recruiter, true)
   assert.equal(partial.searchProgress.exhausted.technical, true)
+  assert.equal(partial.skipReasonCounters['hard:role_mismatch'] > 0, true)
+  assert.equal(partial.skipReasonCounters['soft:city_outside_target'] > 0, true)
   assert.deepEqual(await service.history(7), [])
   const second: any = await service.start(7)
   const secondPartial: any = await waitRun(service, second.runId)

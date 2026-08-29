@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto'
 import { renderSearchKeywords, type SearchAudience } from './catalog.ts'
-import { evaluateCandidate, parseConnectionCandidate } from './policy.ts'
+import { evaluateCandidate, parseConnectionCandidate,
+  type CandidatePolicyEvaluation, type ParsedCandidate } from './policy.ts'
 import { selectTemplates } from './run-model.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
@@ -10,16 +12,53 @@ import { searchBatchDelay, searchRequestDelay, waitWithRunTimer,
 const AUDIENCES: SearchAudience[] = ['recruiter', 'technical']
 const PERMANENT_HISTORY = new Set(['sending', 'sent', 'pending', 'accepted', 'uncertain'])
 
-function countSkip(runtime: ConnectionRuntime, run: ConnectionRun, audience: SearchAudience,
-  reasonCode: string) {
+function increment(run: ConnectionRun, key: string) {
+  run.skipReasonCounters[key] = (run.skipReasonCounters[key] ?? 0) + 1
+}
+
+function recordSignals(run: ConnectionRun, audience: SearchAudience,
+  evaluation: CandidatePolicyEvaluation) {
+  for (const signal of evaluation.softSignals) {
+    increment(run, `soft:${signal}`); increment(run, `audience:${audience}:soft:${signal}`)
+  }
+  for (const hard of evaluation.hardReasons) {
+    for (const soft of evaluation.softSignals) {
+      increment(run, `intersection:${hard}+${soft}`)
+      increment(run, `audience:${audience}:intersection:${hard}+${soft}`)
+    }
+  }
+}
+
+function recordSkip(runtime: ConnectionRuntime, run: ConnectionRun, audience: SearchAudience,
+  reasonCodes: string[], candidateHash?: string) {
+  const uniqueReasons = [...new Set(reasonCodes)]
   run.counters.skipped += 1; run.searchProgress.skipped += 1
-  run.skipReasonCounters[reasonCode] = (run.skipReasonCounters[reasonCode] ?? 0) + 1
+  for (const reason of uniqueReasons) {
+    increment(run, `hard:${reason}`); increment(run, `audience:${audience}:hard:${reason}`)
+  }
   runtime.logger.event('candidate_skip', 'succeeded', { runId: run.runId,
-    platformAccountId: run.platformAccountId, audience, reasonCode })
+    platformAccountId: run.platformAccountId, audience, reasonCode: uniqueReasons[0],
+    hardReasonCodes: uniqueReasons.join('|'), candidateHash })
+}
+
+function safeCandidateHash(runId: string, personId: string) {
+  return createHash('sha256').update(`${runId}:${personId}`).digest('hex').slice(0, 16)
+}
+
+function logEvaluation(runtime: ConnectionRuntime, run: ConnectionRun, audience: SearchAudience,
+  searchKey: string, candidate: ParsedCandidate, evaluation: CandidatePolicyEvaluation) {
+  runtime.logger.event('candidate_policy', 'succeeded', {
+    runId: run.runId, platformAccountId: run.platformAccountId, audience, searchKey,
+    candidateHash: candidate.personId ? safeCandidateHash(run.runId, candidate.personId) : 'missing',
+    roleCategory: evaluation.roleCategory, locationMatch: evaluation.evidence.locationMatch,
+    stackEvidence: evaluation.evidence.stackEvidence,
+    hardReasonCodes: evaluation.hardReasons.join('|') || 'none',
+    softSignalCodes: evaluation.softSignals.join('|') || 'none'
+  })
 }
 
 function proposedHistory(runtime: ConnectionRuntime, run: ConnectionRun, audience: SearchAudience,
-  searchKey: string, candidate: ReturnType<typeof parseConnectionCandidate>): ConnectionHistoryItem {
+  searchKey: string, candidate: ParsedCandidate, existing?: ConnectionHistoryItem): ConnectionHistoryItem {
   const timestamp = runtime.now().toISOString()
   return {
     historyKey: `${run.accountId}:${candidate.personId}`, runId: run.runId,
@@ -27,7 +66,9 @@ function proposedHistory(runtime: ConnectionRuntime, run: ConnectionRun, audienc
     personId: candidate.personId, audience, searchKey, name: candidate.name,
     headline: candidate.headline, location: candidate.location,
     ...(candidate.profileUrl ? { profileUrl: candidate.profileUrl } : {}),
-    status: 'eligible', reasonCode: 'candidate_eligible', discoveredAt: timestamp, updatedAt: timestamp
+    status: 'eligible', reasonCode: 'candidate_eligible',
+    discoveredAt: existing?.discoveredAt ?? timestamp, updatedAt: timestamp,
+    ...(existing?.recordId ? { recordId: existing.recordId } : {})
   }
 }
 
@@ -36,13 +77,13 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
   const catalog = await withConnectionRetry(runtime, run, save, 'noco', 'catalog_read', () =>
     runtime.store.listCatalog())
   const previousRuns = await withConnectionRetry(runtime, run, save, 'noco', 'runs_read', () =>
-    runtime.store.listRuns(1000))
+    runtime.store.listRunsForAccount(run.platformAccountId, 1000))
   const templates = selectTemplates(catalog, previousRuns, run)
   run.searchProgress.keyTotal = {
     recruiter: templates.recruiter.length, technical: templates.technical.length
   }
   const queues: Record<SearchAudience, ConnectionHistoryItem[]> = { recruiter: [], technical: [] }
-  const queuedPeople = new Set(run.seenPersonIds)
+  const seenPeople = new Set(run.seenPersonIds)
   const targets = { recruiter: Math.max(0, quota.recruiter * 2),
     technical: Math.max(0, quota.technical * 2) }
   let requestCount = 0
@@ -57,10 +98,7 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
     const audience = needs[0]
     let keyIndex = run.searchProgress.keyIndex[audience]
     const template = templates[audience][keyIndex]
-    if (!template) {
-      run.searchProgress.exhausted[audience] = true
-      continue
-    }
+    if (!template) { run.searchProgress.exhausted[audience] = true; continue }
     const continuing = run.searchProgress.audience === audience &&
       run.searchProgress.sourceKey === template.sourceKey
     let page = continuing ? run.searchProgress.page : 0
@@ -86,29 +124,52 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
       const items = connectionPageItems(response)
       run.searchProgress.found += items.length
       let pageEligible = 0; let pageSkipped = 0
+      const evaluated: Array<{ candidate: ParsedCandidate; evaluation: CandidatePolicyEvaluation }> = []
+
       for (const raw of items) {
         const candidate = parseConnectionCandidate(raw)
-        run.counters.discovered += 1; run.searchProgress.checked += 1
-        if (!candidate.personId) {
-          countSkip(runtime, run, audience, 'missing_person_id'); pageSkipped += 1; continue
+        const evaluation = evaluateCandidate(candidate, template, run.stack, run.safeRecruiterOnly)
+        const funnel = run.counters.filterFunnel[audience]
+        run.counters.discovered += 1; run.searchProgress.checked += 1; funnel.found += 1
+        const structurallyValid = !evaluation.hardReasons.some(reason =>
+          ['missing_person_id', 'incomplete_profile'].includes(reason))
+        if (structurallyValid) funnel.structurallyValid += 1
+        if (structurallyValid && !evaluation.hardReasons.includes('role_mismatch')) funnel.roleMatched += 1
+        recordSignals(run, audience, evaluation)
+        logEvaluation(runtime, run, audience, template.sourceKey, candidate, evaluation)
+
+        if (candidate.personId && seenPeople.has(candidate.personId)) {
+          recordSkip(runtime, run, audience, ['duplicate_in_run'],
+            safeCandidateHash(run.runId, candidate.personId)); pageSkipped += 1; continue
         }
-        if (queuedPeople.has(candidate.personId)) {
-          countSkip(runtime, run, audience, 'duplicate_in_run'); pageSkipped += 1; continue
+        if (candidate.personId) {
+          seenPeople.add(candidate.personId); run.seenPersonIds.push(candidate.personId)
         }
-        const decision = evaluateCandidate(candidate, template, run.stack, run.safeRecruiterOnly)
-        if (!decision.eligible) {
-          countSkip(runtime, run, audience, decision.reasonCode); pageSkipped += 1; continue
+        if (!evaluation.eligible) {
+          recordSkip(runtime, run, audience, evaluation.hardReasons,
+            candidate.personId ? safeCandidateHash(run.runId, candidate.personId) : undefined)
+          pageSkipped += 1; continue
         }
-        const existing = await withConnectionRetry(runtime, run, save, 'noco', 'history_read', () =>
-          runtime.store.findHistory(run.accountId, candidate.personId))
-        if (existing && PERMANENT_HISTORY.has(existing.status)) {
-          countSkip(runtime, run, audience, 'lifetime_history_block'); pageSkipped += 1; continue
-        }
-        const proposed = proposedHistory(runtime, run, audience, template.sourceKey, candidate)
-        queues[audience].push(proposed); run.searchProgress.pendingCandidates.push(proposed)
-        queuedPeople.add(candidate.personId); run.seenPersonIds.push(candidate.personId)
-        run.counters.eligible += 1; run.searchProgress.eligible += 1; pageEligible += 1
+        evaluated.push({ candidate, evaluation })
       }
+
+      const existingRows = evaluated.length
+        ? await withConnectionRetry(runtime, run, save, 'noco', 'history_batch_read', () =>
+          runtime.store.findHistoryBatch(run.accountId, evaluated.map(item => item.candidate.personId)))
+        : []
+      const existingByPerson = new Map(existingRows.map(item => [item.personId, item]))
+      for (const { candidate } of evaluated) {
+        const existing = existingByPerson.get(candidate.personId)
+        if (existing && PERMANENT_HISTORY.has(existing.status)) {
+          recordSkip(runtime, run, audience, ['lifetime_history_block'],
+            safeCandidateHash(run.runId, candidate.personId)); pageSkipped += 1; continue
+        }
+        const proposed = proposedHistory(runtime, run, audience, template.sourceKey, candidate, existing)
+        queues[audience].push(proposed); run.searchProgress.pendingCandidates.push(proposed)
+        run.counters.eligible += 1; run.searchProgress.eligible += 1
+        run.counters.filterFunnel[audience].historyClear += 1; pageEligible += 1
+      }
+
       cursor = connectionNextCursor(response); run.searchProgress.nextCursor = cursor || undefined
       runtime.logger.event('candidate_search', 'succeeded', { ...log,
         candidateCount: items.length, eligibleCount: pageEligible, skippedCount: pageSkipped,
@@ -125,7 +186,7 @@ export async function discoverCandidates(runtime: ConnectionRuntime, run: Connec
       if (keyIndex >= templates[audience].length) run.searchProgress.exhausted[audience] = true
       if ((run.searchProgress.keyIndex.recruiter + run.searchProgress.keyIndex.technical) % 5 === 0) {
         const proceed = await waitWithRunTimer(runtime, run, save, 'search_batch_cooldown',
-          'search_cooldown', searchBatchDelay(runtime.random), true)
+          'search_cooldown', searchBatchDelay(runtime.random))
         if (!proceed) return queues
       }
     }

@@ -54,6 +54,26 @@ export type ConnectionRunCounters = {
   sent: number
   skipped: number
   sentByAudience: Record<SearchAudience, number>
+  filterFunnel: Record<SearchAudience, ConnectionFilterFunnel>
+}
+
+export type ConnectionFilterFunnel = {
+  found: number
+  structurallyValid: number
+  roleMatched: number
+  historyClear: number
+  preflightPassed: number
+  claimed: number
+  sent: number
+}
+
+export type ConnectionNocoRequestStats = {
+  reads: number
+  pages: number
+  creates: number
+  patches: number
+  conflicts: number
+  retries: number
 }
 
 export type ConnectionRun = {
@@ -130,14 +150,20 @@ export type ConnectionAccountContext = {
 export type ConnectionInviterStore = {
   listCatalog(): Promise<ConnectionSearchTemplate[]>
   listRuns(limit?: number): Promise<ConnectionRun[]>
+  listRunsForAccount(platformAccountId: number, limit?: number): Promise<ConnectionRun[]>
   getRun(runId: string): Promise<ConnectionRun | undefined>
   getRunByKey(runKey: string): Promise<ConnectionRun | undefined>
   createRun(run: ConnectionRun): Promise<{ run: ConnectionRun; created: boolean }>
   updateRun(run: ConnectionRun): Promise<void>
   findHistory(accountId: string, personId: string): Promise<ConnectionHistoryItem | undefined>
+  findHistoryBatch(accountId: string, personIds: string[]): Promise<ConnectionHistoryItem[]>
   claimHistory(item: ConnectionHistoryItem): Promise<boolean>
   updateHistory(item: ConnectionHistoryItem): Promise<void>
   listHistory(platformAccountId: number, limit?: number): Promise<ConnectionHistoryItem[]>
+  listRunHistory(runId: string, limit?: number): Promise<ConnectionHistoryItem[]>
+  listOpenHistory(platformAccountId: number, limit?: number): Promise<ConnectionHistoryItem[]>
+  requestStats?(): ConnectionNocoRequestStats
+  recordRetry?(): void
 }
 
 export type ConnectionUnipileAdapter = {

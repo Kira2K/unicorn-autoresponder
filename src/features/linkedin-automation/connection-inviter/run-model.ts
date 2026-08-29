@@ -27,7 +27,13 @@ export function makeRun(context: ConnectionAccountContext, now: Date, timeZone: 
     stage: context.stack || safeRecruiterOnly ? 'queued' : 'stack_required',
     audienceQuota: { recruiter: 0, technical: 0 },
     counters: { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0,
-      sentByAudience: { recruiter: 0, technical: 0 } },
+      sentByAudience: { recruiter: 0, technical: 0 },
+      filterFunnel: {
+        recruiter: { found: 0, structurallyValid: 0, roleMatched: 0, historyClear: 0,
+          preflightPassed: 0, claimed: 0, sent: 0 },
+        technical: { found: 0, structurallyValid: 0, roleMatched: 0, historyClear: 0,
+          preflightPassed: 0, claimed: 0, sent: 0 }
+      } },
     usedSearchKeys: [], seenPersonIds: [], skipReasonCounters: {},
     searchProgress: {
       keyIndex: { recruiter: 0, technical: 0 }, keyTotal: { recruiter: 0, technical: 0 },

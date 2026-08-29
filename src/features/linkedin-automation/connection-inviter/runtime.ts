@@ -25,4 +25,6 @@ export type ConnectionRuntime = {
   writerId: string
 }
 
-export type SaveRun = (run: ConnectionRun, event?: ConnectionRunEventType) => Promise<void>
+export type SaveRunMode = 'checkpoint' | 'critical'
+export type SaveRun = (run: ConnectionRun, event?: ConnectionRunEventType,
+  mode?: SaveRunMode) => Promise<void>

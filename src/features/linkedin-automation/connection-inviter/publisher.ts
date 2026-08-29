@@ -21,7 +21,10 @@ async function updateHistory(runtime: ConnectionRuntime, run: ConnectionRun, sav
 function countSkip(runtime: ConnectionRuntime, run: ConnectionRun, item: ConnectionHistoryItem,
   reasonCode: string) {
   run.counters.skipped += 1
-  run.skipReasonCounters[reasonCode] = (run.skipReasonCounters[reasonCode] ?? 0) + 1
+  const hardKey = `hard:${reasonCode}`
+  const audienceKey = `audience:${item.audience}:hard:${reasonCode}`
+  run.skipReasonCounters[hardKey] = (run.skipReasonCounters[hardKey] ?? 0) + 1
+  run.skipReasonCounters[audienceKey] = (run.skipReasonCounters[audienceKey] ?? 0) + 1
   runtime.logger.event('candidate_skip', 'succeeded', { runId: run.runId,
     platformAccountId: run.platformAccountId, audience: item.audience, reasonCode })
 }
@@ -30,16 +33,6 @@ async function claim(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveR
   item: ConnectionHistoryItem) {
   return withConnectionRetry(runtime, run, save, 'noco', 'history_claim', () =>
     claimRunCandidate(runtime.store, item))
-}
-
-async function markSkipped(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun,
-  item: ConnectionHistoryItem, reasonCode: string) {
-  const claimed = item.recordId ? item : await claim(runtime, run, save, item)
-  if (claimed) {
-    claimed.status = 'skipped'; claimed.reasonCode = reasonCode
-    claimed.updatedAt = runtime.now().toISOString(); await updateHistory(runtime, run, save, claimed)
-  }
-  countSkip(runtime, run, item, reasonCode)
 }
 
 async function pendingIds(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun) {
@@ -54,6 +47,7 @@ async function confirmSent(runtime: ConnectionRuntime, run: ConnectionRun, save:
   item.verifiedAt = runtime.now().toISOString(); await updateHistory(runtime, run, save, item)
   run.counters.sent += 1
   run.counters.sentByAudience[item.audience] += 1
+  run.counters.filterFunnel[item.audience].sent += 1
   run.stage = 'sending'; await save(run, 'invitation_sent')
   runtime.logger.event('invitation_readback', 'succeeded', { runId: run.runId,
     platformAccountId: run.platformAccountId, audience: item.audience,
@@ -62,7 +56,8 @@ async function confirmSent(runtime: ConnectionRuntime, run: ConnectionRun, save:
 
 async function resolveUncertain(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun,
   item: ConnectionHistoryItem) {
-  run.status = 'running'; run.stage = 'resolving_uncertain'; await save(run, 'uncertain')
+  run.status = 'running'; run.stage = 'resolving_uncertain'
+  await save(run, 'uncertain', 'critical')
   while (true) {
     const pending = await pendingIds(runtime, run, save)
     if (pending.has(item.personId)) { await confirmSent(runtime, run, save, item); return true }
@@ -75,7 +70,7 @@ async function resolveUncertain(runtime: ConnectionRuntime, run: ConnectionRun, 
     run.stage = 'resolving_uncertain'; run.nextActionAt = run.retryState.nextRetryAt
     run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
       nextActionAt: run.retryState.nextRetryAt }
-    await save(run, 'retry_scheduled')
+    await save(run, 'retry_scheduled', 'critical')
     if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) return false
   }
 }
@@ -113,7 +108,7 @@ async function sendWithSafety(runtime: ConnectionRuntime, run: ConnectionRun, sa
         run.stage = 'waiting_retry'; run.nextActionAt = run.retryState.nextRetryAt
         run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
           nextActionAt: run.retryState.nextRetryAt }
-        await save(run, 'retry_scheduled')
+        await save(run, 'retry_scheduled', 'critical')
         if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) return false
         item.status = 'sending'; item.reasonCode = 'invitation_claimed'
         item.updatedAt = runtime.now().toISOString(); await updateHistory(runtime, run, save, item)
@@ -152,16 +147,15 @@ export async function publishInvitations(runtime: ConnectionRuntime, run: Connec
         if (audienceSent >= quota[audience]) break
         if (runtime.stopRequested(run.runId)) break audienceLoop
         if (pending.has(candidate.personId)) {
-          await markSkipped(runtime, run, save, candidate, 'pending_invitation'); continue
+          countSkip(runtime, run, candidate, 'pending_invitation'); continue
         }
         const profile = await withConnectionRetry(runtime, run, save, 'unipile',
           'candidate_profile_read', () => runtime.adapter().getProfile(run.accountId, candidate.personId))
         const preflight = profileAllowsInvitation(profile)
         if (!preflight.allowed) {
-          await markSkipped(runtime, run, save, candidate, preflight.reasonCode); continue
+          countSkip(runtime, run, candidate, preflight.reasonCode); continue
         }
-        const item = await claim(runtime, run, save, candidate)
-        if (!item) { countSkip(runtime, run, candidate, 'lifetime_history_block'); continue }
+        run.counters.filterFunnel[audience].preflightPassed += 1
         runtime.logger.event('candidate_preflight', 'succeeded', { ...details, audience,
           reasonCode: preflight.reasonCode })
         if (sentAny) {
@@ -171,8 +165,11 @@ export async function publishInvitations(runtime: ConnectionRuntime, run: Connec
             'invitation_delay', delayMs, true)) break audienceLoop
         }
         if (runtime.stopRequested(run.runId)) break audienceLoop
-        item.status = 'sending'; item.reasonCode = 'invitation_claimed'
-        item.updatedAt = runtime.now().toISOString(); await updateHistory(runtime, run, save, item)
+        candidate.status = 'sending'; candidate.reasonCode = 'invitation_claimed'
+        candidate.updatedAt = runtime.now().toISOString()
+        const item = await claim(runtime, run, save, candidate)
+        if (!item) { countSkip(runtime, run, candidate, 'lifetime_history_block'); continue }
+        run.counters.filterFunnel[audience].claimed += 1
         run.stage = 'sending'; await save(run, 'stage_changed')
         runtime.logger.event('invitation_claim', 'succeeded', { ...details, audience })
         if (await sendWithSafety(runtime, run, save, item)) {

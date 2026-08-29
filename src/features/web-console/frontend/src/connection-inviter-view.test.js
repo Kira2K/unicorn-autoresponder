@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict'
-import { connectionAudienceLabel, connectionCountdown, connectionProgressPercent,
-  connectionPollDelay, connectionQuotaLabel, connectionRunActive,
-  connectionPauseFromError, connectionRunCanStart, connectionRunConfirmation, connectionRunLabel,
-  connectionStopConfirmation,
-  latestConnectionRun } from './connection-inviter-view.js'
+import { connectionAudienceLabel, connectionCountdown, connectionFilterDiagnostics,
+  connectionFunnelLabel, connectionProgressPercent, connectionPollDelay, connectionQuotaLabel,
+  connectionRunActive, connectionPauseFromError, connectionRunCanStart, connectionRunConfirmation,
+  connectionRunLabel, connectionStopConfirmation, latestConnectionRun } from './connection-inviter-view.js'
 
 const run = { platformAccountId: 2, status: 'succeeded', connectionCount: 320,
-  dailyLimit: 11, dailyQuota: 11, audienceQuota: { recruiter: 8, technical: 3 } }
+  dailyLimit: 11, dailyQuota: 11, audienceQuota: { recruiter: 8, technical: 3 },
+  skipReasonCounters: { 'hard:role_mismatch': 7, 'soft:city_outside_target': 12,
+    'intersection:role_mismatch+city_outside_target': 5,
+    'audience:recruiter:hard:role_mismatch': 7 },
+  counters: { filterFunnel: { recruiter: { found: 20, structurallyValid: 19, roleMatched: 12,
+    historyClear: 10, preflightPassed: 8, claimed: 8, sent: 7 } } } }
 assert.equal(latestConnectionRun([{ platformAccountId: 1 }, run], 2), run)
 assert.equal(connectionRunActive({ status: 'running' }), true)
 assert.equal(connectionRunActive(run), false)
@@ -15,12 +19,18 @@ assert.equal(connectionPollDelay(true), 15_000)
 assert.equal(connectionRunLabel(run), 'Completed')
 assert.equal(connectionRunLabel({ ...run, stage: 'completed_shortfall' }), 'Target not reached')
 assert.equal(connectionRunLabel(null), 'Not run today')
-assert.equal(connectionQuotaLabel(run), '320 connections · 11/day · 11 today')
-assert.equal(connectionAudienceLabel(run), '8 recruiters · 3 technical')
+assert.equal(connectionQuotaLabel(run), '320 connections / 11/day / 11 today')
+assert.equal(connectionAudienceLabel(run), '8 recruiters / 3 technical')
+assert.deepEqual(connectionFilterDiagnostics(run, 'hard'), [['role_mismatch', 7]])
+assert.deepEqual(connectionFilterDiagnostics(run, 'soft'), [['city_outside_target', 12]])
+assert.deepEqual(connectionFilterDiagnostics(run, 'intersection'),
+  [['role_mismatch+city_outside_target', 5]])
+assert.equal(connectionFunnelLabel(run, 'recruiter'),
+  'recruiter: 20 found / 19 valid / 12 role / 10 history / 8 preflight / 8 claimed / 7 sent')
 assert.equal(connectionProgressPercent(4, 11), 36)
 assert.equal(connectionCountdown(90_000), '00:01:30')
 assert.equal(connectionRunLabel({ ...run, status: 'running', stage: 'waiting_retry' }),
-  'Waiting — automatic retry')
+  'Waiting - automatic retry')
 assert.equal(connectionRunLabel({ ...run, status: 'partial', stage: 'search_exhausted' }),
   'Catalog exhausted')
 assert.match(connectionRunConfirmation({ clientName: 'Student' }, run),

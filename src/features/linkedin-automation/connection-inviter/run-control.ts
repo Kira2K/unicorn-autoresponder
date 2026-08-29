@@ -16,19 +16,19 @@ export async function requestRunStop(runtime: ConnectionRuntime, active: Map<str
   }
   if (!live) {
     run.status = 'stopped'; run.stage = 'stopped_by_admin'
-    run.finishedAt = runtime.now().toISOString(); await save(run)
+    run.finishedAt = runtime.now().toISOString(); await save(run, 'stopped', 'critical')
     runtime.logger.event('run_stop', 'succeeded', { ...details, runStatus: run.status,
       runStage: run.stage, reasonCode: 'no_active_executor' })
     return publicRun(run)
   }
-  requests.add(runId); run.stage = 'stop_requested'; await save(run)
+  requests.add(runId); run.stage = 'stop_requested'; await save(run, 'stage_changed', 'critical')
   return publicRun(run)
 }
 
 export async function finishRunStop(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun) {
   if (!runtime.stopRequested(run.runId)) return false
   run.status = 'stopped'; run.stage = 'stopped_by_admin'
-  run.finishedAt = runtime.now().toISOString(); await save(run)
+  run.finishedAt = runtime.now().toISOString(); await save(run, 'stopped', 'critical')
   runtime.logger.event('run_stop', 'succeeded', { runId: run.runId,
     platformAccountId: run.platformAccountId, runStatus: run.status, runStage: run.stage,
     sentCount: run.counters.sent })

@@ -13,7 +13,10 @@ const SAFE_KEYS = new Set([
   'sentToday', 'recruiterRemaining', 'technicalRemaining',
   'audience', 'reasonCode', 'errorCode', 'runId', 'platformAccountId', 'runStatus', 'runStage',
   'itemStatus', 'delayMs', 'sentCount', 'safeRecruiterOnly', 'created', 'cursorPresent',
-  'provider', 'nextRetryAt', 'firstFailedAt', 'lastFailedAt', 'keyIndex', 'keyTotal'
+  'provider', 'nextRetryAt', 'firstFailedAt', 'lastFailedAt', 'keyIndex', 'keyTotal',
+  'candidateHash', 'roleCategory', 'locationMatch', 'stackEvidence', 'hardReasonCodes',
+  'softSignalCodes', 'nocoReads', 'nocoPages', 'nocoCreates', 'nocoPatches',
+  'nocoConflicts', 'nocoRetries', 'nocoRequests'
 ])
 
 const token = (value: unknown, fallback = 'unknown') => {

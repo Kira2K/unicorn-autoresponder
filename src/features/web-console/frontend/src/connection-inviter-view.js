@@ -2,16 +2,18 @@ const LABELS = {
   running: 'Running', paused: 'Needs stack', succeeded: 'Completed', failed: 'Failed',
   partial: 'Partial', uncertain: 'Read-back required', stopped: 'Stopped'
 }
+
 export const latestConnectionRun = (runs, platformAccountId) => runs.find(run =>
   Number(run.platformAccountId) === Number(platformAccountId)) || null
 
 export const connectionRunActive = run => run?.status === 'running'
 export const connectionRunLabel = run => run?.stage === 'completed_shortfall' ? 'Target not reached' :
   run?.stage === 'paused_transient' ? 'Paused' :
-  run?.stage === 'waiting_retry' ? 'Waiting — automatic retry' :
+  run?.stage === 'waiting_retry' ? 'Waiting - automatic retry' :
   run?.stage === 'resolving_uncertain' ? 'Resolving invitation result' :
   run?.stage === 'search_exhausted' ? 'Catalog exhausted' :
   run ? LABELS[run.status] || run.status : 'Not run today'
+
 export const connectionPollDelay = hidden => hidden ? 15_000 : 5_000
 
 export function connectionLocalDate(now = new Date()) {
@@ -50,12 +52,28 @@ export const connectionStopConfirmation = account =>
 
 export function connectionQuotaLabel(run) {
   if (!run?.dailyLimit) return 'Daily quota not calculated'
-  return `${run.connectionCount} connections · ${run.dailyLimit}/day · ${run.dailyQuota || 0} today`
+  return `${run.connectionCount} connections / ${run.dailyLimit}/day / ${run.dailyQuota || 0} today`
 }
 
 export function connectionAudienceLabel(run) {
   const quota = run?.audienceQuota || {}
-  return `${quota.recruiter || 0} recruiters · ${quota.technical || 0} technical`
+  return `${quota.recruiter || 0} recruiters / ${quota.technical || 0} technical`
+}
+
+export function connectionFilterDiagnostics(run, prefix, limit = 4) {
+  return Object.entries(run?.skipReasonCounters || {})
+    .filter(([key]) => key.startsWith(`${prefix}:`))
+    .map(([key, count]) => [key.slice(prefix.length + 1), Number(count || 0)])
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+}
+
+export function connectionFunnelLabel(run, audience) {
+  const funnel = run?.counters?.filterFunnel?.[audience]
+  if (!funnel) return ''
+  return `${audience}: ${funnel.found} found / ${funnel.structurallyValid} valid / ` +
+    `${funnel.roleMatched} role / ${funnel.historyClear} history / ` +
+    `${funnel.preflightPassed} preflight / ${funnel.claimed} claimed / ${funnel.sent} sent`
 }
 
 export const connectionProgressPercent = (value, target) => target > 0
