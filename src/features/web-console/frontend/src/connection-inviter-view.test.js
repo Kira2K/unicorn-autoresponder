@@ -33,6 +33,8 @@ assert.equal(connectionRunLabel({ ...run, status: 'running', stage: 'waiting_ret
   'Waiting - automatic retry')
 assert.equal(connectionRunLabel({ ...run, status: 'partial', stage: 'search_exhausted' }),
   'Catalog exhausted')
+assert.equal(connectionRunLabel({ ...run, status: 'partial', stage: 'daily_window_closed' }),
+  'Partial - day closed')
 assert.match(connectionRunConfirmation({ clientName: 'Student' }, run),
   /LIVE LinkedIn action: send up to 11 real invitations/)
 assert.match(connectionRunConfirmation({ clientName: 'Student' }, null, true),
@@ -45,6 +47,7 @@ assert.equal(connectionRunCanStart({ ...run, localDate: today,
   counters: { sent: 11 } }, true, today), false)
 assert.equal(connectionRunCanStart({ ...run, localDate: '2026-08-28',
   counters: { sent: 11 } }, true, today), true)
+assert.equal(connectionRunActive({ status: 'running', localDate: '2026-08-28' }, today), false)
 assert.equal(connectionRunCanStart({ ...run, status: 'running', localDate: today }, true, today), false)
 assert.deepEqual(connectionPauseFromError({ status: 429, body: { error: 'noco_rate_limited' } }), {
   code: 'noco_rate_limited', message: 'NocoDB is temporarily busy. Run today to resume.' })

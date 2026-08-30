@@ -96,14 +96,13 @@ export function stackSearchAliases(stack: string | undefined): string[] {
 
 export function renderSearchKeywords(template: ConnectionSearchTemplate, stack: string | undefined,
   safeRecruiterOnly = false): string {
-  const city = quoted(template.city)
   if (template.audience === 'recruiter' || safeRecruiterOnly) {
-    return `(${RECRUITER_ROLES.map(quoted).join(' OR ')}) AND ${city}`
+    return `(${RECRUITER_ROLES.map(quoted).join(' OR ')})`
   }
   const aliases = stackSearchAliases(stack)
   if (!aliases.length) throw new Error('Technical connection search requires a stack.')
   return `(${aliases.map(quoted).join(' OR ')}) AND ` +
-    `(${TECHNICAL_ROLES.map(quoted).join(' OR ')}) AND ${city}`
+    `(${TECHNICAL_ROLES.map(quoted).join(' OR ')})`
 }
 
 export const CONNECTION_SEARCH_CATALOG = buildConnectionSearchCatalog()

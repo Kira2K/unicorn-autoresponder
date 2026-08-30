@@ -18,7 +18,7 @@ async function run() {
     sleep: async () => undefined })
   const started: any = await service.start(7)
   const failed: any = await waitRun(service, started.runId)
-  assert.equal(failed.status, 'failed'); assert.equal(failed.stage, 'failed')
+  assert.equal(failed.status, 'partial'); assert.equal(failed.stage, 'search_exhausted')
   assert.equal(failed.errorCode, 'connection_search_space_exhausted')
   assert.equal(failed.counters.sent, 0); assert.equal(test.metrics.sends, 0)
   assert.equal(failed.searchProgress.exhausted.recruiter, true)
@@ -28,7 +28,7 @@ async function run() {
   assert.deepEqual(await service.history(7), [])
   const second: any = await service.start(7)
   const secondFailed: any = await waitRun(service, second.runId)
-  assert.equal(secondFailed.status, 'failed'); assert.equal(secondFailed.searchProgress.pass, 1)
+  assert.equal(secondFailed.status, 'partial'); assert.equal(secondFailed.searchProgress.pass, 2)
   assert.equal(test.metrics.sends, 0)
 }
 

@@ -2,7 +2,7 @@
 import { computed, onMounted, watch } from 'vue'
 import { connectionAudienceLabel, connectionCountdown, connectionEta, connectionFilterDiagnostics,
   connectionFunnelLabel, connectionProgressPercent, connectionQuotaLabel, connectionRunCanStart,
-  connectionRunLabel } from './connection-inviter-view'
+  connectionRunActive, connectionRunLabel } from './connection-inviter-view'
 
 const props = defineProps({ account: Object, inviter: Object, disabled: Boolean })
 const run = computed(() => props.inviter.runFor(props.account))
@@ -12,6 +12,7 @@ const accountHistory = computed(() => props.inviter.history.value[props.account.
 const pause = computed(() => props.inviter.pauses.value[props.account.platformAccountId])
 const canStart = computed(() => connectionRunCanStart(run.value, Boolean(stack.value)) &&
   readiness.value?.writerEnabled !== false)
+const isActive = computed(() => connectionRunActive(run.value))
 const timer = computed(() => props.inviter.countdownFor(run.value))
 const recruiterSent = computed(() => Number(run.value?.counters?.sentByAudience?.recruiter || 0))
 const technicalSent = computed(() => Number(run.value?.counters?.sentByAudience?.technical || 0))
@@ -26,6 +27,12 @@ const keysTotal = computed(() => Number(run.value?.searchProgress?.keyTotal?.rec
 const hardReasons = computed(() => connectionFilterDiagnostics(run.value, 'hard'))
 const softSignals = computed(() => connectionFilterDiagnostics(run.value, 'soft'))
 const intersections = computed(() => connectionFilterDiagnostics(run.value, 'intersection', 3))
+const latestConfirmed = computed(() => [...accountHistory.value]
+  .filter(item => ['sent', 'accepted'].includes(item.status))
+  .sort((left, right) => Date.parse(right.verifiedAt || right.sentAt || right.updatedAt || '') -
+    Date.parse(left.verifiedAt || left.sentAt || left.updatedAt || ''))[0])
+const shortfall = computed(() => Math.max(0,
+  Number(run.value?.dailyQuota || 0) - Number(run.value?.counters?.sent || 0)))
 const severity = computed(() => run.value?.status === 'failed' ? 'danger' :
   ['partial', 'paused', 'uncertain'].includes(run.value?.status) ||
     run.value?.stage === 'waiting_retry' ? 'warn' :
@@ -39,10 +46,10 @@ onMounted(() => props.inviter.ensure(props.account))
   <div class="connection-inviter" :data-testid="`connection-inviter-${account.platformAccountId}`">
     <div class="connection-inviter-head">
       <Tag :severity="pause ? 'warn' : severity" :value="pause ? 'Paused' : connectionRunLabel(run)" />
-      <Button v-if="stack && run?.status !== 'running'" label="Run today" size="small" severity="success"
+      <Button v-if="stack && !isActive" label="Run today" size="small" severity="success"
         :loading="inviter.loading.value[account.platformAccountId]" :disabled="!canStart"
         :data-testid="`connection-run-${account.platformAccountId}`" @click="inviter.start(account)" />
-      <Button v-if="run?.status === 'running'" label="Stop" size="small" severity="danger" outlined
+      <Button v-if="isActive" label="Stop" size="small" severity="danger" outlined
         :loading="inviter.loading.value[account.platformAccountId]"
         :data-testid="`connection-stop-${account.platformAccountId}`" @click="inviter.stop(account)" />
     </div>
@@ -53,6 +60,13 @@ onMounted(() => props.inviter.ensure(props.account))
     <small v-else>Stage: {{ run.stage.replaceAll('_', ' ') }}</small>
     <small v-if="run">{{ connectionQuotaLabel(run) }}</small>
     <small v-if="run">{{ connectionAudienceLabel(run) }}</small>
+    <small v-if="run?.stage === 'daily_window_closed'">
+      Sent {{ run.counters?.sent || 0 }}; shortfall {{ shortfall }}. Nothing carries into today.
+    </small>
+    <small v-if="latestConfirmed">
+      Last confirmed: {{ new Date(latestConfirmed.verifiedAt || latestConfirmed.sentAt).toLocaleString() }} /
+      {{ latestConfirmed.audience }} / {{ latestConfirmed.reasonCode || 'confirmed' }}
+    </small>
 
     <div v-if="run?.dailyQuota" class="connection-progress-grid">
       <label>Overall {{ run.counters?.sent || 0 }} / {{ run.dailyQuota }}</label>
@@ -100,7 +114,10 @@ onMounted(() => props.inviter.ensure(props.account))
       <Button label="Recruiters only" size="small" severity="secondary" outlined :disabled="!canStart"
         :data-testid="`connection-safe-run-${account.platformAccountId}`" @click="inviter.start(account, true)" />
     </div>
-    <small v-if="run?.errorCode" class="comment-monitor-error">{{ run.errorCode }}</small>
+    <small v-if="run?.errorCode" class="comment-monitor-error">
+      {{ latestConfirmed ? 'Search after the last confirmed invitation' : 'Last run error' }}:
+      {{ run.errorCode }}
+    </small>
     <small v-if="pause" class="comment-monitor-warning">{{ pause.message }}</small>
     <small v-if="inviter.errors.value[account.platformAccountId]" class="comment-monitor-error">
       {{ inviter.errors.value[account.platformAccountId] }}

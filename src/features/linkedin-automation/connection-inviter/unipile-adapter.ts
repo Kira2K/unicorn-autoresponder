@@ -30,10 +30,10 @@ export function pendingPersonId(value: any): string {
 export function createConnectionUnipileAdapter(options: {
   http?: any; scheduler?: any; logger?: ConnectionLogger; maxReadAttempts?: number
 } = {}) {
-  const http = options.http ?? createUnipileHttpClient()
+  const http = options.http ?? createUnipileHttpClient({ retryAfterCapMs: Number.POSITIVE_INFINITY })
   const scheduler = options.scheduler ?? sharedScheduler
   const logger = options.logger ?? NOOP_CONNECTION_LOGGER
-  const maxReadAttempts = Math.max(1, options.maxReadAttempts ?? 3)
+  const maxReadAttempts = Math.max(1, options.maxReadAttempts ?? 1)
   async function request(operation: string, method: 'GET' | 'POST', path: string, body?: unknown,
     successStatus = 200) {
     const operationId = randomUUID()
@@ -73,11 +73,17 @@ export function createConnectionUnipileAdapter(options: {
       return request('relations_read', 'GET',
         `/${encodeURIComponent(accountId)}/users/me/relations${query}`)
     },
-    searchPeople(accountId: string, keywords: string, cursor?: string) {
+    resolveLocations(accountId: string, city: string) {
+      const query = new URLSearchParams({ type: 'LOCATION', keywords: city, offset: '0', limit: '10' })
+      return request('location_lookup', 'GET',
+        `/${encodeURIComponent(accountId)}/linkedin/search/parameters?${query}`)
+    },
+    searchPeople(accountId: string, input: { title: string; locationId: string }, cursor?: string) {
       const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
       return request('people_search', 'POST',
         `/${encodeURIComponent(accountId)}/linkedin/search/people${query}`,
-        { keywords, network_distance: [2] })
+        { network_distance: [2], location: [input.locationId],
+          advanced_keywords: { title: input.title } })
     },
     listPendingInvitations(accountId: string, offset = 0) {
       const query = new URLSearchParams({ type: 'sent', offset: String(offset) })

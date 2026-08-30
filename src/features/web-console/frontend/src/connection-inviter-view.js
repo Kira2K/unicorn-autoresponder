@@ -6,12 +6,14 @@ const LABELS = {
 export const latestConnectionRun = (runs, platformAccountId) => runs.find(run =>
   Number(run.platformAccountId) === Number(platformAccountId)) || null
 
-export const connectionRunActive = run => run?.status === 'running'
+export const connectionRunActive = (run, today = connectionLocalDate()) =>
+  run?.status === 'running' && (!run.localDate || run.localDate === today)
 export const connectionRunLabel = run => run?.stage === 'completed_shortfall' ? 'Target not reached' :
   run?.stage === 'paused_transient' ? 'Paused' :
   run?.stage === 'waiting_retry' ? 'Waiting - automatic retry' :
   run?.stage === 'resolving_uncertain' ? 'Resolving invitation result' :
   run?.stage === 'search_exhausted' ? 'Catalog exhausted' :
+  run?.stage === 'daily_window_closed' ? 'Partial - day closed' :
   run ? LABELS[run.status] || run.status : 'Not run today'
 
 export const connectionPollDelay = hidden => hidden ? 15_000 : 5_000
@@ -24,8 +26,9 @@ export function connectionLocalDate(now = new Date()) {
 }
 
 export function connectionRunCanStart(run, hasStack = true, today = connectionLocalDate()) {
+  if (run?.status === 'uncertain' || run?.stage === 'resolving_uncertain') return false
   if (!run || (run.localDate && run.localDate !== today)) return true
-  if (run.status === 'running' || run.status === 'uncertain') return false
+  if (connectionRunActive(run, today)) return false
   if (!['succeeded', 'stopped'].includes(run.status)) return true
   const target = Number(hasStack ? run.dailyLimit : run.dailyQuota)
   return !target || Number(run.counters?.sent || 0) < target

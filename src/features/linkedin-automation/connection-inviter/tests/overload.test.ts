@@ -30,6 +30,7 @@ async function searchRetriesSameCursor() {
   assert.equal(completed.status, 'succeeded')
   assert.deepEqual(failedCursors, ['same-cursor', 'same-cursor', 'same-cursor'])
   assert.deepEqual(retryDelays.slice(0, 3), [180_000, 90_000, 180_000])
+  assert.equal(completed.searchProgress.recentSearchAt.length > completed.counters.searched, true)
 }
 
 async function invitation429ReadbackThenRetry() {

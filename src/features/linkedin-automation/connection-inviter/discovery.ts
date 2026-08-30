@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import { renderSearchKeywords, type SearchAudience } from './catalog.ts'
+import { requireConnectionRunDay } from './day-window.ts'
+import { selectLocation } from './location-resolution.ts'
 import { evaluateCandidate, parseConnectionCandidate,
   type CandidatePolicyEvaluation, type ParsedCandidate } from './policy.ts'
 import { selectTemplates } from './run-model.ts'
@@ -8,6 +10,7 @@ import type { ConnectionHistoryItem, ConnectionRun, ConnectionSearchStreamState 
 import { connectionNextCursor, connectionPageItems } from './unipile-adapter.ts'
 import { searchRequestDelay, waitWithRunTimer,
   withConnectionRetry } from './retry-state.ts'
+import { connectionSearchSlot } from './search-limiter.ts'
 
 const PERMANENT_HISTORY = new Set(['sending', 'sent', 'pending', 'accepted', 'uncertain'])
 
@@ -85,6 +88,10 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
     runtime.store.listCatalog())
   const previousRuns = await withConnectionRetry(runtime, run, save, 'noco', 'runs_read', () =>
     runtime.store.listRunsForAccount(run.platformAccountId, 1000))
+  const accountAttempts = previousRuns.flatMap(item => item.searchProgress.recentSearchAt ?? [])
+  run.searchProgress.recentSearchAt = [...new Set([
+    ...accountAttempts, ...run.searchProgress.recentSearchAt
+  ])].sort()
   const templates = selectTemplates(catalog, previousRuns, run)
   run.searchProgress.keyTotal = {
     recruiter: templates.recruiter.length, technical: templates.technical.length
@@ -93,19 +100,48 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
     ...run.searchProgress.pendingCandidates.map(item => item.personId)])
   async function waitForSearchSlot() {
     const now = runtime.now().getTime()
-    const recent = run.searchProgress.recentSearchAt.map(value => Date.parse(value))
-      .filter(value => Number.isFinite(value) && value > now - 10 * 60_000)
-      .sort((left, right) => left - right)
-    run.searchProgress.recentSearchAt = recent.map(value => new Date(value).toISOString())
-    const last = recent.at(-1)
-    const gapDelay = last === undefined ? 0 : Math.max(0,
-      last + searchRequestDelay(runtime.random) - now)
-    const windowDelay = recent.length < 5 ? 0 : Math.max(0, recent[recent.length - 5] + 600_000 - now)
-    const delayMs = Math.max(gapDelay, windowDelay)
-    if (delayMs <= 0) return true
-    return waitWithRunTimer(runtime, run, save,
-      windowDelay > gapDelay ? 'search_batch_cooldown' : 'search_pacing',
-      'search_cooldown', delayMs)
+    const slot = connectionSearchSlot(run.searchProgress.recentSearchAt, now,
+      searchRequestDelay(runtime.random))
+    run.searchProgress.recentSearchAt = slot.recent
+    if (slot.delayMs <= 0) return true
+    return waitWithRunTimer(runtime, run, save, slot.waitKind,
+      'search_cooldown', slot.delayMs)
+  }
+
+  async function pacedRequest<T>(operation: string, action: () => Promise<T>) {
+    return withConnectionRetry(runtime, run, save, 'unipile', operation, async () => {
+      if (!await waitForSearchSlot()) {
+        throw new Error('Connection search stopped before the next request slot.')
+      }
+      requireConnectionRunDay(runtime, run)
+      const attemptedAt = runtime.now().toISOString()
+      run.searchProgress.recentSearchAt.push(attemptedAt)
+      run.searchProgress.recentSearchAt = run.searchProgress.recentSearchAt.slice(-100)
+      await save(run, 'progress', 'critical')
+      requireConnectionRunDay(runtime, run)
+      const result = await action()
+      requireConnectionRunDay(runtime, run)
+      return result
+    })
+  }
+
+  async function resolveCity(city: string) {
+    const cached = run.searchProgress.locations[city]
+    if (cached) return cached
+    run.stage = 'location_resolving'; run.searchProgress.city = city
+    await save(run, 'stage_changed')
+    runtime.logger.event('location_lookup', 'started', { runId: run.runId,
+      platformAccountId: run.platformAccountId, city })
+    const response = await pacedRequest('location_lookup', () =>
+      runtime.adapter().resolveLocations(run.accountId, city))
+    const resolved = selectLocation(city, connectionPageItems(response), runtime.now().toISOString())
+    run.searchProgress.locations[city] = resolved
+    await save(run, 'progress', 'critical')
+    runtime.logger.event('location_lookup', resolved.status === 'resolved' ? 'succeeded' : 'failed', {
+      runId: run.runId, platformAccountId: run.platformAccountId, city,
+      locationId: resolved.id, errorCode: resolved.status === 'unresolved'
+        ? 'connection_location_unresolved' : undefined })
+    return resolved
   }
 
   async function evaluatePage(audience: SearchAudience, searchKey: string, template: any,
@@ -171,33 +207,41 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
         }
         if (stream.sourceKey !== template.sourceKey) {
           stream.sourceKey = template.sourceKey; stream.city = template.city
-          stream.page = 0; stream.nextCursor = undefined
+          stream.locationId = undefined; stream.page = 0; stream.nextCursor = undefined
         }
         displayStream(run, audience, stream)
         if (!run.usedSearchKeys.includes(template.sourceKey)) run.usedSearchKeys.push(template.sourceKey)
-        if (!await waitForSearchSlot()) return []
+        const location = await resolveCity(template.city)
+        if (location.status !== 'resolved' || !location.id) {
+          increment(run, 'hard:location_unresolved')
+          stream.keyIndex += 1; stream.sourceKey = undefined; stream.city = undefined
+          stream.locationId = undefined; stream.page = 0; stream.nextCursor = undefined
+          run.searchProgress.keyIndex[audience] = stream.keyIndex
+          await save(run, 'progress')
+          continue
+        }
+        stream.locationId = location.id; displayStream(run, audience, stream)
 
         const page = stream.page + 1
         const log = { runId: run.runId, platformAccountId: run.platformAccountId,
           audience, searchKey: template.sourceKey, city: template.city, page }
         runtime.logger.event('candidate_search', 'started', log)
-        const keywords = renderSearchKeywords(template, run.stack, run.safeRecruiterOnly)
-        const response = await withConnectionRetry(runtime, run, save, 'unipile', 'people_search', () =>
-          runtime.adapter().searchPeople(run.accountId, keywords, stream.nextCursor))
+        const title = renderSearchKeywords(template, run.stack, run.safeRecruiterOnly)
+        const response = await pacedRequest('people_search', () => runtime.adapter()
+          .searchPeople(run.accountId, { title, locationId: location.id! }, stream.nextCursor))
         run.counters.searched += 1; stream.page = page
-        run.searchProgress.recentSearchAt.push(runtime.now().toISOString())
         const items = connectionPageItems(response); run.searchProgress.found += items.length
         const result = await evaluatePage(audience, template.sourceKey, template, items)
         const nextCursor = connectionNextCursor(response)
         stream.nextCursor = nextCursor || undefined; displayStream(run, audience, stream)
-        runtime.logger.event('candidate_search', 'succeeded', { ...log, keywords,
+        runtime.logger.event('candidate_search', 'succeeded', { ...log,
           candidateCount: items.length, eligibleCount: result.candidates.length,
           skippedCount: result.skipped, cursorPresent: Boolean(nextCursor) })
         await save(run, 'progress')
 
         if (!nextCursor) {
           stream.keyIndex += 1; stream.sourceKey = undefined; stream.city = undefined
-          stream.page = 0; stream.nextCursor = undefined
+          stream.locationId = undefined; stream.page = 0; stream.nextCursor = undefined
           run.searchProgress.keyIndex[audience] = stream.keyIndex
           if (stream.keyIndex >= templates[audience].length) {
             run.searchProgress.exhausted[audience] = true

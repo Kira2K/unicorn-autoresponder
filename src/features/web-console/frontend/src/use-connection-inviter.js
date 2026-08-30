@@ -2,7 +2,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
 import { stopAdminConnectionRun } from './connection-inviter-api'
 import { connectionRunConfirmation, connectionStopConfirmation, connectionPauseFromError,
-  latestConnectionRun } from './connection-inviter-view'
+  connectionRunActive, latestConnectionRun } from './connection-inviter-view'
 
 const EVENT_TYPES = ['snapshot', 'stage_changed', 'progress', 'timer_started', 'retry_scheduled',
   'retry_succeeded', 'invitation_sent', 'paused', 'stopped', 'partial', 'completed', 'uncertain']
@@ -22,7 +22,7 @@ export function useConnectionInviter() {
   let readinessQueue = Promise.resolve()
   let clockTimer
   let destroyed = false
-  const active = computed(() => runs.value.some(run => run.status === 'running'))
+  const active = computed(() => runs.value.some(run => connectionRunActive(run)))
   const runFor = account => latestConnectionRun(runs.value, account.platformAccountId)
   const stackFor = account => readiness.value[account.platformAccountId]?.stack || account.primaryStack || ''
   const countdownFor = run => run?.nextActionAt ? Math.max(0, Date.parse(run.nextActionAt) - clock.value) : 0
@@ -45,7 +45,7 @@ export function useConnectionInviter() {
   async function fallback(account, runId) {
     try {
       const run = await api.adminConnectionRun(runId); upsertRun(run)
-      if (run.status !== 'running') { closeStream(runId); await refreshHistory(account); return }
+      if (!connectionRunActive(run)) { closeStream(runId); await refreshHistory(account); return }
     } catch (error) {
       errors.value = { ...errors.value, [account.platformAccountId]: error.message }
     }
@@ -62,7 +62,7 @@ export function useConnectionInviter() {
       try {
         const payload = JSON.parse(event.data); const run = payload.run || payload?.run
         upsertRun(run)
-        if (run?.status !== 'running') { closeStream(runId); void refreshHistory(account) }
+        if (!connectionRunActive(run)) { closeStream(runId); void refreshHistory(account) }
       } catch { /* A malformed event is ignored; reconnect snapshot remains authoritative. */ }
     }
     for (const type of EVENT_TYPES) source.addEventListener(type, receive)
@@ -85,13 +85,13 @@ export function useConnectionInviter() {
   function ensure(account) {
     const id = account.platformAccountId
     const run = runFor(account)
-    if (run?.status !== 'running' && Number(run?.counters?.sent || 0) > 0 &&
+    if (!connectionRunActive(run) && Number(run?.counters?.sent || 0) > 0 &&
       history.value[id] === undefined) {
       void refreshHistory(account).catch(error => {
         errors.value = { ...errors.value, [id]: error.message }
       })
     }
-    if (run?.status === 'running' && !streams.has(run.runId) && !fallbackTimers.has(run.runId)) {
+    if (connectionRunActive(run) && !streams.has(run.runId) && !fallbackTimers.has(run.runId)) {
       connect(account, run.runId)
     }
     if (readiness.value[id]) return
@@ -116,7 +116,7 @@ export function useConnectionInviter() {
     try {
       const run = await api.startAdminConnectionRun(id, safeRecruiterOnly)
       pauses.value = { ...pauses.value, [id]: null }; upsertRun(run)
-      if (run.status === 'running') connect(account, run.runId)
+      if (connectionRunActive(run)) connect(account, run.runId)
       else await refreshHistory(account)
     } catch (error) {
       const pause = connectionPauseFromError(error)
@@ -131,7 +131,7 @@ export function useConnectionInviter() {
     loading.value = { ...loading.value, [id]: true }; errors.value = { ...errors.value, [id]: '' }
     try {
       const stopped = await stopAdminConnectionRun(run.runId); upsertRun(stopped)
-      if (stopped.status === 'running') connect(account, stopped.runId)
+      if (connectionRunActive(stopped)) connect(account, stopped.runId)
     } catch (error) { errors.value = { ...errors.value, [id]: error.message || 'Stop failed.' }
     } finally { loading.value = { ...loading.value, [id]: false } }
   }

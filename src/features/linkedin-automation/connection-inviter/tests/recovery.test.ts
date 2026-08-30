@@ -100,12 +100,73 @@ async function queuedCandidatesSurviveRestart() {
     autoRecover: false, sleep: async () => undefined })
   await service.recover()
   const failed: any = await waitRun(service, run.runId)
-  assert.equal(failed.status, 'failed'); assert.equal(failed.counters.sent, 1)
+  assert.equal(failed.status, 'partial'); assert.equal(failed.stage, 'search_exhausted')
+  assert.equal(failed.counters.sent, 1)
   assert.equal(failed.errorCode, 'connection_search_space_exhausted')
   assert.equal(test.metrics.sends, 1)
 }
 
+async function staleRunClosesWithoutCarryover() {
+  const test = fixture({ stack: 'GO', connectionCount: 1663 })
+  const old = new Date('2026-08-28T09:00:00Z')
+  const run = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test',
+    linkedinUrl: 'https://www.linkedin.com/in/test-client/', accountId: 'acc_test',
+    stackId: 10, stack: 'GO' }, old, 'Europe/Moscow', false)
+  run.counters.sent = 13; run.counters.sentByAudience = { recruiter: 9, technical: 4 }
+  run.dailyQuota = 40; run.audienceQuota = { recruiter: 28, technical: 12 }
+  run.stage = 'waiting_retry'
+  await test.store.createRun(run)
+  const service = createConnectionInviterService({ ...test, now: () => now, autoRecover: false })
+  await service.recover()
+  const closed: any = await service.get(run.runId)
+  assert.equal(closed.status, 'partial', JSON.stringify(closed))
+  assert.equal(closed.stage, 'daily_window_closed')
+  assert.equal(closed.counters.sent, 13); assert.equal(closed.dailyQuota, 40)
+  assert.equal(test.metrics.sends, 0)
+}
+
+async function staleSendingIsReadBackBeforeClose() {
+  const test = fixture({ stack: 'GO', connectionCount: 1663 })
+  const old = new Date('2026-08-28T09:00:00Z')
+  const run = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test',
+    linkedinUrl: 'https://www.linkedin.com/in/test-client/', accountId: 'acc_test',
+    stackId: 10, stack: 'GO' }, old, 'Europe/Moscow', false)
+  run.stage = 'sending'; await test.store.createRun(run)
+  const personId = 'stale-sending'
+  await test.store.claimHistory({ historyKey: `acc_test:${personId}`, runId: run.runId,
+    platformAccountId: 7, accountId: 'acc_test', personId, audience: 'recruiter',
+    searchKey: 'old', name: 'Old', headline: 'Recruiter', location: 'Berlin', status: 'sending',
+    discoveredAt: old.toISOString(), updatedAt: old.toISOString() })
+  test.adapter.listPendingInvitations = async (_accountId: string, offset = 0) =>
+    ({ items: offset ? [] : [{ user_id: personId }] })
+  const service = createConnectionInviterService({ ...test, now: () => now,
+    autoRecover: false, sleep: async () => undefined })
+  await service.recover()
+  const closed: any = await waitRun(service, run.runId)
+  assert.equal(closed.status, 'partial', JSON.stringify(closed))
+  assert.equal(closed.stage, 'daily_window_closed')
+  const history: any[] = await service.history(7)
+  assert.equal(history[0].status, 'sent'); assert.equal(test.metrics.sends, 0)
+}
+
+async function unresolvedWriteBlocksNewDay() {
+  const test = fixture({ stack: 'GO' })
+  const run = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test',
+    linkedinUrl: 'https://www.linkedin.com/in/test-client/', accountId: 'acc_test',
+    stackId: 10, stack: 'GO' }, new Date('2026-08-28T09:00:00Z'), 'Europe/Moscow', false)
+  await test.store.createRun(run)
+  await test.store.claimHistory({ historyKey: 'acc_test:unsafe', runId: run.runId,
+    platformAccountId: 7, accountId: 'acc_test', personId: 'unsafe', audience: 'recruiter',
+    searchKey: 'old', name: 'Unsafe', headline: 'Recruiter', location: 'Berlin', status: 'uncertain',
+    discoveredAt: run.createdAt, updatedAt: run.updatedAt })
+  const service = createConnectionInviterService({ ...test, now: () => now, autoRecover: false })
+  await assert.rejects(() => service.start(7),
+    (error: any) => error.code === 'connection_invitation_result_pending')
+  assert.equal(test.metrics.sends, 0)
+}
+
 Promise.all([timerRecovery(), sendingRecovery(), secondWriter(), waitsForHigherPriorityGate(),
-  queuedCandidatesSurviveRestart()])
+  queuedCandidatesSurviveRestart(), staleRunClosesWithoutCarryover(),
+  staleSendingIsReadBackBeforeClose(), unresolvedWriteBlocksNewDay()])
   .then(() => console.log('connection recovery tests passed'))
   .catch((error: unknown) => { console.error(error); process.exitCode = 1 })

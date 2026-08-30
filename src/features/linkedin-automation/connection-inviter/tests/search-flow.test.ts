@@ -13,11 +13,12 @@ async function run() {
   const run = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test',
     linkedinUrl: 'https://linkedin.com/in/test', accountId: 'acc_test', stack: 'GO' },
   new Date('2026-08-29T09:00:00Z'), 'Europe/Moscow', false)
-  const calls: Array<{ keywords: string; cursor?: string }> = []
+  const calls: Array<{ title: string; locationId: string; cursor?: string }> = []
   let clock = new Date('2026-08-29T09:00:00Z').getTime()
   const adapter = {
-    async searchPeople(_accountId: string, keywords: string, cursor?: string) {
-      calls.push({ keywords, cursor })
+    async resolveLocations() { return { data: [{ id: 'geo-berlin', name: 'Berlin' }] } },
+    async searchPeople(_accountId: string, input: { title: string; locationId: string }, cursor?: string) {
+      calls.push({ ...input, cursor })
       const page = calls.length
       return {
         items: page === 15 ? [{ id: 'person-15', display_name: 'Berlin Recruiter',
@@ -37,16 +38,19 @@ async function run() {
   const candidates = await discovery.next('recruiter')
 
   assert.equal(calls.length, 15)
-  assert.equal(new Set(calls.map(call => call.keywords)).size, 1)
+  assert.equal(new Set(calls.map(call => call.title)).size, 1)
+  assert.deepEqual(new Set(calls.map(call => call.locationId)), new Set(['geo-berlin']))
   assert.equal(calls[0].cursor, undefined)
   assert.equal(calls[14].cursor, 'cursor-14')
-  assert.match(calls[0].keywords, /"Technical Recruiter"/)
-  assert.match(calls[0].keywords, /AND "Berlin"$/)
+  assert.match(calls[0].title, /"Technical Recruiter"/)
+  assert.equal(calls[0].title.includes('Berlin'), false)
   assert.equal(candidates.length, 1)
   assert.equal(candidates[0].personId, 'person-15')
   assert.equal(run.searchProgress.streams.recruiter.sourceKey, 'recruiter-berlin')
   assert.equal(run.searchProgress.streams.recruiter.page, 15)
   assert.equal(run.searchProgress.streams.recruiter.nextCursor, 'cursor-15')
+  assert.equal(run.searchProgress.streams.recruiter.locationId, 'geo-berlin')
+  assert.equal(run.searchProgress.locations.Berlin.id, 'geo-berlin')
   assert.equal(run.searchProgress.keyIndex.recruiter, 0)
 }
 

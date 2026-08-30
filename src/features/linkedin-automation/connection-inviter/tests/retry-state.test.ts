@@ -17,7 +17,7 @@ assert.equal(connectionRetryDelay(1, () => 0, 3_600_000), 3_600_000)
 assert.equal(retryAfterMilliseconds({ details: { retryAfter: 120 } }), 120_000)
 assert.equal(retryAfterMilliseconds({ details: { retryAfterMs: 3_600_000 } }), 3_600_000)
 assert.equal(unipileRateLimitDelay(1, () => 0), 180_000)
-assert.equal(unipileRateLimitDelay(1, () => 1), 240_000)
+assert.equal(unipileRateLimitDelay(1, () => 1), 180_000)
 assert.equal(unipileRateLimitDelay(2, () => 0), 360_000)
 assert.equal(unipileRateLimitDelay(3, () => 0), 720_000)
 assert.equal(unipileRateLimitDelay(4, () => 0), 1_440_000)
@@ -32,7 +32,7 @@ async function run() {
   await test.store.createRun(run)
   const attempts: number[] = []; let calls = 0; let now = 0
   const runtime: any = { ...test, adapter: () => test.adapter, timeZone: 'Europe/Moscow',
-    now: () => new Date(1_700_000_000_000 + now), random: () => 0,
+    now: () => new Date(new Date('2026-08-29T09:00:00Z').getTime() + now), random: () => 0,
     sleep: async (milliseconds: number) => { now += milliseconds },
     stopRequested: () => false, emit() {} }
   const save = async () => undefined

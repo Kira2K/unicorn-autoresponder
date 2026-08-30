@@ -40,7 +40,7 @@ export function makeRun(context: ConnectionAccountContext, now: Date, timeZone: 
       streams: {
         recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 }
       },
-      recentSearchAt: [],
+      recentSearchAt: [], locations: {},
       page: 0, found: 0, checked: 0, eligible: 0, skipped: 0,
       exhausted: { recruiter: false, technical: safeRecruiterOnly }, pass: 1,
       pendingCandidates: []

@@ -34,7 +34,7 @@ function searchProgressFromRow(value: unknown): ConnectionSearchProgress {
   const fallback: ConnectionSearchProgress = { keyIndex: { recruiter: 0, technical: 0 },
     keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
     streams: { recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 } },
-    recentSearchAt: [],
+    recentSearchAt: [], locations: {},
     eligible: 0, skipped: 0, exhausted: { recruiter: false, technical: false }, pass: 1,
     pendingCandidates: [] }
   const progress = parse(value, fallback)
@@ -53,6 +53,7 @@ function searchProgressFromRow(value: unknown): ConnectionSearchProgress {
     },
     exhausted: { ...fallback.exhausted, ...progress.exhausted },
     recentSearchAt: Array.isArray(progress.recentSearchAt) ? progress.recentSearchAt : [],
+    locations: progress.locations && typeof progress.locations === 'object' ? progress.locations : {},
     pendingCandidates: Array.isArray(progress.pendingCandidates) ? progress.pendingCandidates : [] }
 }
 

@@ -17,7 +17,7 @@ const template = CONNECTION_SEARCH_CATALOG.find(item => item.city === 'Barcelona
   item.audience === 'recruiter')!
 assert.equal(renderSearchKeywords(template, 'Python').includes('Python'), false)
 assert.match(renderSearchKeywords(template, 'Python'), /"Talent Acquisition"/)
-assert.match(renderSearchKeywords(template, 'Python'), /AND "Barcelona"$/)
+assert.equal(renderSearchKeywords(template, 'Python').includes('Barcelona'), false)
 const legacy = { ...template, keywordTemplate: 'Technical Recruiter {stack} Barcelona' }
 assert.equal(renderSearchKeywords(legacy, 'GO').includes('"GO"'), false)
 assert.equal(renderSearchKeywords(legacy, undefined, true).includes('"Recruiter"'), true)
@@ -26,7 +26,7 @@ const technical = CONNECTION_SEARCH_CATALOG.find(item => item.city === 'Barcelon
 const technicalKeywords = renderSearchKeywords(technical, 'GO')
 assert.match(technicalKeywords, /^\("Go" OR "Golang"\) AND/)
 assert.match(technicalKeywords, /"Backend Engineer"/)
-assert.match(technicalKeywords, /AND "Barcelona"$/)
+assert.equal(technicalKeywords.includes('Barcelona'), false)
 assert.deepEqual(stackSearchAliases('go'), ['Go', 'Golang'])
 assert.deepEqual(stackSearchAliases('C#'), ['C#'])
 console.log('connection search catalog tests passed')

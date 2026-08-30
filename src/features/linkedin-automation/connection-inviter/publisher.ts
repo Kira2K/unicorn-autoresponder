@@ -6,6 +6,7 @@ import { profileAllowsInvitation, profileIsConnected } from './relation-policy.t
 import { isUnknownWrite, sendDelay } from './run-model.ts'
 import { waitOrStop } from './run-control.ts'
 import { makeRetryState, waitWithRunTimer, withConnectionRetry } from './retry-state.ts'
+import { requireConnectionRunDay } from './day-window.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 import { invitationRequestId, pendingPersonId } from './unipile-adapter.ts'
@@ -13,7 +14,7 @@ import { invitationRequestId, pendingPersonId } from './unipile-adapter.ts'
 async function updateHistory(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun,
   item: ConnectionHistoryItem) {
   await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
-    runtime.store.updateHistory(item))
+    runtime.store.updateHistory(item), { allowAfterDayClose: true })
 }
 
 function countSkip(runtime: ConnectionRuntime, run: ConnectionRun, item: ConnectionHistoryItem,
@@ -35,7 +36,8 @@ async function claim(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveR
 
 async function pendingIds(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun) {
   const rows = await withConnectionRetry(runtime, run, save, 'unipile',
-    'pending_invitations_read', () => listAllPending(runtime, run.accountId))
+    'pending_invitations_read', () => listAllPending(runtime, run.accountId),
+    { allowAfterDayClose: true })
   return new Set(rows.map(pendingPersonId).filter(Boolean))
 }
 
@@ -60,7 +62,8 @@ async function resolveUncertain(runtime: ConnectionRuntime, run: ConnectionRun, 
     const pending = await pendingIds(runtime, run, save)
     if (pending.has(item.personId)) { await confirmSent(runtime, run, save, item); return true }
     const profile = await withConnectionRetry(runtime, run, save, 'unipile',
-      'candidate_profile_readback', () => runtime.adapter().getProfile(run.accountId, item.personId))
+      'candidate_profile_readback', () => runtime.adapter().getProfile(run.accountId, item.personId),
+      { allowAfterDayClose: true })
     if (profileIsConnected(profile)) { await confirmSent(runtime, run, save, item); return true }
     const synthetic = connectionError('unipile_readback_pending',
       'Invitation result is not visible yet.', { httpStatus: 503 })
@@ -79,6 +82,7 @@ async function sendWithSafety(runtime: ConnectionRuntime, run: ConnectionRun, sa
     runtime.logger.event('invitation_write', 'started', { runId: run.runId,
       platformAccountId: run.platformAccountId, audience: item.audience })
     try {
+      requireConnectionRunDay(runtime, run)
       const response = await runtime.adapter().sendInvitation(run.accountId, item.personId)
       item.requestId = invitationRequestId(response); item.sentAt = runtime.now().toISOString()
       item.updatedAt = item.sentAt; item.status = 'uncertain'
@@ -107,7 +111,7 @@ async function sendWithSafety(runtime: ConnectionRuntime, run: ConnectionRun, sa
         run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
           nextActionAt: run.retryState.nextRetryAt }
         await save(run, 'retry_scheduled', 'critical')
-        if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) return false
+        if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs, run.localDate)) return false
         item.status = 'sending'; item.reasonCode = 'invitation_claimed'
         item.updatedAt = runtime.now().toISOString(); await updateHistory(runtime, run, save, item)
         continue
@@ -143,6 +147,7 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
       try {
         for (const candidate of candidates) {
           if (sentCount >= sentLimit || runtime.stopRequested(run.runId)) break
+          requireConnectionRunDay(runtime, run)
           if (pending.has(candidate.personId)) {
             countSkip(runtime, run, candidate, 'pending_invitation')
             processedPersonIds.push(candidate.personId); continue
@@ -164,6 +169,7 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
               'invitation_delay', delayMs, true)) break
           }
           if (runtime.stopRequested(run.runId)) break
+          requireConnectionRunDay(runtime, run)
           candidate.status = 'sending'; candidate.reasonCode = 'invitation_claimed'
           candidate.updatedAt = runtime.now().toISOString()
           const item = await claim(runtime, run, save, candidate)

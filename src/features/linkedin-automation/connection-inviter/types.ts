@@ -4,10 +4,11 @@ export type ConnectionRunStatus = 'running' | 'paused' | 'partial' | 'succeeded'
   'uncertain' | 'stopped'
 
 export type ConnectionRunStage = 'queued' | 'stack_required' | 'recovering' | 'verifying_account' |
-  'waiting_gate' | 'searching' | 'search_cooldown' | 'sending' | 'invitation_delay' | 'waiting_retry' |
+  'waiting_gate' | 'location_resolving' | 'searching' | 'search_cooldown' | 'sending' |
+  'invitation_delay' | 'waiting_retry' |
   'resolving_uncertain' | 'readback_pending' | 'search_exhausted' | 'completed' |
   'completed_shortfall' | 'completed_no_candidates' | 'stop_requested' | 'stopped_by_admin' |
-  'paused_transient' | 'failed'
+  'daily_window_closed' | 'paused_transient' | 'failed'
 
 export type ConnectionHistoryStatus = 'discovered' | 'eligible' | 'sending' | 'deferred' |
   'sent' | 'pending' | 'accepted' | 'skipped' | 'failed' | 'uncertain'
@@ -34,8 +35,22 @@ export type ConnectionSearchStreamState = {
   keyIndex: number
   sourceKey?: string
   city?: string
+  locationId?: string
   page: number
   nextCursor?: string
+}
+
+export type ConnectionLocationResolution = {
+  status: 'resolved' | 'unresolved'
+  city: string
+  resolvedAt: string
+  id?: string
+  label?: string
+}
+
+export type ConnectionPeopleSearchInput = {
+  title: string
+  locationId: string
 }
 
 export type ConnectionSearchProgress = {
@@ -45,6 +60,7 @@ export type ConnectionSearchProgress = {
   keyTotal: Record<SearchAudience, number>
   streams: Record<SearchAudience, ConnectionSearchStreamState>
   recentSearchAt: string[]
+  locations: Record<string, ConnectionLocationResolution>
   sourceKey?: string
   city?: string
   page: number
@@ -182,7 +198,8 @@ export type ConnectionUnipileAdapter = {
   getOwnProfile(accountId: string): Promise<any>
   getProfile(accountId: string, personId: string): Promise<any>
   listRelations?(accountId: string, cursor?: string): Promise<any>
-  searchPeople(accountId: string, keywords: string, cursor?: string): Promise<any>
+  resolveLocations(accountId: string, city: string): Promise<any>
+  searchPeople(accountId: string, input: ConnectionPeopleSearchInput, cursor?: string): Promise<any>
   listPendingInvitations(accountId: string, offset?: number): Promise<any>
   sendInvitation(accountId: string, personId: string): Promise<any>
 }

@@ -18,17 +18,21 @@ export function fixture(options: { stack?: string; sendFailure?: any; pendingRea
     async updatePrimaryStack() { account.primaryStackId = 10; account.primaryStack = 'Frontend'
       return { id: 10, name: 'Frontend' } }
   }
-  const adapter = {
+  const adapter: any = {
     async getAccount() { reads += 1; return { provider: 'linkedin', status: 'running',
       is_locked: false, user_id: 'ACoOwner' } },
     async getOwnProfile() { reads += 1; return { public_identifier: 'test-client',
       provider_id: 'ACoOwner', connections_count: options.connectionCount ?? 300 } },
     async getProfile() { reads += 1; profileReads += 1
       return { network_distance: profileReads <= (options.preflightRejectCount ?? 0) ? 1 : 2 } },
-    async searchPeople(_accountId: string, keywords: string) {
+    async resolveLocations(_accountId: string, city: string) {
+      reads += 1; return { items: [{ id: `location-${city}`, name: city }] }
+    },
+    async searchPeople(_accountId: string, input: { title: string; locationId: string }) {
       reads += 1
       const template = CONNECTION_SEARCH_CATALOG.find(item =>
-        renderSearchKeywords(item, options.stack, !options.stack) === keywords)!
+        renderSearchKeywords(item, options.stack, !options.stack) === input.title &&
+        `location-${item.city}` === input.locationId)!
       return { items: Array.from({ length: 4 }, (_value, index) => { person += 1
         const personId = options.stablePeople ?
           `ACo_${template.audience}_${template.priority}_${index}` : `ACo${person}`

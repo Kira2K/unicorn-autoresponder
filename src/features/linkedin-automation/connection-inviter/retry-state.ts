@@ -1,6 +1,7 @@
 import { connectionError, connectionErrorCode, connectionHttpStatus,
   transientConnectionError } from './errors.ts'
 import { waitOrStop } from './run-control.ts'
+import { requireConnectionRunDay } from './day-window.ts'
 import type { ConnectionRunStage, ConnectionRetryState, ConnectionRun } from './types.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 
@@ -9,7 +10,6 @@ const MAX_MS = 30 * 60_000
 const CAP_FLOOR_MS = 28.5 * 60_000
 const UNIPILE_RATE_LIMIT_BASE_MS = 3 * 60_000
 const UNIPILE_RATE_LIMIT_CAP_MS = 30 * 60_000
-const UNIPILE_RATE_LIMIT_JITTER_MS = 60_000
 
 const boundedRandom = (value: number) => Math.min(1, Math.max(0, value))
 
@@ -43,8 +43,8 @@ export function unipileRateLimitDelay(attempt: number, random: () => number,
   const exponent = Math.max(0, Math.min(10, attempt - 1))
   const adaptive = Math.min(UNIPILE_RATE_LIMIT_CAP_MS,
     UNIPILE_RATE_LIMIT_BASE_MS * (2 ** exponent))
-  const base = Math.max(adaptive, explicitRetryAfterMs ?? 0)
-  return Math.round(base + boundedRandom(random()) * UNIPILE_RATE_LIMIT_JITTER_MS)
+  void random
+  return Math.max(adaptive, explicitRetryAfterMs ?? 0)
 }
 
 export function connectionRetryProvider(error: unknown): 'noco' | 'unipile' {
@@ -77,11 +77,13 @@ export function makeRetryState(runtime: ConnectionRuntime, run: ConnectionRun,
 }
 
 export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: ConnectionRun,
-  save: SaveRun, provider: 'noco' | 'unipile', operation: string, action: () => Promise<T>): Promise<T> {
+  save: SaveRun, provider: 'noco' | 'unipile', operation: string, action: () => Promise<T>,
+  options: { allowAfterDayClose?: boolean } = {}): Promise<T> {
   const resumeStage = run.stage
   let retried = false
   while (true) {
     try {
+      if (!options.allowAfterDayClose) requireConnectionRunDay(runtime, run)
       const result = await action()
       if (retried) {
         run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
@@ -105,7 +107,8 @@ export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: Co
         nextRetryAt: run.retryState.nextRetryAt })
       runtime.emit(run, 'retry_scheduled')
       if (provider === 'unipile') await save(run, 'retry_scheduled', 'critical')
-      if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) {
+      if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs,
+        options.allowAfterDayClose ? undefined : run.localDate)) {
         throw connectionError('connection_stop_requested', 'Connection run stop was requested.')
       }
     }
@@ -121,7 +124,7 @@ export async function waitWithRunTimer(runtime: ConnectionRuntime, run: Connecti
   run.stage = stage; run.nextActionAt = nextActionAt; run.timerState = { kind, delayMs, nextActionAt }
   runtime.emit(run, 'timer_started')
   if (persist) await save(run, 'timer_started')
-  const proceed = await waitOrStop(runtime, run.runId, delayMs)
+  const proceed = await waitOrStop(runtime, run.runId, delayMs, run.localDate)
   run.timerState = undefined; run.nextActionAt = undefined; run.stage = previousStage
   return proceed
 }

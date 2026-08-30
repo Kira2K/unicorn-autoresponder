@@ -10,6 +10,7 @@ import { completedRunCanTopUp, failedRunCanRetry, prepareRunRetry,
   prepareRunTopUp, transientRunCanResume } from './retry-policy.ts'
 import { connectionError, connectionErrorCode, transientConnectionError } from './errors.ts'
 import { makeRetryState } from './retry-state.ts'
+import { closeConnectionRunDay } from './day-window.ts'
 import { createConnectionRunEvents, type ConnectionRunEvent } from './run-events.ts'
 import type { ConnectionRunEventType, ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionRun, ConnectionRunStage } from './types.ts'
@@ -121,6 +122,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
   }
 
   const execute = async (run: ConnectionRun) => {
+    if (activeRuns.has(run.runId) || running.has(run.runId)) return
     if (!ownsWriterLease(run)) {
       logger.event('writer_lease', 'failed', { runId: run.runId,
         platformAccountId: run.platformAccountId, errorCode: 'connection_writer_active' })
@@ -147,8 +149,31 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     if (!runtime.writerEnabled) return
     try {
       const today = dateParts(runtime.now(), runtime.timeZone).localDate
-      const recoverable = (await runtime.store.listRuns(100)).filter(run =>
-        run.localDate === today && activeRunStatus(run) && ownsWriterLease(run))
+      const runs = await runtime.store.listRuns(100)
+      const blockedAccounts = new Set<number>()
+      const stale = runs.filter(run => run.localDate !== today && activeRunStatus(run) &&
+        ownsWriterLease(run))
+      for (const run of stale) {
+        const unsafe = (await runtime.store.listOpenHistory(run.platformAccountId, 1000))
+          .filter(item => ['sending', 'uncertain'].includes(item.status))
+        if (unsafe.length) {
+          blockedAccounts.add(run.platformAccountId)
+          run.status = 'running'; run.stage = 'recovering'; run.finishedAt = undefined
+          await save(run, 'stage_changed', 'critical')
+          void execute(run).then(async () => {
+            const current = await runtime.store.getRunByKey(`${run.platformAccountId}:${today}`)
+            if (current && activeRunStatus(current) && ownsWriterLease(current)) {
+              current.status = 'running'; current.stage = 'recovering'; current.finishedAt = undefined
+              await save(current, 'stage_changed', 'critical'); await execute(current)
+            }
+          }).catch(error => logger.event('run_recovery', 'failed', {
+            platformAccountId: run.platformAccountId, errorCode: connectionErrorCode(error) }))
+        } else {
+          await closeConnectionRunDay(runtime, run, save)
+        }
+      }
+      const recoverable = runs.filter(run => run.localDate === today && activeRunStatus(run) &&
+        ownsWriterLease(run) && !blockedAccounts.has(run.platformAccountId))
       for (const run of recoverable) {
         run.status = 'running'; run.stage = 'recovering'; run.finishedAt = undefined
         await save(run, 'stage_changed', 'critical'); void execute(run)
@@ -206,8 +231,17 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
         const date = dateParts(runtime.now(), runtime.timeZone)
         const existing = await runtime.store.getRunByKey(`${platformAccountId}:${date.localDate}`)
         const context = await resolveContext(runtime, platformAccountId)
+        const unresolvedWrites = (await runtime.store.listOpenHistory(platformAccountId, 1000))
+          .filter(item => ['sending', 'uncertain'].includes(item.status))
+        if (unresolvedWrites.length) {
+          throw connectionError('connection_invitation_result_pending',
+            'A previous invitation result must be reconciled before a new daily run can start.')
+        }
         if (existing) {
-          if (activeRunStatus(existing)) return publicRun(existing)
+          if (activeRunStatus(existing)) {
+            if (ownsWriterLease(existing) && !activeRuns.has(existing.runId)) void execute(existing)
+            return publicRun(existing)
+          }
           const ready = Boolean(context.stack || input.safeRecruiterOnly)
           const history = existing.status === 'failed'
             ? await runtime.store.listHistory(platformAccountId, 1000) : []

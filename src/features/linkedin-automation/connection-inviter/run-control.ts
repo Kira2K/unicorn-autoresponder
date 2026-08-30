@@ -1,4 +1,5 @@
 import { connectionError } from './errors.ts'
+import { dateParts } from './limits.ts'
 import { publicRun } from './run-model.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionRun } from './types.ts'
@@ -35,11 +36,20 @@ export async function finishRunStop(runtime: ConnectionRuntime, run: ConnectionR
   return true
 }
 
-export async function waitOrStop(runtime: ConnectionRuntime, runId: string, milliseconds: number) {
+export async function waitOrStop(runtime: ConnectionRuntime, runId: string, milliseconds: number,
+  expectedLocalDate?: string) {
   let remaining = milliseconds
   while (remaining > 0) {
     if (runtime.stopRequested(runId)) return false
+    if (expectedLocalDate && dateParts(runtime.now(), runtime.timeZone).localDate !== expectedLocalDate) {
+      throw connectionError('connection_daily_window_closed',
+        'The local calendar day for this Connection Inviter run has ended.')
+    }
     const step = Math.min(1000, remaining); await runtime.sleep(step); remaining -= step
+  }
+  if (expectedLocalDate && dateParts(runtime.now(), runtime.timeZone).localDate !== expectedLocalDate) {
+    throw connectionError('connection_daily_window_closed',
+      'The local calendar day for this Connection Inviter run has ended.')
   }
   return !runtime.stopRequested(runId)
 }

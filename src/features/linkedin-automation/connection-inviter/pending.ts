@@ -26,7 +26,7 @@ export async function listAllPending(runtime: ConnectionRuntime, accountId: stri
 export async function reconcileInvitations(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun) {
   const active = await withConnectionRetry(runtime, run, save, 'noco', 'open_history_list', () =>
-    runtime.store.listOpenHistory(run.platformAccountId, 1000))
+    runtime.store.listOpenHistory(run.platformAccountId, 1000), { allowAfterDayClose: true })
   if (!active.length) {
     runtime.logger.event('invitation_reconcile', 'succeeded', {
       platformAccountId: run.platformAccountId, activeCount: 0 })
@@ -34,7 +34,8 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
   }
   let accepted = 0
   const initialPendingRows = await withConnectionRetry(runtime, run, save, 'unipile',
-    'pending_invitations_read', () => listAllPending(runtime, run.accountId))
+    'pending_invitations_read', () => listAllPending(runtime, run.accountId),
+    { allowAfterDayClose: true })
   let pending = new Set(initialPendingRows.map(pendingPersonId).filter(Boolean))
   for (const item of active) {
     while (true) {
@@ -44,17 +45,18 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
           item.status = 'sent'; item.reasonCode = 'pending_readback_confirmed'
           item.verifiedAt = runtime.now().toISOString()
           await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
-            runtime.store.updateHistory(item))
+            runtime.store.updateHistory(item), { allowAfterDayClose: true })
         }
         break
       }
       const profile = await withConnectionRetry(runtime, run, save, 'unipile',
-        'candidate_profile_readback', () => runtime.adapter().getProfile(run.accountId, item.personId))
+        'candidate_profile_readback', () => runtime.adapter().getProfile(run.accountId, item.personId),
+        { allowAfterDayClose: true })
       if (profileIsConnected(profile)) {
         item.status = 'accepted'; item.reasonCode = 'connection_accepted'
         item.verifiedAt = runtime.now().toISOString()
         await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
-          runtime.store.updateHistory(item))
+          runtime.store.updateHistory(item), { allowAfterDayClose: true })
         accepted += 1; break
       }
       if (item.status === 'sent' || item.status === 'deferred') break
@@ -68,7 +70,8 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
       await save(run, 'retry_scheduled', 'critical')
       if (!await waitOrStop(runtime, run.runId, run.retryState.delayMs)) return
       const pendingRows = await withConnectionRetry(runtime, run, save, 'unipile',
-        'pending_invitations_read', () => listAllPending(runtime, run.accountId))
+        'pending_invitations_read', () => listAllPending(runtime, run.accountId),
+        { allowAfterDayClose: true })
       pending = new Set(pendingRows.map(pendingPersonId).filter(Boolean))
     }
   }

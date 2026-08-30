@@ -25,7 +25,7 @@ export function prepareRunRetry(run: ConnectionRun, context: any, safeRecruiterO
   run.searchProgress = { keyIndex: { recruiter: 0, technical: 0 },
     keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
     streams: { recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 } },
-    recentSearchAt: [],
+    recentSearchAt: [], locations: {},
     eligible: 0, skipped: 0, exhausted: { recruiter: false, technical: run.safeRecruiterOnly },
     pass: 1, pendingCandidates: [] }
   run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
@@ -50,7 +50,7 @@ export function prepareRunTopUp(run: ConnectionRun, context: any, safeRecruiterO
   run.searchProgress = { keyIndex: { recruiter: 0, technical: 0 },
     keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
     streams: { recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 } },
-    recentSearchAt: [],
+    recentSearchAt: [], locations: {},
     eligible: 0, skipped: 0, exhausted: { recruiter: false, technical: run.safeRecruiterOnly },
     pass: (run.searchProgress?.pass ?? 0) + 1, pendingCandidates }
   run.seenPersonIds = []; run.retryState = undefined; run.timerState = undefined
