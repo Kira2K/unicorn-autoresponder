@@ -466,6 +466,7 @@ function createWebConsoleApp(options: {
   profileFiller?: import('./profile-filler-types.ts').ProfileFillerService
   commentMonitor?: import('./comment-monitor-types.ts').CommentMonitorService
   connectionInviter?: import('./connection-inviter-types.ts').ConnectionInviterService
+  initializeConnectionInviter?: boolean
   useMockData?: boolean
 } = {}) {
   const useMockData = options.useMockData ?? process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
@@ -523,6 +524,9 @@ function createWebConsoleApp(options: {
   const connectionInviter = options.connectionInviter ?? (useMockData
     ? createMockConnectionInviterService()
     : lazyConnectionInviter)
+  if (!useMockData && !options.connectionInviter && options.initializeConnectionInviter) {
+    getLiveConnectionInviter()
+  }
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
     api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
