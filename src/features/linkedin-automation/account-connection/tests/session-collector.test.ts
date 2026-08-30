@@ -31,6 +31,7 @@ async function run(): Promise<void> {
     200,
     'https://linkedin.com/in/kira-test',
     {
+      async checkLocalApi() { events.push('health') },
       async acquireLock() {
         events.push('lock')
         return { async release() { events.push('release') } }
@@ -59,9 +60,10 @@ async function run(): Promise<void> {
   assert.equal(result.session.liAt, 'li-at-secret')
   assert.equal(result.session.userAgent, 'Dolphin Agent')
   assert.equal(result.proxy.host, 'proxy.test')
-  assert.deepEqual(events, ['lock', 'stop', 'start', 'goto', 'close', 'stop', 'release'])
+  assert.deepEqual(events, ['health', 'lock', 'stop', 'start', 'goto', 'close', 'stop', 'release'])
   assert.deepEqual(logStages, [
-    'profile_lock_acquired', 'profile_stopped', 'proxy_validated', 'proxy_summary',
+    'dolphin_local_api_checked', 'profile_lock_acquired', 'profile_stopped',
+    'proxy_validated', 'proxy_summary',
     'profile_started', 'cdp_connected', 'linkedin_opened', 'session_validated',
     'session_summary', 'cdp_closed', 'profile_cleanup_stopped', 'profile_lock_released'
   ])

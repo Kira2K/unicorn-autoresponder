@@ -1,5 +1,6 @@
 const tests = [
   require('./profile-url.test.ts'),
+  require('./existing-account.test.ts'),
   require('./session-cookie.test.ts'),
   require('./profile-lock.test.ts'),
   require('./dolphin-profile-proxy.test.ts'),
@@ -9,6 +10,7 @@ const tests = [
   require('./cli-args.test.ts'),
   require('./noco-target.test.ts'),
   require('./session-collector.test.ts'),
+  require('./dolphin-local-error.test.ts'),
   require('./unipile-adapter.test.ts'),
   require('./unipile-http.test.ts'),
   require('./account-validation.test.ts'),

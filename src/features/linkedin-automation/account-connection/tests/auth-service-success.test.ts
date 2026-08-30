@@ -46,8 +46,11 @@ function dependencies(existing = false) {
     async inspectProfile() { return { summary: { configured: true, protocol: 'socks5' } } },
     logger: {
       event(stage: string, status: string, details: any) { logs.push({ stage, status, details }) },
-      async run(_stage: string, _details: any, action: () => Promise<any>) {
-        return await action()
+      async run(stage: string, details: any, action: () => Promise<any>) {
+        logs.push({ stage, status: 'started', details })
+        const result = await action()
+        logs.push({ stage, status: 'succeeded', details })
+        return result
       }
     },
     unipileProxyProtocol() { return 'https' }
@@ -65,6 +68,9 @@ async function run(): Promise<void> {
   const ready = initial.logs.find(log => log.stage === 'pre_api_ready')
   assert.equal(ready.details.dolphinProtocol, 'socks5')
   assert.equal(ready.details.unipileProtocol, 'https')
+  assert.equal(initial.logs.some(log => log.stage === 'unipile_authentication'), true)
+  assert.equal(initial.logs.some(log => log.stage === 'unipile_owner_profile_read'), true)
+  assert.equal(initial.logs.some(log => log.stage === 'noco_connection_saved'), true)
 
   const current = dependencies(true)
   const verified = await runLinkedInAuth({ clientName: 'Kira', apply: true }, current.deps)

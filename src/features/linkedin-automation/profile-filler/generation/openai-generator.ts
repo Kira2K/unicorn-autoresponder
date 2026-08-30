@@ -22,7 +22,9 @@ candidate_id and confident=true. Every role must receive a distinct candidate wh
 candidates exist. Return null and false when no candidate is a plausible semantic match.`
 const REPAIR_INSTRUCTIONS = `Repair only the supplied profile sections. Obey the output schema
 and listed validation issues. Use only supplied CV facts; never invent employment, education,
-dates, metrics or contacts. Return no sections beyond the schema.`
+dates, metrics or contacts. Compare numeric facts by meaning and by their exact CV position:
+6000, 6 000 and 6,000 are equivalent formatting. If a numeric claim is not supported by the
+same CV position, rewrite it without that claim or remove it. Return no sections beyond the schema.`
 
 function parseChoices(value: any): JobTitleChoice[] {
   if (!Array.isArray(value?.choices)) return []

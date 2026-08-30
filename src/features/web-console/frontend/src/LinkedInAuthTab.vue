@@ -13,6 +13,7 @@ const auth = useLinkedInAuth()
 const filler = useProfileFiller()
 const comments = useCommentMonitor()
 const busy = computed(() => auth.active.value || filler.active.value)
+const nocoWait = computed(() => Math.max(1, Math.ceil(Number(auth.nocoQueue.value.waitMs || 0) / 1000)))
 </script>
 
 <template>
@@ -24,6 +25,12 @@ const busy = computed(() => auth.active.value || filler.active.value)
         <InputText v-model="auth.query.value" placeholder="Search student, URL, account or error" data-testid="linkedin-search" />
         <span v-if="auth.active.value" class="linkedin-running-note">One authorization is running</span>
       </div>
+      <Message v-if="auth.nocoQueue.value.state === 'cooldown'" severity="warn" :closable="false">
+        Noco limit reached. All queued operations will continue in {{ nocoWait }}s.
+      </Message>
+      <Message v-else-if="auth.nocoQueue.value.state === 'queued'" severity="info" :closable="false">
+        Noco queue: {{ auth.nocoQueue.value.waiting }} waiting, next request in {{ nocoWait }}s.
+      </Message>
       <Message v-if="auth.error.value" severity="error" :closable="false" data-testid="linkedin-page-error">{{ auth.error.value }}</Message>
       <Message v-if="comments.errors.value.page" severity="error" :closable="false"
         data-testid="comment-monitor-page-error">{{ comments.errors.value.page }}</Message>
@@ -61,7 +68,8 @@ const busy = computed(() => auth.active.value || filler.active.value)
           </tbody>
         </table>
       </div>
-      <LinkedInAuthHistory :runs="auth.history.value" />
+      <LinkedInAuthHistory :runs="auth.filteredHistory.value" :accounts="auth.accounts.value"
+        :busy="busy" @action="auth.historyAction" />
     </template>
   </Card>
   <ProfileFillerDialog :filler="filler" />

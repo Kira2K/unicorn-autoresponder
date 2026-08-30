@@ -6,6 +6,9 @@ const { createNocoClient, isRetryableNocoError } = require('./client.ts') as {
   createNocoClient(options?: any): any
   isRetryableNocoError(error: any): boolean
 }
+const { createNocoRequestLimiter } = require('./request-limiter.ts') as {
+  createNocoRequestLimiter(options?: any): any
+}
 const { parseJobArgs } = require('./job.ts') as {
   parseJobArgs(args?: string[]): { mode: string; apply: boolean; dryRun: boolean; test: boolean }
 }
@@ -62,6 +65,26 @@ async function runTests(): Promise<void> {
   assert.equal(isRetryableNocoError(httpError(429, 'Too Many Requests')), true)
   assert.equal(isRetryableNocoError(httpError(400, 'Bad Request')), false)
 
+  const limiterEvents: any[] = []
+  const limiter = createNocoRequestLimiter({
+    maxStarts: 1, windowMs: 25, cooldownMs: 25,
+    log: (event: any) => limiterEvents.push(event)
+  })
+  const order: string[] = []
+  await Promise.all([
+    limiter.schedule('read', async () => { order.push('first') }),
+    limiter.schedule('read', async () => { order.push('read') }),
+    limiter.schedule('write', async () => { order.push('write') })
+  ])
+  assert.deepEqual(order, ['first', 'read', 'write'])
+  assert.ok(limiterEvents.some(event => event.event === 'request_queued'))
+
+  limiter.rateLimited(25)
+  const cooldownStarted = Date.now()
+  await limiter.schedule('read', async () => undefined)
+  assert.ok(Date.now() - cooldownStarted >= 20)
+  assert.equal(limiter.snapshot().state, 'ready')
+
   const paged = createMockRequester([
     { list: [{ Id: 1 }], pageInfo: { isLastPage: false } },
     { list: [{ Id: 2 }], pageInfo: { isLastPage: true } }
@@ -70,6 +93,20 @@ async function runTests(): Promise<void> {
   const records = await client.fetchRecords('table', 1)
   assert.deepEqual(records.map((record: any) => record.Id), [1, 2])
   assert.equal(paged.calls.length, 2)
+
+  const limited = createMockRequester([
+    Object.assign(httpError(429, 'Too Many Requests'), {
+      response: { status: 429, headers: { 'retry-after': '0.025' }, data: { message: 'Too Many Requests' } }
+    }),
+    { ok: true }
+  ])
+  const retryLimiter = createNocoRequestLimiter({ log() {} })
+  const retrying = createNocoClient({
+    requester: limited.requester, retryDelaysMs: [0, 0], limiter: retryLimiter
+  })
+  const retryStarted = Date.now()
+  assert.deepEqual(await retrying.request('get', '/test'), { ok: true })
+  assert.ok(Date.now() - retryStarted >= 20)
 
   assert.deepEqual(uniqueRelatedIds([1, 1, 2, 0]), [1, 2])
   assert.deepEqual(buildLinkPayloads([1, 1, 2]), [

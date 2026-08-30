@@ -49,11 +49,27 @@ const GROUPS = [
 function linkedinAuthErrorDisplay(value: unknown): ErrorDisplay | undefined {
   const code = String(value ?? '').trim().toLowerCase()
   if (!code) return undefined
+  if (code === 'dolphin_local_api_unavailable' || code === 'dolphin_local_session_invalid') {
+    return {
+      code, category: 'Dolphin', tone: 'warning',
+      message: code.endsWith('session_invalid')
+        ? 'Dolphin Local API session is invalid.'
+        : 'Dolphin Local API is unavailable.',
+      action: 'Fully restart Dolphin, log in, wait for Local API port 3001, and retry.'
+    }
+  }
   if (code.startsWith('unipile_checkpoint_')) {
     return {
       code, category: 'Checkpoint', tone: 'warning',
       message: 'LinkedIn requires a checkpoint or 2FA.',
       action: 'Open Dolphin, restore the LinkedIn session, and retry.'
+    }
+  }
+  if (code === 'unipile_timeout' || code === 'unipile_unreachable') {
+    return {
+      code, category: 'Unipile', tone: 'danger',
+      message: 'The Unipile API did not respond.',
+      action: 'Check network access to api.unipile.com and retry.'
     }
   }
   const group = GROUPS.find(item => item.prefixes.some(prefix => code.startsWith(prefix)))

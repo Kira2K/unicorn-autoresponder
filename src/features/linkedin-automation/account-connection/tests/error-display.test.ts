@@ -11,6 +11,8 @@ async function run(): Promise<void> {
     ['linkedin_url_missing', 'Settings'],
     ['dolphin_proxy_unhealthy', 'Proxy'],
     ['dolphin_profile_in_use', 'Dolphin'],
+    ['dolphin_local_api_unavailable', 'Dolphin'],
+    ['dolphin_local_session_invalid', 'Dolphin'],
     ['linkedin_li_at_missing', 'LinkedIn session'],
     ['linkedin_profile_mismatch', 'Owner mismatch'],
     ['unipile_timeout', 'Unipile'],

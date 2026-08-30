@@ -41,6 +41,7 @@ function createUnipileHttpClient(options: {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: any
+    let text: string
 
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
@@ -53,6 +54,7 @@ function createUnipileHttpClient(options: {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal
       })
+      text = await response.text()
     } catch (error: any) {
       const code = error?.name === 'AbortError' ? 'unipile_timeout' : 'unipile_unreachable'
       throw new LinkedInAuthError(code, `Unipile request failed before receiving a response.`)
@@ -60,7 +62,6 @@ function createUnipileHttpClient(options: {
       clearTimeout(timer)
     }
 
-    const text = await response.text()
     let data: any
     try {
       data = text ? JSON.parse(text) : null

@@ -68,7 +68,14 @@ async function run() {
   assert.ok(noDatePlan.issues.some((issue: any) =>
     issue.path === 'profile.experience[0].data.start_date'))
   assert.ok(noDatePlan.issues.some((issue: any) =>
-    issue.path === 'profile.education[0].data.start_date'))
+    issue.path === 'profile.education[0].data.start_date' && issue.level === 'warning'))
+  assert.equal(noDatePlan.issues.some((issue: any) => issue.level === 'fatal'), false)
+  const unreadCurrent = { display_name: 'Student', profile_url: current.profile_url,
+    specifics: { experience: [], education: [], skills: [] } }
+  const unreadPlan = await buildProfilePlan(client, account, validation.value, unreadCurrent, [])
+  assert.ok(unreadPlan.steps.some((step: any) => step.section === 'headline'))
+  assert.ok(unreadPlan.steps.some((step: any) => step.section === 'about'))
+  assert.ok(unreadPlan.issues.some((issue: any) => issue.message.includes('was not returned')))
   const fullSkills = { ...current, specifics: { experience: [], education: [],
     skills: Array.from({ length: 100 }, (_, index) => ({ name: `Existing ${index}` })) } }
   const skillsInput = validateProfileFile({ profile: {

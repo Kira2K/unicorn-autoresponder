@@ -31,6 +31,11 @@ export async function buildProfilePlan(
   ].sort((left, right) => position(left) - position(right))
   const steps = planned
   validatePlanPayloads(steps, issues, logger)
+  steps.forEach(step => logger?.event('field_ready', 'succeeded', {
+    stepId: step.id, section: step.section
+  }))
+  issues.filter(issue => issue.level === 'warning' && /skipped/i.test(issue.resolution ?? ''))
+    .forEach(issue => logger?.event('field_skipped', 'succeeded', { fieldPath: issue.path }))
   return {
     kind: 'apply', account, input: desired,
     identity: {

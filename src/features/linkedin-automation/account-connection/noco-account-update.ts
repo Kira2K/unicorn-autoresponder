@@ -12,7 +12,11 @@ const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
 async function updateLinkedInUrl(client: any, platformAccountId: number, value: unknown) {
   const linkedinUrl = canonicalLinkedInProfileUrl(linkedInPublicIdentifier(value))
   try {
-    await client.patchRecord(TABLES.platformAccounts.id, platformAccountId, { url: linkedinUrl })
+    await client.patchRecord(TABLES.platformAccounts.id, platformAccountId, {
+      url: linkedinUrl,
+      linkedin_auth_error_code: '',
+      linkedin_auth_updated_at: new Date().toISOString()
+    })
   } catch (error) { throw linkedInNocoError(error) }
   return linkedinUrl
 }

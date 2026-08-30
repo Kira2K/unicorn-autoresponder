@@ -46,6 +46,18 @@ changed.profile.experience = [{ data: { company: 'Other', job_title: 'Engineer',
 const issues = factIssues(changed, experienceFacts)
 assert(issues.some(issue => issue.path.endsWith('.company')))
 assert(issues.some(issue => issue.path.endsWith('.description')))
+assert(issues.some(issue => issue.message.includes('"30%"')))
+const formatted: any = document()
+formatted.profile.experience = [{ data: { company: 'Acme', job_title: 'Engineer',
+  start_date: '2022-01', description: 'Handled 6,000 requests.' } }]
+const formattedFacts: CvFacts = { ...experienceFacts, experience: [{ ...experienceFacts.experience[0],
+  achievements: ['Handled 6000 requests'] }] }
+assert.equal(factIssues(formatted, formattedFacts).some(issue => issue.path.endsWith('.description')), false)
+const wrongPositionFacts: CvFacts = { ...formattedFacts, experience: [
+  { ...formattedFacts.experience[0], achievements: [] },
+  { ...formattedFacts.experience[0], company: 'Second', achievements: ['Handled 6000 requests'] }
+] }
+assert(factIssues(formatted, wrongPositionFacts).some(issue => issue.path.endsWith('.description')))
 const detached: any = document()
 detached.profile.experience = [{ data: { company: 'Acme', job_title: 'Engineer',
   start_date: { year: 2024, month: 1 }, description: 'Valid description',

@@ -77,15 +77,12 @@ export async function executeProfilePlan(client: ProfileClient, plan: ProfilePla
         logger.event('step_verification_delayed', 'succeeded', { stepId: step.id, section: step.section })
         continue
       }
-      result.status = 'failed'
-      await progress(index, { status: 'failed', failureKind: kind, errorCode: failureCode(writeError),
-        message: rejectedMessage(kind) })
-      const finalResult = finishProgress(result, 'failed', clock)
-      await options.onProgress?.(finalResult)
+      await progress(index, { status: 'pending_retry', failureKind: kind,
+        errorCode: failureCode(writeError), message: `${rejectedMessage(kind)} Other fields continue.` })
       logger.event('step', 'failed', { stepId: step.id, section: step.section,
         ...profileErrorDetails(writeError) })
-      logger.event('run', 'failed', profileErrorDetails(writeError))
-      return result
+      logger.event('step_pending_retry', 'succeeded', { stepId: step.id, section: step.section })
+      continue
     }
     await progress(index, { status: 'verified', message: 'Verified in LinkedIn.' })
     logger.event('step', 'succeeded', { stepId: step.id, section: step.section })
@@ -93,7 +90,8 @@ export async function executeProfilePlan(client: ProfileClient, plan: ProfilePla
   await verifyFinal({ client, plan, result,
     range: timing.finalReadBack, wait, progress: progressMany, logger, clock,
     random: options.random, onStage: options.onStage })
-  const delayed = result.steps.some(step => step.status === 'verification_delayed')
+  const delayed = result.steps.some(step =>
+    ['verification_delayed', 'pending_retry'].includes(step.status))
   const finalResult = finishProgress(result, delayed ? 'pending_verification' : 'verified', clock)
   await options.onProgress?.(finalResult); logger.event(delayed ? 'run_verification_delayed' : 'run', 'succeeded')
   return result

@@ -84,6 +84,9 @@ export const api = {
   adminLinkedInAccounts() {
     return request('/api/admin/linkedin/accounts')
   },
+  adminNocoQueue() {
+    return request('/api/admin/noco-queue')
+  },
   adminLinkedInHistory() {
     return request('/api/admin/linkedin/runs')
   },

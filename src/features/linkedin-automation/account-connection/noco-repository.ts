@@ -27,7 +27,15 @@ const { updateLinkedInUrl } = require('./noco-account-update.ts') as {
 const { linkedInNocoError } = require('./noco-error.ts') as {
   linkedInNocoError(error: unknown): unknown
 }
-function createLinkedInAuthNocoRepository(client = createNocoClient({ pageDelayMs: 300, retryDelaysMs: [0, 30_000, 30_000] })) {
+function createLinkedInAuthNocoRepository(
+  client?: any,
+  failureClient?: any
+) {
+  const injectedClient = client
+  client ??= createNocoClient({ pageDelayMs: 300, retryDelaysMs: [0, 30_000, 30_000] })
+  const getFailureClient = () => failureClient ??= injectedClient ?? createNocoClient({
+    retryDelaysMs: [0], requestTimeoutMs: 10_000
+  })
   let rowsCache: { expiresAt: number; value: any } | undefined
   let rowsRequest: Promise<any> | undefined
   async function fetchRows() {
@@ -76,7 +84,11 @@ function createLinkedInAuthNocoRepository(client = createNocoClient({ pageDelayM
   async function updateAccountUrl(platformAccountId: number, value: unknown) {
     const linkedinUrl = await updateLinkedInUrl(client, platformAccountId, value)
     const account = rowsCache?.value.accounts.find((row: any) => Number(row.Id) === platformAccountId)
-    if (account) account.url = linkedinUrl
+    if (account) {
+      account.url = linkedinUrl
+      account.linkedin_auth_error_code = ''
+      account.linkedin_auth_updated_at = new Date().toISOString()
+    }
     else rowsCache = undefined
     return linkedinUrl
   }
@@ -86,7 +98,9 @@ function createLinkedInAuthNocoRepository(client = createNocoClient({ pageDelayM
     resolveTarget,
     updateLinkedInUrl: updateAccountUrl,
     async recordFailure(platformAccountId: number, input: any) {
-      await client.patchRecord(TABLES.platformAccounts.id, platformAccountId, failurePatch(input))
+      await getFailureClient().patchRecord(
+        TABLES.platformAccounts.id, platformAccountId, failurePatch(input)
+      )
       rowsCache = undefined
     },
     async recordSuccess(platformAccountId: number, input: any) {

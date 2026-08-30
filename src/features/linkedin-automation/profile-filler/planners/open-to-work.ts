@@ -20,9 +20,9 @@ export async function planOpenToWork(
     const result = await resolve(REQUIRED_ID_FIELDS.openToWorkJobTitle, value.name)
     const match = result.exact
     if (!match) {
-      issues.push({ level: 'fatal', path: issuePath,
+      issues.push({ level: 'warning', path: issuePath,
         message: `LinkedIn job title "${value.name}" was not resolved.`,
-        resolution: 'Choose one exact LinkedIn value and rebuild Preview.',
+        resolution: 'Open to Work was skipped because no verified catalog value was available.',
         suggestions: result.matches.slice(0, 5).map(item => item.name) })
       return []
     }
@@ -33,9 +33,9 @@ export async function planOpenToWork(
     const result = await resolve(REQUIRED_ID_FIELDS.openToWorkLocation, value.name)
     const match = result.exact
     if (!match) {
-      issues.push({ level: 'fatal', path: 'profile.open_to_work.locations',
+      issues.push({ level: 'warning', path: 'profile.open_to_work.locations',
         message: `LinkedIn location "${value.name}" was not resolved.`,
-        resolution: 'Choose one exact LinkedIn value and rebuild Preview.',
+        resolution: 'Open to Work was skipped because no verified catalog value was available.',
         suggestions: result.matches.slice(0, 8).map(item => item.name) })
       return []
     }

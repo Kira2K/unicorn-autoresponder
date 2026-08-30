@@ -14,6 +14,7 @@ export function codedError(code: string, message: string, details?: unknown) {
 }
 
 export function profileErrorCode(error: unknown) {
+  if ((error as any)?.response?.status === 429) return 'noco_rate_limited'
   const raw = String((error as any)?.code ?? '')
   if (SAFE_CODES.has(raw) || ['unipile_', 'openai_', 'profile_cv_', 'profile_proxy_']
     .some(prefix => raw.startsWith(prefix))) return raw.slice(0, 120)

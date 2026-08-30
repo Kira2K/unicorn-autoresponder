@@ -59,18 +59,27 @@ async function runLinkedInAuth(input: {
   let knownStatus = target.unipileAccountStatus
   try {
     if (target.unipileAccountId && !input.forceReauth) {
-      const current: Account = await dependencies.adapter.getAccount(target.unipileAccountId)
+      const current: Account = await logger.run(
+        'unipile_account_read', targetDetails,
+        () => dependencies.adapter.getAccount(target.unipileAccountId as string)
+      )
       assertAccountShape(current)
       knownStatus = current.status
       const classicStatus = classicConnectionStatus(current)
       if (classicStatus === 'running') {
-        return { mode: 'verified', ...(await verifyAndStore(target, current, dependencies)) }
+        return {
+          mode: 'verified',
+          ...(await verifyAndStore(target, current, dependencies, logger))
+        }
       }
       if (classicStatus === 'errored') assertAccountOperational(current)
     }
     const account = await authenticate(target, dependencies, logger)
     knownStatus = account.status
-    return { mode: target.unipileAccountId ? 'reconnected' : 'connected', ...(await verifyAndStore(target, account, dependencies)) }
+    return {
+      mode: target.unipileAccountId ? 'reconnected' : 'connected',
+      ...(await verifyAndStore(target, account, dependencies, logger))
+    }
   } catch (error: unknown) {
     await dependencies.repository.recordFailure(target.platformAccountId, {
       errorCode: getAuthErrorCode(error), accountStatus: knownStatus

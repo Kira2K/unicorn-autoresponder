@@ -10,6 +10,7 @@ const { createGenerationRuntime } = require('./runtime.ts') as {
 }
 const { validateWithRepair } = require('./validate-with-repair.ts') as
   typeof import('./validate-with-repair.ts')
+const { metricFactCount } = require('./metric-claims.ts') as typeof import('./metric-claims.ts')
 const { groundAndPreview } = require('./ground-and-preview.ts') as
   { groundAndPreview(options: any, checkpoint: any): Promise<boolean> }
 
@@ -33,6 +34,7 @@ async function runGeneration(options: any) {
       { operation: 'extracting_cv_facts' })
     const facts = await logAction(logger, 'cv_fact_extraction', () =>
       runtime.generator.extractFacts(cv))
+    logger.event('cv_metric_index', 'succeeded', { stepCount: metricFactCount(facts) })
     await logAction(logger, 'generation_stage_persist', () =>
       persistStage({ job, store, update }, 'generating_profile', 'generating_profile'),
       { operation: 'generating_profile' })

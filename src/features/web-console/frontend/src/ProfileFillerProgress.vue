@@ -19,6 +19,7 @@ const complete = computed(() => steps.value.filter(step => step.status === 'veri
 const summary = computed(() => `${complete.value} of ${steps.value.length} completed`)
 const failed = computed(() => steps.value.find(step => step.status === 'failed'))
 const delayed = computed(() => steps.value.filter(step => step.status === 'verification_delayed'))
+const pendingRetry = computed(() => steps.value.filter(step => step.status === 'pending_retry'))
 const now = ref(Date.now())
 let timer
 onMounted(() => { timer = window.setInterval(() => { now.value = Date.now() }, 1000) })
@@ -29,6 +30,7 @@ function label(step) {
     pending: 'Waiting', waiting: 'Waiting before write', writing: 'Sending',
     write_accepted: 'Accepted by Unipile', verifying: 'Checking LinkedIn',
     verification_delayed: 'Accepted · verification delayed',
+    pending_retry: 'Waiting for a safe retry',
     verified: 'Completed', failed: 'Stopped'
   }
   return labels[step.status] || step.status
@@ -83,6 +85,9 @@ function failureText(kind, code) {
     <Message v-else-if="delayed.length" severity="warn" :closable="false">
       {{ delayed.length }} change(s) were accepted but LinkedIn verification is delayed.
       Other steps continued. Build a fresh preview later to confirm them.
+    </Message>
+    <Message v-if="pendingRetry.length" severity="warn" :closable="false">
+      {{ pendingRetry.length }} field(s) remain pending. Other fields continued normally.
     </Message>
   </section>
 </template>

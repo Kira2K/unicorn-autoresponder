@@ -29,9 +29,9 @@ export function planExperience(
       return []
     }
     if (!existing && !entry.data.startDate) {
-      issues.push({ level: 'fatal', path: `profile.experience[${index}].data.start_date`,
+      issues.push({ level: 'warning', path: `profile.experience[${index}].data.start_date`,
         message: 'Unipile v2 requires start_date to create an Experience.',
-        resolution: 'Add start_date in YYYY-MM format and rebuild Preview.' })
+        resolution: 'This CV entry was skipped because the required fact is unavailable.' })
       return []
     }
     const before = existing ? normalizeExperience(existing) : undefined

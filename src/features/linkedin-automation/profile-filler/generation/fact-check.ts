@@ -1,9 +1,11 @@
 import type { CvFacts } from './types.ts'
 import type { ValidationIssue } from '../input-types.ts'
+import {
+  allFactMetrics, allowedExperienceMetrics, unsupportedMetrics
+} from './metric-claims.ts'
 
 const norm = (value: unknown) => String(value ?? '').trim().toLowerCase()
 const same = (left: unknown, right: unknown) => norm(left) === norm(right)
-const metrics = (value: unknown) => String(value ?? '').match(/\b\d+(?:[.,]\d+)?%?\b/g) ?? []
 
 function mismatch(issues: ValidationIssue[], path: string, field: string) {
   issues.push({ level: 'fatal', path, message: `${field} does not match the final CV.`,
@@ -23,9 +25,12 @@ export function factIssues(document: any, facts: CvFacts): ValidationIssue[] {
     for (const key of ['company', 'job_title', 'start_date', 'end_date'] as const) {
       if (!same(data[key], fact[key])) mismatch(issues, `profile.experience[${index}].data.${key}`, key)
     }
-    const evidence = JSON.stringify(fact)
-    if (metrics(data.description).some(value => !evidence.includes(value))) {
-      mismatch(issues, `profile.experience[${index}].data.description`, 'Experience metric')
+    const unsupported = unsupportedMetrics(data.description, allowedExperienceMetrics(fact))
+    if (unsupported.length) {
+      const values = unsupported.map(item => `"${item.raw}"`).join(', ')
+      issues.push({ level: 'fatal', path: `profile.experience[${index}].data.description`,
+        message: `Experience metrics ${values} are not supported by this CV position.`,
+        resolution: 'Rewrite or remove only the unsupported numeric claims.' })
     }
   })
   const educationFacts = facts.education.filter(item => item.is_higher_education)
@@ -41,9 +46,12 @@ export function factIssues(document: any, facts: CvFacts): ValidationIssue[] {
   })
   const about = String(document?.profile?.about ?? '')
   const headline = String(document?.profile?.headline ?? '')
-  const trustedFacts = JSON.stringify(facts)
-  if (metrics(`${headline}\n${about}`).some(value => !trustedFacts.includes(value))) {
-    mismatch(issues, 'profile.about', 'Profile metric')
+  const unsupported = unsupportedMetrics(`${headline}\n${about}`, allFactMetrics(facts))
+  if (unsupported.length) {
+    const values = unsupported.map(item => `"${item.raw}"`).join(', ')
+    issues.push({ level: 'fatal', path: 'profile.about',
+      message: `Profile metrics ${values} are not supported by the final CV.`,
+      resolution: 'Rewrite or remove only the unsupported numeric claims.' })
   }
   if (facts.target_roles.length && !facts.target_roles.some(role =>
     norm(headline).includes(norm(role)))) mismatch(issues, 'profile.headline', 'Target role')

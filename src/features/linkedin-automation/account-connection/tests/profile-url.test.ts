@@ -7,6 +7,8 @@ const {
 
 async function run(): Promise<void> {
   assert.equal(linkedInPublicIdentifier('https://www.linkedin.com/in/Kira-Test/'), 'kira-test')
+  assert.equal(linkedInPublicIdentifier('linkedin.com/in/Kira-Test/'), 'kira-test')
+  assert.equal(linkedInPublicIdentifier('www.linkedin.com/in/Kira-Test/'), 'kira-test')
   assert.equal(assertLinkedInIdentity(
     'https://linkedin.com/in/kira-test',
     'https://www.linkedin.com/in/KIRA-TEST/'

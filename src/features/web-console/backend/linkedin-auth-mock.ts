@@ -26,6 +26,14 @@ function createMockLinkedInAuthRunService(): import('./linkedin-auth-types.ts').
     runId: 'mock-history-1', platformAccountId: 203, clientName: 'Connected Client',
     action: 'connect', status: 'succeeded', stage: 'completed',
     startedAt: '2026-08-20T10:00:00.000Z', finishedAt: '2026-08-20T10:00:04.000Z'
+  }, {
+    runId: 'mock-history-url', platformAccountId: 103, clientName: 'Test Client',
+    action: 'check', status: 'failed', stage: 'target_resolved', errorCode: 'linkedin_url_invalid',
+    startedAt: '2026-08-20T09:00:00.000Z', finishedAt: '2026-08-20T09:00:01.000Z'
+  }, {
+    runId: 'mock-history-reconnect', platformAccountId: 203, clientName: 'Connected Client',
+    action: 'connect', status: 'failed', stage: 'profile_started', errorCode: 'dolphin_local_api_unavailable',
+    startedAt: '2026-08-20T08:00:00.000Z', finishedAt: '2026-08-20T08:00:01.000Z'
   }]
   let active = false
 
