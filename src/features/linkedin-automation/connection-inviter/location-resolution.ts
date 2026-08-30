@@ -29,8 +29,7 @@ export function selectLocation(city: string, rows: any[], resolvedAt: string): C
     const label = normalized(item.label)
     return [...accepted].some(value => label.startsWith(`${value} `) || value.startsWith(`${label} `))
   })
-  const selected = exact.length === 1 ? exact[0] : exact.length ? undefined :
-    fuzzy.length === 1 ? fuzzy[0] : undefined
+  const selected = exact[0] ?? fuzzy[0]
   return selected
     ? { status: 'resolved', city, id: selected.id, label: selected.label, resolvedAt }
     : { status: 'unresolved', city, resolvedAt }

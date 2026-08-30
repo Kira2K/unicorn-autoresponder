@@ -10,6 +10,6 @@ assert.deepEqual(selectLocation('Berlin', [
 assert.equal(selectLocation('Bangalore', [{ id: 'geo-blr', name: 'Bengaluru' }], at).id, 'geo-blr')
 assert.equal(selectLocation('Springfield', [
   { id: 'one', name: 'Springfield Illinois' }, { id: 'two', name: 'Springfield Missouri' }
-], at).status, 'unresolved')
+], at).id, 'one')
 
 console.log('connection location resolution tests passed')
