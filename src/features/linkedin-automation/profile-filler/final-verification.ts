@@ -21,6 +21,8 @@ export async function verifyFinal(options: {
 }) {
   const { client, plan, result, range, wait, progress, logger, clock, random, onStage } = options
   const checked = result.steps.map((step, index) => ({ step, index }))
+    .filter(({ step }) => step.status !== 'pending_retry')
+  if (!checked.length) return result.steps.length
   const pause = delayMilliseconds(range, random)
   const nextActionAt = scheduledAt(pause, clock)
   onStage?.('final_verification:1/1')

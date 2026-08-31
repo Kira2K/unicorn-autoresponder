@@ -14,7 +14,7 @@ export function overallTime(result, now) {
 }
 
 export function stepTimer(step, resultStatus, now) {
-  if (['verified', 'verification_delayed', 'pending'].includes(step.status)) return ''
+  if (['verified', 'verification_delayed', 'pending_retry', 'pending'].includes(step.status)) return ''
   if (step.nextActionAt && resultStatus === 'running') {
     const remaining = Date.parse(step.nextActionAt) - now
     const action = step.status === 'waiting' ? 'write' : 'check'

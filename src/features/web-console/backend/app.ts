@@ -128,6 +128,9 @@ const { createMockCommentMonitorService } = require('./comment-monitor-mock.ts')
 const { registerCommentMonitorRoutes } = require('./comment-monitor-routes.ts') as {
   registerCommentMonitorRoutes(options: any): void
 }
+const { sharedNocoRequestLimiter } = require('../../../integrations/noco/core/request-limiter.ts') as {
+  sharedNocoRequestLimiter: { snapshot(): Record<string, unknown> }
+}
 
 type Request = import('express').Request
 type Response = import('express').Response
@@ -789,6 +792,9 @@ function createWebConsoleApp(options: {
     app,
     requireAdmin: requireRole('admin'),
     service: commentMonitor
+  })
+  app.get('/api/admin/noco-queue', requireRole('admin'), (_req: Request, res: Response) => {
+    res.json(sharedNocoRequestLimiter.snapshot())
   })
 
   app.get('/api/internal/telegram-gateway/health', requireTelegramGateway, (_req: Request, res: Response) => {

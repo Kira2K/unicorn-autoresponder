@@ -1,6 +1,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
-import { confirmationMessage } from './linkedin-auth-view'
+import { confirmationMessage, historyForAccounts } from './linkedin-auth-view'
 
 export function useLinkedInAuth() {
   const accounts = ref([])
@@ -12,6 +12,7 @@ export function useLinkedInAuth() {
   const editors = ref({})
   const drafts = ref({})
   const saving = ref({})
+  const nocoQueue = ref({ state: 'ready', waiting: 0, waitMs: 0 })
   const timers = new Map()
   const active = computed(() => Object.values(runs.value).some(run => run.status === 'running'))
   const filtered = computed(() => {
@@ -22,6 +23,7 @@ export function useLinkedInAuth() {
       account.dolphinProfileId, account.authErrorCode
     ].some(value => String(value ?? '').toLowerCase().includes(needle)))
   })
+  const filteredHistory = computed(() => historyForAccounts(history.value, filtered.value))
 
   async function load() {
     loading.value = true
@@ -32,6 +34,11 @@ export function useLinkedInAuth() {
     }
     catch (caught) { error.value = caught.message || 'Could not load LinkedIn accounts.' }
     finally { loading.value = false }
+  }
+
+  async function pollNocoQueue() {
+    try { nocoQueue.value = await api.adminNocoQueue() } catch {}
+    timers.set('noco-queue', setTimeout(pollNocoQueue, 1000))
   }
 
   async function poll(platformAccountId, runId) {
@@ -78,7 +85,18 @@ export function useLinkedInAuth() {
     finally { saving.value = { ...saving.value, [id]: false } }
   }
 
-  onMounted(load)
+  function historyAction(run, action) {
+    const account = accounts.value.find(row =>
+      Number(row.platformAccountId) === Number(run.platformAccountId))
+    if (!account) return
+    if (action === 'edit_url') edit(account)
+    else void start(account, action)
+  }
+
+  onMounted(() => { void load(); void pollNocoQueue() })
   onUnmounted(() => { for (const timer of timers.values()) clearTimeout(timer) })
-  return { active, drafts, editors, edit, error, filtered, history, loading, query, runs, save, saving, start }
+  return {
+    accounts, active, drafts, editors, edit, error, filtered, filteredHistory, history,
+    historyAction, loading, nocoQueue, query, runs, save, saving, start
+  }
 }

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const { executeProfilePlan } = require('../executor.ts') as any
 const { createProfileLogger } = require('../profile-logger.ts') as any
 const { DEFAULT_TIMING } = require('../timing.ts') as any
+const { safeRetryStep } = require('../safe-retry-step.ts') as any
 
 assert.deepEqual(DEFAULT_TIMING.ordinaryWrite, { min: 25, max: 70 })
 
@@ -84,7 +85,33 @@ async function run() {
   }, plan, { timing, wait: async () => undefined })
   assert.equal(rejected.steps[0].failureKind, 'write_rejected')
   assert.equal(rejected.steps[0].errorCode, 'unipile_rejected')
+  assert.equal(rejected.steps[0].status, 'pending_retry')
+  assert.equal(rejected.status, 'pending_verification')
   assert.ok(JSON.stringify(events).includes('New') === false)
+
+  const retryCandidate = { ...plan.steps[0], section: 'experience', payload: { specifics: {
+    linkedin: { experience: { operation: 'create', job_title: { name: 'Engineer' },
+      company: { name: 'Acme' }, start_date: { year: 2024, month: 1 },
+      description: 'Trusted', skills: [{ name: 'Go' }], workplace_type: 'REMOTE' } } } } }
+  const safe = safeRetryStep(retryCandidate).payload.specifics.linkedin.experience
+  assert.equal(safe.description, 'Trusted')
+  assert.equal(Object.hasOwn(safe, 'skills'), false)
+  assert.equal(Object.hasOwn(safe, 'workplace_type'), false)
+
+  const continuingPlan = { ...plan, steps: [plan.steps[0], {
+    id: 'about', section: 'about', action: 'update', summary: 'About', before: 'Old', after: 'New',
+    payload: { bio: 'New' }, verification: { kind: 'about', expected: 'New' }
+  }] }
+  const continuedProfile: any = { description: 'Old', bio: 'Old' }
+  const continued = await executeProfilePlan({
+    async updateOwnProfile(_id: string, payload: any) {
+      if (payload.specifics) throw Object.assign(new Error('rejected'), { code: 'unipile_rejected' })
+      continuedProfile.bio = 'New'
+    },
+    async getOwnProfile() { return structuredClone(continuedProfile) }
+  }, continuingPlan, { timing, wait: async () => undefined })
+  assert.equal(continued.steps[0].status, 'pending_retry')
+  assert.equal(continued.steps[1].status, 'verified')
 
   const lines: string[] = []
   const logger = createProfileLogger({ jobId: 'job-1', writeLine: (line: string) => lines.push(line) })

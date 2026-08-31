@@ -6,6 +6,10 @@ function normalizeLinkedInHost(hostname: string): string {
   return hostname.toLowerCase().replace(/^www\./, '')
 }
 
+function withDefaultProtocol(value: string): string {
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`
+}
+
 function linkedInPublicIdentifier(value: unknown): string {
   const text = String(value ?? '').trim()
   if (!text) {
@@ -17,11 +21,11 @@ function linkedInPublicIdentifier(value: unknown): string {
 
   let url: URL
   try {
-    url = new URL(text)
+    url = new URL(withDefaultProtocol(text))
   } catch {
     throw new LinkedInAuthError(
       'linkedin_url_invalid',
-      'linkedin_url must be an absolute LinkedIn profile URL.'
+      'linkedin_url must be a LinkedIn profile URL.'
     )
   }
 

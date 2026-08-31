@@ -42,6 +42,10 @@ function authIntentPayload(input: {
 
 function createUnipileAccountAdapter(http = createUnipileHttpClient()) {
   return {
+    async listAccounts() {
+      const response = await http.request<any>('GET', '/accounts?limit=100')
+      return Array.isArray(response) ? response : response?.data ?? response?.items ?? []
+    },
     async authenticateLinkedIn(input: Parameters<typeof authIntentPayload>[0]) {
       return await http.request<UnipileAuthIntentResult>('POST', '/auth/intent', authIntentPayload(input))
     },

@@ -6,6 +6,9 @@ const { getNocoConfig, nocoHeaders } = require('./config.ts') as {
 const { describeError } = require('./errors.ts') as {
   describeError(error: any): string
 }
+const { sharedNocoRequestLimiter } = require('./request-limiter.ts') as {
+  sharedNocoRequestLimiter: NocoRequestLimiter
+}
 
 type NocoRecord = Record<string, unknown> & { Id: number }
 type RequestMethod = 'get' | 'post' | 'patch' | 'delete'
@@ -16,6 +19,11 @@ type Requester = (request: {
   headers: Record<string, string>
   timeout: number
 }) => Promise<{ data: unknown }>
+type NocoRequestLimiter = {
+  rateLimited(waitMs?: number): void
+  schedule<T>(kind: 'read' | 'write', action: () => Promise<T>): Promise<T>
+  snapshot(): Record<string, unknown>
+}
 
 function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -27,50 +35,67 @@ function isRetryableNocoError(error: any): boolean {
   return status === 429 || String(message).includes('Too Many Requests')
 }
 
+function retryAfterMs(error: any): number {
+  const value = error?.response?.headers?.['retry-after']
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+  const date = Date.parse(String(value ?? ''))
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 30000
+}
+
 function createNocoClient(options: {
   requester?: Requester
   retryDelaysMs?: number[]
   requestTimeoutMs?: number
   pageDelayMs?: number
+  limiter?: NocoRequestLimiter
 } = {}) {
   const config = getNocoConfig()
   const requester: Requester =
     options.requester ??
     (request => axios.request(request))
-  const retryDelaysMs = options.retryDelaysMs ?? [0, 2500, 5000, 10000, 20000]
+  const retryDelaysMs = options.retryDelaysMs?.length
+    ? options.retryDelaysMs
+    : [0, 2500, 5000, 10000, 20000]
   const requestTimeoutMs = options.requestTimeoutMs ?? 60000
   const pageDelayMs = options.pageDelayMs ?? 0
+  const limiter = options.limiter ?? sharedNocoRequestLimiter
 
   async function request<T>(
     method: RequestMethod,
     endpoint: string,
     body?: unknown
   ): Promise<T> {
-    let lastError: any
-
-    for (const delay of retryDelaysMs) {
+    let attempt = 0
+    while (true) {
+      const delay = retryDelaysMs[Math.min(attempt, retryDelaysMs.length - 1)]
       if (delay) {
         await wait(delay)
       }
 
       try {
-        const response = await requester({
-          method,
-          url: `${config.baseUrl}${endpoint}`,
-          data: body,
-          headers: nocoHeaders(config),
-          timeout: requestTimeoutMs
+        const response = await limiter.schedule(method === 'get' ? 'read' : 'write', async () => {
+          try {
+            return await requester({
+              method,
+              url: `${config.baseUrl}${endpoint}`,
+              data: body,
+              headers: nocoHeaders(config),
+              timeout: requestTimeoutMs
+            })
+          } catch (error: any) {
+            if (isRetryableNocoError(error)) limiter.rateLimited(retryAfterMs(error))
+            throw error
+          }
         })
         return response.data as T
       } catch (error: any) {
-        lastError = error
         if (!isRetryableNocoError(error)) {
           throw error
         }
+        attempt += 1
       }
     }
-
-    throw lastError ?? new Error(`NocoDB request failed: ${method.toUpperCase()} ${endpoint}`)
   }
 
   async function fetchTableMeta(tableId: string): Promise<any> {
@@ -183,6 +208,7 @@ function createNocoClient(options: {
     fetchTableMeta,
     patchRecord,
     request,
+    queueStatus: limiter.snapshot,
     wait
   }
 }
@@ -190,5 +216,6 @@ function createNocoClient(options: {
 module.exports = {
   createNocoClient,
   isRetryableNocoError,
+  retryAfterMs,
   wait
 }

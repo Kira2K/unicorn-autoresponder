@@ -33,15 +33,18 @@ async function run(): Promise<void> {
   const adapter = createUnipileAccountAdapter({
     async request(method: string, path: string, body?: unknown) {
       calls.push({ method, path, body })
+      if (path === '/accounts?limit=100') return { data: [{ id: 'acc_1' }] }
       if (path === '/auth/intent') return { object: 'Account', id: 'acc_1' }
       if (path === '/accounts/acc_1') return { id: 'acc_1', provider: 'linkedin' }
       return { public_identifier: 'kira-test' }
     }
   })
+  assert.deepEqual(await adapter.listAccounts(), [{ id: 'acc_1' }])
   await adapter.authenticateLinkedIn({ liAt: 'x', userAgent: 'ua', proxy })
   await adapter.getAccount('acc_1')
   await adapter.getOwnProfile('acc_1')
   assert.deepEqual(calls.map(call => `${call.method} ${call.path}`), [
+    'GET /accounts?limit=100',
     'POST /auth/intent', 'GET /accounts/acc_1', 'GET /acc_1/users/me'
   ])
 }

@@ -21,12 +21,19 @@ const { extractLinkedInSession } = require('./session-cookie.ts') as {
 const { readLinkedInPageIdentity } = require('./page-identity.ts') as {
   readLinkedInPageIdentity(page: any): Promise<{ profileUrl: string; userAgent: string }>
 }
+const { assertDolphinAppRunning } = require('../../../integrations/dolphin/preflight.ts') as {
+  assertDolphinAppRunning(): Promise<void>
+}
+const { linkedInDolphinLocalError } = require('./dolphin-local-error.ts') as {
+  linkedInDolphinLocalError(error: unknown): unknown
+}
 const { NOOP_AUTH_LOGGER } = require('./auth-logger.ts') as {
   NOOP_AUTH_LOGGER: import('./auth-logger.ts').AuthLogger
 }
 const PROFILE_URL = 'https://www.linkedin.com/in/me/'
 type AuthLogger = import('./auth-logger.ts').AuthLogger
 type CollectorDependencies = {
+  checkLocalApi(): Promise<void>
   acquireLock(id: number): Promise<{ release(): Promise<void> }>
   getProxy(id: number): Promise<any>
   startProfile(id: number): Promise<any>
@@ -34,6 +41,7 @@ type CollectorDependencies = {
   playwright(): any
 }
 const defaults: CollectorDependencies = {
+  checkLocalApi: assertDolphinAppRunning,
   acquireLock: acquireLinkedInProfileLock,
   getProxy: resolveOrPromptLinkedInProxy,
   startProfile: startDolphinProfile,
@@ -47,6 +55,10 @@ async function collectLinkedInSession(
   logger: AuthLogger = NOOP_AUTH_LOGGER
 ) {
   const details = { dolphinProfileId: profileId }
+  await logger.run('dolphin_local_api_checked', details, async () => {
+    try { await dependencies.checkLocalApi() }
+    catch (error) { throw linkedInDolphinLocalError(error) }
+  })
   const lock = await logger.run(
     'profile_lock_acquired', details, () => dependencies.acquireLock(profileId)
   )
@@ -58,7 +70,9 @@ async function collectLinkedInSession(
       ...details, dolphinProtocol: proxy.protocol, authenticated: Boolean(proxy.username)
     })
     const port = await logger.run('profile_started', details, async () => {
-      const started = await dependencies.startProfile(profileId)
+      let started
+      try { started = await dependencies.startProfile(profileId) }
+      catch (error) { throw linkedInDolphinLocalError(error) }
       const value = Number(started?.automation?.port)
       if (!Number.isFinite(value) || value <= 0) {
         throw new LinkedInAuthError('dolphin_cdp_port_missing', 'Dolphin did not return a CDP port.')

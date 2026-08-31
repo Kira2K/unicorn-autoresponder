@@ -57,7 +57,7 @@ export type FillStepResult = {
   stepId: string
   section: PlanSection
   status: 'pending' | 'waiting' | 'writing' | 'write_accepted' | 'verifying' |
-    'verification_delayed' | 'verified' | 'failed'
+    'verification_delayed' | 'pending_retry' | 'verified' | 'failed'
   message: string
   attempt?: number
   maxAttempts?: number

@@ -26,7 +26,7 @@ export function updateProgress(
   if (!step.startedAt && status !== 'pending') step.startedAt = now
   Object.assign(step, patch, { updatedAt: now })
   if (!['waiting', 'verifying'].includes(status)) delete step.nextActionAt
-  if (['verification_delayed', 'verified', 'failed'].includes(status)) {
+  if (['verification_delayed', 'pending_retry', 'verified', 'failed'].includes(status)) {
     step.completedAt = now
     step.durationMs = Math.max(0, nowMs - Date.parse(step.startedAt ?? now))
   } else { delete step.completedAt; delete step.durationMs }

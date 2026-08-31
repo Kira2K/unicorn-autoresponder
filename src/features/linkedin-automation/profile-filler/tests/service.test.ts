@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict')
 const { createProfileFillerService } = require('../service.ts') as any
+const { profileErrorCode } = require('../errors.ts') as any
 
 const turn = () => new Promise(resolve => setImmediate(resolve))
 
@@ -13,6 +14,7 @@ async function settled(service: any, jobId: string, expected: string) {
 }
 
 async function run() {
+  assert.equal(profileErrorCode({ response: { status: 429 } }), 'noco_rate_limited')
   const records = new Map<string, any>()
   const releases: string[] = []
   const profile: any = {
