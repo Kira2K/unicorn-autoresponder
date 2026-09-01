@@ -15,6 +15,7 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Password from 'primevue/password'
 import ProgressSpinner from 'primevue/progressspinner'
+import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Toolbar from 'primevue/toolbar'
 import 'primeicons/primeicons.css'
@@ -44,6 +45,7 @@ createApp(App)
   .component('Message', Message)
   .component('Password', Password)
   .component('ProgressSpinner', ProgressSpinner)
+  .component('Select', Select)
   .component('Tag', Tag)
   .component('Toolbar', Toolbar)
   .mount('#app')

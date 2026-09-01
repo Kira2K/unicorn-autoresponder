@@ -138,6 +138,37 @@ Profile Filler routes:
 - `POST /api/admin/linkedin/profile-jobs/:jobId/apply`
 - `POST /api/admin/linkedin/profile-jobs/:jobId/rollback`
 
+## Connection Inviter
+
+The LinkedIn table shows readiness, primary stack, the latest connection count,
+daily limit, today's 70/30 quotas, progress, timers, retries, and recent
+invitation history. The admin starts a run manually; a repeated start on the
+same local day only processes the confirmed remaining quota.
+
+Connection Inviter routes:
+
+- `GET /api/admin/linkedin/connection-runs`
+- `GET /api/admin/linkedin/connection-runs/:runId`
+- `GET /api/admin/linkedin/connection-runs/:runId/events`
+- `POST /api/admin/linkedin/connection-runs/:runId/stop`
+- `GET /api/admin/linkedin/connection-stacks`
+- `GET /api/admin/linkedin/accounts/:id/connection-readiness`
+- `GET /api/admin/linkedin/accounts/:id/connection-history`
+- `PUT /api/admin/linkedin/accounts/:id/connection-stack`
+- `POST /api/admin/linkedin/accounts/:id/connection-runs`
+
+Structured logs are written to
+`logs/linkedin-connections/connection-inviter-<pid>.jsonl`. Logs contain safe
+stages, durations, counters, retry state, and hashed candidate diagnostics;
+credentials, request bodies, names, profile URLs, and full headlines are not
+logged.
+
+Before an invitation POST the candidate must have a durable unique `sending`
+claim. Timeout, `5xx`, or an unconfirmed `2xx` is resolved through pending
+read-back and is never repeated blindly. `completed` requires both confirmed
+audience quotas; day closure or catalog exhaustion is reported as `partial`
+with the exact shortfall.
+
 ## Tests
 
 LinkedIn checks are isolated from the legacy web-console and support-bot tests:
@@ -146,6 +177,8 @@ LinkedIn checks are isolated from the legacy web-console and support-bot tests:
 npm run linkedin:web:test
 npm run linkedin:web:e2e
 npm run linkedin:web:check
+npm run linkedin:connections:test
+npm run linkedin:connections:e2e
 ```
 
 The last command also runs the LinkedIn authorization tests, typecheck, and the

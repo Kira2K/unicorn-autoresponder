@@ -13,7 +13,7 @@ function createMockLinkedInAuthRunService(): import('./linkedin-auth-types.ts').
       platformAccountId: 203, clientId: 2, clientName: 'Connected Client',
       linkedinUrl: 'https://www.linkedin.com/in/connected-client/', dolphinProfileId: 333333333,
       unipileAccountId: 'acc_mock', unipileAccountStatus: 'running',
-      lastVerifiedAt: '2026-08-20T10:00:00.000Z'
+      lastVerifiedAt: '2026-08-20T10:00:00.000Z', primaryStackId: 10, primaryStack: 'FRONTEND'
     },
     {
       platformAccountId: 303, clientId: 3, clientName: 'Proxy Error Client',

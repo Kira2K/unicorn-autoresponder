@@ -1,0 +1,156 @@
+<script setup>
+import { computed, onMounted, watch } from 'vue'
+import { connectionAudienceLabel, connectionCountdown, connectionEta, connectionFilterDiagnostics,
+  connectionFunnelLabel, connectionProgressPercent, connectionQuotaLabel, connectionRunCanStart,
+  connectionRunActive, connectionRunFromPreviousDay, connectionRunLabel } from './connection-inviter-view'
+
+const props = defineProps({ account: Object, inviter: Object, disabled: Boolean })
+const run = computed(() => props.inviter.runFor(props.account))
+const stack = computed(() => props.inviter.stackFor(props.account))
+const readiness = computed(() => props.inviter.readiness.value[props.account.platformAccountId])
+const accountHistory = computed(() => props.inviter.history.value[props.account.platformAccountId] || [])
+const historyLoaded = computed(() => props.inviter.history.value[props.account.platformAccountId] !== undefined)
+const pause = computed(() => props.inviter.pauses.value[props.account.platformAccountId])
+const writerEnabled = computed(() => props.inviter.settings.value.loaded &&
+  props.inviter.settings.value.writerEnabled === true)
+const accountVerified = computed(() => Boolean(props.account.unipileAccountId) &&
+  props.account.unipileAccountStatus === 'running' && Boolean(props.account.lastVerifiedAt))
+const mutationDisabled = computed(() => !writerEnabled.value || Boolean(props.disabled) ||
+  Boolean(props.inviter.loading.value[props.account.platformAccountId]))
+const canStart = computed(() => connectionRunCanStart(run.value, Boolean(stack.value)) &&
+  accountVerified.value && !mutationDisabled.value)
+const isActive = computed(() => connectionRunActive(run.value))
+const previousDayRun = computed(() => connectionRunFromPreviousDay(run.value))
+const timer = computed(() => props.inviter.countdownFor(run.value))
+const recruiterSent = computed(() => Number(run.value?.counters?.sentByAudience?.recruiter || 0))
+const technicalSent = computed(() => Number(run.value?.counters?.sentByAudience?.technical || 0))
+const recruiterQueued = computed(() => Number(run.value?.searchProgress?.queuedByAudience?.recruiter ??
+  (run.value?.searchProgress?.pendingCandidates || []).filter(item => item.audience === 'recruiter').length))
+const technicalQueued = computed(() => Number(run.value?.searchProgress?.queuedByAudience?.technical ??
+  (run.value?.searchProgress?.pendingCandidates || []).filter(item => item.audience === 'technical').length))
+const keysProcessed = computed(() => Number(run.value?.searchProgress?.keyIndex?.recruiter || 0) +
+  Number(run.value?.searchProgress?.keyIndex?.technical || 0))
+const keysTotal = computed(() => Number(run.value?.searchProgress?.keyTotal?.recruiter || 0) +
+  Number(run.value?.searchProgress?.keyTotal?.technical || 0))
+const currentSearchTerm = computed(() => run.value?.searchProgress?.term)
+const hardReasons = computed(() => connectionFilterDiagnostics(run.value, 'hard'))
+const softSignals = computed(() => connectionFilterDiagnostics(run.value, 'soft'))
+const intersections = computed(() => connectionFilterDiagnostics(run.value, 'intersection', 3))
+const latestConfirmed = computed(() => [...accountHistory.value]
+  .filter(item => ['sent', 'accepted'].includes(item.status))
+  .sort((left, right) => Date.parse(right.verifiedAt || right.sentAt || right.updatedAt || '') -
+    Date.parse(left.verifiedAt || left.sentAt || left.updatedAt || ''))[0])
+const shortfall = computed(() => Math.max(0,
+  Number(run.value?.dailyQuota || 0) - Number(run.value?.counters?.sent || 0)))
+const severity = computed(() => run.value?.status === 'failed' ? 'danger' :
+  previousDayRun.value ? 'warn' :
+  ['partial', 'paused', 'uncertain'].includes(run.value?.status) ||
+    run.value?.stage === 'waiting_retry' ? 'warn' :
+    run.value?.status === 'succeeded' ? 'success' : run.value?.status === 'running' ? 'info' : 'secondary')
+
+watch(() => run.value?.runId, () => props.inviter.ensure(props.account))
+onMounted(() => props.inviter.ensure(props.account))
+
+function loadHistory(event) {
+  if (event.target?.open) void props.inviter.loadHistory(props.account)
+}
+</script>
+
+<template>
+  <div class="connection-inviter" :data-testid="`connection-inviter-${account.platformAccountId}`">
+    <div class="connection-inviter-head">
+      <Tag :severity="pause ? 'warn' : severity" :value="pause ? 'Paused' : connectionRunLabel(run)" />
+      <Button v-if="stack && !isActive" label="Run today" size="small" severity="success"
+        :loading="inviter.loading.value[account.platformAccountId]" :disabled="!canStart"
+        :data-testid="`connection-run-${account.platformAccountId}`" @click="inviter.start(account)" />
+      <Button v-if="isActive" label="Stop" size="small" severity="danger" outlined
+        :loading="inviter.loading.value[account.platformAccountId]"
+        :disabled="mutationDisabled"
+        :data-testid="`connection-stop-${account.platformAccountId}`" @click="inviter.stop(account)" />
+    </div>
+    <small>Readiness: {{ readiness?.ready ? 'ready' : stack ? 'checked before run' : 'stack required' }}</small>
+    <small v-if="inviter.settings.value.loaded && !writerEnabled" class="comment-monitor-warning">
+      Read-only backend
+    </small>
+    <small v-else-if="!inviter.settings.value.loaded">Checking writer status</small>
+    <small>Stack: {{ stack || 'missing' }}</small>
+    <small v-if="!run">Connections and quota are checked when the run starts</small>
+    <small v-else>Stage: {{ (run.stage || 'unknown').replaceAll('_', ' ') }}</small>
+    <small v-if="run">{{ connectionQuotaLabel(run) }}</small>
+    <small v-if="run">{{ connectionAudienceLabel(run) }}</small>
+    <small v-if="run?.stage === 'daily_window_closed' || previousDayRun">
+      Sent {{ run.counters?.sent || 0 }}; shortfall {{ shortfall }}. Nothing carries into today.
+    </small>
+    <small v-if="latestConfirmed">
+      Last confirmed: {{ new Date(latestConfirmed.verifiedAt || latestConfirmed.sentAt).toLocaleString() }} /
+      {{ latestConfirmed.audience }} / {{ latestConfirmed.reasonCode || 'confirmed' }}
+    </small>
+
+    <div v-if="run?.dailyQuota" class="connection-progress-grid">
+      <label>Overall {{ run.counters?.sent || 0 }} / {{ run.dailyQuota }}</label>
+      <progress :value="connectionProgressPercent(run.counters?.sent, run.dailyQuota)" max="100" />
+      <label>Recruiters {{ recruiterSent }} / {{ run.audienceQuota?.recruiter || 0 }}</label>
+      <progress :value="connectionProgressPercent(recruiterSent, run.audienceQuota?.recruiter)" max="100" />
+      <label>Technical {{ technicalSent }} / {{ run.audienceQuota?.technical || 0 }}</label>
+      <progress :value="connectionProgressPercent(technicalSent, run.audienceQuota?.technical)" max="100" />
+    </div>
+
+    <small v-if="run?.searchProgress">
+      Search keys {{ keysProcessed }} / {{ keysTotal }} / {{ run.searchProgress.audience || '-' }} /
+      {{ run.searchProgress.city || '-' }} / {{ currentSearchTerm || '-' }} /
+      page {{ run.searchProgress.page || 0 }}
+    </small>
+    <small v-if="run?.searchProgress">
+      Next slot: {{ run.searchProgress.nextAudience || '-' }} /
+      queued {{ recruiterQueued }} recruiters · {{ technicalQueued }} technical
+    </small>
+    <small v-if="run?.searchProgress">
+      Found {{ run.searchProgress.found }} / Checked {{ run.searchProgress.checked }} /
+      Eligible {{ run.searchProgress.eligible }} / Skipped {{ run.searchProgress.skipped }}
+    </small>
+    <small v-if="hardReasons.length">Hard skips: {{ hardReasons.map(([code, count]) => `${code} ${count}`).join(' / ') }}</small>
+    <small v-if="softSignals.length">Soft signals: {{ softSignals.map(([code, count]) => `${code} ${count}`).join(' / ') }}</small>
+    <small v-if="intersections.length">Intersections: {{ intersections.map(([code, count]) => `${code} ${count}`).join(' / ') }}</small>
+    <small v-if="run">{{ connectionFunnelLabel(run, 'recruiter') }}</small>
+    <small v-if="run && !run.safeRecruiterOnly">{{ connectionFunnelLabel(run, 'technical') }}</small>
+    <small v-if="run && readiness">Seven days: {{ readiness.sevenDaySent || 0 }} sent / {{ connectionEta(run) }}</small>
+
+    <div v-if="timer" class="connection-timer">
+      <strong>{{ run?.timerState?.kind?.replaceAll('_', ' ') || 'waiting' }}</strong>
+      <span>{{ connectionCountdown(timer) }}</span>
+      <small v-if="run?.retryState">
+        {{ run.retryState.provider }} / {{ run.retryState.errorCode }} / attempt {{ run.retryState.attempt }} /
+        retry {{ new Date(run.retryState.nextRetryAt).toLocaleTimeString() }}
+      </small>
+    </div>
+
+    <div v-if="!stack" class="connection-stack-editor">
+      <Select v-model="inviter.stackDrafts.value[account.platformAccountId]" :options="inviter.stacks.value"
+        option-label="name" option-value="id" placeholder="Select stack"
+        :disabled="mutationDisabled"
+        :data-testid="`connection-stack-${account.platformAccountId}`" />
+      <Button label="Save and run" size="small" :loading="inviter.loading.value[account.platformAccountId]"
+        :disabled="mutationDisabled || !accountVerified || !inviter.stackDrafts.value[account.platformAccountId]"
+        :data-testid="`connection-stack-save-${account.platformAccountId}`" @click="inviter.saveStack(account)" />
+      <Button label="Recruiters only" size="small" severity="secondary" outlined :disabled="!canStart"
+        :data-testid="`connection-safe-run-${account.platformAccountId}`" @click="inviter.start(account, true)" />
+    </div>
+    <small v-if="run?.errorCode" class="comment-monitor-error">
+      {{ latestConfirmed ? 'Search after the last confirmed invitation' : 'Last run error' }}:
+      {{ run.errorCode }}
+    </small>
+    <small v-if="pause" class="comment-monitor-warning">{{ pause.message }}</small>
+    <small v-if="inviter.errors.value[account.platformAccountId]" class="comment-monitor-error">
+      {{ inviter.errors.value[account.platformAccountId] }}
+    </small>
+    <details v-if="Number(run?.counters?.sent || 0) > 0 || historyLoaded"
+      class="comment-monitor-history" @toggle="loadHistory">
+      <summary>Connection history</summary>
+      <small v-if="!historyLoaded">Loading history...</small>
+      <small v-else-if="!accountHistory.length">No confirmed invitations found.</small>
+      <div v-for="item in accountHistory.slice(0, 5)" :key="item.personId">
+        <strong>{{ item.status }}</strong>: {{ item.name }} / {{ item.audience }} / {{ item.reasonCode || 'no reason' }}
+      </div>
+    </details>
+  </div>
+</template>
