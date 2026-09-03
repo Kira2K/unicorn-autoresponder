@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto'
 import { createUnipileRequestScheduler } from '../../../integrations/unipile/request-scheduler.ts'
 import { NOOP_CONNECTION_LOGGER, type ConnectionLogger } from './logger.ts'
 import { retryableUnipileRead } from '../../../integrations/unipile/read-retry.ts'
+import { unipileRateLimitSource } from './errors.ts'
 
 const { createUnipileHttpClient } = httpClientModule as unknown as {
   createUnipileHttpClient(options?: any): any
 }
 const sharedScheduler = createUnipileRequestScheduler()
+const PENDING_INVITATIONS_PAGE_LIMIT = 100
 
 export function connectionPageItems(value: any): any[] {
   return Array.isArray(value) ? value : value?.items ?? value?.data ?? value?.list ?? []
@@ -89,22 +91,40 @@ export function createConnectionUnipileAdapter(options: {
   const scheduler = options.scheduler ?? sharedScheduler
   const logger = options.logger ?? NOOP_CONNECTION_LOGGER
   const maxReadAttempts = Math.max(1, options.maxReadAttempts ?? 1)
+  let requestNumber = 0
   async function request(operation: string, method: 'GET' | 'POST', path: string, body?: unknown,
     successStatus = 200) {
     const operationId = randomUUID()
     for (let attempt = 1; attempt <= (method === 'GET' ? maxReadAttempts : 1); attempt += 1) {
-      const started = Date.now()
-      logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt })
+      const queuedAt = Date.now()
       try {
-        const value = await scheduler.run(() => http.request(method, path, body))
-        logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId,
-          attempt, durationMs: Date.now() - started, httpStatus: successStatus })
+        const value = await scheduler.run(async () => {
+          const started = Date.now()
+          const currentRequestNumber = ++requestNumber
+          logger.event('unipile_request', 'started', { level: 'debug', operation, operationId,
+            attempt, requestNumber: currentRequestNumber, queueWaitMs: started - queuedAt })
+          try {
+            const result = await http.request(method, path, body)
+            logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId,
+              attempt, requestNumber: currentRequestNumber, durationMs: Date.now() - started,
+              httpStatus: successStatus })
+            return result
+          } catch (error: any) {
+            const willRetry = method === 'GET' && attempt < maxReadAttempts &&
+              retryableUnipileRead(error)
+            const rateLimitSource = unipileRateLimitSource(error)
+            const retryAfterMs = Number(error?.details?.retryAfterMs)
+            logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId,
+              attempt, requestNumber: currentRequestNumber, durationMs: Date.now() - started,
+              errorCode: String(error?.code ?? 'unipile_request_failed'), willRetry,
+              ...(rateLimitSource ? { rateLimitSource } : {}),
+              ...(Number.isFinite(retryAfterMs) ? { retryAfterMs } : {}) })
+            throw error
+          }
+        })
         return value
       } catch (error: any) {
         const willRetry = method === 'GET' && attempt < maxReadAttempts && retryableUnipileRead(error)
-        logger.event('unipile_request', 'failed', { level: 'warn', operation, operationId,
-          attempt, durationMs: Date.now() - started,
-          errorCode: String(error?.code ?? 'unipile_request_failed'), willRetry })
         if (!willRetry) throw error
       }
     }
@@ -140,7 +160,9 @@ export function createConnectionUnipileAdapter(options: {
         { keywords: input.keywords, location: [input.locationId], network_distance: [2] })
     },
     listPendingInvitations(accountId: string, page: number | string = 0) {
-      const query = new URLSearchParams({ type: 'sent' })
+      const query = new URLSearchParams({
+        type: 'sent', limit: String(PENDING_INVITATIONS_PAGE_LIMIT)
+      })
       if (typeof page === 'string') query.set('cursor', page)
       else query.set('offset', String(page))
       return request('pending_invitations_read', 'GET',

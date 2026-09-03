@@ -38,6 +38,8 @@ assert.equal(connectionRunLabel({ ...run, status: 'partial', stage: 'search_exha
   'Catalog exhausted')
 assert.equal(connectionRunLabel({ ...run, status: 'partial', stage: 'daily_window_closed' }),
   'Partial - day closed')
+assert.equal(connectionRunLabel({ ...run, status: 'partial', stage: 'provider_cooldown' }),
+  'Partial - LinkedIn cooldown')
 assert.equal(connectionRunLabel({ ...run, status: 'running', localDate: '2026-08-28' }, '2026-08-29'),
   'Partial - day closed')
 assert.equal(connectionRunFromPreviousDay({ ...run, status: 'running', localDate: '2026-08-28' },
@@ -56,6 +58,8 @@ assert.equal(connectionRunCanStart({ ...run, localDate: '2026-08-28',
   counters: { sent: 11 } }, true, today), true)
 assert.equal(connectionRunActive({ status: 'running', localDate: '2026-08-28' }, today), false)
 assert.equal(connectionRunCanStart({ ...run, status: 'running', localDate: today }, true, today), false)
+assert.equal(connectionRunCanStart({ ...run, status: 'partial', stage: 'provider_cooldown',
+  localDate: today }, true, today), true)
 assert.deepEqual(connectionPauseFromError({ status: 429, body: { error: 'noco_rate_limited' } }), {
   code: 'noco_rate_limited', message: 'NocoDB is temporarily busy. Wait, then retry.' })
 assert.equal(connectionPauseFromError({ status: 503,

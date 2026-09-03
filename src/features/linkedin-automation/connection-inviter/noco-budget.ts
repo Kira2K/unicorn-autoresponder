@@ -130,6 +130,7 @@ export function createConnectionNocoBudgetController() {
   return {
     onPhysicalAttempt,
     currentRunId,
+    reset(runId: string) { budgets.delete(runId) },
     initialize,
     syncRun,
     snapshot(runId: string): ConnectionNocoBudgetSnapshot {

@@ -226,6 +226,7 @@ async function runPhysicalNocoBudgetRegression() {
 
     const started: any = await service.start(7)
     const completed: any = await waitRun(service, started.runId)
+    const executionPhysicalRequests = fake.calls.length
     const history: any[] = await service.history(7)
     console.log('connection sparse terminal snapshot', {
       status: completed.status,
@@ -282,8 +283,8 @@ async function runPhysicalNocoBudgetRegression() {
 
     assert.equal(totalPhysicalRequests <= 220, true,
       `Physical Noco budget exceeded: ${JSON.stringify(breakdown)}`)
-    assert.equal(budgetSnapshot.physicalAttempts, totalPhysicalRequests - 1,
-      'Every lifecycle/execution request except the unscoped history UI read must be attributed.')
+    assert.equal(budgetSnapshot.physicalAttempts, executionPhysicalRequests - 1,
+      'Only the terminal waitRun read may be outside the attributed execution budget.')
     assert.deepEqual(fake.faults, {
       catalogReadRetry: 1,
       runCreateFallback: 1,

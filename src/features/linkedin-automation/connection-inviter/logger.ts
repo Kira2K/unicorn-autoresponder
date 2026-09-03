@@ -20,7 +20,8 @@ const SAFE_KEYS = new Set([
   'responseShape', 'consecutiveEmptyCount', 'marketTier', 'term', 'emptyCursorStreak',
   'termFinishReason', 'city', 'locationId', 'locationLabel', 'unresolvedCount',
   'recruiterShortfall', 'technicalShortfall', 'nocoPhysicalAttempts',
-  'nocoPhysicalRetries', 'nocoSafetyOverrun'
+  'nocoPhysicalRetries', 'nocoSafetyOverrun', 'snapshotAgeMs', 'snapshotFresh',
+  'requestNumber', 'queueWaitMs', 'willRetry'
 ])
 
 const token = (value: unknown, fallback = 'unknown') => {

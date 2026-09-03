@@ -243,6 +243,7 @@ export function createConnectionInviterStore(providedClient?: any, options: {
     nocoBudgetCanStart(runId: string, requiredPhysicalAttempts: number) {
       return budget.canStart(runId, requiredPhysicalAttempts)
     },
+    resetNocoBudget(runId: string) { budget.reset(runId) },
     nocoBudgetSnapshot(runId: string) { return budget.snapshot(runId) }
   }
 }

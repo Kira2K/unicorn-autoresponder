@@ -70,6 +70,7 @@ export function createMemoryConnectionInviterStore() {
         open.has(row.status)).sort((a, b) => b.discoveredAt.localeCompare(a.discoveredAt)).slice(0, limit)
       read(Math.ceil(rows.length / 100)); return rows.map(copy)
     },
+    resetNocoBudget(_runId: string) { /* The in-memory store has no physical request budget. */ },
     requestStats() { return copy(stats) },
     recordRetry() { stats.retries += 1 }
   }

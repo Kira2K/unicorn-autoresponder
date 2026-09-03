@@ -63,7 +63,9 @@ async function run() {
     { sourceKey: 'recruiter-exhausted', audience: 'recruiter', city: 'Berlin',
       keywordTemplate: 'Recruiter', priority: 1, enabled: true },
     { sourceKey: 'technical-continues', audience: 'technical', city: 'Berlin',
-      keywordTemplate: '{stack} Engineer', priority: 2, enabled: true }
+      keywordTemplate: '{stack}', priority: 2, enabled: true },
+    { sourceKey: 'technical-next-city', audience: 'technical', city: 'Amsterdam',
+      keywordTemplate: '{stack}', priority: 3, enabled: true }
   ] as any
   let personIndex = 0
   split.adapter.searchPeople = async (_accountId: string, input: { keywords: string }) => {

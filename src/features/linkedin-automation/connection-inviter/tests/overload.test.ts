@@ -5,6 +5,9 @@ const { fixture, waitRun } = require('./fixtures.ts') as typeof import('./fixtur
 const busy = (status: number) => Object.assign(new Error(`busy ${status}`), {
   code: `unipile_http_${status}`, details: { httpStatus: status }
 })
+const apiBusy = () => Object.assign(new Error('Unipile API rate limit'), {
+  code: 'unipile_api_too_many_requests', details: { httpStatus: 429 }
+})
 
 async function searchRetriesSameCursor() {
   const test = fixture({ stack: 'GO', connectionCount: 149 })
@@ -46,7 +49,7 @@ async function invitation429ReadbackThenRetry() {
   const original = test.adapter.sendInvitation; let posts = 0
   test.adapter.sendInvitation = async (accountId: string, personId: string) => {
     posts += 1
-    if (posts === 1) throw busy(429)
+    if (posts === 1) throw apiBusy()
     return original(accountId, personId)
   }
   const service = createConnectionInviterService({ ...test,
@@ -66,7 +69,7 @@ async function invitation429RearmRequiresFreshClaimReadback() {
   let firstPersonId = ''; let suppressRearmPatch = true
   test.adapter.sendInvitation = async (accountId: string, personId: string) => {
     postsByPerson.set(personId, (postsByPerson.get(personId) ?? 0) + 1)
-    if (!firstPersonId) { firstPersonId = personId; throw busy(429) }
+    if (!firstPersonId) { firstPersonId = personId; throw apiBusy() }
     return originalSend(accountId, personId)
   }
   test.store.updateHistory = async (item: any) => {
@@ -93,7 +96,7 @@ async function invitation429InvalidReadbackNeverRepeatsBlindly() {
   let posts = 0; let attemptedPersonId = ''; let invalidReads = 0
   test.adapter.sendInvitation = async (accountId: string, personId: string) => {
     posts += 1; attemptedPersonId = personId
-    if (posts === 1) throw busy(429)
+    if (posts === 1) throw apiBusy()
     return originalSend(accountId, personId)
   }
   test.adapter.listPendingInvitations = async (accountId: string, offset = 0) => {
@@ -116,6 +119,7 @@ async function freshPendingAfterDelayBlocksPost() {
   const test = fixture({ stack: 'GO', connectionCount: 149, stablePeople: true })
   const originalSearch = test.adapter.searchPeople
   const originalPending = test.adapter.listPendingInvitations
+  const originalProfile = test.adapter.getProfile
   const originalSend = test.adapter.sendInvitation
   const discovered: string[] = []; const externalPending = new Set<string>()
   const sentPersonIds: string[] = []
@@ -128,6 +132,10 @@ async function freshPendingAfterDelayBlocksPost() {
     const response = await originalPending(accountId, offset)
     return offset === 0 ? { items: [...response.items,
       ...[...externalPending].map(user_id => ({ user_id }))] } : response
+  }
+  test.adapter.getProfile = async (accountId: string, personId: string) => {
+    const profile = await originalProfile(accountId, personId)
+    return externalPending.has(personId) ? { ...profile, pending_invitation: true } : profile
   }
   test.adapter.sendInvitation = async (accountId: string, personId: string) => {
     sentPersonIds.push(personId); return originalSend(accountId, personId)
@@ -179,6 +187,9 @@ async function freshRelationAfterClaimBlocksPost(kind: 'pending' | 'connected') 
     return originalPending(accountId, typeof page === 'number' ? page : 0)
   }
   test.adapter.getProfile = async (accountId: string, personId: string) => {
+    if (relationInjected && kind === 'pending' && personId === externalPersonId) {
+      return { network_distance: 2, pending_invitation: true }
+    }
     if (relationInjected && kind === 'connected' && personId === externalPersonId) {
       return { network_distance: 1, is_connection: true }
     }
@@ -197,21 +208,14 @@ async function freshRelationAfterClaimBlocksPost(kind: 'pending' | 'connected') 
   assert.equal(test.metrics.sends, 0)
   const history: any[] = await service.history(7)
   assert.equal(history.some(item => ['sent', 'accepted'].includes(item.status)), false)
-  assert.equal(history.find(item => item.personId === externalPersonId)?.status,
-    kind === 'pending' ? 'pending' : 'failed')
+  assert.equal(history.find(item => item.personId === externalPersonId)?.status, 'failed')
 }
 
 async function unsafePendingReadbackBlocksProviderPost(kind: 'truncated' | 'request_id') {
   const test = fixture({ stack: 'GO', connectionCount: 149, stablePeople: true })
-  const claimHistory = test.store.claimHistory.bind(test.store)
-  const normalPending = test.adapter.listPendingInvitations
-  let claimed = false; let now = Date.parse('2026-08-24T09:00:00Z')
-  test.store.claimHistory = async (item: any) => {
-    const result = await claimHistory(item); if (result) claimed = true; return result
-  }
+  let now = Date.parse('2026-08-24T09:00:00Z')
   test.adapter.listPendingInvitations = async (accountId: string,
     page: number | string = 0) => {
-    if (!claimed) return normalPending(accountId, typeof page === 'number' ? page : 0)
     if (page === 0) return { items: [{ user_id: 'other-person' }],
       next_cursor: 'unsafe-page-two', ...(kind === 'truncated' ? { total_count: 3 } : {}) }
     return kind === 'truncated'
@@ -220,7 +224,7 @@ async function unsafePendingReadbackBlocksProviderPost(kind: 'truncated' | 'requ
   }
   const service = createConnectionInviterService({ ...test,
     now: () => new Date(now), random: () => 0,
-    sleep: async () => { if (claimed) now += 86_400_000 } })
+    sleep: async () => { now += 86_400_000 } })
   const started: any = await service.start(7)
   const stopped: any = await waitRun(service, started.runId)
   assert.equal(stopped.status, 'partial')

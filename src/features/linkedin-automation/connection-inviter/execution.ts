@@ -15,7 +15,7 @@ import { CONNECTION_NOCO_OPTIONAL_RESERVE } from './noco-budget.ts'
 import { closeConnectionRunDay, connectionRunDayIsOpen,
   requireConnectionRunDay } from './day-window.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
-import type { ConnectionRun } from './types.ts'
+import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 
 const quotaEmpty = (quota: { recruiter: number; technical: number }) =>
   quota.recruiter <= 0 && quota.technical <= 0
@@ -51,19 +51,20 @@ async function acquireAccountGate(runtime: ConnectionRuntime, run: ConnectionRun
 }
 
 async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: ConnectionRun,
-  running: Set<string>, save: SaveRun) {
+  running: Set<string>, save: SaveRun, initialOpenHistory?: ConnectionHistoryItem[]) {
   if (running.has(run.runId) || run.status !== 'running' || !runtime.writerEnabled) return
   running.add(run.runId); let release: (() => void) | undefined
   const details = { runId: run.runId, platformAccountId: run.platformAccountId }
   const nocoStart = runtime.store.requestStats?.()
-  const holdUnsafeTerminal = async (stage: 'resolving_uncertain' | 'stop_requested') => {
-    const open = await withConnectionRetry(runtime, run, save, 'noco',
+  const holdUnsafeTerminal = async (stage: 'resolving_uncertain' | 'stop_requested',
+    knownHistory?: ConnectionHistoryItem[], retryError?: unknown) => {
+    const open = knownHistory ?? await withConnectionRetry(runtime, run, save, 'noco',
       'terminal_open_history_readback', () => runtime.store.listOpenHistory(
         run.platformAccountId, 1000), { allowAfterDayClose: true, ignoreStopRequested: true })
     const unsafe = open.filter(item => item.runId === run.runId &&
       ['sending', 'uncertain'].includes(item.status))
     if (!unsafe.length) return false
-    const pending = connectionError('unipile_terminal_readback_pending',
+    const pending = retryError ?? connectionError('unipile_terminal_readback_pending',
       'Invitation result must be resolved before a terminal run state.', { httpStatus: 503 })
     run.status = 'running'; run.stage = stage
     run.errorCode = 'connection_invitation_result_pending'
@@ -81,9 +82,29 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
     if (!release && runtime.gate) {
       release = await acquireAccountGate(runtime, run, save, true, true)
     }
+    const openHistory = await withConnectionRetry(runtime, run, save, 'noco',
+      'stop_open_history_readback', () => runtime.store.listOpenHistory(
+        run.platformAccountId, 1000), { allowAfterDayClose: true, ignoreStopRequested: true })
+    const unsafe = openHistory.filter(item => item.runId === run.runId &&
+      ['sending', 'uncertain'].includes(item.status))
+    const retryDueAt = Date.parse(run.nextActionAt ?? '')
+    if (unsafe.length && Number.isFinite(retryDueAt) && retryDueAt > runtime.now().getTime()) {
+      run.status = 'running'; run.stage = 'stop_requested'
+      run.errorCode = 'connection_invitation_result_pending'; run.finishedAt = undefined
+      await save(run, 'retry_scheduled', 'critical')
+      return true
+    }
+    if (!unsafe.length) {
+      const stoppedHistory = await withConnectionRetry(runtime, run, save, 'noco',
+        'stop_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
+        { allowAfterDayClose: true, ignoreStopRequested: true })
+      synchronizeConfirmedProgress(run, stoppedHistory, run.audienceQuota)
+      return finishRunStop(runtime, run, save)
+    }
     const reconciliation = await reconcileInvitations(runtime, run, save,
-      { singlePass: true, ignoreStopRequested: true, runOnly: true })
-    if (reconciliation.unresolved && await holdUnsafeTerminal('stop_requested')) return true
+      { singlePass: true, ignoreStopRequested: true, runOnly: true, openHistory })
+    if (reconciliation.unresolved && await holdUnsafeTerminal('stop_requested', undefined,
+      reconciliation.retryError)) return true
     const stoppedHistory = await withConnectionRetry(runtime, run, save, 'noco',
       'stop_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
       { allowAfterDayClose: true, ignoreStopRequested: true })
@@ -102,13 +123,18 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
     await save(run, 'stage_changed')
     const recoveredWait = Date.parse(run.nextActionAt ?? '') - runtime.now().getTime()
     if (!recoveringClosedDay && Number.isFinite(recoveredWait) && recoveredWait > 0) {
+      const preserveInvitationWriteAttempt = run.retryState?.provider === 'unipile' &&
+        run.retryState.operation === 'invitation_write'
       if (!await waitOrStop(runtime, run.runId, recoveredWait, run.localDate)) {
         await finishStopSafely(); return
       }
-      run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
-      run.pausedAt = undefined; await save(run, 'retry_succeeded')
+      if (preserveInvitationWriteAttempt) run.invitationRetryState = run.retryState
+      run.retryState = undefined
+      run.timerState = undefined; run.nextActionAt = undefined; run.pausedAt = undefined
+      run.errorCode = undefined
+      await save(run, 'retry_succeeded')
     }
-    await reconcileInvitations(runtime, run, save)
+    await reconcileInvitations(runtime, run, save, { openHistory: initialOpenHistory })
     if (await finishStopSafely()) return
     requireConnectionRunDay(runtime, run)
     run.stage = 'verifying_account'; await save(run, 'stage_changed')
@@ -168,7 +194,7 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
       let candidates = run.searchProgress.pendingCandidates
         .filter(item => item.audience === audience)
       if (!candidates.length) {
-        run.stage = 'searching'; await save(run, 'stage_changed')
+        run.stage = 'searching'; runtime.emit(run, 'stage_changed')
         try {
           const nextCandidates = async () => {
             discovery ??= await createCandidateDiscovery(runtime, run, save)
@@ -207,7 +233,7 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
     const finalHistory = await withConnectionRetry(runtime, run, save, 'noco',
       'final_history_readback', () => runtime.store.listRunHistory(run.runId, 1000))
     progress = synchronizeConfirmedProgress(run, finalHistory, run.audienceQuota)
-    if (await holdUnsafeTerminal('resolving_uncertain')) return
+    if (await holdUnsafeTerminal('resolving_uncertain', finalHistory)) return
     requireConnectionRunDay(runtime, run)
 
     if (confirmedQuotaExceeded(progress, run.audienceQuota)) {
@@ -235,10 +261,10 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
     }
     const errorCode = connectionErrorCode(error)
     if (errorCode === 'connection_daily_window_closed') {
-      if (await holdUnsafeTerminal('resolving_uncertain')) return
       const closingHistory = await withConnectionRetry(runtime, run, save, 'noco',
         'day_close_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
         { allowAfterDayClose: true })
+      if (await holdUnsafeTerminal('resolving_uncertain', closingHistory)) return
       await closeConnectionRunDay(runtime, run, save, closingHistory)
       return
     }
@@ -247,7 +273,7 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
         'partial_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
         { allowAfterDayClose: true })
       const terminalProgress = synchronizeConfirmedProgress(run, terminalHistory, run.audienceQuota)
-      if (await holdUnsafeTerminal('resolving_uncertain')) return
+      if (await holdUnsafeTerminal('resolving_uncertain', terminalHistory)) return
       run.status = 'partial'; run.stage = errorCode === 'connection_search_contract_suspect'
         ? 'search_contract_suspect' : 'search_exhausted'; run.errorCode = errorCode
       run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
@@ -299,8 +325,8 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
 }
 
 export function executeConnectionRun(runtime: ConnectionRuntime, run: ConnectionRun,
-  running: Set<string>, save: SaveRun) {
-  const action = () => executeConnectionRunWithBudget(runtime, run, running, save)
+  running: Set<string>, save: SaveRun, initialOpenHistory?: ConnectionHistoryItem[]) {
+  const action = () => executeConnectionRunWithBudget(runtime, run, running, save, initialOpenHistory)
   return runtime.store.runWithNocoBudget
     ? runtime.store.runWithNocoBudget(run, action)
     : action()

@@ -8,6 +8,31 @@ const parse = (value: unknown, fallback: any) => {
 export const createdItem = (value: any) =>
   Array.isArray(value) ? value[0] : value?.list?.[0] ?? value?.data?.[0] ?? value
 
+function retryStateRow(run: ConnectionRun) {
+  if (!run.retryState && !run.invitationRetryState) return null
+  return JSON.stringify({
+    active: run.retryState ?? null,
+    invitationWrite: run.invitationRetryState ?? null
+  })
+}
+
+function retryStatesFromRow(value: unknown): Pick<ConnectionRun,
+  'retryState' | 'invitationRetryState'> {
+  const parsed = parse(value, undefined)
+  if (!parsed || typeof parsed !== 'object') return {}
+  if ('provider' in parsed && 'operation' in parsed) {
+    const legacy = parsed as ConnectionRun['retryState']
+    return {
+      retryState: legacy,
+      ...(legacy?.operation === 'invitation_write' ? { invitationRetryState: legacy } : {})
+    }
+  }
+  return {
+    ...(parsed.active ? { retryState: parsed.active } : {}),
+    ...(parsed.invitationWrite ? { invitationRetryState: parsed.invitationWrite } : {})
+  }
+}
+
 export function runRow(run: ConnectionRun) {
   return {
     run_key: run.runKey, run_id: run.runId, platform_account_id: run.platformAccountId,
@@ -18,7 +43,7 @@ export function runRow(run: ConnectionRun) {
     weekly_limit: null, daily_quota: run.dailyQuota ?? null,
     audience_quota_json: JSON.stringify(run.audienceQuota), counters_json: JSON.stringify(run.counters),
     used_search_keys_json: JSON.stringify(run.usedSearchKeys),
-    retry_state_json: run.retryState ? JSON.stringify(run.retryState) : null,
+    retry_state_json: retryStateRow(run),
     search_progress_json: JSON.stringify(run.searchProgress),
     skip_reason_counters_json: JSON.stringify(run.skipReasonCounters),
     next_action_at: run.nextActionAt ?? null, paused_at: run.pausedAt ?? null,
@@ -63,6 +88,7 @@ function searchProgressFromRow(value: unknown): ConnectionSearchProgress {
 export function runFromRow(row: any): ConnectionRun {
   const count = number(row.connection_count)
   const daily = number(row.daily_quota)
+  const retryStates = retryStatesFromRow(row.retry_state_json)
   return {
     runId: String(row.run_id), runKey: String(row.run_key),
     platformAccountId: Number(row.platform_account_id), clientId: Number(row.client_id),
@@ -92,7 +118,7 @@ export function runFromRow(row: any): ConnectionRun {
     seenPersonIds: [],
     searchProgress: searchProgressFromRow(row.search_progress_json),
     skipReasonCounters: parse(row.skip_reason_counters_json, {}),
-    ...(parse(row.retry_state_json, undefined) ? { retryState: parse(row.retry_state_json, undefined) } : {}),
+    ...retryStates,
     ...(String(row.next_action_at ?? '').trim() ? { nextActionAt: String(row.next_action_at) } : {}),
     ...(String(row.paused_at ?? '').trim() ? { pausedAt: String(row.paused_at) } : {}),
     ...(String(row.executor_id ?? '').trim() ? { executorId: String(row.executor_id) } : {}),

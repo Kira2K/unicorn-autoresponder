@@ -1,5 +1,5 @@
 import { connectionError, connectionErrorCode, connectionHttpStatus,
-  transientConnectionError } from './errors.ts'
+  normalizeConnectionProviderError, transientConnectionError } from './errors.ts'
 import { waitOrStop } from './run-control.ts'
 import { requireConnectionRunDay } from './day-window.ts'
 import type { ConnectionRunStage, ConnectionRetryState, ConnectionRun } from './types.ts'
@@ -52,12 +52,13 @@ export function connectionRetryProvider(error: unknown): 'noco' | 'unipile' {
 }
 
 export function makeRetryState(runtime: ConnectionRuntime, run: ConnectionRun,
-  provider: 'noco' | 'unipile', operation: string, error: unknown): ConnectionRetryState {
+  provider: 'noco' | 'unipile', operation: string, error: unknown,
+  previousState: ConnectionRetryState | undefined = run.retryState): ConnectionRetryState {
   const errorCode = connectionErrorCode(error)
   const rateLimited = provider === 'unipile' && (connectionHttpStatus(error) === 429 ||
     errorCode.includes('too_many_requests') || errorCode.includes('rate_limit'))
-  const candidate = run.retryState?.provider === provider && run.retryState.operation === operation
-    ? run.retryState : undefined
+  const candidate = previousState?.provider === provider && previousState.operation === operation
+    ? previousState : undefined
   const previousRateLimited = candidate?.provider === 'unipile' &&
     (candidate.errorCode.includes('429') || candidate.errorCode.includes('too_many_requests') ||
       candidate.errorCode.includes('rate_limit'))
@@ -78,11 +79,13 @@ export function makeRetryState(runtime: ConnectionRuntime, run: ConnectionRun,
 
 export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun, provider: 'noco' | 'unipile', operation: string, action: () => Promise<T>,
-  options: { allowAfterDayClose?: boolean; ignoreStopRequested?: boolean } = {}): Promise<T> {
+  options: { allowAfterDayClose?: boolean; ignoreStopRequested?: boolean;
+    onFirstTransientError?: (error: unknown) => Promise<void> } = {}): Promise<T> {
   const resumeStage = run.stage
   let retried = false
   while (true) {
     try {
+      runtime.assertWriterOwnership?.()
       if (!options.allowAfterDayClose) requireConnectionRunDay(runtime, run)
       const result = await action()
       if (retried) {
@@ -92,8 +95,14 @@ export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: Co
         if (provider === 'unipile') await save(run, 'retry_succeeded', 'critical')
       }
       return result
-    } catch (error) {
+    } catch (caught) {
+      const error = normalizeConnectionProviderError(provider, caught)
+      if (!options.ignoreStopRequested && runtime.stopRequested(run.runId)) {
+        throw connectionError('connection_stop_requested',
+          'Connection run stop was requested.')
+      }
       if (!transientConnectionError(error)) throw error
+      if (!retried) await options.onFirstTransientError?.(error)
       retried = true
       runtime.store.recordRetry?.()
       run.retryState = makeRetryState(runtime, run, provider, operation, error)

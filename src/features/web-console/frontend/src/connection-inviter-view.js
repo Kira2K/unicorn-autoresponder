@@ -17,6 +17,7 @@ export const connectionRunLabel = (run, today = connectionLocalDate()) =>
   run?.stage === 'resolving_uncertain' ? 'Resolving invitation result' :
   run?.stage === 'search_exhausted' ? 'Catalog exhausted' :
   run?.stage === 'search_contract_suspect' ? 'Search response suspected' :
+  run?.stage === 'provider_cooldown' ? 'Partial - LinkedIn cooldown' :
   run?.stage === 'daily_window_closed' ? 'Partial - day closed' :
   run ? LABELS[run.status] || run.status : 'Not run today'
 

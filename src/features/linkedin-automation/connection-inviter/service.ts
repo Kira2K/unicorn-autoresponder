@@ -8,7 +8,8 @@ import { makeRun, publicHistory, publicRun } from './run-model.ts'
 import { requestRunStop, waitOrStop } from './run-control.ts'
 import { completedRunCanTopUp, failedRunCanRetry, prepareRunRetry,
   prepareRunTopUp, transientRunCanResume } from './retry-policy.ts'
-import { connectionError, connectionErrorCode, transientConnectionError } from './errors.ts'
+import { connectionError, connectionErrorCode, normalizeConnectionProviderError,
+  transientConnectionError } from './errors.ts'
 import { connectionRetryDelay, makeRetryState, retryAfterMilliseconds } from './retry-state.ts'
 import { closeConnectionRunDay } from './day-window.ts'
 import { createConnectionRunEvents, type ConnectionRunEvent } from './run-events.ts'
@@ -17,13 +18,14 @@ import { synchronizeConfirmedProgress } from './daily-progress.ts'
 import { withConnectionRetry } from './retry-state.ts'
 import { acquireConnectionWriterLock } from './writer-lock.ts'
 import type { ConnectionRunEventType, ConnectionRuntime, SaveRun } from './runtime.ts'
-import type { ConnectionRun, ConnectionRunStage } from './types.ts'
+import type { ConnectionHistoryItem, ConnectionRun, ConnectionRunStage } from './types.ts'
 
 type ServiceOptions = Partial<Omit<ConnectionRuntime, 'adapter' | 'emit' | 'stopRequested'>> & {
   repository?: ConnectionRuntime['repository']
   adapter?: ReturnType<ConnectionRuntime['adapter']>
   autoRecover?: boolean
   enforceWriterSingleton?: boolean
+  writerLockPath?: string
 }
 
 const activeRunStatus = (run: ConnectionRun) => run.status === 'running' ||
@@ -70,7 +72,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
   const writerId = configuredWriterId || 'read-only'
   const enforceWriterSingleton = options.enforceWriterSingleton ?? options.writerEnabled === undefined
   const writerLock = writerEnabled && enforceWriterSingleton
-    ? acquireConnectionWriterLock(writerId) : undefined
+    ? acquireConnectionWriterLock(writerId, options.writerLockPath) : undefined
   let disposed = false
   let releaseWriterWhenIdle = false
   let recoveryCoordinator: Promise<void> | undefined
@@ -137,7 +139,8 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           platformAccountId: run.platformAccountId, runStatus: run.status, runStage: run.stage })
         runtime.emit(run, event)
         return
-      } catch (error) {
+      } catch (caught) {
+        const error = normalizeConnectionProviderError('noco', caught)
         if (!transientConnectionError(error)) throw error
         nocoRetried = true
         runtime.store.recordRetry?.()
@@ -172,7 +175,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     return connectionWriterLeaseAvailable(run, runtime.writerId, runtime.now().getTime())
   }
 
-  const execute = async (run: ConnectionRun) => {
+  const execute = async (run: ConnectionRun, initialOpenHistory?: ConnectionHistoryItem[]) => {
     if (disposed) return
     runtime.assertWriterOwnership?.()
     const scheduled = resumeTimers.get(run.runId)
@@ -185,7 +188,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     }
     run.executorId = runtime.writerId; run.heartbeatAt = runtime.now().toISOString()
     activeRuns.set(run.runId, run)
-    try { await executeConnectionRun(runtime, run, running, save) }
+    try { await executeConnectionRun(runtime, run, running, save, initialOpenHistory) }
     catch (error) {
       logger.event('run_executor', 'failed', { runId: run.runId,
         platformAccountId: run.platformAccountId, errorCode: connectionErrorCode(error) })
@@ -374,8 +377,8 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
         const date = dateParts(runtime.now(), runtime.timeZone)
         const existing = await runtime.store.getRunByKey(`${platformAccountId}:${date.localDate}`)
         const context = await resolveContext(runtime, platformAccountId)
-        const unresolvedWrites = (await runtime.store.listOpenHistory(platformAccountId, 1000))
-          .filter(item => ['sending', 'uncertain'].includes(item.status))
+        const openHistory = await runtime.store.listOpenHistory(platformAccountId, 1000)
+        const unresolvedWrites = openHistory.filter(item => ['sending', 'uncertain'].includes(item.status))
         if (unresolvedWrites.length) {
           throw connectionError('connection_invitation_result_pending',
             'A previous invitation result must be reconciled before a new daily run can start.')
@@ -396,7 +399,10 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           const resume = ready && transientRunCanResume(existing)
           const stackResume = existing.status === 'paused' && existing.stage === 'stack_required' && ready
           if (stackResume || retry || topUp || resume) {
-            if (topUp || resume) prepareRunTopUp(existing, context, input.safeRecruiterOnly === true)
+            if (topUp || resume) {
+              prepareRunTopUp(existing, context, input.safeRecruiterOnly === true)
+              if (topUp) runtime.store.resetNocoBudget(existing.runId)
+            }
             else prepareRunRetry(existing, context, input.safeRecruiterOnly === true)
             await save(existing, 'stage_changed', 'critical'); void execute(existing)
           }
@@ -413,7 +419,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
         logger.event('run_create', 'succeeded', { runId: created.run.runId, platformAccountId,
           created: created.created, runStatus: created.run.status, runStage: created.run.stage })
         runtime.emit(created.run, 'snapshot')
-        if (created.created && run.status === 'running') void execute(run)
+        if (created.created && run.status === 'running') void execute(run, openHistory)
         return publicRun(created.run)
       })
     },

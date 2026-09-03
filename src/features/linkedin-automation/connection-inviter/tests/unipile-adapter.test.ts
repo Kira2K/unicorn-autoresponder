@@ -39,9 +39,10 @@ async function run() {
   assert.deepEqual(calls[5], { method: 'GET',
     path: '/acc%201/users/me/relations?cursor=relations+cursor', body: undefined })
   assert.deepEqual(calls[6], { method: 'GET',
-    path: '/acc%201/users/me/relation-requests?type=sent&offset=100', body: undefined })
+    path: '/acc%201/users/me/relation-requests?type=sent&limit=100&offset=100', body: undefined })
   assert.deepEqual(calls[7], { method: 'GET',
-    path: '/acc%201/users/me/relation-requests?type=sent&cursor=pending+cursor', body: undefined })
+    path: '/acc%201/users/me/relation-requests?type=sent&limit=100&cursor=pending+cursor',
+    body: undefined })
   assert.deepEqual(calls[8], { method: 'POST', path: '/acc%201/users/me/relation-requests',
     body: { user_id: 'ACo_1' } })
   assert.equal('message' in calls[8].body, false)
@@ -101,6 +102,23 @@ async function run() {
   await assert.rejects(() => noWriteRetry.sendInvitation('acc 1', 'ACo_1'),
     (error: any) => error.code === 'unipile_timeout')
   assert.equal(writeAttempts, 1)
+
+  const rateLimitEvents: any[] = []
+  const rateLimited = createConnectionUnipileAdapter({
+    scheduler: { run(operation: any) { return operation() } },
+    logger: { event(stage: string, status: string, details: any) {
+      rateLimitEvents.push({ stage, status, details })
+    } },
+    http: { async request() {
+      throw Object.assign(new Error('limited'), { code: 'unipile_api_too_many_requests',
+        details: { httpStatus: 429, retryAfterMs: 3_600_000 } })
+    } }
+  })
+  await assert.rejects(() => rateLimited.listPendingInvitations('acc 1'))
+  const rateLimitEvent = rateLimitEvents.find(event => event.status === 'failed')
+  assert.equal(rateLimitEvent.details.rateLimitSource, 'api')
+  assert.equal(rateLimitEvent.details.retryAfterMs, 3_600_000)
+  assert.equal(JSON.stringify(rateLimitEvent).includes('acc 1'), false)
 }
 run().then(() => console.log('connection Unipile adapter tests passed'))
   .catch((error: unknown) => { console.error(error); process.exitCode = 1 })

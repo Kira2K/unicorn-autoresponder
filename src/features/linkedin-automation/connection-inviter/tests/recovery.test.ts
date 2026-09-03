@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict')
+const { tmpdir } = require('node:os') as typeof import('node:os')
+const { join } = require('node:path') as typeof import('node:path')
 const { createConnectionInviterService } = require('../service.ts') as typeof import('../service.ts')
 const { makeRun } = require('../run-model.ts') as typeof import('../run-model.ts')
 const { fixture, waitRun } = require('./fixtures.ts') as typeof import('./fixtures.ts')
@@ -16,6 +18,8 @@ async function timerRecovery() {
     firstFailedAt: now.toISOString(), lastFailedAt: now.toISOString() }
   run.timerState = { kind: 'overload_backoff', delayMs: 90_000, nextActionAt: run.nextActionAt }
   await test.store.createRun(run)
+  let budgetResets = 0
+  test.store.resetNocoBudget = () => { budgetResets += 1 }
   let slept = 0
   const service = createConnectionInviterService({ ...test, now: () => now, autoRecover: false,
     random: () => 0, sleep: async (milliseconds: number) => { slept += milliseconds } })
@@ -23,6 +27,8 @@ async function timerRecovery() {
   const completed: any = await waitRun(service, run.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.sent, 5)
   assert.equal(slept >= 90_000, true)
+  assert.equal(budgetResets, 0, 'Recovery must preserve the persisted Noco request budget.')
+  service.stop()
 }
 
 async function sendingRecovery() {
@@ -48,6 +54,7 @@ async function sendingRecovery() {
   const completed: any = await waitRun(service, run.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.sent, 5)
   assert.equal(test.metrics.sends, 0)
+  service.stop()
 }
 
 async function secondWriter() {
@@ -61,6 +68,7 @@ async function secondWriter() {
   await service.recover(); await new Promise(resolve => setTimeout(resolve, 10))
   const untouched: any = await test.store.getRun(run.runId)
   assert.equal(untouched.executorId, 'writer-one'); assert.equal(test.metrics.sends, 0)
+  service.stop()
 }
 
 async function waitsForHigherPriorityGate() {
@@ -75,6 +83,7 @@ async function waitsForHigherPriorityGate() {
   const started: any = await service.start(7)
   const completed: any = await waitRun(service, started.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(attempts, 3)
+  service.stop()
 }
 
 async function queuedCandidatesSurviveRestart() {
@@ -104,6 +113,7 @@ async function queuedCandidatesSurviveRestart() {
   assert.equal(failed.counters.sent, 1)
   assert.equal(failed.errorCode, 'connection_search_space_exhausted')
   assert.equal(test.metrics.sends, 1)
+  service.stop()
 }
 
 async function staleRunClosesWithoutCarryover() {
@@ -133,6 +143,7 @@ async function staleRunClosesWithoutCarryover() {
   assert.equal(closed.counters.sent, 13); assert.equal(closed.dailyQuota, 40)
   assert.deepEqual(closed.counters.shortfallByAudience, { recruiter: 19, technical: 8 })
   assert.equal(test.metrics.sends, 0)
+  service.stop()
 }
 
 async function staleSendingIsReadBackBeforeClose() {
@@ -157,6 +168,7 @@ async function staleSendingIsReadBackBeforeClose() {
   assert.equal(closed.stage, 'daily_window_closed')
   const history: any[] = await service.history(7)
   assert.equal(history[0].status, 'sent'); assert.equal(test.metrics.sends, 0)
+  service.stop()
 }
 
 async function unresolvedWriteBlocksNewDay() {
@@ -173,6 +185,7 @@ async function unresolvedWriteBlocksNewDay() {
   await assert.rejects(() => service.start(7),
     (error: any) => error.code === 'connection_invitation_result_pending')
   assert.equal(test.metrics.sends, 0)
+  service.stop()
 }
 
 async function malformedOpenHistoryFailsClosed() {
@@ -296,8 +309,9 @@ async function stopCancelsStartupRecoveryBackoff() {
   const sleepStarted = new Promise<void>(resolve => { signalSleepStarted = resolve })
   const requestedSlices: number[] = []
   const writerId = `startup-recovery-stop-${process.pid}-${Date.now()}`
+  const writerLockPath = join(tmpdir(), `${writerId}.lock`)
   const service = createConnectionInviterService({ ...test, writerId,
-    enforceWriterSingleton: true, autoRecover: false,
+    writerLockPath, enforceWriterSingleton: true, autoRecover: false,
     sleep: async (milliseconds: number) => {
       requestedSlices.push(milliseconds); signalSleepStarted?.(); signalSleepStarted = undefined
       await new Promise<void>(resolve => { releaseSlice = resolve })
@@ -312,14 +326,14 @@ async function stopCancelsStartupRecoveryBackoff() {
 
   // The old writer keeps its fence until the in-flight 1s slice settles.
   assert.throws(() => createConnectionInviterService({ ...fixture({ stack: 'GO' }), writerId,
-    enforceWriterSingleton: true, autoRecover: false }),
+    writerLockPath, enforceWriterSingleton: true, autoRecover: false }),
   (error: any) => error.code === 'connection_writer_lock_active')
   releaseSlice?.()
   await recovery
   assert.equal(listRunsAttempts, 1)
   assert.equal(test.metrics.sends, 0)
   const replacement = createConnectionInviterService({ ...fixture({ stack: 'GO' }), writerId,
-    enforceWriterSingleton: true, autoRecover: false })
+    writerLockPath, enforceWriterSingleton: true, autoRecover: false })
   replacement.stop()
 }
 
@@ -339,16 +353,19 @@ async function stoppedRecoveryCannotMutateAfterFenceHandoff() {
   const updateRun = test.store.updateRun.bind(test.store); let writesAfterStop = 0
   test.store.updateRun = async (next: any) => { writesAfterStop += 1; return updateRun(next) }
   const writerId = `recovery-fence-${process.pid}-${Date.now()}`
+  const writerLockPath = join(tmpdir(), `${writerId}.lock`)
   const service = createConnectionInviterService({ ...test, writerId,
-    enforceWriterSingleton: true, autoRecover: false, logger: { event() {} } })
+    writerLockPath, enforceWriterSingleton: true, autoRecover: false, logger: { event() {} } })
   const recovery = service.recover(); await listStarted; service.stop()
   assert.throws(() => createConnectionInviterService({ ...fixture({ stack: 'GO' }),
-    writerId: `${writerId}-replacement`, enforceWriterSingleton: true, autoRecover: false }),
+    writerId: `${writerId}-replacement`, writerLockPath,
+    enforceWriterSingleton: true, autoRecover: false }),
   (error: any) => error.code === 'connection_writer_lock_active')
   releaseList(); await recovery
   assert.equal(writesAfterStop, 0); assert.equal(test.metrics.sends, 0)
   const replacement = createConnectionInviterService({ ...fixture({ stack: 'GO' }),
-    writerId: `${writerId}-replacement`, enforceWriterSingleton: true, autoRecover: false })
+    writerId: `${writerId}-replacement`, writerLockPath,
+    enforceWriterSingleton: true, autoRecover: false })
   replacement.stop()
 }
 
@@ -358,7 +375,8 @@ async function run() {
     ['gate', waitsForHigherPriorityGate], ['queued', queuedCandidatesSurviveRestart],
     ['staleClose', staleRunClosesWithoutCarryover],
     ['staleSending', staleSendingIsReadBackBeforeClose],
-    ['unresolved', unresolvedWriteBlocksNewDay], ['malformed', malformedOpenHistoryFailsClosed],
+    ['unresolved', unresolvedWriteBlocksNewDay],
+    ['malformed', malformedOpenHistoryFailsClosed],
     ['startupRetry', startupRecoveryRetriesNocoBeforeInvitations],
     ['stopBackoff', stopCancelsStartupRecoveryBackoff],
     ['fenceHandoff', stoppedRecoveryCannotMutateAfterFenceHandoff]

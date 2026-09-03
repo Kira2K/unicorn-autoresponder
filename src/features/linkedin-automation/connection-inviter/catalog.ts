@@ -47,10 +47,6 @@ const RECRUITER_SEARCH_TERMS = [
   'People Partner', 'People Operations'
 ] as const
 
-const TECHNICAL_SEARCH_TERMS = [
-  'Developer', 'Engineer', 'Backend Developer', 'Software Engineer', 'Tech Lead'
-] as const
-
 const STACK_ALIASES: Record<string, readonly string[]> = {
   GO: ['Golang', 'Go']
 }
@@ -107,7 +103,7 @@ export function connectionSearchTerms(template: ConnectionSearchTemplate, stack:
   }
   const aliases = stackSearchAliases(stack)
   if (!aliases.length) throw new Error('Technical connection search requires a stack.')
-  return aliases.flatMap(alias => TECHNICAL_SEARCH_TERMS.map(role => `${alias} ${role}`))
+  return aliases
 }
 
 export function renderSearchKeywords(template: ConnectionSearchTemplate, stack: string | undefined,

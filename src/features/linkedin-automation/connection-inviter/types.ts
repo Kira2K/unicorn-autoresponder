@@ -9,7 +9,7 @@ export type ConnectionRunStage = 'queued' | 'stack_required' | 'recovering' | 'v
   'resolving_uncertain' | 'readback_pending' | 'search_exhausted' | 'completed' |
   'search_contract_suspect' | 'noco_budget_exhausted' |
   'stop_requested' | 'stopped_by_admin' |
-  'daily_window_closed' | 'paused_transient' | 'failed'
+  'daily_window_closed' | 'provider_cooldown' | 'paused_transient' | 'failed'
 
 export type ConnectionHistoryStatus = 'discovered' | 'eligible' | 'sending' | 'deferred' |
   'sent' | 'pending' | 'accepted' | 'skipped' | 'failed' | 'uncertain'
@@ -143,6 +143,7 @@ export type ConnectionRun = {
   searchProgress: ConnectionSearchProgress
   skipReasonCounters: Record<string, number>
   retryState?: ConnectionRetryState
+  invitationRetryState?: ConnectionRetryState
   timerState?: ConnectionTimerState
   nextActionAt?: string
   pausedAt?: string
@@ -212,6 +213,7 @@ export type ConnectionInviterStore = {
   withNocoBudgetMode?<T>(runId: string, mode: 'mandatory' | 'optional',
     action: () => Promise<T>): Promise<T>
   nocoBudgetCanStart?(runId: string, requiredPhysicalAttempts: number): boolean
+  resetNocoBudget(runId: string): void
   nocoBudgetSnapshot?(runId: string): {
     limit: number
     physicalAttempts: number

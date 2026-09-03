@@ -1,12 +1,14 @@
 const assert = require('node:assert/strict')
 const { writeFileSync } = require('node:fs') as typeof import('node:fs')
+const { tmpdir } = require('node:os') as typeof import('node:os')
+const { join } = require('node:path') as typeof import('node:path')
 const { CONNECTION_WRITER_HEARTBEAT_MS, CONNECTION_WRITER_LEASE_MS,
   connectionWriterHeartbeatDue, connectionWriterLeaseAvailable,
   createConnectionInviterService } = require('../service.ts') as
   typeof import('../service.ts')
 const { failedRunCanRetry } = require('../retry-policy.ts') as typeof import('../retry-policy.ts')
 const { makeRun } = require('../run-model.ts') as typeof import('../run-model.ts')
-const { acquireConnectionWriterLock, connectionWriterLockPath } = require('../writer-lock.ts') as
+const { acquireConnectionWriterLock } = require('../writer-lock.ts') as
   typeof import('../writer-lock.ts')
 const { fixture, waitRun } = require('./fixtures.ts') as typeof import('./fixtures.ts')
 
@@ -58,7 +60,8 @@ async function uncertain() {
   service.stop()
   test.adapter.listPendingInvitations = async (_accountId: string, offset = 0) =>
     ({ items: offset ? [] : [{ user_id: attemptedPersonId }] })
-  const recovered = createConnectionInviterService({ ...test, now: clock,
+  const recoveryTime = new Date(Date.parse(guarded.nextActionAt) + 1)
+  const recovered = createConnectionInviterService({ ...test, now: () => recoveryTime,
     autoRecover: false, sleep: async () => undefined })
   await recovered.recover()
   const stopped: any = await waitRun(recovered, started.runId)
@@ -221,19 +224,19 @@ async function stopAfterClaimDoesNotReachProvider() {
 async function stopInterruptsTransientPostClaimRead() {
   const test = fixture({ stack: 'Frontend', connectionCount: 149 })
   const originalClaim = test.store.claimHistory.bind(test.store)
-  const originalPending = test.adapter.listPendingInvitations
+  const originalProfile = test.adapter.getProfile
   let claimed = false; let failedFinalRead = false; let releaseWait!: () => void
   test.store.claimHistory = async (item: any) => {
     const result = await originalClaim(item); if (result) claimed = true; return result
   }
-  test.adapter.listPendingInvitations = async (accountId: string, page: number | string = 0) => {
+  test.adapter.getProfile = async (accountId: string, personId: string) => {
     if (claimed && !failedFinalRead) {
       failedFinalRead = true
-      throw Object.assign(new Error('post-claim pending read unavailable'), {
+      throw Object.assign(new Error('post-claim profile read unavailable'), {
         code: 'unipile_http_503', details: { httpStatus: 503 }
       })
     }
-    return originalPending(accountId, typeof page === 'number' ? page : 0)
+    return originalProfile(accountId, personId)
   }
   const service = createConnectionInviterService({ ...test, now: clock,
     sleep: async () => failedFinalRead
@@ -333,6 +336,43 @@ async function orphanedRunStop() {
   assert.equal(history[0].status, 'sent')
   assert.equal(test.metrics.sends, 0)
 }
+async function orphanedStopDoesNotWaitThroughProviderBackoff() {
+  const test = fixture({ stack: 'Frontend' })
+  const run = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test Client',
+    linkedinUrl: 'https://www.linkedin.com/in/test/', accountId: 'acc_test', stack: 'Frontend' },
+  clock(), 'Europe/Moscow', false)
+  await test.store.createRun(run)
+  await test.store.claimHistory({ historyKey: 'acc_test:orphan-backoff', runId: run.runId,
+    platformAccountId: 7, accountId: 'acc_test', personId: 'orphan-backoff',
+    audience: 'recruiter', searchKey: 'orphan', name: 'Orphan', headline: 'Recruiter',
+    location: 'Berlin', status: 'sending', reasonCode: 'invitation_claimed',
+    discoveredAt: clock().toISOString(), updatedAt: clock().toISOString() })
+  let pendingCalls = 0
+  test.adapter.listPendingInvitations = async () => {
+    pendingCalls += 1
+    throw Object.assign(new Error('rate limited'), {
+      code: 'unipile_api_too_many_requests',
+      details: { httpStatus: 429, retryAfterMs: 3_600_000 }
+    })
+  }
+  let slept = false
+  const service = createConnectionInviterService({ ...test, now: clock, autoRecover: false,
+    sleep: async () => { slept = true } })
+  const stopped: any = await service.stopRun(run.runId)
+  assert.equal(stopped.status, 'running')
+  assert.equal(stopped.stage, 'stop_requested')
+  assert.equal(slept, false)
+  assert.equal(pendingCalls, 1)
+  assert.equal(test.metrics.sends, 0)
+  service.stop()
+  const recovered = createConnectionInviterService({ ...test, now: clock, autoRecover: false,
+    sleep: async () => { slept = true } })
+  await recovered.recover()
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(pendingCalls, 1)
+  assert.equal(slept, false)
+  recovered.stop()
+}
 async function startCannotClearDurableStop() {
   const test = fixture({ stack: 'Frontend', connectionCount: 149 })
   const run = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test Client',
@@ -383,6 +423,72 @@ async function successfulPostReadback429DoesNotRepeatPost() {
   assert.equal(completed.status, 'succeeded')
   assert.equal(posts, 5)
   assert.equal(test.metrics.sends, 5)
+}
+
+async function postReadbackFailurePersistsUncertainBeforeRetry() {
+  const test = fixture({ stack: 'Frontend', connectionCount: 149 })
+  const send = test.adapter.sendInvitation
+  const listPending = test.adapter.listPendingInvitations
+  let posts = 0; let pendingReads = 0; let releaseRetry!: () => void
+  let retryWaiting = false
+  test.adapter.sendInvitation = async (accountId: string, personId: string) => {
+    posts += 1
+    return send(accountId, personId)
+  }
+  test.adapter.listPendingInvitations = async (accountId: string, offset = 0) => {
+    pendingReads += 1
+    if (pendingReads === 2) {
+      throw Object.assign(new Error('readback unavailable'), {
+        code: 'unipile_unreachable'
+      })
+    }
+    return listPending(accountId, offset)
+  }
+  const service = createConnectionInviterService({ ...test, now: clock,
+    sleep: async () => posts === 1 && pendingReads === 2
+      ? new Promise<void>(resolve => { retryWaiting = true; releaseRetry = resolve })
+      : undefined })
+  const started: any = await service.start(7)
+  for (let count = 0; count < 100 && !retryWaiting; count += 1) {
+    await new Promise(resolve => setTimeout(resolve, 2))
+  }
+  assert.equal(retryWaiting, true)
+  assert.equal(posts, 1)
+  assert.equal((await service.get(started.runId))?.counters.sent, 0)
+  const waitingHistory: any[] = await service.history(7)
+  assert.equal(waitingHistory.some(item => item.status === 'uncertain' &&
+    item.reasonCode === 'unipile_unreachable'), true)
+  releaseRetry()
+  const completed: any = await waitRun(service, started.runId)
+  assert.equal(completed.status, 'succeeded')
+  assert.equal(posts, 5)
+}
+
+async function providerRateLimitRecoversAndCompletesRun() {
+  const test = fixture({ stack: 'Frontend', connectionCount: 149 })
+  const originalSend = test.adapter.sendInvitation
+  let postCalls = 0
+  test.adapter.sendInvitation = async (accountId: string, personId: string) => {
+    postCalls += 1
+    if (postCalls === 1) {
+      throw Object.assign(new Error('LinkedIn rate limited'), {
+        code: 'unipile_provider_too_many_requests', details: { httpStatus: 429 }
+      })
+    }
+    return originalSend(accountId, personId)
+  }
+  const service = createConnectionInviterService({ ...test, now: clock,
+    sleep: async () => undefined })
+  const started: any = await service.start(7)
+  const completed: any = await waitRun(service, started.runId)
+  assert.equal(completed.status, 'succeeded')
+  assert.equal(completed.stage, 'completed')
+  assert.equal(completed.counters.sent, 5)
+  assert.equal(postCalls, 6)
+  assert.equal(test.metrics.sends, 5)
+  const history: any[] = await service.history(7)
+  assert.equal(history.filter(item => item.status === 'sent').length, 5)
+  service.stop()
 }
 
 async function corruptConfirmedQuotaBlocksPosts() {
@@ -447,33 +553,36 @@ const settingsStore = fixture({ stack: 'Frontend' })
 const settingsService = createConnectionInviterService({ ...settingsStore, autoRecover: false })
 assert.deepEqual(settingsService.settings(), { writerEnabled: true })
 const lockId = `connection-writer-test-${process.pid}-${Date.now()}`
-const firstLock = acquireConnectionWriterLock(lockId)
-assert.throws(() => acquireConnectionWriterLock(lockId),
+const testLockPath = join(tmpdir(), `${lockId}.lock`)
+const firstLock = acquireConnectionWriterLock(lockId, testLockPath)
+assert.throws(() => acquireConnectionWriterLock(lockId, testLockPath),
   (error: any) => error.code === 'connection_writer_lock_active')
 firstLock.release()
-const replacementLock = acquireConnectionWriterLock(lockId)
+const replacementLock = acquireConnectionWriterLock(lockId, testLockPath)
 assert.throws(() => firstLock.assertOwned(),
   (error: any) => error.code === 'connection_writer_fence_lost')
 replacementLock.release()
 const staleLockId = `${lockId}-stale`
-writeFileSync(connectionWriterLockPath(staleLockId), JSON.stringify({
+const staleLockPath = join(tmpdir(), `${staleLockId}.lock`)
+writeFileSync(staleLockPath, JSON.stringify({
   nonce: 'stale-owner', pid: 2_147_483_647, createdAt: clock().toISOString()
 }), 'utf8')
-const staleReplacement = acquireConnectionWriterLock(staleLockId)
+const staleReplacement = acquireConnectionWriterLock(staleLockId, staleLockPath)
 staleReplacement.assertOwned(); staleReplacement.release()
 const fencedFixture = fixture({ stack: 'Frontend', connectionCount: 149 })
 const fencedWriterId = `${lockId}-service`
 const firstWriter = createConnectionInviterService({ ...fencedFixture, autoRecover: false,
-  writerId: fencedWriterId, enforceWriterSingleton: true })
+  writerId: fencedWriterId, enforceWriterSingleton: true, writerLockPath: testLockPath })
 assert.throws(() => createConnectionInviterService({ ...fencedFixture, autoRecover: false,
-  writerId: fencedWriterId, enforceWriterSingleton: true }),
+  writerId: fencedWriterId, enforceWriterSingleton: true, writerLockPath: testLockPath }),
   (error: any) => error.code === 'connection_writer_lock_active')
 assert.throws(() => createConnectionInviterService({ ...fencedFixture, autoRecover: false,
-  writerId: `${fencedWriterId}-different`, enforceWriterSingleton: true }),
+  writerId: `${fencedWriterId}-different`, enforceWriterSingleton: true,
+  writerLockPath: testLockPath }),
   (error: any) => error.code === 'connection_writer_lock_active')
 firstWriter.stop()
 const replacementWriter = createConnectionInviterService({ ...fencedFixture, autoRecover: false,
-  writerId: fencedWriterId, enforceWriterSingleton: true })
+  writerId: fencedWriterId, enforceWriterSingleton: true, writerLockPath: testLockPath })
 const fencedRestartAssertion = assert.rejects(firstWriter.start(7),
   (error: any) => error.code === 'connection_writer_service_stopped')
 assert.equal(fencedFixture.metrics.sends, 0)
@@ -482,14 +591,20 @@ const failedRun = { runId: 'run-1', status: 'failed', counters: { sent: 0 } } as
 assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'eligible' } as any]), true)
 assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'skipped' } as any]), true)
 assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'sending' } as any]), false)
-assert.equal(failedRunCanRetry(failedRun,
-  [{ runId: 'run-1', status: 'failed', sentAt: clock().toISOString() } as any]), false)
+assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'sent',
+  sentAt: clock().toISOString(), requestId: 'confirmed' } as any]), true)
+assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'uncertain',
+  sentAt: clock().toISOString() } as any]), false)
+assert.equal(failedRunCanRetry(failedRun, [{ runId: 'run-1', status: 'failed',
+  sentAt: clock().toISOString() } as any]), false)
 async function run() {
   await fencedRestartAssertion
   const cases: Array<[string, () => Promise<unknown>]> = [
     ['uncertain', uncertain], ['serverError', serverErrorDoesNotRepeatPost],
     ['missingReadback', missingReadbackDoesNotRepeatPost],
     ['postReadback429', successfulPostReadback429DoesNotRepeatPost],
+    ['postReadbackPersistsUncertain', postReadbackFailurePersistsUncertainBeforeRetry],
+    ['providerCooldownRecovery', providerRateLimitRecoversAndCompletesRun],
     ['quotaOverflow', corruptConfirmedQuotaBlocksPosts],
     ['readOnly', readOnlyServiceRejectsMutations], ['missingStack', missingStack],
     ['weekend', weekendRun], ['safeRetry', safeFailedRetry], ['safeHistory', safeHistoryRetry],
@@ -498,7 +613,9 @@ async function run() {
     ['stopRead', stopInterruptsTransientPostClaimRead],
     ['preWriteDay', preWriteRetryStopsAtMidnight],
     ['postWriteDay', postWriteRetrySurvivesMidnightUntilReadback],
-    ['orphanStop', orphanedRunStop], ['durableStop', startCannotClearDurableStop]
+    ['orphanStop', orphanedRunStop],
+    ['orphanStopBackoff', orphanedStopDoesNotWaitThroughProviderBackoff],
+    ['durableStop', startCannotClearDurableStop]
   ]
   for (const [name, test] of cases) {
     console.log(`safety case: ${name}`); await test()

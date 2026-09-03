@@ -112,7 +112,7 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
     if (delayMs <= 0) return true
     const proceed = await waitWithRunTimer(runtime, run, save,
       reservationDelay > slot.delayMs ? 'search_batch_cooldown' : slot.waitKind,
-      'search_cooldown', delayMs, true)
+      'search_cooldown', delayMs)
     if (proceed && reservationDelay > 0) {
       run.searchProgress.searchReservedUntil = undefined
       await save(run, 'progress', 'critical')
@@ -159,7 +159,7 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
     const cached = run.searchProgress.locations[city]
     if (cached) return cached
     run.stage = 'location_resolving'; run.searchProgress.city = city
-    await save(run, 'stage_changed')
+    runtime.emit(run, 'stage_changed')
     runtime.logger.event('location_lookup', 'started', { runId: run.runId,
       platformAccountId: run.platformAccountId, city })
     const response = await pacedRequest('location_lookup', () =>
@@ -326,13 +326,12 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
             }
           }
         }
-        // Cursor and empty-page state are the exact safe resume position after a restart.
+        // Cursor and empty-page state are included in the mandatory reservation persisted
+        // immediately before the next provider request. A crash before that point can only
+        // repeat this read-only page, so an extra critical PATCH here adds load without
+        // protecting an external mutation.
         run.searchProgress.searchReservedUntil = undefined
-        // A normal empty first/final page is read-only and may be checkpointed. Before the next
-        // provider call its advanced term/key position is included in the mandatory reservation
-        // save; if the process dies sooner, recovery can only repeat this harmless empty read.
-        const persistence = items.length === 0 && !nextCursor ? 'checkpoint' : 'critical'
-        await save(run, 'progress', persistence)
+        await save(run, 'progress', 'checkpoint')
         if (audience === 'recruiter' &&
           run.searchProgress.consecutiveEmptyRecruiterSearches >= 20) {
           throw connectionError('connection_search_contract_suspect',

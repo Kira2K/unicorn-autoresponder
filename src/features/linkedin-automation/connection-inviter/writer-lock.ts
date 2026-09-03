@@ -68,8 +68,8 @@ function registerExitCleanup() {
   })
 }
 
-export function acquireConnectionWriterLock(writerId: string): ConnectionWriterLock {
-  const path = connectionWriterLockPath(writerId)
+export function acquireConnectionWriterLock(writerId: string,
+  path = connectionWriterLockPath(writerId)): ConnectionWriterLock {
   if (ownedLocks.has(path)) {
     throw connectionError('connection_writer_lock_active',
       'Another Connection Inviter writer is active in this process.')

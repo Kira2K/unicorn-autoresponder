@@ -2,13 +2,20 @@ import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 import { dailyAudienceTargets } from './limits.ts'
 
 export function failedRunCanRetry(run: ConnectionRun, history: ConnectionHistoryItem[]) {
-  const unsafe = new Set(['sending', 'sent', 'pending', 'accepted', 'uncertain'])
   const runHistory = history.filter(item => item.runId === run.runId)
-  return run.status === 'failed' && runHistory.every(item =>
-    !unsafe.has(item.status) && !item.sentAt && !item.requestId)
+  return run.status === 'failed' && runHistory.every(item => {
+    if (['sending', 'uncertain'].includes(item.status)) return false
+    if (!item.sentAt && !item.requestId) return true
+    return ['sent', 'accepted'].includes(item.status)
+  })
 }
 
 export function prepareRunRetry(run: ConnectionRun, context: any, safeRecruiterOnly: boolean) {
+  const pendingCandidates = run.searchProgress.pendingCandidates.filter(item =>
+    ['eligible', 'deferred'].includes(item.status))
+  const recentSearchAt = [...run.searchProgress.recentSearchAt]
+  const locations = { ...run.searchProgress.locations }
+  const nextPass = (run.searchProgress.pass ?? 0) + 1
   run.stackId = context.stackId; run.stack = context.stack
   run.safeRecruiterOnly = !context.stack && safeRecruiterOnly
   run.status = 'running'; run.stage = 'queued'; run.errorCode = undefined
@@ -31,11 +38,12 @@ export function prepareRunRetry(run: ConnectionRun, context: any, safeRecruiterO
   run.searchProgress = { keyIndex: { recruiter: 0, technical: 0 },
     keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
     streams: { recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 } },
-    recentSearchAt: [], locations: {},
+    recentSearchAt, locations,
     eligible: 0, skipped: 0, consecutiveEmptyRecruiterSearches: 0,
     exhausted: { recruiter: false, technical: run.safeRecruiterOnly },
-    pass: 1, passUsedSearchKeys: [], pendingCandidates: [] }
-  run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
+    pass: nextPass, passUsedSearchKeys: [], pendingCandidates }
+  run.retryState = undefined; run.invitationRetryState = undefined
+  run.timerState = undefined; run.nextActionAt = undefined
   run.pausedAt = undefined
   run.finishedAt = undefined
 }
@@ -67,7 +75,8 @@ export function prepareRunTopUp(run: ConnectionRun, context: any, safeRecruiterO
     eligible: 0, skipped: 0, consecutiveEmptyRecruiterSearches: 0,
     exhausted: { recruiter: false, technical: run.safeRecruiterOnly },
     pass: (run.searchProgress?.pass ?? 0) + 1, passUsedSearchKeys: [], pendingCandidates }
-  run.seenPersonIds = []; run.retryState = undefined; run.timerState = undefined
+  run.seenPersonIds = []; run.retryState = undefined; run.invitationRetryState = undefined
+  run.timerState = undefined
   run.nextActionAt = undefined; run.pausedAt = undefined
   run.finishedAt = undefined
 }
