@@ -14,6 +14,7 @@ export async function publishReplies(options: {
   const sleep = options.sleep ?? sleepDefault
   let sent = 0
   for (const item of options.items) {
+    if (item.status !== 'queued') continue
     if (!['checking', 'replying'].includes(job.status)) break
     if (sent) {
       const delayMs = replyDelay(options.random)

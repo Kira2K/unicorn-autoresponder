@@ -33,6 +33,15 @@ async function run() {
     async reply() { writes += 1 }, async listReplies() { return { items: [] } }
   } })
   assert.equal(writes, 0); assert.equal(uncertain.status, 'failed')
+
+  const ignoredJob = baseJob(); const ignored = item(); ignored.status = 'ignored'
+  ignored.reasonCode = 'insult'; ignoredJob.state.items = [ignored]
+  let ignoredWrites = 0
+  await publishReplies({ job: ignoredJob, items: [ignored], logger,
+    save: async () => undefined, sleep: async () => undefined, adapter: {
+      async reply() { ignoredWrites += 1 }, async listReplies() { return { items: [] } }
+    } })
+  assert.equal(ignoredWrites, 0)
 }
 
 run().then(() => console.log('comment publisher tests passed'))
