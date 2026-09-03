@@ -1,5 +1,11 @@
 # HH Autoresponses Operations
 
+## Combined daily run
+
+For installations with `.agents/skills/hh-profile-filler`, schedule
+`scripts/run-hh-daily-with-profile-filler.ps1`. Preserve the current Ru/En autoresponse failure
+semantics, but always run `profile-filler:pending` in `finally` after Dolphin is released.
+
 This reference expands the launch, scheduling, and monitoring routines for the HH autoresponse orchestrator.
 
 ## Source Map
