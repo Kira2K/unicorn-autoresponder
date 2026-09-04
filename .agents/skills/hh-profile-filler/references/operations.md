@@ -10,7 +10,10 @@
 
 ## Daily sequence
 
-The Windows task starts at 04:40 GMT+3. Preserve the existing autoresponse sequence. Execute Profile Filler in a PowerShell `finally` block so Ru/En responder failures cannot suppress it. For each pending job, run source/auth/UI dry-run first and execute only on success.
+Run Profile Filler through its own Windows task and process. It must not be started by, chained to,
+or share a wrapper with HH autoresponses. The repository default is `HH-Profile-Filler-Daily` at
+12:00 Europe/Warsaw; autoresponses remain a separate task at 03:40 Europe/Warsaw. For each pending
+job, run source/auth/UI dry-run first and execute only on success.
 
 ## Artifacts and reporting
 

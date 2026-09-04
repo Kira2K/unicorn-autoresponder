@@ -38,11 +38,13 @@ export async function main(args = process.argv.slice(2)) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(async error => {
-    const message = safeErrorMessage(error)
-    console.error(message)
-    await reportProfileFillerFatal(message).catch(reportError =>
-      console.error(`Profile filler fatal Telegram report failed: ${safeErrorMessage(reportError)}`))
-    process.exitCode = 1
-  })
+  main()
+    .then(() => process.exit(process.exitCode ?? 0))
+    .catch(async error => {
+      const message = safeErrorMessage(error)
+      console.error(message)
+      await reportProfileFillerFatal(message).catch(reportError =>
+        console.error(`Profile filler fatal Telegram report failed: ${safeErrorMessage(reportError)}`))
+      process.exit(1)
+    })
 }

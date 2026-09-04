@@ -3,6 +3,7 @@ import { runStackTitleTests } from './stack-titles.test.ts'
 import { runProfileBuilderTests } from './profile-builder.test.ts'
 import { runNocoRepositoryTests } from './noco-repository.test.ts'
 import { runServiceTests } from './service.test.ts'
+import { runProcessIsolationTests } from './process-isolation.test.ts'
 
 async function main() {
   runStateStoreTests()
@@ -10,6 +11,7 @@ async function main() {
   runProfileBuilderTests()
   await runNocoRepositoryTests()
   await runServiceTests()
+  runProcessIsolationTests()
   console.log('HH profile filler tests passed.')
 }
 

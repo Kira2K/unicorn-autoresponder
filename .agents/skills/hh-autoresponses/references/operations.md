@@ -1,10 +1,10 @@
 # HH Autoresponses Operations
 
-## Combined daily run
+## Daily process isolation
 
-For installations with `.agents/skills/hh-profile-filler`, schedule
-`scripts/run-hh-daily-with-profile-filler.ps1`. Preserve the current Ru/En autoresponse failure
-semantics, but always run `profile-filler:pending` in `finally` after Dolphin is released.
+Run autoresponses through their own wrapper and Windows task. Do not invoke Profile Filler from an
+autoresponse wrapper, `finally` block, child process, or autoresponse scheduled task. Profile Filler
+has a separate runner, schedule, process lifetime, exit code, and retry queue.
 
 This reference expands the launch, scheduling, and monitoring routines for the HH autoresponse orchestrator.
 

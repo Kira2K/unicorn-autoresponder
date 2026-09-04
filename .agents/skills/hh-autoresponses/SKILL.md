@@ -5,9 +5,8 @@ description: Operate HH autoresponse orchestrator workflows in the hh-autoparcer
 
 # HH Autoresponses
 
-When HH Profile Filler is installed, daily combined runs must use
-`scripts/run-hh-daily-with-profile-filler.ps1`. The script invokes Profile Filler from `finally`,
-so an autoresponse failure never suppresses profile-filling status jobs.
+HH Profile Filler is operationally independent. Never invoke it from an autoresponse wrapper,
+`finally` block, or autoresponse scheduled task.
 
 ## Operating Model
 
