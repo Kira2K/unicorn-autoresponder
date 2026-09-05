@@ -36,23 +36,23 @@ function updateSkillTarget(value) {
 
 <template>
   <section class="profile-draft-editor" data-testid="profile-draft-editor">
-    <h4>Edit normalized profile</h4>
-    <label><span>Headline</span>
+    <h4>Редактирование нормализованного профиля</h4>
+    <label><span>Заголовок</span>
       <input :value="profile.headline || ''" @input="updateProfile('headline', $event.target.value)" />
     </label>
-    <label class="wide"><span>About</span>
+    <label class="wide"><span>О себе</span>
       <textarea :value="profile.about || ''" @input="updateProfile('about', $event.target.value)" />
     </label>
-    <label class="wide"><span>Main Skills (one per line)</span>
+    <label class="wide"><span>Основные навыки (по одному в строке)</span>
       <textarea :value="(profile.skills?.add || []).join('\n')" @input="updateSkills($event.target.value)" />
     </label>
-    <label><span>Target Skills count</span>
+    <label><span>Целевое количество навыков</span>
       <input type="number" min="95" max="103" :value="profile.skills?.target_count || 100"
         @input="updateSkillTarget($event.target.value)" />
     </label>
     <template v-for="section in ['experience', 'education']" :key="section">
       <fieldset v-for="(entry, index) in profile[section] || []" :key="`${section}-${index}`">
-        <legend>{{ section }} {{ index + 1 }}</legend>
+        <legend>{{ section === 'experience' ? 'Опыт работы' : 'Образование' }} {{ index + 1 }}</legend>
         <ProfileEntryEditor :kind="section" :entry="entry"
           @change="value => updateEntry(section, index, value)" />
       </fieldset>

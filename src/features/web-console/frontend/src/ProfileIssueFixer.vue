@@ -24,7 +24,7 @@ function row(issue) {
 
 const isSkill = issue => issue.path.includes('.skills')
 const isCompany = issue => issue.path.endsWith('.company')
-const label = issue => isSkill(issue) ? 'Skill' : isCompany(issue) ? 'Company' : 'Job title'
+const label = issue => isSkill(issue) ? 'Навык' : isCompany(issue) ? 'Компания' : 'Должность'
 const ready = computed(() => rows.value.length && rows.value.every(issue => {
   const value = row(issue)
   return Boolean(value.selected || ((isSkill(issue) || isCompany(issue)) && value.ignored))
@@ -37,8 +37,8 @@ async function search(issue) {
     const result = await api.adminProfileParameters(props.accountId,
       isSkill(issue) ? 'SKILL' : isCompany(issue) ? 'COMPANY' : 'JOB_TITLE', value.query)
     value.options = result.items.map(item => item.name)
-    if (!value.options.length) value.error = 'No LinkedIn options found. Try another wording.'
-  } catch (error) { value.error = error.message || 'Search failed.' }
+    if (!value.options.length) value.error = 'Совпадений нет. Попробуйте другую формулировку.'
+  } catch (error) { value.error = error.message || 'Поиск не удался.' }
   finally { value.loading = false }
 }
 
@@ -54,28 +54,28 @@ function submit() {
 
 <template>
   <section v-if="rows.length" class="profile-issue-fixer" data-testid="profile-issue-fixer">
-    <h4>Fix fields before Apply</h4>
+    <h4>Уточнение полей перед применением</h4>
     <article v-for="issue in rows" :key="issue.path">
       <strong>{{ label(issue) }}</strong>
       <small>{{ issue.path }}</small>
       <div class="profile-fix-search">
-        <input v-model="row(issue).query" :aria-label="`Search ${issue.path}`" />
-        <Button label="Search LinkedIn" size="small" :loading="row(issue).loading"
+        <input v-model="row(issue).query" :aria-label="`Поиск ${issue.path}`" />
+        <Button label="Найти в LinkedIn" size="small" :loading="row(issue).loading"
           :disabled="row(issue).query.trim().length < 2" @click="search(issue)" />
       </div>
       <select v-model="row(issue).selected" @change="row(issue).ignored = false">
-        <option value="">Choose a LinkedIn value</option>
+        <option value="">Выберите значение LinkedIn</option>
         <option v-for="option in row(issue).options" :key="option" :value="option">{{ option }}</option>
       </select>
       <Button v-if="isSkill(issue) || isCompany(issue)"
-        :label="isSkill(issue) ? 'Exclude this Skill' : 'Keep company as typed'"
+        :label="isSkill(issue) ? 'Исключить этот навык' : 'Сохранить название компании'"
         severity="secondary" text @click="row(issue).ignored = true; row(issue).selected = ''" />
       <small v-if="row(issue).ignored" class="profile-fix-ok">
-        {{ isSkill(issue) ? 'Will be excluded.' : 'Current company text will be kept.' }}
+        {{ isSkill(issue) ? 'Будет исключён.' : 'Название компании будет сохранено.' }}
       </small>
       <small v-if="row(issue).error" class="profile-fix-error">{{ row(issue).error }}</small>
     </article>
-    <Button label="Save fixes and rebuild Preview" :disabled="!ready"
+    <Button label="Сохранить уточнения и пересобрать Preview" :disabled="!ready"
       data-testid="profile-fixes-submit" @click="submit" />
   </section>
 </template>
