@@ -85,9 +85,7 @@ function createNocoRequestLimiter(options: LimiterOptions = {}) {
     const safeWait = Number.isFinite(waitMs) && waitMs > 0 ? Number(waitMs) : cooldownMs
     const timestamp = now()
     blockedUntil = Math.max(blockedUntil, timestamp + safeWait)
-    // The rate-limit cooldown is longer than the normal batch pause and starts a fresh batch.
-    completedInBatch = 0
-    batchPausedUntil = 0
+    // Retry-After can be shorter than the mandatory pause; preserve both constraints.
     log({ event: 'cooldown_started', status: 429, queueDepth: waiting,
       waitMs: safeWait, completedInBatch })
   }
@@ -101,8 +99,7 @@ function createNocoRequestLimiter(options: LimiterOptions = {}) {
     }
   }
 
-  function completeAttempt(rateLimitError: boolean): void {
-    if (rateLimitError) return
+  function completeAttempt(): void {
     completedInBatch += 1
     if (completedInBatch < maxRequestsPerBatch) return
     completedInBatch = 0
@@ -142,7 +139,7 @@ function createNocoRequestLimiter(options: LimiterOptions = {}) {
           ...(errorCode ? { errorCode } : {}) })
         throw error
       } finally {
-        completeAttempt(rateLimitError)
+        completeAttempt()
         busy = false
       }
     })
