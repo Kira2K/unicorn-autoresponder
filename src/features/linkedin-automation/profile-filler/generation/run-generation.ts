@@ -11,6 +11,7 @@ const { createGenerationRuntime } = require('./runtime.ts') as {
 const { validateWithRepair } = require('./validate-with-repair.ts') as
   typeof import('./validate-with-repair.ts')
 const { metricFactCount } = require('./metric-claims.ts') as typeof import('./metric-claims.ts')
+const { assignFactIds } = require('./fact-ids.ts') as typeof import('./fact-ids.ts')
 const { groundAndPreview } = require('./ground-and-preview.ts') as
   { groundAndPreview(options: any, checkpoint: any): Promise<boolean> }
 
@@ -32,8 +33,8 @@ async function runGeneration(options: any) {
     await logAction(logger, 'generation_stage_persist', () =>
       persistStage({ job, store, update }, 'generating_cv', 'extracting_cv_facts'),
       { operation: 'extracting_cv_facts' })
-    const facts = await logAction(logger, 'cv_fact_extraction', () =>
-      runtime.generator.extractFacts(cv))
+    const facts = assignFactIds(await logAction(logger, 'cv_fact_extraction', () =>
+      runtime.generator.extractFacts(cv)))
     logger.event('cv_metric_index', 'succeeded', { stepCount: metricFactCount(facts) })
     await logAction(logger, 'generation_stage_persist', () =>
       persistStage({ job, store, update }, 'generating_profile', 'generating_profile'),
@@ -55,7 +56,7 @@ async function runGeneration(options: any) {
       proxyCountry: country,
       generatedAt: new Date().toISOString() }
     const checkpoint = { version: 1 as const, stage: 'resolving_job_titles' as const,
-      profile: validated.value, issues: validated.issues, generation }
+      profile: validated.value, issues: validated.issues, generation, catalogParameters: {} }
     await logAction(logger, 'generation_checkpoint_persist', async () => {
       update({ checkpoint })
       await store.update(job.jobId, { checkpoint, updatedAt: new Date().toISOString() })

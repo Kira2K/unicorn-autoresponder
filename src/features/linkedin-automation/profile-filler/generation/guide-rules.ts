@@ -21,17 +21,16 @@ working approach, categorized technical stack, and contact call-to-action when c
 The joined blocks must be at most 2600 characters.
 Never mention salary. Never use: spearheaded, leveraged, driving significant impact,
 delivered transformative outcomes.
-Skills: exactly 100 unique relevant skills, ordered AI, core stack, architecture, databases,
-cloud/DevOps, testing, tools, methodologies, domain. target_count is exactly 100.
-Experience: include every CV position newest first. Keep company, title, and dates equal to the
-extracted CV facts. Description is at most 2000 characters and uses achievements,
-responsibilities, and technologies supported by the facts. Attach 5-15 skills. Never emit
-experience employment_type. Every attached skill must also exist in profile.skills.add.
-Education: include higher education only. Keep factual fields equal to the extracted CV facts.
-Generic neutral description is allowed when details are absent. Attach at least 5 skills, all of
-which must also exist in profile.skills.add.
+Skills: propose exactly 100 unique relevant skills, ordered AI, core stack, architecture,
+databases, cloud/DevOps, testing, tools, methodologies, domain. target_count is exactly 100.
+Every Experience and Education skill must exactly match one of these 100 skills.
+The backend keeps existing profile Skills and adds only the number needed to reach 100 by name.
+Experience: return exactly one addition for every exp_N fact_id, newest first. Return only fact_id,
+description and 5-15 skills. The backend copies company, title, dates, location and workplace type
+from CV facts. Descriptions use only achievements, responsibilities and technologies from that fact.
+Education: return exactly one addition for every edu_N fact_id. Return only
+fact_id, description and 5-15 skills. The backend copies all factual education fields from CV.
 Open to Work: exactly five role variations, the supplied proxy country, REMOTE/HYBRID/ON_SITE,
 IMMEDIATELY, FULL_TIME/CONTRACT/PART_TIME, visibility ALL.
-Do not add IDs to Experience or Education: MCP v2 accepts names there. Do not add unsupported
-fields. Use null only where the output schema permits it.
+Do not invent or change fact IDs. Do not add unsupported fields. Use null only where permitted.
 `.trim()

@@ -532,6 +532,7 @@ function createWebConsoleApp(options: {
   const sendSummaryTelegramMessage = options.sendSummaryTelegramMessage ?? sendTelegramMessage
   const sessions = createSessionStore()
   const app = express()
+  app.locals.recoverProfileVerification = () => profileFiller.recoverPending?.() ?? Promise.resolve()
 
   app.use(express.json({ limit: '25mb' }))
   app.use(cookieParser())

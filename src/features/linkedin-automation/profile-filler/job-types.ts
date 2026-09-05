@@ -4,7 +4,7 @@ import { profileDocument } from './profile-document.ts'
 export type ProfileJobStatus =
   'generating_cv' | 'generating_profile' | 'validating' |
   'previewing' | 'waiting_retry' | 'retrying' | 'preview_ready' |
-  'running' | 'pending_verification' |
+  'running' | 'verifying' | 'pending_verification' |
   'succeeded' | 'failed' | 'needs_expert_review'
 
 export type ProfileJob = {
@@ -38,9 +38,10 @@ export function publicProfileJob(job: ProfileJob) {
       identity: job.plan.identity, issues: job.plan.issues,
       generation: job.plan.generation,
       document: job.plan.input ? profileDocument(job.plan.input) : undefined,
-      steps: job.plan.steps.map(({ payload: _payload, verification: _verification, ...step }) => step)
+      steps: job.plan.steps.map(({ payload: _payload, verification: _verification, readOnly: _readOnly, ...step }) => step)
     } : undefined,
-    result: job.result, errorCode: job.errorCode,
+    result: job.result && { ...job.result,
+      steps: job.result.steps.map(({ writeIntent: _intent, ...step }) => step) }, errorCode: job.errorCode,
     retry: job.checkpoint?.retry,
     createdAt: job.createdAt, updatedAt: job.updatedAt, finishedAt: job.finishedAt
   }

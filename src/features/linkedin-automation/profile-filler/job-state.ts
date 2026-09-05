@@ -1,16 +1,24 @@
-const { timingSafeEqual } = require('node:crypto') as typeof import('node:crypto')
-type ProfileJob = import('./job-types.ts').ProfileJob
+import { timingSafeEqual } from 'node:crypto'
+import type { ProfileJob } from './job-types.ts'
+import type { MutationStore } from './mutation-persistence.ts'
 
-function sameHash(left: string, right: string) {
+export function sameHash(left: string, right: string) {
   const a = Buffer.from(left)
   const b = Buffer.from(right)
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-async function recoverInterruptedJob(store: any, job: ProfileJob) {
+export async function recoverInterruptedJob(store: MutationStore, job: ProfileJob) {
   if (!['generating_cv', 'generating_profile', 'validating', 'previewing', 'retrying', 'running']
     .includes(job.status)) return job
   const now = new Date().toISOString()
+  if (job.status === 'running' && job.plan && job.result?.steps.some(step =>
+    step.writeIntent && step.status !== 'verified')) {
+    const patch: Partial<ProfileJob> = { status: 'verifying', phase: 'recovering_write_result', updatedAt: now }
+    await store.update(job.jobId, patch)
+    Object.assign(job, patch)
+    return job
+  }
   if (job.status !== 'running' && job.checkpoint) {
     const patch: Partial<ProfileJob> = { status: 'waiting_retry', phase: 'interrupted_retryable',
       errorCode: 'profile_job_interrupted', updatedAt: now }
@@ -25,5 +33,3 @@ async function recoverInterruptedJob(store: any, job: ProfileJob) {
   await store.update(job.jobId, patch)
   return job
 }
-
-module.exports = { recoverInterruptedJob, sameHash }

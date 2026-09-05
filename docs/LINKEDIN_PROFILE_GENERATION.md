@@ -13,11 +13,14 @@ proxy-country checks, generation, validation, Preview, and manual Apply are unch
 2. Accept only `moved to filling` or `filled` with a non-empty `en_version_url`.
 3. Export a Google Doc to PDF or download a PDF through the Drive service account.
 4. Resolve the Dolphin proxy IP to a non-Russian country without persisting the IP.
-5. Extract CV facts with an OpenAI strict Structured Output response.
-6. Generate only the six supported Profile Filler sections from those facts.
-7. Resolve generated Open to Work roles with at most three unique catalog queries. Terra chooses
+5. Extract CV facts with an OpenAI strict Structured Output response and assign stable
+   `exp_N` and `edu_N` IDs on the backend.
+6. Generate only descriptions and attached Skills for every fact ID, plus Headline, About,
+   Open to Work, and exactly 100 unique profile Skills.
+7. Resolve generated Open to Work roles and optional catalog-backed identity values. Terra chooses
    distinct semantic matches only from supplied LinkedIn candidates.
-8. Run deterministic guide, fact, schema, and Unipile input validation.
+8. Require every expected fact ID, then run deterministic guide, fact, schema, identity,
+   and Unipile input validation.
 9. Automatically build and persist Preview. An administrator reviews and applies it manually.
 
 ## Fixed contract
@@ -34,22 +37,33 @@ a confident match is omitted. Preview uses one to five verified unique roles; wh
 verified, the Open to Work step is skipped and Preview shows a warning. The PDF or DOCX is
 uploaded as a transient OpenAI input file and deleted in
 `finally`; the second request receives extracted facts, not the CV file. The
-deterministic validator blocks invented employers, roles, dates, education,
-metrics, or contacts. One bounded repair request may regenerate only sections rejected by strict
-validation. Catalog IDs are resolved later by the existing Preview.
+  deterministic validator blocks invented employers, roles, dates, education,
+  metrics, or contacts. Company, role, dates, location, workplace type, school, degree,
+  field of study, grade, and activities are copied from CV facts by the backend. Up to two
+  bounded repair requests receive only missing or invalid fact IDs. Remaining fatal issues
+  block Preview.
 
 The payload validator mirrors the Unipile v2 MCP schema. Experience and Education creates require
 their identity fields and `start_date`; edits require only `operation` and `id`. Edit payloads
-contain changed fields only. Generated Experience/Education Skills must also occur in the generated
-100-Skill list. If the live profile has no free Skill slots, new attached Skills remain visible in
-the draft but are omitted from the write with a warning.
+  contain changed fields only. Existing Skills are retained. The backend normalizes names and adds
+  only the number required to reach exactly 100; Unipile accepts Skills by name, so no Skill catalog
+  lookup is performed. Generated Experience/Education Skills must occur in that same set.
 
 Apply order is: headline, About, Experience updates/creates, Education updates/creates,
-profile-level Skills, then Open to Work. Each write is followed by its read-only verification.
+profile-level Skills, then Open to Work. Each write is followed by a fresh read-only check.
+If a change is not visible, only read-back is retried after 5, 15, 30, and 60 minutes.
+The backend resumes this schedule after restart without repeating PATCH. A job succeeds only
+after full verification; otherwise it ends in `needs_expert_review` with exact sections.
+If new Skills do not fit the shared 100-Skill limit, other fields remain applicable;
+omitted names are retained as warnings and the final phase is `partially_completed`.
+Dates preserve CV precision; missing mandatory months block creation rather than being invented.
+Fact IDs prove enrichment coverage, not first-pass extraction accuracy: compare the source CV
+with extracted records separately before live Apply.
 
-Catalog calls are serialized with a five-second minimum interval. Rate limits use `Retry-After`
-or three jittered retries. Exhausted retries leave the job in `waiting_retry`; Resume continues
-from the saved validated profile without extracting the CV or generating the profile again.
+Required catalog calls are serialized with a five-second minimum interval. A provider `Retry-After` is
+never shortened or negatively jittered. Successful catalog results are saved in the job checkpoint,
+so retry or backend restart continues without repeating resolved searches. Exhausted retries leave
+the job in `waiting_retry`; Resume does not extract the CV or generate the profile again.
 
 ## Configuration
 
@@ -71,7 +85,8 @@ Do not log or persist the CV, prompts, model response, Drive URL, contacts,
 proxy IP, credentials, or API keys. `linkedin_profile_jobs.plan_json` stores
 only the resulting Preview and safe generation metadata. While waiting for a provider retry,
 `checkpoint_json` contains only the validated normalized profile, validation issues, generation
-metadata, and retry timing. It never contains CV bytes, extracted facts, prompts, or secrets.
+metadata, safe non-Skill catalog `{id, name}` results, and retry timing. It never contains CV bytes,
+extracted facts, prompts, or secrets.
 For a manual upload, the CV revision is a SHA-256 hash; the original filename
 and file bytes are not persisted.
 

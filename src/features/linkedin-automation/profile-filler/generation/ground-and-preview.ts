@@ -9,6 +9,7 @@ type GenerationCheckpoint = import('./types.ts').GenerationCheckpoint
 
 async function groundAndPreview(options: any, checkpoint: GenerationCheckpoint) {
   const { job, store, update, release, logger } = options
+  checkpoint.catalogParameters ??= {}
   try {
     await logAction(logger, 'generation_stage_persist', () =>
       persistStage({ job, store, update }, 'validating', 'resolving_job_titles'),
@@ -16,6 +17,7 @@ async function groundAndPreview(options: any, checkpoint: GenerationCheckpoint) 
     const grounded = await logAction(logger, 'job_title_catalog_prepare', () =>
       groundJobTitles({ client: options.client, accountId: job.accountId,
         input: checkpoint.profile, issues: checkpoint.issues, logger,
+        parameterCache: checkpoint.catalogParameters,
         choose: options.generator.chooseJobTitles?.bind(options.generator),
         retry: { ...options.catalogRetry, onRetry: async (retry: any) => {
           checkpoint.retry = { provider: 'unipile', ...retry }
@@ -30,7 +32,8 @@ async function groundAndPreview(options: any, checkpoint: GenerationCheckpoint) 
       { operation: 'building_preview' })
     runPreview({ client: options.client, repository: options.repository, store, job,
       input: grounded.input, issues: grounded.issues, update, release, logger,
-      generation: checkpoint.generation })
+      generation: checkpoint.generation, catalogRetry: options.catalogRetry,
+      catalogParameters: checkpoint.catalogParameters })
     return true
   } catch (error: any) {
     if (!error?.retryExhausted) throw error

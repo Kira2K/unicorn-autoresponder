@@ -6,6 +6,14 @@ export const yearMonth = {
     { type: 'null' }
   ]
 }
+export const cvDate = {
+  anyOf: [
+    { type: 'string', pattern: '^(?:19|20|21)[0-9]{2}(?:-(?:0[1-9]|1[0-2]))?$' },
+    { type: 'null' }
+  ]
+}
+export const cvEndDate = { anyOf: [...cvDate.anyOf,
+  { type: 'string', enum: ['present'] }] }
 export function strictObject(properties: Record<string, unknown>) {
   return {
     type: 'object', additionalProperties: false,

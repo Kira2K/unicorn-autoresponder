@@ -1,6 +1,6 @@
 import type { EducationUpsert, ExperienceUpsert, JsonObject, ProfileInput, YearMonth } from './input-types.ts'
 
-const date = (value?: YearMonth) => value && `${value.year}-${String(value.month).padStart(2, '0')}`
+const date = (value?: YearMonth) => value && `${value.year}${value.month === undefined ? '' : `-${String(value.month).padStart(2, '0')}`}`
 const clean = (value: JsonObject) => Object.fromEntries(
   Object.entries(value).filter(([, item]) => item !== undefined)
 )
@@ -12,7 +12,7 @@ function experience(entry: ExperienceUpsert) {
     company: entry.data.company, job_title: entry.data.jobTitle,
     location: entry.data.location, workplace_type: entry.data.workplaceType,
     start_date: date(entry.data.startDate),
-    end_date: date(entry.data.endDate), description: entry.data.description,
+    end_date: entry.data.isCurrent ? 'present' : date(entry.data.endDate), description: entry.data.description,
     source_of_hire: entry.data.sourceOfHire, skills: entry.data.skills
   }) }
 }
@@ -22,7 +22,8 @@ function education(entry: EducationUpsert) {
     school: entry.match.school, start_date: date(entry.match.startDate)
   }), data: clean({
     school: entry.data.school, degree: entry.data.degree, field_of_study: entry.data.fieldOfStudy,
-    start_date: date(entry.data.startDate), end_date: date(entry.data.endDate), grade: entry.data.grade,
+    start_date: date(entry.data.startDate),
+    end_date: entry.data.isCurrent ? 'present' : date(entry.data.endDate), grade: entry.data.grade,
     activities: entry.data.activities, description: entry.data.description, skills: entry.data.skills
   }) }
 }

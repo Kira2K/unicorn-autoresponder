@@ -18,11 +18,14 @@ export function yearMonth(value: unknown, path: string, issues: ValidationIssue[
   if (isObject(value)) {
     const year = Number(value.year)
     const month = Number(value.month)
+    if (Number.isInteger(year) && year >= 1900 && year <= 2200 && value.month === undefined) {
+      return { year }
+    }
     if (Number.isInteger(year) && year >= 1900 && year <= 2200 &&
         Number.isInteger(month) && month >= 1 && month <= 12) return { year, month }
   }
-  const match = text(value)?.match(/^(\d{4})-(0[1-9]|1[0-2])$/)
-  if (match) return { year: Number(match[1]), month: Number(match[2]) }
+  const match = text(value)?.match(/^((?:19|20|21)\d{2})(?:-(0[1-9]|1[0-2]))?$/)
+  if (match) return { year: Number(match[1]), ...(match[2] ? { month: Number(match[2]) } : {}) }
   if (value !== undefined) warning(issues, path, 'Ожидалась дата YYYY-MM или {year, month}.')
   return undefined
 }

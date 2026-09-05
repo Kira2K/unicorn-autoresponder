@@ -44,7 +44,7 @@ function validateSkills(profile: any, issues: ValidationIssue[]) {
   const skills = profile.skills?.add ?? []
   const unique = new Set(skills.map((value: unknown) => String(value).trim().toLowerCase()))
   if (skills.length !== 100 || unique.size !== 100 || profile.skills?.target_count !== 100) {
-    fatal(issues, 'profile.skills', 'Skills must contain exactly 100 unique names and target_count 100.')
+    fatal(issues, 'profile.skills', 'Skills must contain exactly 100 unique values and target_count 100.')
   }
   const validateAttached = (values: unknown[], path: string) => {
     const keys = values.map(value => String(value).trim().toLowerCase())

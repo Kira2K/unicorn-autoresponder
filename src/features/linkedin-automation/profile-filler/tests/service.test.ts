@@ -14,6 +14,14 @@ async function settled(service: any, jobId: string, expected: string) {
 }
 
 async function run() {
+  await require('./entry-claims.test.ts').testEntryClaims()
+  await require('./repair-entry-contract.test.ts').testRepairEntryContract()
+  await require('./current-entry.test.ts').testCurrentEntry()
+  await require('./startup-verification.test.ts').testStartupVerification()
+  await require('./stability-writes.test.ts').testSafeWrites()
+  await require('./stability-skills.test.ts').testSkillCompletion()
+  require('./stability-dates.test.ts').testDatePrecision()
+  await require('./stability-recovery.test.ts').testPersistedRecovery()
   assert.equal(profileErrorCode({ response: { status: 429 } }), 'noco_rate_limited')
   const records = new Map<string, any>()
   const releases: string[] = []
@@ -23,6 +31,7 @@ async function run() {
     specifics: { experience: [], education: [], skills: [] }
   }
   let acceptWrites = true
+  const profileReadOptions: any[] = []
   const events: any[] = []
   const store = {
     async create(job: any) { records.set(job.jobId, job) },
@@ -38,7 +47,9 @@ async function run() {
     }] } },
     client: {
       async getAccount() { return { provider: 'linkedin', status: 'running', user_id: 'provider-1' } },
-      async getOwnProfile() { return profile },
+      async getOwnProfile(_id: string, _sections: string[], options: any) {
+        profileReadOptions.push(options); return profile
+      },
       async updateOwnProfile(_id: string, payload: any) {
         const headline = payload?.specifics?.linkedin?.headline
         if (acceptWrites && headline !== undefined) profile.description = headline
@@ -54,6 +65,7 @@ async function run() {
     profile: { headline: 'New' }
   })
   const preview = await settled(service, started.jobId, 'preview_ready')
+  assert.deepEqual(profileReadOptions[0], { fresh: true })
   assert.equal(preview.preview.steps[0].after, 'New')
   assert.equal(JSON.stringify(preview).includes('payload'), false)
   assert.equal(JSON.stringify(records.get(started.jobId)).includes('must-not-leak'), false)
@@ -76,7 +88,7 @@ async function run() {
   const retryStart = await service.startPreview(7, { profile: { headline: 'Late' } })
   const retryPreview = await settled(service, retryStart.jobId, 'preview_ready')
   await service.apply(retryStart.jobId, retryPreview.planHash)
-  const failed = await settled(service, retryStart.jobId, 'pending_verification')
+  const failed = await settled(service, retryStart.jobId, 'needs_expert_review')
   assert.equal(failed.result.steps[0].failureKind, 'write_accepted_not_visible')
   assert.deepEqual(releases,
     ['profile_preview', 'profile_fill', 'profile_rollback', 'profile_preview', 'profile_fill'])
@@ -105,6 +117,37 @@ async function run() {
   })
   await assert.rejects(() => service.apply('blocked-job', 'blocked-hash'),
     { code: 'profile_preview_has_blocking_issues' })
+
+  let recoveryWrites = 0
+  const verificationRecord: any = {
+    jobId: 'verifying-job', platformAccountId: 7, accountId: 'acc-1', clientName: 'Student',
+    status: 'verifying', phase: 'final_verification:1/1', createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(), plan: { account: { accountId: 'acc-1' },
+      identity: {}, issues: [], steps: [{ id: 'headline', section: 'headline', action: 'update',
+        summary: 'Headline', before: 'Old', after: 'Recovered', payload: {},
+        verification: { kind: 'headline', expected: 'Recovered' } }] },
+    result: { status: 'verifying', startedAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(), verification: { attempt: 1, maxAttempts: 1,
+        nextReadBackAt: new Date(0).toISOString() }, steps: [{ stepId: 'headline',
+        section: 'headline', status: 'verifying', message: 'Read-only verification.',
+        attempt: 1, maxAttempts: 1, nextActionAt: new Date(0).toISOString() }] }
+  }
+  const verificationStore = {
+    async get() { return verificationRecord }, async list() { return [verificationRecord] },
+    async update(_id: string, patch: any) { Object.assign(verificationRecord, structuredClone(patch)) }
+  }
+  const recoveredVerifier = createProfileFillerService({ store: verificationStore,
+    client: { async updateOwnProfile() { recoveryWrites += 1 },
+      async getOwnProfile() { return { description: 'Recovered' } } },
+    gate: { acquire(kind: string) { assert.equal(kind, 'profile_verify'); return () => undefined } },
+    executorOptions: { wait: async () => undefined, timing: { firstWrite: { min: 0, max: 0 },
+      ordinaryWrite: { min: 0, max: 0 }, readBack: { min: 0, max: 0 },
+      finalReadBack: { min: 0, max: 0 }, skillsBatch: { min: 0, max: 0 },
+      verificationScheduleSeconds: [0] } } })
+  await recoveredVerifier.list()
+  const verifiedAfterRestart = await settled(recoveredVerifier, 'verifying-job', 'succeeded')
+  assert.equal(verifiedAfterRestart.result.status, 'verified')
+  assert.equal(recoveryWrites, 0)
 }
 
 run().then(() => console.log('profile filler service tests passed')).catch((error: unknown) => {

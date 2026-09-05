@@ -10,10 +10,12 @@ export type ValidationIssue = {
   autoFixed?: boolean
 }
 
-export type YearMonth = { year: number; month: number }
+export type ProfileDate = { year: number; month?: number }
+export type YearMonth = ProfileDate
 export type NamedParameter = { name: string; id?: string }
 
 export type ExperienceData = {
+  isCurrent?: boolean
   company: string
   jobTitle: string
   location?: string
@@ -23,14 +25,21 @@ export type ExperienceData = {
   description?: string
   sourceOfHire?: string
   skills: string[]
+  catalog?: {
+    company?: NamedParameter
+    jobTitle?: NamedParameter
+    location?: NamedParameter
+  }
 }
 
 export type ExperienceUpsert = {
+  factId?: string
   match: { company: string; jobTitle: string; startDate?: YearMonth }
   data: ExperienceData
 }
 
 export type EducationData = {
+  isCurrent?: boolean
   school: string
   degree?: string
   fieldOfStudy?: string
@@ -40,9 +49,11 @@ export type EducationData = {
   activities?: string
   description?: string
   skills: string[]
+  catalog?: { school?: NamedParameter }
 }
 
 export type EducationUpsert = {
+  factId?: string
   match: { school: string; startDate?: YearMonth }
   data: EducationData
 }

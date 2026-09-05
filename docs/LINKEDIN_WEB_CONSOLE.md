@@ -95,9 +95,13 @@ date variants, and named Skill objects are converted deterministically. Each
 issue includes a path, correction hint, and example. The normalized document is
 editable in Preview and can be downloaded. Any edit disables `Apply` until a
 fresh read-only preview creates a new plan hash.
+Generated Preview is different: factual fields remain bound to the CV, so it cannot be
+edited or rebuilt as manual JSON. The administrator may only regenerate it from the CV.
 
-MCP v2 accepts Job Title, Company, Location, and Skills by name, so Preview does
-not query their parameter catalog. Experience `employment_type` is temporarily
+Preview uses exact unique catalog IDs for Job Title, Company, Location, and School when found.
+Confirmed CV names remain the fallback for Experience and Education identity fields. Skills are
+normalized, deduplicated, and sent by name without individual catalog searches. Experience
+`employment_type` is temporarily
 excluded: live Unipile v2 rejects it even with an ID returned by its own catalog.
 The analyzer removes that field with a visible warning. Open to Work
 `employment_types` remains supported. Preview resolves the Job Title and
@@ -111,18 +115,23 @@ warnings, resolves every mandatory LinkedIn ID from the current account catalog,
 then validates the final payload against the MCP-confirmed Unipile v2 contract.
 IDs supplied by uploaded JSON are ignored and never forwarded.
 
-Writes run sequentially. Each step gets exactly one read-only check. A write
-accepted but not yet visible becomes `verification_delayed`, and later writes
-continue. At the end, exactly one shared read-only check runs for the complete
-plan after a randomized 55-65 second pause. Immediately before every write,
+Writes run sequentially. Each step gets a fresh read-only check after 2-3 minutes;
+consecutive Skill batches are spaced 3-5 minutes apart. A write accepted but not yet
+visible becomes `verification_delayed`. Uncertain writes and unconfirmed creates/Skills block
+subsequent PATCHs. The backend then runs
+read-only checks after 5, 15, 30, and 60 minutes. Immediately before every write,
 Profile Filler reads the target field again. Existing Experience and Education
 entries are edited by provider ID,
 already matching fields are skipped, and Skills payloads contain only values
 still missing at write time. Multiple matching entries block the write instead
 of selecting one and creating or editing another duplicate. LinkedIn dates
-returned as `MM/DD/YYYY` are normalized before matching. Only an explicitly rejected write
-stops execution. Unresolved checks finish in the warning state
-`pending_verification`.
+returned as `MM/DD/YYYY` are normalized before matching. Timeout and `5xx` never repeat a
+write blindly. The saved `verifying` state resumes after backend restart using reads only.
+Full equality finishes as `succeeded`; unresolved sections finish as
+`needs_expert_review`.
+Omitted Skills produce `needs_expert_review / partially_completed`, not a success message.
+Durable write intent is saved before PATCH; saving failures stop new writes. Recovery only reads.
+History/reload resumes one observer; temporary read failures retry and `verifying` retains its timer.
 A fresh preview re-reads LinkedIn and contains only changes still required.
 The UI shows overall elapsed time, status age, and the countdown to each planned
 write or check. A verified step replaces its timer with a green check.

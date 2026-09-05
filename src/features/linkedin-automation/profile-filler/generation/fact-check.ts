@@ -3,6 +3,7 @@ import type { ValidationIssue } from '../input-types.ts'
 import {
   allFactMetrics, allowedExperienceMetrics, unsupportedMetrics
 } from './metric-claims.ts'
+import { generatedContractIssues } from './materialize-profile.ts'
 
 const norm = (value: unknown) => String(value ?? '').trim().toLowerCase()
 const same = (left: unknown, right: unknown) => norm(left) === norm(right)
@@ -13,7 +14,7 @@ function mismatch(issues: ValidationIssue[], path: string, field: string) {
 }
 
 export function factIssues(document: any, facts: CvFacts): ValidationIssue[] {
-  const issues: ValidationIssue[] = []
+  const issues: ValidationIssue[] = [...generatedContractIssues(document)]
   const generatedExperience = document?.profile?.experience ?? []
   if (generatedExperience.length !== facts.experience.length) {
     mismatch(issues, 'profile.experience', 'Experience count')
@@ -33,7 +34,7 @@ export function factIssues(document: any, facts: CvFacts): ValidationIssue[] {
         resolution: 'Rewrite or remove only the unsupported numeric claims.' })
     }
   })
-  const educationFacts = facts.education.filter(item => item.is_higher_education)
+  const educationFacts = facts.education
   const generatedEducation = document?.profile?.education ?? []
   if (generatedEducation.length !== educationFacts.length) mismatch(issues, 'profile.education', 'Education count')
   generatedEducation.forEach((entry: any, index: number) => {

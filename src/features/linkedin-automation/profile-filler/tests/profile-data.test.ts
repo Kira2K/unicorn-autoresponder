@@ -1,11 +1,13 @@
 const assert = require('node:assert/strict')
-const { readDate, sectionReadable } = require('../profile-data.ts') as any
+const { normalizeEducation, readDate, sectionReadable } = require('../profile-data.ts') as any
 const { experienceMatches, educationMatches } = require('../profile-match.ts') as any
 
 assert.deepEqual(readDate('2024-09'), { year: 2024, month: 9 })
 assert.deepEqual(readDate('09/01/2024'), { year: 2024, month: 9 })
 assert.deepEqual(readDate('13/01/2024'), undefined)
 assert.equal(sectionReadable({ specifics: { skills: [], throttled_sections: [] } }, 'skills'), true)
+assert.equal(sectionReadable({ specifics: { skills: [],
+  throttled_sections: ['skills'] } }, 'skills'), false)
 assert.equal(sectionReadable({ specifics: { skills: [],
   throttled_sections: ['linkedin_skills'] } }, 'skills'), false)
 
@@ -16,5 +18,7 @@ assert.equal(experienceMatches({ company: { name: 'Acme' }, job_title: 'Engineer
 assert.equal(educationMatches({ school: { name: 'University' }, started_on: '09/01/2020' }, {
   school: 'University', startDate: { year: 2020, month: 9 }
 }), true)
+assert.equal(normalizeEducation({ school: { name: 'University' }, degree: 'MSc',
+  fields_of_study: ['Computer Science'] }).field_of_study, 'Computer Science')
 
 console.log('profile data normalization tests passed')
