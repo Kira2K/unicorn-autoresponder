@@ -11,8 +11,8 @@ export function cvMime(file) {
 }
 
 export function cvUploadError(file) {
-  if (!file?.size) return 'The CV file is empty.'
-  if (file.size > MAX_BYTES) return 'The CV file exceeds 20 MB.'
-  if (!cvMime(file)) return 'Choose a PDF or DOCX CV file.'
+  if (!file?.size) return 'Файл CV пуст.'
+  if (file.size > MAX_BYTES) return 'CV превышает 20 МБ.'
+  if (!cvMime(file)) return 'Выберите CV в формате PDF или DOCX.'
   return ''
 }
