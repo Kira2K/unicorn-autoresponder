@@ -6,6 +6,10 @@ const { runProfileAnalysis } = require('../../linkedin-automation/profile-filler
 const { cvUploadFailure, parseCvBody, readCvUpload } = require('./profile-generation-upload.ts') as
   { cvUploadFailure(error: any): any; parseCvBody: Handler; readCvUpload(req: any): any }
 const CONFLICT_MESSAGES: Record<string, string> = {
+  profile_preview_stale: 'LinkedIn changed after this preview. Build a fresh preview before Apply.',
+  profile_section_unavailable: 'LinkedIn did not return a required section. Wait and build a fresh preview.',
+  profile_entry_ambiguous: 'Several CV entries match the same LinkedIn entry. Resolve the match and rebuild Preview.',
+  profile_current_status_unsupported: 'Mark the entry as current in LinkedIn, then build a fresh preview.',
   profile_filler_auth_required: 'Verify or reconnect LinkedIn before using Profile Filler.',
   profile_job_not_ready: 'This preview can no longer be applied. Build a fresh preview.',
   profile_plan_hash_mismatch: 'This preview is outdated. Build a fresh preview before applying.',
@@ -36,13 +40,11 @@ function failure(error: any) {
     return { status: 429, body: { error: 'noco_rate_limited',
       message: 'NocoDB is busy. Wait 30 seconds and retry.' } }
   }
-  if (['profile_filler_auth_required', 'profile_job_not_ready', 'profile_plan_hash_mismatch',
-    'profile_preview_has_blocking_issues', 'linkedin_operation_active',
-    'profile_rollback_not_available', 'profile_rollback_state_changed',
-    'profile_rollback_unsupported', 'profile_already_rolled_back',
-    'profile_retry_not_ready', 'profile_retry_unavailable'].includes(code)) {
+  if (Object.hasOwn(CONFLICT_MESSAGES, code)) {
     return { status: 409, body: { error: code, message: `[${code}] ${CONFLICT_MESSAGES[code]}` } }
   }
+  if (code === 'profile_state_persist_failed') return { status: 503, body: { error: code,
+    message: 'The job state could not be saved. Further writes are blocked; check the saved result before retrying.' } }
   return { status: 500, body: { error: 'profile_filler_internal_error',
     message: 'Profile Filler failed.' } }
 }

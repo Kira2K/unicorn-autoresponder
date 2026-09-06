@@ -1,6 +1,6 @@
 import type { JsonObject, ProfileInput, ValidationIssue } from '../input-types.ts'
 import { REQUIRED_ID_FIELDS } from '../mcp-contract.ts'
-import { createParameterSearch } from '../parameter-search.ts'
+import { createParameterSearch, type ParameterSearchCache } from '../parameter-search.ts'
 import type { PlanStep, ProfileClient } from '../plan-types.ts'
 import type { ProfileLogger } from '../profile-logger.ts'
 import { linkedInPayload } from '../payloads.ts'
@@ -8,10 +8,11 @@ import { specifics } from '../profile-data.ts'
 
 export async function planOpenToWork(
   client: ProfileClient, accountId: string, desired: ProfileInput,
-  current: JsonObject, issues: ValidationIssue[], logger?: ProfileLogger
+  current: JsonObject, issues: ValidationIssue[], logger?: ProfileLogger,
+  parameterCache?: ParameterSearchCache
 ): Promise<PlanStep[]> {
   if (!desired.openToWork) return []
-  const resolve = createParameterSearch(client, accountId, logger)
+  const resolve = createParameterSearch(client, accountId, logger, parameterCache)
   const titles: Array<{ title: string; id: string }> = []
   for (const [index, value] of desired.openToWork.jobTitles.entries()) {
     const issuePath = `profile.open_to_work.job_titles[${index}].name`

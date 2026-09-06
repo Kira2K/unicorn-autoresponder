@@ -1,7 +1,7 @@
 import type { ProfileInput, ValidationIssue } from '../input-types.ts'
 import { logAction } from '../log-action.ts'
 import { REQUIRED_ID_FIELDS } from '../mcp-contract.ts'
-import { createParameterSearch, type Parameter } from '../parameter-search.ts'
+import { createParameterSearch, type Parameter, type ParameterSearchCache } from '../parameter-search.ts'
 import type { ProfileClient } from '../plan-types.ts'
 import type { ProfileLogger } from '../profile-logger.ts'
 import type { JobTitleChoice, JobTitleChoiceRequest } from './types.ts'
@@ -31,13 +31,14 @@ export async function groundJobTitles(options: {
   client: ProfileClient; accountId: string; input: ProfileInput; issues: ValidationIssue[]
   logger: ProfileLogger
   choose?: (requests: JobTitleChoiceRequest[]) => Promise<JobTitleChoice[]>
+  parameterCache?: ParameterSearchCache
   retry?: { sleep?: (ms: number) => Promise<void>; random?: () => number; now?: () => number
     onRetry?: (retry: CatalogRetry) => Promise<void> | void }
 }) {
   const { client, accountId, logger } = options
   const input = structuredClone(options.input); const issues = [...options.issues]
   if (!input.openToWork) return { input, issues }
-  const resolve = createParameterSearch(client, accountId, logger)
+  const resolve = createParameterSearch(client, accountId, logger, options.parameterCache)
   const titles = input.openToWork.jobTitles
   let pool: Parameter[] = []
   for (const [attempt, query] of jobTitleCatalogQueries(titles.map(item => item.name)).entries()) {

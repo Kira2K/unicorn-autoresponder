@@ -6,12 +6,16 @@ async function main() {
   const generated = generatedDocument()
   generated.profile.about = 'Backend engineer building reliable services.'
   let repairCalls = 0
+  const issueLogs: any[] = []
   const result = await validateWithRepair({ generated, facts: emptyFacts, country: 'Poland',
     generator: { async repairProfile() {
       repairCalls += 1
       return generatedDocument()
-    } }, logger: { event() {} } })
+    } }, logger: { event(stage: string, status: string, details: any) {
+      if (stage === 'generated_profile_issue') issueLogs.push({ status, details })
+    } } })
   assert.equal(repairCalls, 1)
+  assert(issueLogs.some(item => item.status === 'failed' && item.details.fieldPath === 'profile.about'))
   assert.equal(result.issues.some((issue: any) => issue.level === 'fatal'), false)
   assert.equal(result.value.about?.split(/\n\s*\n/).length, 4)
   const twice = generatedDocument(); twice.profile.about = 'Only one block.'

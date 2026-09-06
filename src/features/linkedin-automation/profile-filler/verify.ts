@@ -3,7 +3,9 @@ import type { PlanStep, ProfileClient, VerificationSpec } from './plan-types.ts'
 import {
   desiredEducation, desiredExperience, normalizeEducation, normalizeExperience, section, specifics
 } from './profile-data.ts'
-import { differs, educationMatches, experienceMatches } from './profile-match.ts'
+import { differs } from './profile-match.ts'
+import { entryTarget } from './entry-target.ts'
+import { skillKey } from './skill-selection.ts'
 
 function nestedMatch(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(expected)) return Array.isArray(actual) &&
@@ -25,24 +27,16 @@ export function verifyProfile(profile: JsonObject, spec: VerificationSpec): bool
   if (spec.kind === 'about') return String(profile.bio ?? '') === spec.expected
   if (spec.kind === 'skills') {
     const names = new Set(section(profile, 'skills').map(item =>
-      String(item.name ?? item.title ?? '').toLowerCase()))
-    return spec.expected.every(value => names.has(value.toLowerCase()))
+      skillKey(String(item.name ?? item.title ?? ''))))
+    return spec.expected.every(value => names.has(skillKey(value))) &&
+      (!spec.exact || names.size === new Set(spec.expected.map(skillKey)).size)
   }
   if (spec.kind === 'experience') {
-    const entries = section(profile, 'experience')
-    const target = spec.id ? entries.find(item => item.id === spec.id) :
-      entries.find(item => experienceMatches(item, {
-        company: spec.expected.company, jobTitle: spec.expected.jobTitle,
-        startDate: spec.expected.startDate
-      }))
+    const target = entryTarget(profile, spec)
     return Boolean(target) && !differs(normalizeExperience(target!), desiredExperience(spec.expected))
   }
   if (spec.kind === 'education') {
-    const entries = section(profile, 'education')
-    const target = spec.id ? entries.find(item => item.id === spec.id) :
-      entries.find(item => educationMatches(item, {
-        school: spec.expected.school, startDate: spec.expected.startDate
-      }))
+    const target = entryTarget(profile, spec)
     return Boolean(target) && !differs(normalizeEducation(target!), desiredEducation(spec.expected))
   }
   const data = specifics(profile)
@@ -50,5 +44,6 @@ export function verifyProfile(profile: JsonObject, spec: VerificationSpec): bool
 }
 
 export async function readBack(client: ProfileClient, accountId: string, step: PlanStep) {
-  return verifyProfile(await client.getOwnProfile(accountId, sectionsFor(step.verification)), step.verification)
+  return verifyProfile(await client.getOwnProfile(accountId, sectionsFor(step.verification),
+    { fresh: true }), step.verification)
 }

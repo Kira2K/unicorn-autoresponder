@@ -22,7 +22,7 @@ async function resolveProfileAccount(
   }
   const remoteAccount = await client.getAccount(row.unipileAccountId)
   assertAccountOperational(remoteAccount)
-  const profile = await client.getOwnProfile(row.unipileAccountId, sections)
+  const profile = await client.getOwnProfile(row.unipileAccountId, sections, { fresh: true })
   const identity = verifiedIdentity(remoteAccount, profile, {
     expectedLinkedInUrl: row.linkedinUrl,
     verifiedProviderId: row.verifiedProviderId

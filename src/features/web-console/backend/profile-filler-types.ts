@@ -1,4 +1,5 @@
 export type ProfileFillerService = {
+  recoverPending?(): Promise<void>
   startGeneration(platformAccountId: number,
     upload?: { bytes: Buffer; mimeType: string }): Promise<Record<string, unknown>>
   startPreview(platformAccountId: number, profileFile: unknown): Promise<Record<string, unknown>>

@@ -15,7 +15,8 @@ async function waitFor(service: any, id: string, status: string) {
 }
 
 async function run() {
-  const records = new Map<string, any>(); let limited = true; let extracted = 0; let generated = 0
+  const records = new Map<string, any>(); let limited = true; let planLimitedOnce = false
+  let extracted = 0; let generated = 0
   const account = { platformAccountId: 7, clientName: 'Student', dolphinProfileId: 9,
     linkedinUrl: 'https://www.linkedin.com/in/student/', unipileAccountId: 'acc-1',
     unipileAccountStatus: 'running', verifiedProviderId: 'provider-1',
@@ -32,10 +33,17 @@ async function run() {
       is_locked: false, user_id: 'provider-1' } }, async getOwnProfile() { return {
       public_identifier: 'student', provider_id: 'provider-1', profile_url: account.linkedinUrl,
       specifics: { experience: [], education: [], skills: [] }
-    } }, async searchParameters() {
+    } }, async searchParameters(_accountId: string, type: string, value: string) {
       if (limited) throw Object.assign(new Error('limited'), {
         code: 'unipile_api_too_many_requests', details: { httpStatus: 429, retryAfterMs: 0 }
       })
+      if (type === 'LOCATION' && planLimitedOnce) {
+        planLimitedOnce = false
+        throw Object.assign(new Error('limited'), {
+          code: 'unipile_api_too_many_requests', details: { httpStatus: 429, retryAfterMs: 0 }
+        })
+      }
+      if (type === 'LOCATION') return [{ id: 'location-poland', name: 'Poland' }]
       return ['Backend Engineer', 'Go Engineer', 'Software Engineer', 'Platform Engineer',
         'API Engineer'].map((name, index) => ({ id: `role-${index}`, name }))
     } },
@@ -59,6 +67,12 @@ async function run() {
   assert.equal(ready.status, 'preview_ready')
   assert.equal(extracted, 1); assert.equal(generated, 1)
   assert.equal(records.get(started.jobId).checkpoint, null)
+
+  planLimitedOnce = true
+  const catalogRetry = await service.startGeneration(7)
+  const catalogReady = await waitFor(service, catalogRetry.jobId, 'preview_ready')
+  assert.equal(catalogReady.status, 'preview_ready')
+  assert.equal(extracted, 2); assert.equal(generated, 2)
 }
 
 run().then(() => console.log('generation resume tests passed')).catch(error => {

@@ -33,7 +33,9 @@ export function parseEducation(value: unknown, issues: ValidationIssue[]): Educa
       },
       data: {
         school, startDate, degree: text(data.degree), fieldOfStudy: text(data.field_of_study),
-        endDate: optionalDate(data.end_date, `${path}.data.end_date`, issues),
+        ...(data.end_date === 'present' ? { isCurrent: true } : {}),
+        endDate: data.end_date === 'present' ? undefined :
+          optionalDate(data.end_date, `${path}.data.end_date`, issues),
         grade: text(data.grade),
         activities: typeof data.activities === 'string' ? data.activities : undefined,
         description: typeof data.description === 'string' ? data.description : undefined,

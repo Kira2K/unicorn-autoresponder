@@ -19,6 +19,7 @@ export function validatePlanPayloads(
   steps: PlanStep[], issues: ValidationIssue[], logger?: ProfileLogger
 ) {
   for (const step of steps) {
+    if (step.readOnly) continue
     const issueCount = issues.length
     const path = `profile.${step.section}`
     if (step.section === 'about') {
