@@ -14,6 +14,14 @@ const { linkedinAuthErrorDisplay } = require('./error-display.ts') as {
 type Row = Record<string, any> & { Id: number }
 type AccountRow = import('./types.ts').LinkedInAuthAccountRow
 
+function primaryStack(client: Row): { id?: number; name?: string } {
+  const value = Array.isArray(client.rel_clients_primary_stack)
+    ? client.rel_clients_primary_stack[0] : client.rel_clients_primary_stack
+  const id = Number(value?.Id ?? value?.id)
+  const name = String(value?.name ?? value?.stack ?? value?.stack_name ?? '').trim()
+  return { ...(Number.isFinite(id) && id > 0 ? { id } : {}), ...(name ? { name } : {}) }
+}
+
 function optionalText(value: unknown): string | undefined {
   return String(value ?? '').trim() || undefined
 }
@@ -50,10 +58,13 @@ function listLinkedInAuthAccounts(input: { clients: Row[]; accounts: Row[]; prof
         String(profile.locale ?? '').trim().toLowerCase() === 'en'
       )
       const profileId = enProfiles.length === 1 ? Number(enProfiles[0].dolphin_profile_id) : undefined
+      const stack = primaryStack(client)
       return {
         platformAccountId: Number(account.Id),
         clientId,
         clientName: String(client.client_name ?? '').trim(),
+        ...(stack.id ? { primaryStackId: stack.id } : {}),
+        ...(stack.name ? { primaryStack: stack.name } : {}),
         linkedinUrl: accountLinkedInUrl(account),
         ...(Number.isFinite(profileId) && Number(profileId) > 0 ? { dolphinProfileId: profileId } : {}),
         readinessErrorCode: readinessError(account, input.profiles, clientId),

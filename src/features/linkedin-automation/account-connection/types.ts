@@ -30,6 +30,8 @@ export type LinkedInAuthAccountRow = {
   platformAccountId: number
   clientId: number
   clientName: string
+  primaryStackId?: number
+  primaryStack?: string
   linkedinUrl: string
   dolphinProfileId?: number
   readinessErrorCode?: string

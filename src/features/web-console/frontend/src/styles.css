@@ -1369,3 +1369,11 @@ body {
 .profile-filler-divider::before,
 .profile-filler-divider::after { background: var(--p-content-border-color); content: ''; flex: 1; height: 1px; }
 .profile-generation-meta { color: var(--p-text-muted-color); font-size: .85rem; }
+.connection-inviter { display: grid; gap: .35rem; min-width: 220px; }
+.connection-inviter-head, .connection-stack-editor { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.connection-progress-grid { display: grid; gap: .2rem; margin: .25rem 0; }
+.connection-progress-grid label { color: #475569; font-size: .75rem; }
+.connection-progress-grid progress { accent-color: #10b981; height: .55rem; width: 100%; }
+.connection-timer { background: #fef3c7; border: 1px solid #f59e0b; border-radius: .45rem;
+  display: grid; gap: .15rem; padding: .4rem .5rem; }
+.connection-timer span { font-variant-numeric: tabular-nums; font-weight: 700; }
