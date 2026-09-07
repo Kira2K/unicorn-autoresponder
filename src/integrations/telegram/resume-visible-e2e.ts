@@ -116,6 +116,7 @@ function platformKey(account: any): string {
 
 function accountContact(account: any): string {
   return normalizeText(
+    account?.linkedInUrl ||
     account?.login ||
     account?.nickname ||
     account?.phone ||
@@ -136,7 +137,6 @@ async function ensureVisibleTestPlatformAccount(input: {
   repository: any
   config: VisibleResumeE2eConfig
   platform: string
-  accountLabel: string
   login: string
   platformId?: number
 }): Promise<string> {
@@ -157,12 +157,15 @@ async function ensureVisibleTestPlatformAccount(input: {
     : accountContact(existing)
   if (value) return `${input.platform} account already set.`
 
+  const platformFields = input.platform === 'github'
+    ? { linkedInUrl: input.login }
+    : input.platform === 'linkedin'
+      ? { login: input.login, password: 'visible-resume-e2e', linkedInUrl: input.login }
+      : { login: input.login, nickname: input.login }
   await input.repository.createPlatformAccount(input.config.testClientId, {
     platformId: input.platformId,
     platform: input.platform,
-    accountLabel: input.accountLabel,
-    login: input.login,
-    linkedInUrl: input.platform === 'linkedin' ? input.login : undefined
+    ...platformFields
   })
   return `${input.platform} account was missing and was set to a test value.`
 }
@@ -380,7 +383,6 @@ async function ensureTestClientData(repository: any, config: VisibleResumeE2eCon
     repository,
     config,
     platform: 'github',
-    accountLabel: 'Visible resume e2e GitHub',
     login: 'https://github.com/visible-resume-e2e'
   }))
   setup.push(await ensureVisibleTestPlatformAccount({
@@ -388,21 +390,18 @@ async function ensureTestClientData(repository: any, config: VisibleResumeE2eCon
     config,
     platform: 'linkedin',
     platformId: await platformIdByLabel(repository, 'linkedin'),
-    accountLabel: 'Visible resume e2e LinkedIn',
     login: 'https://linkedin.com/in/visible-resume-e2e'
   }))
   setup.push(await ensureVisibleTestPlatformAccount({
     repository,
     config,
     platform: 'telegram_ru',
-    accountLabel: 'Visible resume e2e Telegram RU',
     login: '@visible_resume_ru'
   }))
   setup.push(await ensureVisibleTestPlatformAccount({
     repository,
     config,
     platform: 'telegram_en',
-    accountLabel: 'Visible resume e2e Telegram EN',
     login: '@visible_resume_en'
   }))
 

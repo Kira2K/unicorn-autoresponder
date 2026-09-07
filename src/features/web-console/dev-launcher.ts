@@ -9,6 +9,13 @@ function uniqueNumbers(values: number[]): number[] {
   return [...new Set(values)].filter(value => Number.isInteger(value) && value > 0)
 }
 
+function buildDevEnvironment(sourceEnv: NodeJS.ProcessEnv, backendPort: number): NodeJS.ProcessEnv {
+  return {
+    ...sourceEnv,
+    WEB_CONSOLE_API_URL: sourceEnv.WEB_CONSOLE_API_URL || `http://127.0.0.1:${backendPort}`
+  }
+}
+
 function parseWindowsNetstatListeners(output: string, ports: number[]): number[] {
   const targetPorts = new Set(ports.map(Number))
   const pids: number[] = []
@@ -114,7 +121,7 @@ function runDevLauncher(): void {
     console.log(`Cleared stale web-console process ids: ${cleared.join(', ')}`)
   }
 
-  const env = { ...process.env }
+  const env = buildDevEnvironment(process.env, backendPort)
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const children = [
     spawnManaged('backend', npmCommand, ['run', 'web:backend:dev'], env),
@@ -151,6 +158,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildDevEnvironment,
   buildWindowsKillCommand,
   clearWebConsolePorts,
   DEFAULT_BACKEND_PORT,

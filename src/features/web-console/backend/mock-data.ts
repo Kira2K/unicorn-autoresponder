@@ -29,6 +29,18 @@ const mockClients = [
     client_status: { Id: 1, title: 'studying' }
   },
   {
+    Id: 1.5,
+    client_name: 'Аблена Дементьева',
+    first_name: 'Аблена',
+    last_name: 'Дементьева',
+    fio: 'Аблена Дементьева',
+    calendar_email: 'alexeevalydia@gmail.com',
+    telegram_general_chat_id: '-100170000',
+    rel_clients_primary_stack: { Id: 10, name: 'FRONTEND' },
+    market: 'Ru',
+    client_status: { Id: 1, title: 'studying' }
+  },
+  {
     Id: 10,
     client_name: 'Latest Admin Client',
     first_name: 'Latest',
@@ -180,6 +192,49 @@ const mockPlatformAccounts = [
     rel_platformAccounts_platform: { Id: 7, name: 'phone', label: 'phone_en' }
   },
   {
+    Id: 107,
+    platform: 'whatsapp',
+    account_label: 'Legacy WhatsApp',
+    phone: '+441234567890',
+    clients_id: 1,
+    platforms_id: 20,
+    rel_platformAccounts_platform: { Id: 20, name: 'whatsapp', label: 'whatsapp' }
+  },
+  {
+    Id: 108,
+    platform: 'legacy_unknown',
+    account_label: 'Legacy Unknown',
+    clients_id: 1
+  },
+  {
+    Id: 109,
+    platform: 'linkedin',
+    account_label: 'linkedin',
+    login: 'ablena.linkedin@example.com',
+    linkedin_url: 'https://linkedin.com/in/ablena-test',
+    clients_id: 1.5,
+    platforms_id: 16,
+    rel_platformAccounts_platform: { Id: 16, name: 'linkedin', label: 'linkedin' }
+  },
+  {
+    Id: 110,
+    platform: 'github',
+    account_label: 'github',
+    login: 'https://github.com/ablena-test',
+    clients_id: 1.5,
+    platforms_id: 17,
+    rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
+  },
+  {
+    Id: 111,
+    platform: 'whatsapp',
+    account_label: 'Legacy WhatsApp',
+    phone: '+48111111111',
+    clients_id: 1.5,
+    platforms_id: 20,
+    rel_platformAccounts_platform: { Id: 20, name: 'whatsapp', label: 'whatsapp' }
+  },
+  {
     Id: 201,
     platform: 'email_en',
     account_label: 'Latest Email En',
@@ -294,10 +349,14 @@ const mockPlatformAccounts = [
 
 const mockPlatforms = [
   { Id: 1, label: 'hh_ru', name: 'hh' },
+  { Id: 10, label: 'hh_en', name: 'hh' },
   { Id: 2, label: 'telegram_ru' },
   { Id: 4, label: 'telegram_en' },
   { Id: 7, label: 'phone_en', name: 'phone' },
-  { Id: 3, label: 'email_en', name: 'email' },
+  { Id: 20, label: 'whatsapp', name: 'whatsapp' },
+  { Id: 25, label: 'email_en', name: 'email' },
+  { Id: 26, label: null, name: 'email_ru' },
+  { Id: 27, label: 'email_ru', name: 'email' },
   { Id: 16, label: 'linkedin', name: 'linkedin' },
   { Id: 17, label: 'github', name: 'github' }
 ]

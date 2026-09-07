@@ -14,6 +14,13 @@ const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as 
     actorRole: 'provider'
   }): import('./types.ts').DolphinProfileStatus
 }
+const {
+  CANONICAL_EMAIL_RU_PLATFORM_ID,
+  PLATFORM_ACCOUNT_POLICY_CLIENT_ID,
+  PLATFORM_ACCOUNT_POLICY_EMAIL,
+  normalizePlatformAccountLabel,
+  platformAccountPolicy
+} = require('../platform-account-policy.ts') as typeof import('../platform-account-policy.ts')
 
 type ClientDashboard = import('./types.ts').ClientDashboard
 type ClientProfilePatch = import('./types.ts').ClientProfilePatch
@@ -26,7 +33,6 @@ type WebPlatformAccount = import('./types.ts').WebPlatformAccount
 type ProviderClientRow = import('./types.ts').ProviderClientRow
 type ResumeWorkflowPatch = import('./types.ts').ResumeWorkflowPatch
 type ResumeWorkflowRecord = import('./types.ts').ResumeWorkflowRecord
-
 type NocoRecord = Record<string, unknown> & { Id: number }
 type NocoSelectOption = { id?: string; Id?: string | number; title?: string; name?: string; label?: string }
 const LINKEDIN_PLATFORM_ID = 16
@@ -500,7 +506,7 @@ function githubUrl(platformAccounts: NocoRecord[]): string {
   const account = platformAccounts
     .filter(isGitHubPlatformAccount)
     .sort((a, b) => Number(a.Id) - Number(b.Id))[0]
-  return normalizeText(account?.login)
+  return normalizeText(account?.linkedin_url || account?.login)
 }
 
 function linkedInUrl(platformAccounts: NocoRecord[]): string {
@@ -609,7 +615,7 @@ function toPlatformAccount(record: NocoRecord, fullAccess: boolean, telegramIds:
   return {
     id: Number(record.Id),
     clientId: accountClientId(record) || undefined,
-    platform: normalizeText(record.platform || linkedName(record.rel_platformAccounts_platform)),
+    platform: platformAccountRecordLabel(record),
     platformId: accountPlatformId(record) || undefined,
     isTelegramAccount: isTelegramPlatformAccount(record, telegramIds),
     accountLabel: normalizeText(record.account_label || record.label || record.platform || linkedLabel(record.rel_platformAccounts_platform)),
@@ -646,6 +652,38 @@ function toOption(record: NocoRecord, fields: string[]): WebOption {
     id: Number(record.Id),
     label: optionLabel(record, fields)
   }
+}
+
+function platformRecordLabel(record: NocoRecord): string {
+  return normalizePlatformAccountLabel(record.label ?? record.platform ?? record.name)
+}
+
+function supportedPlatformOptions(records: NocoRecord[]): WebOption[] {
+  const selected = new Map<string, NocoRecord>()
+  for (const record of records) {
+    const label = platformRecordLabel(record)
+    if (!platformAccountPolicy(label)) continue
+    const current = selected.get(label)
+    if (!current) {
+      selected.set(label, record)
+      continue
+    }
+
+    const recordId = Number(record.Id)
+    const currentId = Number(current.Id)
+    const useCanonicalEmailRu = label === 'email_ru' &&
+      recordId === CANONICAL_EMAIL_RU_PLATFORM_ID &&
+      currentId !== CANONICAL_EMAIL_RU_PLATFORM_ID
+    const recordHasCanonicalLabel = normalizePlatformAccountLabel(record.label) === label
+    const currentHasCanonicalLabel = normalizePlatformAccountLabel(current.label) === label
+    if (useCanonicalEmailRu || (recordHasCanonicalLabel && !currentHasCanonicalLabel)) {
+      selected.set(label, record)
+    }
+  }
+
+  return [...selected.entries()]
+    .map(([label, record]) => ({ id: Number(record.Id), label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 }
 
 function cleanOptionalText(value: unknown): string | undefined {
@@ -769,6 +807,95 @@ function buildAccountPatch(input: PlatformAccountInput, options: { includeBlankS
   return patch
 }
 
+function platformAccountInputError(
+  code: string,
+  message: string,
+  fields: string[] = []
+): Error & { code: string; fields?: string[] } {
+  return Object.assign(new Error(message), {
+    code,
+    ...(fields.length ? { fields } : {})
+  })
+}
+
+function platformAccountRecordLabel(account: NocoRecord): string {
+  const candidates = [
+    linkedLabel(account.rel_platformAccounts_platform),
+    account.platform,
+    linkedName(account.rel_platformAccounts_platform)
+  ].map(normalizePlatformAccountLabel).filter(Boolean)
+  return candidates.find(candidate => Boolean(platformAccountPolicy(candidate))) ?? candidates[0] ?? ''
+}
+
+function validatePlatformAccountFields(
+  input: PlatformAccountInput,
+  platform: string,
+  options: { allowPlatformIdentity: boolean }
+): void {
+  const policy = platformAccountPolicy(platform)
+  if (!policy) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Platform account ${platform || 'unknown'} is not supported.`
+    )
+  }
+
+  const identityFields = options.allowPlatformIdentity ? ['platformId', 'platform'] : []
+  const allowedFields = new Set<string>([...identityFields, ...policy.fields])
+  const disallowedFields = Object.keys(input).filter(field => !allowedFields.has(field))
+  if (disallowedFields.length) {
+    throw platformAccountInputError(
+      'platform_account_fields_not_allowed',
+      `Fields are not allowed for ${platform}: ${disallowedFields.join(', ')}.`,
+      disallowedFields
+    )
+  }
+
+  const missingFields = policy.requiredFields.filter(field => !normalizeText(input[field]))
+  if (missingFields.length) {
+    throw platformAccountInputError(
+      'platform_account_required_fields_missing',
+      `Required fields are missing for ${platform}: ${missingFields.join(', ')}.`,
+      [...missingFields]
+    )
+  }
+}
+
+function resolveCreatePlatform(
+  input: PlatformAccountInput,
+  platforms: NocoRecord[]
+): { id: number; label: string } {
+  const platformId = cleanNullableId(input.platformId)
+  const requestedLabel = normalizePlatformAccountLabel(input.platform)
+  const canonicalOption = platformId === undefined
+    ? supportedPlatformOptions(platforms).find(option => option.label === requestedLabel)
+    : undefined
+  const resolvedPlatformId = platformId ?? canonicalOption?.id
+  const record = platforms.find(candidate => Number(candidate.Id) === resolvedPlatformId)
+  const label = record ? platformRecordLabel(record) : requestedLabel
+
+  if (!record || !platformAccountPolicy(label)) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Platform account ${requestedLabel || platformId || 'unknown'} is not supported.`
+    )
+  }
+  if (requestedLabel && requestedLabel !== label) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Platform ${requestedLabel} does not match platform ID ${record.Id}.`
+    )
+  }
+  if (label === 'email_ru' && Number(record.Id) !== CANONICAL_EMAIL_RU_PLATFORM_ID) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Use canonical email_ru platform ID ${CANONICAL_EMAIL_RU_PLATFORM_ID}.`
+    )
+  }
+
+  return { id: Number(record.Id), label }
+}
+
 function notFoundError(message: string): Error & { code?: string } {
   const error = new Error(message) as Error & { code?: string }
   error.code = 'not_found'
@@ -783,8 +910,20 @@ function extractCreatedRecordId(value: any): number | null {
   return null
 }
 
-function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebConsoleRepository {
+function createWebConsoleRepository(options: {
+  nocoClient?: any
+  platformAccountPolicyEmails?: string[]
+  platformAccountPolicyClientIds?: number[]
+} = {}): WebConsoleRepository {
   const nocoClient = options.nocoClient ?? createNocoClient()
+  const platformAccountPolicyClientIds = new Set([
+    PLATFORM_ACCOUNT_POLICY_CLIENT_ID,
+    ...(options.platformAccountPolicyClientIds ?? [])
+  ].map(Number).filter(id => Number.isFinite(id) && id > 0))
+  const platformAccountPolicyEmails = new Set([
+    PLATFORM_ACCOUNT_POLICY_EMAIL,
+    ...(options.platformAccountPolicyEmails ?? String(process.env.WEB_CONSOLE_PLATFORM_ACCOUNT_POLICY_EMAILS ?? '').split(','))
+  ].map(normalizeEmail).filter(Boolean))
 
   async function fetchClients(): Promise<NocoRecord[]> {
     return await nocoClient.fetchRecords(TABLES.clients.id, 1000)
@@ -799,6 +938,12 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       return records.find(record => Number(record.Id) === Number(clientId)) ?? null
     }
     return (await fetchClients()).find(record => Number(record.Id) === Number(clientId)) ?? null
+  }
+
+  async function isPlatformAccountPolicyClient(clientId: number): Promise<boolean> {
+    if (platformAccountPolicyClientIds.has(Number(clientId))) return true
+    const client = await fetchClientById(clientId)
+    return Boolean(client && platformAccountPolicyEmails.has(normalizeEmail(client.calendar_email)))
   }
 
   async function fetchClientsByIds(clientIds: number[]): Promise<NocoRecord[]> {
@@ -1170,8 +1315,16 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         .map(record => toOption(record, ['level', 'name', 'label']))
     },
 
-    async listPlatforms(): Promise<WebOption[]> {
-      return (await fetchPlatforms())
+    async isPlatformAccountPolicyEnabled(clientId: number): Promise<boolean> {
+      return await isPlatformAccountPolicyClient(clientId)
+    },
+
+    async listPlatforms(clientId?: number): Promise<WebOption[]> {
+      const records = await fetchPlatforms()
+      if (clientId && await isPlatformAccountPolicyClient(clientId)) {
+        return supportedPlatformOptions(records)
+      }
+      return records
         .sort((a, b) => optionLabel(a, ['label', 'platform', 'name']).localeCompare(optionLabel(b, ['label', 'platform', 'name'])))
         .map(record => toOption(record, ['label', 'platform', 'name']))
     },
@@ -1186,8 +1339,24 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard> {
-      const record = buildAccountPatch(input, { includeBlankSecrets: true })
-      if (!record.account_label) record.account_label = String(record.platform || 'Platform account')
+      if (!await isPlatformAccountPolicyClient(clientId)) {
+        const record = buildAccountPatch(input, { includeBlankSecrets: true })
+        if (!record.account_label) record.account_label = String(record.platform || 'Platform account')
+        await nocoClient.createRecord(TABLES.platformAccounts.id, {
+          ...record,
+          clients_id: Number(clientId)
+        })
+        return await refetchDashboard(clientId)
+      }
+      const platform = resolveCreatePlatform(input, await fetchPlatforms())
+      const normalizedInput: PlatformAccountInput = {
+        ...input,
+        platformId: platform.id,
+        platform: platform.label
+      }
+      validatePlatformAccountFields(normalizedInput, platform.label, { allowPlatformIdentity: true })
+      const record = buildAccountPatch(normalizedInput, { includeBlankSecrets: true })
+      record.account_label = platform.label
       await nocoClient.createRecord(TABLES.platformAccounts.id, {
         ...record,
         clients_id: Number(clientId)
@@ -1196,8 +1365,32 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard> {
-      await getOwnedPlatformAccount(clientId, accountId)
-      const patch = buildAccountPatch(input, { includeBlankSecrets: false })
+      const account = await getOwnedPlatformAccount(clientId, accountId)
+      if (!await isPlatformAccountPolicyClient(clientId)) {
+        const patch = buildAccountPatch(input, { includeBlankSecrets: false })
+        if (Object.keys(patch).length) {
+          await nocoClient.patchRecord(TABLES.platformAccounts.id, Number(accountId), patch)
+        }
+        return await refetchDashboard(clientId)
+      }
+      const platform = platformAccountRecordLabel(account)
+      const currentPlatformId = accountPlatformId(account)
+      const requestedPlatformId = cleanNullableId(input.platformId)
+      const requestedPlatform = normalizePlatformAccountLabel(input.platform)
+      if (
+        (requestedPlatformId !== undefined && requestedPlatformId !== currentPlatformId) ||
+        (requestedPlatform && requestedPlatform !== platform)
+      ) {
+        throw platformAccountInputError(
+          'platform_account_platform_immutable',
+          'The platform of an existing account cannot be changed.'
+        )
+      }
+      const fieldsOnly = { ...input }
+      delete fieldsOnly.platformId
+      delete fieldsOnly.platform
+      validatePlatformAccountFields(fieldsOnly, platform, { allowPlatformIdentity: false })
+      const patch = buildAccountPatch(fieldsOnly, { includeBlankSecrets: false })
       if (Object.keys(patch).length) {
         await nocoClient.patchRecord(TABLES.platformAccounts.id, Number(accountId), patch)
       }

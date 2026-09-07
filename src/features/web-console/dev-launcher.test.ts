@@ -1,9 +1,11 @@
 const assert = require('node:assert/strict')
 const {
+  buildDevEnvironment,
   buildWindowsKillCommand,
   parseWindowsNetstatListeners,
   uniqueNumbers
 } = require('./dev-launcher.ts') as {
+  buildDevEnvironment(sourceEnv: NodeJS.ProcessEnv, backendPort: number): NodeJS.ProcessEnv
   buildWindowsKillCommand(pid: number): { command: string; args: string[]; display: string }
   parseWindowsNetstatListeners(output: string, ports: number[]): number[]
   uniqueNumbers(values: number[]): number[]
@@ -11,6 +13,15 @@ const {
 
 function runTests(): void {
   assert.deepEqual(uniqueNumbers([4300, 4301, 4300, 0, -1, 4301]), [4300, 4301])
+
+  assert.equal(
+    buildDevEnvironment({ WEB_CONSOLE_PORT: '4320' }, 4320).WEB_CONSOLE_API_URL,
+    'http://127.0.0.1:4320'
+  )
+  assert.equal(
+    buildDevEnvironment({ WEB_CONSOLE_API_URL: 'http://localhost:4999' }, 4320).WEB_CONSOLE_API_URL,
+    'http://localhost:4999'
+  )
 
   const netstatOutput = `
   Proto  Local Address          Foreign Address        State           PID
