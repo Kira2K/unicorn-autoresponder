@@ -56,6 +56,7 @@ function httpError(status: number, message: string): Error {
 }
 
 async function runTests(): Promise<void> {
+  await require('./request-limiter-regression.test.ts').testCompletedBatches()
   assert.deepEqual(parseJobArgs([]), {
     mode: 'dry-run',
     apply: false,
