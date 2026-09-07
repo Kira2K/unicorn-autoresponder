@@ -5,10 +5,15 @@ export type CatalogRetry = {
   nextRetryAt: string
 }
 
-const retryable = (error: any) => [
-  'unipile_api_too_many_requests', 'unipile_http_429',
+const RETRYABLE_CODES = new Set([
+  'unipile_api_too_many_requests', 'unipile_http_429', 'unipile_api_internal_error',
   'unipile_timeout', 'unipile_unreachable'
-].includes(String(error?.code ?? ''))
+])
+
+export function isRetryableCatalogFailure(error: any) {
+  const status = Number(error?.details?.httpStatus)
+  return RETRYABLE_CODES.has(String(error?.code ?? error ?? '')) || status >= 500
+}
 
 export async function withCatalogRetry<T>(operation: () => Promise<T>, options: {
   logger: ProfileLogger
@@ -25,13 +30,16 @@ export async function withCatalogRetry<T>(operation: () => Promise<T>, options: 
   for (let attempt = 0; ; attempt += 1) {
     try { return await operation() }
     catch (error: any) {
-      if (!retryable(error) || attempt >= fallback.length) {
-        if (retryable(error)) error.retryExhausted = true
+      if (!isRetryableCatalogFailure(error) || attempt >= fallback.length) {
+        if (isRetryableCatalogFailure(error)) error.retryExhausted = true
         throw error
       }
       const supplied = Number(error?.details?.retryAfterMs)
-      const base = Number.isFinite(supplied) ? supplied : fallback[attempt]
-      const delayMs = Math.max(0, Math.round(base * (0.9 + random() * 0.2)))
+      const hasProviderDelay = Number.isFinite(supplied) && supplied >= 0
+      const base = hasProviderDelay ? supplied : fallback[attempt]
+      const delayMs = hasProviderDelay
+        ? Math.round(base)
+        : Math.max(0, Math.round(base * (0.9 + random() * 0.2)))
       const retry = { attempt: attempt + 1,
         nextRetryAt: new Date(now() + delayMs).toISOString() }
       options.logger.event('unipile_retry_scheduled', 'succeeded', {

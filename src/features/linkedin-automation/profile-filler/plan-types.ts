@@ -18,12 +18,13 @@ export type PlanSection =
 export type VerificationSpec =
   | { kind: 'headline'; expected: string }
   | { kind: 'about'; expected: string }
-  | { kind: 'skills'; expected: string[] }
+  | { kind: 'skills'; expected: string[]; exact?: boolean }
   | { kind: 'experience'; id?: string; expected: ExperienceData }
   | { kind: 'education'; id?: string; expected: EducationData }
   | { kind: 'open_to_work'; expected: JsonObject }
 
 export type PlanStep = {
+  readOnly?: boolean
   id: string
   section: PlanSection
   action: 'update' | 'create' | 'add'
@@ -35,6 +36,8 @@ export type PlanStep = {
 }
 
 export type ProfilePlan = {
+  entryPolicy?: import('./approved-state.ts').ApprovedEntries
+  skillPolicy?: { baseline: string[]; target: string[] }
   kind: 'apply' | 'rollback'
   rollbackOf?: string
   account: ProfileAccount
@@ -46,14 +49,15 @@ export type ProfilePlan = {
   generation?: GenerationMetadata
 }
 
-export type ProfilePreview = Omit<ProfilePlan, 'input' | 'steps'> & {
+export type ProfilePreview = Omit<ProfilePlan, 'input' | 'steps' | 'skillPolicy' | 'entryPolicy'> & {
   jobId: string
   planHash: string
   document?: JsonObject
-  steps: Array<Omit<PlanStep, 'payload' | 'verification'>>
+  steps: Array<Omit<PlanStep, 'payload' | 'verification' | 'readOnly'>>
 }
 
 export type FillStepResult = {
+  writeIntent?: { step: PlanStep; savedAt: string }
   stepId: string
   section: PlanSection
   status: 'pending' | 'waiting' | 'writing' | 'write_accepted' | 'verifying' |
@@ -72,8 +76,9 @@ export type FillStepResult = {
 }
 
 export type FillResult = {
-  status: 'running' | 'pending_verification' | 'verified' | 'failed' | 'no_changes'
+  status: 'running' | 'verifying' | 'pending_verification' | 'verified' | 'failed' | 'no_changes'
   steps: FillStepResult[]
+  verification?: { attempt: number; maxAttempts: number; nextReadBackAt?: string; startedAt?: string; notBefore?: string }
   startedAt?: string
   updatedAt?: string
   finishedAt?: string
@@ -81,7 +86,7 @@ export type FillResult = {
 
 export type ProfileClient = {
   getAccount(accountId: string): Promise<JsonObject>
-  getOwnProfile(accountId: string, sections?: string[]): Promise<JsonObject>
+  getOwnProfile(accountId: string, sections?: string[], options?: { fresh?: boolean }): Promise<JsonObject>
   updateOwnProfile(accountId: string, payload: JsonObject): Promise<unknown>
   searchParameters(accountId: string, type: CatalogType, keywords: string):
     Promise<Array<{ id: string; name: string }>>

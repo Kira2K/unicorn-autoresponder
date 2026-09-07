@@ -15,5 +15,11 @@ export function validateGeneratedProfile(document: unknown, facts: CvFacts, coun
     throw codedError('profile_generation_validation_failed',
       'Generated profile failed strict validation.', issues)
   }
+  validation.value.experience.forEach((entry, index) => {
+    entry.factId = facts.experience[index]?.fact_id ?? `exp_${index + 1}`
+  })
+  validation.value.education.forEach((entry, index) => {
+    entry.factId = facts.education[index]?.fact_id ?? `edu_${index + 1}`
+  })
   return { value: validation.value, issues }
 }

@@ -15,11 +15,12 @@ function editFields(fields: JsonObject, before: JsonObject | undefined, after: J
 
 export function experiencePayload(data: ExperienceData, id?: string, before?: JsonObject): JsonObject {
   const fields: JsonObject = {
-    job_title: { name: data.jobTitle }, company: { name: data.company },
-    ...(data.location ? { location: { name: data.location } } : {}),
+    job_title: data.catalog?.jobTitle ?? { name: data.jobTitle },
+    company: data.catalog?.company ?? { name: data.company },
+    ...(data.location ? { location: data.catalog?.location ?? { name: data.location } } : {}),
     ...(data.workplaceType ? { workplace_type: data.workplaceType } : {}),
-    ...(data.startDate ? { start_date: date(data.startDate) } : {}),
-    ...(data.endDate ? { end_date: date(data.endDate) } : {}),
+    ...(data.startDate?.month ? { start_date: date(data.startDate) } : {}),
+    ...(data.endDate?.month ? { end_date: date(data.endDate) } : {}),
     ...(data.description !== undefined ? { description: data.description } : {}),
     ...(data.sourceOfHire ? { source_of_hire: data.sourceOfHire } : {}),
     ...(data.skills.length ? { skills: data.skills.map(name => ({ name })) } : {})
@@ -32,10 +33,10 @@ export function experiencePayload(data: ExperienceData, id?: string, before?: Js
 
 export function educationPayload(data: EducationData, id?: string, before?: JsonObject): JsonObject {
   const fields: JsonObject = {
-    school: { name: data.school }, ...(data.degree ? { degree: { name: data.degree } } : {}),
+    school: data.catalog?.school ?? { name: data.school }, ...(data.degree ? { degree: { name: data.degree } } : {}),
     ...(data.fieldOfStudy ? { field_of_study: { name: data.fieldOfStudy } } : {}),
-    ...(data.startDate ? { start_date: date(data.startDate) } : {}),
-    ...(data.endDate ? { end_date: date(data.endDate) } : {}),
+    ...(data.startDate?.month ? { start_date: date(data.startDate) } : {}),
+    ...(data.endDate?.month ? { end_date: date(data.endDate) } : {}),
     ...(data.grade ? { grade: data.grade } : {}),
     ...(data.activities !== undefined ? { activities: data.activities } : {}),
     ...(data.description !== undefined ? { description: data.description } : {}),

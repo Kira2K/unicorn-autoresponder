@@ -20,11 +20,21 @@ async function run() {
   assert.equal(failure({ code: 'profile_job_not_ready' }).body.message,
     '[profile_job_not_ready] This preview can no longer be applied. Build a fresh preview.')
   assert.equal(failure({ code: 'profile_preview_has_blocking_issues' }).status, 409)
+  for (const code of ['profile_preview_stale', 'profile_section_unavailable',
+    'profile_entry_ambiguous', 'profile_current_status_unsupported']) {
+    const response = failure({ code, message: 'private provider details' })
+    assert.equal(response.status, 409)
+    assert.equal(response.body.error, code)
+    assert(!response.body.message.includes('private'))
+  }
+  assert.equal(failure({ code: 'profile_state_persist_failed' }).status, 503)
   const calls: any[] = []
+  let recoveryStarts = 0
   const job = { jobId: 'job-1', status: 'preview_ready', planHash: 'safe-hash' }
   const app = createWebConsoleApp({
     useMockData: true,
     profileFiller: {
+      async recoverPending() { recoveryStarts += 1 },
       async searchParameters(id: number, type: string, keywords: string) {
         calls.push(['search', id, type, keywords]); return { type, items: [{ name: 'QA Engineer' }] }
       },
@@ -33,13 +43,19 @@ async function run() {
           size: upload.bytes.length }]); return job
       },
       async startPreview(id: number, body: any) { calls.push(['preview', id, body]); return job },
-      async apply(id: string, hash: string) { calls.push(['apply', id, hash]); return job },
+      async apply(id: string, hash: string) {
+        if (hash === 'stale') throw { code: 'profile_preview_stale', message: 'private provider details' }
+        calls.push(['apply', id, hash]); return job
+      },
       async resume(id: string) { calls.push(['resume', id]); return job },
       async rollback(id: string) { calls.push(['rollback', id]); return job },
       async get(id: string) { return id === job.jobId ? job : undefined },
       async list() { return [job] }
     }
   })
+  assert.equal(recoveryStarts, 0, 'Constructing the app must not start live recovery')
+  await app.locals.recoverProfileVerification()
+  assert.equal(recoveryStarts, 1, 'Backend startup hook is connected to Profile Filler')
   const server = app.listen(0, '127.0.0.1')
   await new Promise(resolve => server.once('listening', resolve))
   const address = server.address() as import('node:net').AddressInfo
@@ -60,6 +76,11 @@ async function run() {
     } })).status, 403)
     const admin = await login(base, 'unicornveryevil@gmail.com', '101010')
     const headers = { Cookie: admin, 'Content-Type': 'application/json' }
+    const stale = await fetch(`${base}/api/admin/linkedin/profile-jobs/job-1/apply`, {
+      method: 'POST', headers, body: JSON.stringify({ planHash: 'stale' })
+    })
+    assert.equal(stale.status, 409)
+    assert.equal((await stale.json()).error, 'profile_preview_stale')
     const analysis = await fetch(`${base}/api/admin/linkedin/profile-analysis`, {
       method: 'POST', headers, body: JSON.stringify({ headline: 'Engineer' })
     })

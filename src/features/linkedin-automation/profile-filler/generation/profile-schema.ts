@@ -1,41 +1,15 @@
-import { nullableString, nullableWorkplace, strictObject, stringList, yearMonth } from './schema-helpers.ts'
+import { nullableString, strictObject, stringList } from './schema-helpers.ts'
 
-const experienceData = strictObject({
-  company: { type: 'string', minLength: 1 },
-  job_title: { type: 'string', minLength: 1 },
-  location: nullableString,
-  workplace_type: nullableWorkplace,
-  start_date: yearMonth,
-  end_date: yearMonth,
+const experience = strictObject({
+  fact_id: { type: 'string', pattern: '^exp_[1-9][0-9]*$' },
   description: nullableString,
-  source_of_hire: { type: 'null' },
   skills: { ...stringList, minItems: 5, maxItems: 15 }
 })
 
-const experience = strictObject({
-  action: { type: 'string', const: 'upsert' },
-  match: strictObject({
-    company: { type: 'string' }, job_title: { type: 'string' }, start_date: yearMonth
-  }),
-  data: experienceData
-})
-
-const educationData = strictObject({
-  school: { type: 'string', minLength: 1 },
-  degree: nullableString,
-  field_of_study: nullableString,
-  start_date: yearMonth,
-  end_date: yearMonth,
-  grade: nullableString,
-  activities: nullableString,
-  description: nullableString,
-  skills: { ...stringList, minItems: 5 }
-})
-
 const education = strictObject({
-  action: { type: 'string', const: 'upsert' },
-  match: strictObject({ school: { type: 'string' }, start_date: yearMonth }),
-  data: educationData
+  fact_id: { type: 'string', pattern: '^edu_[1-9][0-9]*$' },
+  description: nullableString,
+  skills: { ...stringList, minItems: 5, maxItems: 15 }
 })
 
 const openToWork = strictObject({

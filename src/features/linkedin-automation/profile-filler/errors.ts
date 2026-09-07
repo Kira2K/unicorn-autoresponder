@@ -2,9 +2,12 @@ const SAFE_CODES = new Set([
   'linkedin_account_not_found', 'profile_filler_auth_required', 'profile_validation_failed',
   'profile_job_not_found', 'profile_job_not_ready', 'profile_plan_hash_mismatch',
   'profile_entry_ambiguous', 'profile_entry_id_missing',
+  'profile_entry_missing', 'profile_preview_stale', 'profile_section_unavailable',
+  'profile_state_persist_failed', 'profile_current_status_unsupported',
   'linkedin_operation_active', 'linkedin_profile_jobs_table_missing',
   'noco_rate_limited',
   'profile_retry_unavailable', 'profile_retry_not_ready',
+  'profile_verification_unavailable', 'profile_verification_mismatch',
   'dolphin_en_profile_not_found', 'profile_generation_validation_failed',
   'unipile_account_locked', 'unipile_provider_mismatch', 'linkedin_provider_id_mismatch'
 ])

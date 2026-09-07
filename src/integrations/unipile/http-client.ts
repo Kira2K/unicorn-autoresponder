@@ -7,6 +7,7 @@ const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as
   typeof import('./error-diagnostics.ts')
 
 type FetchLike = (url: string, init: Record<string, unknown>) => Promise<any>
+type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean }
 
 function retryAfterMs(response: any, capMs: number) {
   const value = String(response?.headers?.get?.('retry-after') ?? '').trim()
@@ -39,7 +40,8 @@ function createUnipileHttpClient(options: {
   const timeoutMs = options.timeoutMs ?? 60_000
   const retryAfterCapMs = options.retryAfterCapMs ?? 120_000
 
-  async function request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown): Promise<T> {
+  async function request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown,
+    requestOptions: RequestOptions = {}): Promise<T> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: any
@@ -51,7 +53,8 @@ function createUnipileHttpClient(options: {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          'X-API-KEY': apiKey
+          'X-API-KEY': apiKey,
+          ...(requestOptions.noCache ? { 'Cache-Control': 'no-cache' } : {})
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal
@@ -74,13 +77,14 @@ function createUnipileHttpClient(options: {
     if (!response.ok) {
       const remoteCode = safeErrorCode(data?.type ?? data?.code, `http_${response.status}`)
       const requestId = safeErrorCode(data?.req_id, '')
+      const retryDelay = retryAfterMs(response,
+        requestOptions.fullRetryAfter ? Number.POSITIVE_INFINITY : retryAfterCapMs)
       throw new LinkedInAuthError(
         `unipile_${remoteCode}`,
         `Unipile request failed with HTTP ${response.status} (${remoteCode}).` +
         (requestId ? ` Request ID: ${requestId}.` : ''),
         { ...safeUnipileDiagnostics(response.status, data),
-          ...(retryAfterMs(response, retryAfterCapMs) !== undefined
-            ? { retryAfterMs: retryAfterMs(response, retryAfterCapMs) } : {}) }
+          ...(retryDelay !== undefined ? { retryAfterMs: retryDelay } : {}) }
       )
     }
     return data as T

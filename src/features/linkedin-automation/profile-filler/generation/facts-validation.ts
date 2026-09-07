@@ -17,11 +17,12 @@ const text = (value: unknown) => typeof value === 'string'
 const nullableText = (value: unknown) => value === null || text(value)
 const texts = (value: unknown) => Array.isArray(value) && value.every(text)
 const date = (value: unknown) => value === null || typeof value === 'string' &&
-  /^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(value)
+  /^(?:19|20|21)\d{2}(?:-(?:0[1-9]|1[0-2]))?$/.test(value)
+const endDate = (value: unknown) => value === 'present' || date(value)
 
 function validExperience(item: any) {
   return exactKeys(item, EXPERIENCE) && text(item.company) && text(item.job_title) &&
-    date(item.start_date) && date(item.end_date) && nullableText(item.location) &&
+    date(item.start_date) && endDate(item.end_date) && nullableText(item.location) &&
     (item.workplace_type === null || ['ON_SITE', 'HYBRID', 'REMOTE'].includes(item.workplace_type)) &&
     ['achievements', 'responsibilities', 'technologies'].every(key => texts(item[key])) &&
     text(item.evidence)
@@ -30,7 +31,7 @@ function validExperience(item: any) {
 function validEducation(item: any) {
   return exactKeys(item, EDUCATION) && text(item.school) &&
     ['degree', 'field_of_study', 'grade', 'activities'].every(key => nullableText(item[key])) &&
-    date(item.start_date) && date(item.end_date) && text(item.evidence) &&
+    date(item.start_date) && endDate(item.end_date) && text(item.evidence) &&
     typeof item.is_higher_education === 'boolean'
 }
 

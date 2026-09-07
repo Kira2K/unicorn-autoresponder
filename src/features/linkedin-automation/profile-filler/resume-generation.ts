@@ -6,6 +6,8 @@ const { createGenerationRuntime } = require('./generation/runtime.ts') as
   { createGenerationRuntime(value?: any, logger?: any): any }
 const { groundAndPreview } = require('./generation/ground-and-preview.ts') as
   { groundAndPreview(options: any, checkpoint: any): Promise<boolean> }
+const { isRetryableCatalogFailure } = require('./generation/catalog-retry.ts') as
+  typeof import('./generation/catalog-retry.ts')
 const { validCheckpoint } = require('./generation/checkpoint.ts') as
   typeof import('./generation/checkpoint.ts')
 
@@ -14,7 +16,9 @@ async function resumeProfileGeneration(options: any) {
   logger.event('generation_resume_request', 'started')
   const job = jobs.get(jobId) ?? await logAction(logger, 'job_read', () => store.get(jobId))
   if (!job) throw codedError('profile_job_not_found', 'Profile job was not found.')
-  if (job.status !== 'waiting_retry') {
+  const retryableFailure = job.status === 'failed' &&
+    isRetryableCatalogFailure(job.errorCode)
+  if (job.status !== 'waiting_retry' && !retryableFailure) {
     throw codedError('profile_retry_not_ready', 'Profile generation is not waiting for retry.')
   }
   if (!validCheckpoint(job.checkpoint)) {

@@ -9,25 +9,35 @@ import { validatePlanPayloads } from './payload-contract.ts'
 import type { ProfileLogger } from './profile-logger.ts'
 import { createEntrySkillBudget } from './entry-skill-budget.ts'
 import { MCP_WRITE_ORDER } from './mcp-contract.ts'
+import { resolveProfileCatalog } from './catalog-resolution.ts'
+import type { ParameterSearchCache } from './parameter-search.ts'
+import { selectProfileSkills } from './skill-selection.ts'
+import { name, section } from './profile-data.ts'
+import { captureApprovedEntries } from './approved-state.ts'
 
 function position(step: { section: string; action: string }) {
   const key = ['experience', 'education'].includes(step.section)
     ? `${step.section}-${step.action}` : step.section
-  return MCP_WRITE_ORDER.indexOf(key as any)
+  return MCP_WRITE_ORDER.findIndex(value => value === key)
 }
 
 export async function buildProfilePlan(
   client: ProfileClient, account: ProfileAccount, desired: ProfileInput,
-  current: JsonObject, validationIssues: ValidationIssue[], logger?: ProfileLogger
+  current: JsonObject, validationIssues: ValidationIssue[], logger?: ProfileLogger,
+  parameterCache?: ParameterSearchCache
 ): Promise<ProfilePlan> {
   const issues = structuredClone(validationIssues)
+  const catalog = await resolveProfileCatalog({ client, accountId: account.accountId,
+    desired, issues, logger, parameterCache })
+  const resolved = selectProfileSkills(catalog, current, issues)
   const skillBudget = createEntrySkillBudget(current)
   const planned = [
-    ...planBasic(desired, current, issues),
-    ...planExperience(desired, current, issues, skillBudget),
-    ...planEducation(desired, current, issues, skillBudget),
-    ...planSkills(desired, current, issues),
-    ...await planOpenToWork(client, account.accountId, desired, current, issues, logger)
+    ...planBasic(resolved, current, issues),
+    ...planExperience(resolved, current, issues, skillBudget),
+    ...planEducation(resolved, current, issues, skillBudget),
+    ...planSkills(resolved, current, issues),
+    ...await planOpenToWork(client, account.accountId, resolved, current, issues, logger,
+      parameterCache)
   ].sort((left, right) => position(left) - position(right))
   const steps = planned
   validatePlanPayloads(steps, issues, logger)
@@ -37,7 +47,11 @@ export async function buildProfilePlan(
   issues.filter(issue => issue.level === 'warning' && /skipped/i.test(issue.resolution ?? ''))
     .forEach(issue => logger?.event('field_skipped', 'succeeded', { fieldPath: issue.path }))
   return {
-    kind: 'apply', account, input: desired,
+    kind: 'apply', account, input: resolved, entryPolicy: captureApprovedEntries(resolved, current),
+    ...(resolved.skills.add.length ? { skillPolicy: {
+      baseline: section(current, 'skills').map(name).filter((item): item is string => Boolean(item)),
+      target: resolved.skills.add
+    } } : {}),
     identity: {
       displayName: String(current.display_name ?? current.name ?? account.clientName),
       profileUrl: String(current.profile_url ?? account.profileUrl)

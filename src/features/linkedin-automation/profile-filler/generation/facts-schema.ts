@@ -1,10 +1,10 @@
-import { nullableString, nullableWorkplace, strictObject, stringList, yearMonth } from './schema-helpers.ts'
+import { nullableString, nullableWorkplace, strictObject, stringList, cvDate, cvEndDate } from './schema-helpers.ts'
 
 const experience = strictObject({
   company: { type: 'string' },
   job_title: { type: 'string' },
-  start_date: yearMonth,
-  end_date: yearMonth,
+  start_date: cvDate,
+  end_date: cvEndDate,
   location: nullableString,
   workplace_type: nullableWorkplace,
   achievements: stringList,
@@ -16,8 +16,8 @@ const education = strictObject({
   school: { type: 'string' },
   degree: nullableString,
   field_of_study: nullableString,
-  start_date: yearMonth,
-  end_date: yearMonth,
+  start_date: cvDate,
+  end_date: cvEndDate,
   grade: nullableString,
   activities: nullableString,
   evidence: { type: 'string', maxLength: 500 },

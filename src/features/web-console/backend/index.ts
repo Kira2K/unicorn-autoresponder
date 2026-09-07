@@ -37,6 +37,9 @@ if (isProduction) {
 
 app.listen(port, host, () => {
   console.log(`Web console backend listening at http://${host}:${port}`)
+  void app.locals.recoverProfileVerification().catch(() => {
+    console.error('Profile verification recovery could not be started; inspect safe Profile Filler logs.')
+  })
   if (isProduction) {
     console.log(`Web console static files served from ${staticDir}`)
   }

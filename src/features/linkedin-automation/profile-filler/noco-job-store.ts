@@ -82,7 +82,12 @@ function createProfileJobStore(client = createNocoClient({ pageDelayMs: 300 })) 
   async function list() {
     return (await client.fetchRecords(await table(), 50, { sort: '-created_at' })).map(fromRow)
   }
-  return { create, get, list, update }
+  async function listPendingVerification(): Promise<ProfileJob[]> {
+    return (await client.fetchRecords(await table(), 50, {
+      where: '(status,eq,running)~or(status,eq,verifying)', sort: 'created_at'
+    })).map(fromRow)
+  }
+  return { create, get, list, listPendingVerification, update }
 }
 
 module.exports = { createProfileJobStore, fromRow }
