@@ -50,12 +50,20 @@ For Unipile contract work, verify the current `Unipile API` V2 specification and
 
 ## Engineering Context
 
-- Use the project-local runtime under `D:\Unicorn\tools\node-v24.20.0-win-x64` without replacing the system Node installation or changing global PATH.
+- Use Node `24.20.0` without replacing system Node or changing global PATH. The usual local bundle is `D:\Unicorn\tools\node-v24.20.0-win-x64`; locate the approved runtime on another machine rather than assuming that path exists.
 - Keep business behavior in the LinkedIn feature, provider request details in the Unipile integration, and browser UI behind backend-owned operations.
 - Treat NocoDB as the live source for LinkedIn cards and bindings; Google Sheets data is legacy or advisory unless the current task explicitly establishes otherwise.
 - Serialize mutations for one LinkedIn account through the existing operation boundary.
 - After an external mutation, require read-back where the current contract supports it. Treat a lost or ambiguous result as `uncertain`, not as permission for a blind retry.
 - Never print or retain `.env` values, cookies, API keys, proxy credentials, exact user agents, or unnecessary full provider responses.
+
+## Local Development Convention
+
+- Follow the selected checkout's `AGENTS.md`: one module owns one concrete task, with explicit inputs, outputs, errors and side effects. Helpers inside a module are fine; a separate service or class is not required.
+- Define the contract and focused checks first. Inject only the data and methods the consumer needs; adapters must preserve the same contract and pass common contract tests.
+- Apply SOLID, KISS and DRY pragmatically: separate responsibilities, keep implementations replaceable and business rules in one place. Do not add abstraction or refactor neighbours merely to satisfy terminology.
+- A Writer receives prepared context and a model and returns content/checks. CV loading, ENV, storage, scheduling and external publication belong outside it.
+- Mock checks do not authorize paid calls or live writes. Keep regression coverage for duplicate writes, loss of data and unknown provider results.
 
 ## Adapt To The Request
 
