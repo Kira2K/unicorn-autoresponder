@@ -8,6 +8,10 @@ type QueueEvent = {
   waitMs?: number
   durationMs?: number
   status?: number
+  errorCode?: string
+  waitReason?: 'batch_pause' | 'rate_limit' | null
+  completedInBatch?: number
+  requestInBatch?: number
 }
 
 function createNocoQueueLogger(options: {

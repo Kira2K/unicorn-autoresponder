@@ -1,98 +1,160 @@
+const { nocoErrorCode, nocoRetryAfterMs } = require('./error-policy.ts') as
+  typeof import('./error-policy.ts')
 const { createNocoQueueLogger } = require('./queue-logger.ts') as {
   createNocoQueueLogger(options?: any): (event: Record<string, unknown>) => void
 }
+
 type Kind = 'read' | 'write'
-type Item = {
-  kind: Kind
-  action: () => Promise<any>
-  resolve: (value: any) => void
-  reject: (error: unknown) => void
-}
-function createNocoRequestLimiter(options: {
-  maxStarts?: number
-  windowMs?: number
+type Loader<T> = () => Promise<T>
+
+type LimiterOptions = {
+  maxRequestsPerBatch?: number
+  batchPauseMs?: number
   cooldownMs?: number
+  now?: () => number
+  sleep?: (milliseconds: number) => Promise<void>
   log?: (event: Record<string, unknown>) => void
-} = {}) {
-  const maxStarts = options.maxStarts ?? 4
-  const windowMs = options.windowMs ?? 1000
-  const cooldownMs = options.cooldownMs ?? 30000
+  /** Backward-compatible name for maxRequestsPerBatch. */
+  maxStarts?: number
+  /** Backward-compatible name for batchPauseMs. */
+  windowMs?: number
+}
+
+function positiveInteger(value: unknown, fallback: number): number {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : fallback
+}
+
+function createNocoRequestLimiter(options: LimiterOptions = {}) {
+  const maxRequestsPerBatch = positiveInteger(
+    options.maxRequestsPerBatch ?? options.maxStarts,
+    4
+  )
+  const batchPauseMs = positiveInteger(options.batchPauseMs ?? options.windowMs, 1_000)
+  const cooldownMs = positiveInteger(options.cooldownMs, 30_000)
+  const now = options.now ?? Date.now
+  const sleep = options.sleep ?? ((milliseconds: number) =>
+    new Promise(resolve => setTimeout(resolve, milliseconds)))
   const log = options.log ?? createNocoQueueLogger()
-  const queue: Item[] = []
-  let batchCount = 0
+
+  let tail = Promise.resolve()
+  let waiting = 0
+  let busy = false
+  let completedInBatch = 0
   let batchPausedUntil = 0
   let blockedUntil = 0
-  let busy = false
-  let timer: NodeJS.Timeout | undefined
 
-  const depth = () => queue.length
-  const nextAt = (now = Date.now()) => {
-    if (blockedUntil && blockedUntil <= now) {
+  function refreshPauses(timestamp = now()): void {
+    if (blockedUntil && blockedUntil <= timestamp) {
       blockedUntil = 0
-      log({ event: 'cooldown_finished', queueDepth: depth() })
+      log({ event: 'cooldown_finished', queueDepth: waiting })
     }
-    if (batchPausedUntil && batchPausedUntil <= now) {
-      batchCount = 0
+    if (batchPausedUntil && batchPausedUntil <= timestamp) {
       batchPausedUntil = 0
-      log({ event: 'batch_pause_finished', queueDepth: depth() })
+      log({ event: 'batch_pause_finished', queueDepth: waiting })
     }
-    return Math.max(blockedUntil, batchPausedUntil, now)
   }
-  const snapshot = () => {
-    const now = Date.now()
-    const availableAt = nextAt(now)
+
+  function availableAt(timestamp = now()): number {
+    refreshPauses(timestamp)
+    return Math.max(timestamp, blockedUntil, batchPausedUntil)
+  }
+
+  function waitReason(timestamp = now()): 'batch_pause' | 'rate_limit' | null {
+    if (blockedUntil > timestamp) return 'rate_limit'
+    if (batchPausedUntil > timestamp) return 'batch_pause'
+    return null
+  }
+
+  function snapshot() {
+    const timestamp = now()
+    const nextAt = availableAt(timestamp)
+    const reason = waitReason(timestamp)
     return {
-      state: blockedUntil > now ? 'cooldown' : depth() ? 'queued' : 'ready',
-      waiting: depth(),
-      availableAt: availableAt > now ? new Date(availableAt).toISOString() : null,
-      waitMs: Math.max(0, availableAt - now)
+      state: reason === 'rate_limit' ? 'cooldown' : waiting > 0 || busy || reason ? 'queued' : 'ready',
+      waiting,
+      busy,
+      availableAt: nextAt > timestamp ? new Date(nextAt).toISOString() : null,
+      waitMs: Math.max(0, nextAt - timestamp),
+      waitReason: reason,
+      completedInBatch
     }
   }
-  function wake(at: number) {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => { timer = undefined; pump() }, Math.max(1, at - Date.now()))
+
+  function rateLimited(waitMs = cooldownMs): void {
+    const safeWait = Number.isFinite(waitMs) && waitMs > 0 ? Number(waitMs) : cooldownMs
+    const timestamp = now()
+    blockedUntil = Math.max(blockedUntil, timestamp + safeWait)
+    // The rate-limit cooldown is longer than the normal batch pause and starts a fresh batch.
+    completedInBatch = 0
+    batchPausedUntil = 0
+    log({ event: 'cooldown_started', status: 429, queueDepth: waiting,
+      waitMs: safeWait, completedInBatch })
   }
-  function pump() {
-    if (busy || !depth()) return
-    const now = Date.now()
-    const availableAt = nextAt(now)
-    if (availableAt > now) {
-      wake(availableAt)
-      return
+
+  async function waitForAvailability(): Promise<void> {
+    while (true) {
+      const timestamp = now()
+      const delay = Math.max(0, availableAt(timestamp) - timestamp)
+      if (!delay) return
+      await sleep(delay)
     }
-    const item = queue.shift()!
-    batchCount += 1
-    if (batchCount >= maxStarts) {
-      batchPausedUntil = now + windowMs
-      log({ event: 'batch_pause_started', queueDepth: depth(), waitMs: windowMs })
-    }
-    busy = true
-    const startedAt = Date.now()
-    log({ event: 'request_dispatched', kind: item.kind, queueDepth: depth() })
-    void item.action().then(value => {
-      log({ event: 'request_succeeded', kind: item.kind, durationMs: Date.now() - startedAt })
-      item.resolve(value)
-    }, error => {
-      const status = Number(error?.response?.status)
-      log({ event: 'request_failed', kind: item.kind, durationMs: Date.now() - startedAt,
-        ...(Number.isFinite(status) ? { status } : {}) })
-      item.reject(error)
-    }).finally(() => { busy = false; pump() })
   }
-  function schedule<T>(kind: Kind, action: () => Promise<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      queue.push({ kind, action, resolve, reject })
-      log({ event: 'request_queued', kind, queueDepth: depth(), waitMs: snapshot().waitMs })
-      pump()
+
+  function completeAttempt(rateLimitError: boolean): void {
+    if (rateLimitError) return
+    completedInBatch += 1
+    if (completedInBatch < maxRequestsPerBatch) return
+    completedInBatch = 0
+    batchPausedUntil = Math.max(batchPausedUntil, now() + batchPauseMs)
+    log({ event: 'batch_pause_started', queueDepth: waiting,
+      waitMs: batchPauseMs, completedInBatch })
+  }
+
+  function schedule<T>(kind: Kind, action: Loader<T>): Promise<T> {
+    waiting += 1
+    log({ event: 'request_queued', kind, queueDepth: waiting, waitMs: snapshot().waitMs,
+      completedInBatch })
+
+    const queued = tail.then(async () => {
+      await waitForAvailability()
+      waiting -= 1
+      busy = true
+      const startedAt = now()
+      const requestInBatch = completedInBatch + 1
+      let rateLimitError = false
+      log({ event: 'request_dispatched', kind, queueDepth: waiting, completedInBatch,
+        requestInBatch })
+      try {
+        const value = await action()
+        log({ event: 'request_succeeded', kind, queueDepth: waiting,
+          durationMs: now() - startedAt, requestInBatch })
+        return value
+      } catch (error: any) {
+        const status = Number(error?.response?.status)
+        const errorCode = nocoErrorCode(error)
+        rateLimitError = errorCode === 'noco_rate_limited'
+        if (rateLimitError) rateLimited(nocoRetryAfterMs(error, now()) ?? cooldownMs)
+        log({ event: 'request_failed', kind, queueDepth: waiting,
+          durationMs: now() - startedAt,
+          requestInBatch,
+          ...(Number.isFinite(status) ? { status } : {}),
+          ...(errorCode ? { errorCode } : {}) })
+        throw error
+      } finally {
+        completeAttempt(rateLimitError)
+        busy = false
+      }
     })
+
+    tail = queued.then(() => undefined, () => undefined)
+    return queued
   }
-  function rateLimited(waitMs = cooldownMs) {
-    const safeWait = Number.isFinite(waitMs) && waitMs > 0 ? waitMs : cooldownMs
-    blockedUntil = Math.max(blockedUntil, Date.now() + safeWait)
-    log({ event: 'cooldown_started', status: 429, queueDepth: depth(), waitMs: safeWait })
-    if (depth()) wake(blockedUntil)
-  }
+
   return { rateLimited, schedule, snapshot }
 }
+
 const sharedNocoRequestLimiter = createNocoRequestLimiter()
+
 module.exports = { createNocoRequestLimiter, sharedNocoRequestLimiter }
+export type { Kind, LimiterOptions }

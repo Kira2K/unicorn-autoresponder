@@ -11,7 +11,7 @@ const isProduction = process.env.NODE_ENV === 'production'
 const port = Number(process.env.PORT ?? process.env.WEB_CONSOLE_PORT ?? 4300)
 const host = process.env.WEB_CONSOLE_HOST ?? (isProduction ? '0.0.0.0' : '127.0.0.1')
 const staticDir = path.resolve(__dirname, '../../../../dist/web-console')
-const app = createWebConsoleApp()
+const app = createWebConsoleApp({ initializeConnectionInviter: true })
 
 if (isProduction) {
   if (!fs.existsSync(staticDir)) {
