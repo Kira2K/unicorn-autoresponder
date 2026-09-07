@@ -14,6 +14,7 @@ async function settled(service: any, jobId: string, expected: string) {
 }
 
 async function run() {
+  await require('./read-only-history.test.ts').testReadOnlyHistory()
   await require('./entry-claims.test.ts').testEntryClaims()
   await require('./repair-entry-contract.test.ts').testRepairEntryContract()
   await require('./current-entry.test.ts').testCurrentEntry()
@@ -136,6 +137,9 @@ async function run() {
     async get() { return verificationRecord }, async list() { return [verificationRecord] },
     async update(_id: string, patch: any) { Object.assign(verificationRecord, structuredClone(patch)) }
   }
+  verificationRecord.result.steps[0].writeIntent = {
+    step: verificationRecord.plan.steps[0], savedAt: new Date(0).toISOString()
+  }
   const recoveredVerifier = createProfileFillerService({ store: verificationStore,
     client: { async updateOwnProfile() { recoveryWrites += 1 },
       async getOwnProfile() { return { description: 'Recovered' } } },
@@ -144,7 +148,7 @@ async function run() {
       ordinaryWrite: { min: 0, max: 0 }, readBack: { min: 0, max: 0 },
       finalReadBack: { min: 0, max: 0 }, skillsBatch: { min: 0, max: 0 },
       verificationScheduleSeconds: [0] } } })
-  await recoveredVerifier.list()
+  await recoveredVerifier.recoverPending()
   const verifiedAfterRestart = await settled(recoveredVerifier, 'verifying-job', 'succeeded')
   assert.equal(verifiedAfterRestart.result.status, 'verified')
   assert.equal(recoveryWrites, 0)
