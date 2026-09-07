@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { testAccountScope } = require('./account-scope.test.ts') as typeof import('./account-scope.test.ts')
 const { writeFileSync } = require('node:fs') as typeof import('node:fs')
 const { tmpdir } = require('node:os') as typeof import('node:os')
 const { join } = require('node:path') as typeof import('node:path')
@@ -606,7 +607,7 @@ async function run() {
     ['postReadbackPersistsUncertain', postReadbackFailurePersistsUncertainBeforeRetry],
     ['providerCooldownRecovery', providerRateLimitRecoversAndCompletesRun],
     ['quotaOverflow', corruptConfirmedQuotaBlocksPosts],
-    ['readOnly', readOnlyServiceRejectsMutations], ['missingStack', missingStack],
+    ['accountScope', testAccountScope], ['readOnly', readOnlyServiceRejectsMutations], ['missingStack', missingStack],
     ['weekend', weekendRun], ['safeRetry', safeFailedRetry], ['safeHistory', safeHistoryRetry],
     ['stop', stoppableRun], ['stopPersist', stopPersistenceRetriesDespiteStopIntent],
     ['stopClaim', stopAfterClaimDoesNotReachProvider],

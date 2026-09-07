@@ -7,6 +7,8 @@ function failure(error: any) {
   const nocoFailure = nocoRouteFailure(error)
   if (nocoFailure) return nocoFailure
   const code = String(error?.code ?? 'connection_inviter_internal_error')
+  if (code === 'connection_account_not_allowed') return { status: 403,
+    body: { error: code, message: 'Аккаунт не разрешён для этого ручного запуска backend.' } }
   if (['linkedin_account_not_found', 'connection_run_not_found'].includes(code)) return {
     status: 404, body: { error: code, message: 'LinkedIn account or connection run was not found.' }
   }

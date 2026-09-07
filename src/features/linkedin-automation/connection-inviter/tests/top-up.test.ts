@@ -62,11 +62,23 @@ async function run() {
     stackId: 10, stack: 'GO' }, now, 'Europe/Moscow', false)
   seeded.status = 'partial'; seeded.stage = 'search_exhausted'
   seeded.connectionCount = 1663; seeded.dailyLimit = 40; seeded.dailyQuota = 40
+  seeded.runId = 'topup-33' // This seed searches cached Berlin in the recruiter stream.
   seeded.audienceQuota = { recruiter: 28, technical: 12 }; seeded.counters.sent = 2
   seeded.searchProgress.recentSearchAt = ['2026-08-29T08:58:00.000Z']
-  seeded.searchProgress.locations.Berlin = { status: 'resolved', city: 'Berlin', id: 'geo-berlin',
+  seeded.searchProgress.locations.Berlin = { status: 'resolved', city: 'Berlin', id: 'location-Berlin',
     label: 'Berlin', resolvedAt: '2026-08-29T08:58:00.000Z' }
   seeded.finishedAt = now.toISOString()
+  const resolveLocation = test.adapter.resolveLocations.bind(test.adapter)
+  test.adapter.resolveLocations = async (account: string, city: string) => {
+    assert.notEqual(city, 'Berlin', 'Top-up must reuse the saved location ID')
+    return resolveLocation(account, city)
+  }
+  const firstSearch: string[] = []
+  const search = test.adapter.searchPeople.bind(test.adapter)
+  test.adapter.searchPeople = async (account: string, input: { keywords: string; locationId: string }) => {
+    firstSearch.push(input.locationId)
+    return search(account, input)
+  }
   const created = await test.store.createRun(seeded)
   let nocoBudgetResets = 0
   const resettableStore = test.store as typeof test.store & {
@@ -93,10 +105,11 @@ async function run() {
   const internalResumed: any = await test.store.getRun(resumed.runId)
   assert.equal(internalResumed.searchProgress.recentSearchAt
     .includes('2026-08-29T08:58:00.000Z'), true)
-  assert.equal(internalResumed.searchProgress.locations.Berlin.id, 'geo-berlin')
+  assert.equal(internalResumed.searchProgress.locations.Berlin.id, 'location-Berlin')
   const completed: any = await waitRun(service, resumed.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.stage, 'completed')
   assert.equal(completed.counters.sent, 40); assert.equal(test.metrics.sends, 38)
+  assert.equal(firstSearch.includes('location-Berlin'), true, 'Exercise the saved location, not just its JSON')
   await service.start(7)
   assert.equal(test.metrics.sends, 38)
   await thresholdDoesNotIncreaseQuota()

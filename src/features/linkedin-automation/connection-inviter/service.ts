@@ -1,4 +1,5 @@
 import { resolveContext } from './account.mts'
+import { connectionAccountScope } from './account-scope.ts'
 import { executeConnectionRun } from './execution.ts'
 import { dateParts } from './limits.ts'
 import { createConnectionLogger, logged } from './logger.ts'
@@ -26,6 +27,7 @@ type ServiceOptions = Partial<Omit<ConnectionRuntime, 'adapter' | 'emit' | 'stop
   autoRecover?: boolean
   enforceWriterSingleton?: boolean
   writerLockPath?: string
+  allowedAccounts?: readonly number[]
 }
 
 const activeRunStatus = (run: ConnectionRun) => run.status === 'running' ||
@@ -46,6 +48,7 @@ export const connectionWriterHeartbeatDue = (lastPersistedAt: number, now: numbe
   now - lastPersistedAt >= CONNECTION_WRITER_HEARTBEAT_MS
 
 export function createConnectionInviterService(options: ServiceOptions = {}) {
+  const scope = connectionAccountScope(options.allowedAccounts)
   const repository = options.repository
   if (!repository) throw new Error('Connection Inviter requires a LinkedIn repository.')
   const logger = options.logger ?? createConnectionLogger()
@@ -223,7 +226,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     }
     assertRecoveryOwner()
     const today = dateParts(runtime.now(), runtime.timeZone).localDate
-    const runs = await runtime.store.listRuns(100)
+    const runs = (await runtime.store.listRuns(100)).filter(run => scope.includes(run.platformAccountId))
     assertRecoveryOwner()
     const blockedAccounts = new Set<number>()
     const stale = runs.filter(run => run.localDate !== today && activeRunStatus(run) &&
@@ -356,6 +359,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       })
     },
     async saveStack(platformAccountId: number, stackId: number) {
+      scope.assert(platformAccountId)
       if (!runtime.writerEnabled) throw connectionError('connection_writer_disabled',
         'Connection Inviter is read-only on this backend.')
       runtime.assertWriterOwnership?.()
@@ -367,6 +371,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       })
     },
     async start(platformAccountId: number, input: { safeRecruiterOnly?: boolean } = {}) {
+      scope.assert(platformAccountId)
       if (disposed) throw connectionError('connection_writer_service_stopped',
         'Connection Inviter writer service has been stopped.')
       runtime.assertWriterOwnership?.()
@@ -427,6 +432,10 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       if (!runtime.writerEnabled) throw connectionError('connection_writer_disabled',
         'Connection Inviter is read-only on this backend.')
       runtime.assertWriterOwnership?.()
+      if (options.allowedAccounts) {
+        const run = activeRuns.get(runId) ?? await runtime.store.getRun(runId)
+        if (run) scope.assert(run.platformAccountId)
+      }
       return requestRunStop(runtime, activeRuns, stopRequests, runId, save, execute)
     },
     async recover() {
