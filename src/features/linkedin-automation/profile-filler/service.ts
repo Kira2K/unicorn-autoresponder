@@ -13,8 +13,8 @@ const { startProfileGeneration } = require('./start-generation.ts') as
   { startProfileGeneration(options: any): Promise<any> }
 const { resumeProfileGeneration } = require('./resume-generation.ts') as
   { resumeProfileGeneration(options: any): Promise<any> }
-const { recoverInterruptedJob } = require('./job-state.ts') as
-  { recoverInterruptedJob(store: any, job: ProfileJob): Promise<ProfileJob> }
+const { recoverInterruptedJob, profileReadView } = require('./job-state.ts') as
+  typeof import('./job-state.ts')
 const { findParameterOptions } = require('./parameter-options.ts') as
   typeof import('./parameter-options.ts')
 const { approvedSections, assertApprovedState } = require('./approved-state.ts') as typeof import('./approved-state.ts')
@@ -77,16 +77,12 @@ function createProfileFillerService(options: any = {}) {
     const active = jobs.get(jobId)
     const job = active ?? await getStore().get(jobId)
     if (!job) return undefined
-    if (!active) await recoverInterruptedJob(getStore(), job)
-    if (job.status === 'verifying') void ensureVerification(job)
-    return publicProfileJob(job)
+    return publicProfileJob(profileReadView(job, Boolean(active)))
   }
   async function listJobs() {
     return await Promise.all((await getStore().list()).map(async (stored: ProfileJob) => {
       const active = jobs.get(stored.jobId)
-      const job = active ?? await recoverInterruptedJob(getStore(), stored)
-      if (job.status === 'verifying') void ensureVerification(job)
-      return publicProfileJob(job)
+      return publicProfileJob(profileReadView(active ?? stored, Boolean(active)))
     }))
   }
   async function startPreview(platformAccountId: number, profileFile: unknown) {
