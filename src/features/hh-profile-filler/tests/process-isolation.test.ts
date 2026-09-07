@@ -16,6 +16,8 @@ export function runProcessIsolationTests() {
 
   assert.doesNotMatch(autoresponses, /profile-filler|Profile Filler/i)
   assert.doesNotMatch(profileFiller, /npm run orchestrator|ORCHESTRATOR_WORK_WITH_MARKET/i)
+  assert.match(profileFiller, /TELEGRAM_STORAGE_ROOT\s*=\s*Join-Path \$RuntimeRepo 'storage'/)
+  assert.match(profileFiller, /telegram-reporting\\\.telegram-session/)
   assert.match(registration, /HH-Autoresponses-Daily/)
   assert.match(registration, /HH-Profile-Filler-Daily/)
   assert.match(registration, /Unregister-ScheduledTask[^\r\n]+LegacyTaskName/)

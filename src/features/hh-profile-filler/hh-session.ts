@@ -68,7 +68,16 @@ export async function withAuthorizedHHPage<T>(client: ResolvedClient,
     }
     const page = context.pages()[0] ?? await context.newPage()
     if (!/^https:\/\/([^/]+\.)?hh\.ru\//i.test(page.url())) {
-      await page.goto('https://hh.ru/', { waitUntil: 'domcontentloaded', timeout: 120_000 })
+      try {
+        await page.goto('https://hh.ru/', { waitUntil: 'domcontentloaded', timeout: 120_000 })
+      } catch (error) {
+        // A Dolphin tab can finish the cross-domain commit while HH keeps a
+        // subresource pending. Accept an already committed HH page; otherwise
+        // retry with the weaker, sufficient navigation milestone.
+        if (!/^https:\/\/([^/]+\.)?hh\.ru\//i.test(page.url())) {
+          await page.goto('https://hh.ru/', { waitUntil: 'commit', timeout: 60_000 })
+        }
+      }
     }
     const initial = await validateAuth(page, { timeoutMs: 10_000 })
     if (initial.state === 'captcha') {

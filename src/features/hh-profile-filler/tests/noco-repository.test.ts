@@ -28,14 +28,39 @@ export async function runNocoRepositoryTests() {
       en_version_url: 'https://docs.google.com/document/d/cv', UpdatedAt: '2026-09-01' }],
     [TABLES.stacks.id]: [{ Id: 1, name: 'Python' }, { Id: 2, name: 'FullStack' }]
   }
+  const reads = new Map<string, number>()
   const repository = createProfileFillerNocoRepository({
-    async fetchRecords(tableId: string) { return records[tableId] ?? [] }
+    async fetchRecords(tableId: string) {
+      reads.set(tableId, (reads.get(tableId) ?? 0) + 1)
+      return records[tableId] ?? []
+    }
   })
+  await repository.listClients(true)
   const resolved = await repository.resolveClient(7, 'En')
+  await repository.resolveClient(7, 'En')
   assert.equal(resolved.stack, 'FullStack')
   assert.equal(resolved.dolphinProfileId, 123)
   assert.equal(resolved.contacts.email, 'login@example.com')
   assert.equal(resolved.contacts.phone, '+123')
   assert.equal(resolved.contacts.telegram, '@nick')
   assert.equal(resolved.credentials.login, 'login@example.com')
+  assert.equal(reads.get(TABLES.clients.id), 1)
+  for (const tableId of [TABLES.hhAutoresponses.id, TABLES.dolphinProfiles.id,
+    TABLES.platformAccounts.id, TABLES.cvProcessing.id, TABLES.stacks.id]) {
+    assert.equal(reads.get(tableId), 1)
+  }
+
+  const rateLimitedRepository = createProfileFillerNocoRepository({
+    async fetchRecords() {
+      const error: any = new Error('Request failed with status code 429')
+      error.response = { status: 429, headers: { 'retry-after': '2' } }
+      throw error
+    }
+  })
+  await assert.rejects(rateLimitedRepository.listClients(true), (error: any) => {
+    assert.equal(error.code, 'profile_noco_rate_limited')
+    assert.equal(error.stage, 'resolve_noco')
+    assert.equal(error.details.retryAfterMs, 2000)
+    return true
+  })
 }

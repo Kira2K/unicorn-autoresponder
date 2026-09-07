@@ -54,6 +54,57 @@ export async function runServiceTests() {
   assert.deepEqual(result.createdResumeTitles, ['Title A', 'Title B'])
   assert.deepEqual(deleted, ['old-1', 'old-2'])
 
+  const variantProfile: PreparedProfile = {
+    ...profile,
+    client: { ...profile.client, market: 'Ru', stack: 'FullStack' },
+    titles: [
+      'Старший Fullstack разработчик / Senior Fullstack Developer',
+      'Старший Backend разработчик / Senior Backend Developer',
+      'Старший Frontend разработчик / Senior Frontend Developer'
+    ]
+  }
+  const baseline = { id: 'baseline', title: 'Старший фуллстэк разработчик',
+    href: 'https://hh.ru/resume/baseline', isDraft: false }
+  const variants = [baseline]
+  const duplicateCalls: Array<{ sourceId: string; title: string }> = []
+  const configured: string[] = []
+  const variantService = createProfileFillerService({
+    repository: {} as any,
+    drive: {} as any,
+    extractor: {} as any,
+    withPage: async (_client: any, action: any) => await action(fakePage, artifactDir),
+    ui: {
+      async listResumes() { return variants },
+      async duplicateResumeVariant(_page: any, source: any, title: string) {
+        duplicateCalls.push({ sourceId: source.id, title })
+        const normalized = title.includes('Backend')
+          ? 'Старший бэкенд разработчик' : 'Старший фронтенд разработчик'
+        const resume = { id: `variant-${variants.length}`, title: normalized,
+          href: `https://hh.ru/resume/variant-${variants.length}`, isDraft: false }
+        variants.push(resume)
+        return resume
+      },
+      async createResumeDraft() { throw new Error('A filled baseline must be duplicated.') },
+      async deleteResume() { throw new Error('Preserved resumes must not be deleted.') },
+      async configurePrivacyAndStopList(_page: any, resume: any) {
+        configured.push(resume.id)
+        return { added: [], existing: [], skipped: [] }
+      },
+      async inspectHH() { return { resumes: variants, artifact: 'artifact' } }
+    } as any
+  })
+  const variantResult = await variantService.execute(variantProfile, 'variant-job', {
+    preserveExisting: true
+  })
+  assert.equal(variantResult.ok, true)
+  assert.deepEqual(duplicateCalls, [
+    { sourceId: 'baseline', title: variantProfile.titles[1] },
+    { sourceId: 'baseline', title: variantProfile.titles[2] }
+  ])
+  assert.deepEqual(configured, ['baseline', 'variant-1', 'variant-2'])
+  assert.deepEqual(variantResult.createdResumeTitles,
+    ['Старший бэкенд разработчик', 'Старший фронтенд разработчик'])
+
   let destructiveCreateCalls = 0
   const criticalService = createProfileFillerService({
     repository: {} as any,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { buildPreparedProfile } from '../profile-builder.ts'
+import { ProfileFillerError } from '../errors.ts'
 import type { CvProfile, ResolvedClient } from '../types.ts'
 
 export function runProfileBuilderTests() {
@@ -35,4 +36,24 @@ export function runProfileBuilderTests() {
     ['Employer', 'Vendor', 'Product Brand', 'Partner'])
   assert.equal(prepared.cv.education[0].institution, 'Noco University')
   assert.deepEqual(prepared.cv.languages, [{ name: 'English', level: 'B2' }])
+
+  const ruClient: ResolvedClient = {
+    ...client, clientId: 170, clientName: 'Аблена Дементьева', market: 'Ru',
+    currentStatus: 'on ru market', fallbacks: { firstName: 'Елена', lastName: 'Дементьева' }
+  }
+  const wrongCv: CvProfile = {
+    ...cv, language: 'ru', fullName: 'Дмитрий Овчинников', firstName: 'Дмитрий',
+    lastName: 'Овчинников'
+  }
+  assert.throws(() => buildPreparedProfile(ruClient, wrongCv), (error: unknown) =>
+    error instanceof ProfileFillerError && error.code === 'profile_cv_identity_mismatch' &&
+    error.stage === 'validate_sources')
+  const overridden = buildPreparedProfile(ruClient, {
+    ...wrongCv, birthDate: '2026-08-03'
+  }, '2026-09-04T00:00:00Z', { useNocoIdentity: true })
+  assert.equal(overridden.cv.fullName, 'Елена Дементьева')
+  assert.equal(overridden.cv.firstName, 'Елена')
+  assert.equal(overridden.cv.lastName, 'Дементьева')
+  assert.equal(overridden.cv.birthDate, undefined)
+  assert.equal(overridden.cv.contacts.email, 'cv@example.com')
 }

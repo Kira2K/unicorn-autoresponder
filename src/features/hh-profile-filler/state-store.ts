@@ -93,10 +93,21 @@ export function eligibleJobs(state: ProfileFillerState,
   now = new Date().toISOString()): ProfileFillerJob[] {
   const nowMs = Date.parse(now)
   return state.jobs.filter(job => {
-    if (job.status === 'pending' || job.status === 'dry_run_passed') return true
+    if (job.status === 'pending' || job.status === 'dry_run_passed') {
+      return !job.nextAttemptAt || Date.parse(job.nextAttemptAt) <= nowMs
+    }
     if (job.status !== 'failed' || job.attemptCount >= 3) return false
     return !job.nextAttemptAt || Date.parse(job.nextAttemptAt) <= nowMs
   })
+}
+
+export function deferJobWithoutAttempt(job: ProfileFillerJob, code: string, message: string,
+  delayMs: number, now = new Date().toISOString()): void {
+  job.updatedAt = now
+  job.lastErrorCode = code
+  job.lastErrorMessage = message
+  const safeDelayMs = Number.isFinite(delayMs) ? Math.max(60_000, delayMs) : 15 * 60_000
+  job.nextAttemptAt = new Date(Date.parse(now) + safeDelayMs).toISOString()
 }
 
 export function markJobFailure(job: ProfileFillerJob, code: string, message: string,
@@ -118,6 +129,7 @@ export function markDryRunPassed(job: ProfileFillerJob, artifact?: string): void
   job.status = 'dry_run_passed'
   job.updatedAt = new Date().toISOString()
   job.dryRunArtifact = artifact
+  delete job.nextAttemptAt
   delete job.lastErrorCode
   delete job.lastErrorMessage
 }

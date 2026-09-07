@@ -28,8 +28,11 @@ Do not infer salary, citizenship, relocation, commute time, dates, employers, ed
 
 ## Resumes and visibility
 
-- Create all configured titles for the resolved stack and market with identical content.
-- Save drafts; never click a publish/post button.
+- Create all configured titles for the resolved stack and market with identical content. If a filled
+  primary-title baseline already exists, preserve it, create only missing variants with HH's native
+  `Duplicate` action, and reuse matching incomplete drafts.
+- Save ordinary builds as drafts. HH may publish a native duplicate when its profession is confirmed;
+  permit that only for a verified missing title variant copied from the filled baseline.
 - Visibility is everyone except selected employers.
 - Stop-list candidates come from CV experience/context and every exact `Самопрезентация` file.
 - Search every employer, owner, brand/product, vendor, customer and partner. Add only one unambiguous official card; skip missing or ambiguous matches and include the reason in the report.

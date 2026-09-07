@@ -31,9 +31,10 @@ export async function main(args = process.argv.slice(2)) {
     throw new Error('Expected a positive --client-id.')
   }
   const result = await createProfileFillerService().run(clientId,
-    market(value(args, '--market')), args.includes('--dry-run'))
+    market(value(args, '--market')), args.includes('--dry-run'), undefined,
+    args.includes('--use-noco-identity'))
   console.log(JSON.stringify(result, null, 2))
-  await reportProfileFillerResult(result)
+  if (!result.dryRun) await reportProfileFillerResult(result)
   if (!result.ok) process.exitCode = 1
 }
 

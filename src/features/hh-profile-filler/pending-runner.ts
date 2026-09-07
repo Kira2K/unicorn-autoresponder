@@ -1,9 +1,13 @@
 import { createProfileFillerService } from './service.ts'
 import { errorCode, errorStage, safeErrorMessage } from './errors.ts'
-import { eligibleJobs, markDryRunPassed, markJobCompleted, markJobFailure,
+import { deferJobWithoutAttempt, eligibleJobs, markDryRunPassed, markJobCompleted, markJobFailure,
   observeStatusTransitions, readState, writeState } from './state-store.ts'
 import { reportProfileFillerResult } from './reporter.ts'
-import type { ProfileFillerResult } from './types.ts'
+import type { ProfileFillerJobStatus, ProfileFillerResult } from './types.ts'
+
+export function shouldReportProfileFillerStatus(status: ProfileFillerJobStatus): boolean {
+  return status === 'completed' || status === 'exhausted' || status === 'cancelled'
+}
 
 export async function scanTransitions(options: { statePath?: string; refresh?: boolean } = {}) {
   const service = createProfileFillerService()
@@ -35,8 +39,6 @@ export async function runPending(options: { statePath?: string; scanOnly?: boole
         markDryRunPassed(job, check.artifactDir)
         writeState(state, options.statePath)
         results.push(check)
-        await reportProfileFillerResult(check).catch(error =>
-          console.warn(`Profile filler Telegram dry-run report failed: ${safeErrorMessage(error)}`))
       }
       executing = true
       const result = await service.execute(prepared, job.id)
@@ -48,10 +50,14 @@ export async function runPending(options: { statePath?: string; scanOnly?: boole
         console.warn(`Profile filler Telegram result report failed: ${safeErrorMessage(error)}`))
     } catch (error) {
       const message = safeErrorMessage(error)
-      if (errorCode(error) === 'profile_status_changed') {
+      const code = errorCode(error)
+      if (code === 'profile_status_changed') {
         job.status = 'cancelled'
         job.updatedAt = new Date().toISOString()
-      } else markJobFailure(job, errorCode(error), message)
+      } else if (code === 'profile_noco_rate_limited') {
+        deferJobWithoutAttempt(job, code, message,
+          Number((error as any)?.details?.retryAfterMs))
+      } else markJobFailure(job, code, message)
       writeState(state, options.statePath)
       const result: ProfileFillerResult = {
         ok: false,
@@ -62,14 +68,16 @@ export async function runPending(options: { statePath?: string; scanOnly?: boole
         market: job.market,
         dolphinProfileId: prepared?.client.dolphinProfileId,
         stage: errorStage(error),
-        code: errorCode(error),
+        code,
         attempt: job.attemptCount,
         message,
         artifactDir: String((error as any)?.details?.artifactDir ?? job.dryRunArtifact ?? '') || undefined
       }
       results.push(result)
-      await reportProfileFillerResult(result).catch(reportError =>
-        console.warn(`Profile filler Telegram error report failed: ${safeErrorMessage(reportError)}`))
+      if (shouldReportProfileFillerStatus(job.status)) {
+        await reportProfileFillerResult(result).catch(reportError =>
+          console.warn(`Profile filler Telegram final error report failed: ${safeErrorMessage(reportError)}`))
+      }
     }
   }
   return { created, results }

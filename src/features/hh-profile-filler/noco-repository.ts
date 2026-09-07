@@ -9,7 +9,7 @@ const { TABLES } = require('../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { id: string }>
 }
 
-import { profileFillerError } from './errors.ts'
+import { ProfileFillerError, profileFillerError } from './errors.ts'
 import { marketForStatus } from './state-store.ts'
 import type { ContactData, ProfileFillerMarket, ResolvedClient } from './types.ts'
 
@@ -102,37 +102,88 @@ export type NocoProfileFillerSnapshot = {
   stacks: NocoRecord[]
 }
 
+const NOCO_RATE_LIMIT_FALLBACK_MS = 15 * 60 * 1000
+
+function retryAfterMs(error: any): number {
+  const headers = error?.response?.headers
+  const raw = typeof headers?.get === 'function'
+    ? headers.get('retry-after')
+    : headers?.['retry-after'] ?? headers?.['Retry-After']
+  if (raw !== undefined && raw !== null && String(raw).trim()) {
+    const seconds = Number(raw)
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+    const date = Date.parse(String(raw))
+    if (Number.isFinite(date)) return Math.max(0, date - Date.now())
+  }
+  return NOCO_RATE_LIMIT_FALLBACK_MS
+}
+
+function mapNocoReadError(error: unknown, source: string): never {
+  if (error instanceof ProfileFillerError) throw error
+  if (Number((error as any)?.response?.status) === 429 ||
+      /too many requests/i.test(String((error as any)?.message ?? ''))) {
+    throw profileFillerError('profile_noco_rate_limited',
+      'NocoDB temporarily rate-limited Profile Filler reads. The job was deferred without consuming an HH attempt.',
+      'resolve_noco', { retryAfterMs: retryAfterMs(error), source })
+  }
+  throw error
+}
+
 export function createProfileFillerNocoRepository(
-  client = createNocoClient({ pageDelayMs: 150, retryDelaysMs: [0, 2500, 5000] })
+  client = createNocoClient({ pageDelayMs: 750, retryDelaysMs: [0, 5000, 15000, 45000] })
 ) {
   let cached: Promise<NocoProfileFillerSnapshot> | undefined
   let cachedClients: Promise<NocoRecord[]> | undefined
 
-  async function snapshot(refresh = false): Promise<NocoProfileFillerSnapshot> {
-    if (!cached || refresh) {
-      cached = (async () => {
-        const clients = await client.fetchRecords(TABLES.clients.id, 1000)
-        const autoresponses = await client.fetchRecords(TABLES.hhAutoresponses.id, 1000)
-        const profiles = await client.fetchRecords(TABLES.dolphinProfiles.id, 1000)
-        const accounts = await client.fetchRecords(TABLES.platformAccounts.id, 1000)
-        const cvRows = await client.fetchRecords(TABLES.cvProcessing.id, 1000)
-        const stacks = await client.fetchRecords(TABLES.stacks.id, 1000)
-        return { clients, autoresponses, profiles, accounts, cvRows, stacks }
-      })()
+  async function readTable(tableId: string, source: string): Promise<NocoRecord[]> {
+    try {
+      return await client.fetchRecords(tableId, 1000)
+    } catch (error) {
+      return mapNocoReadError(error, source)
     }
-    return await cached
   }
 
   async function listClients(refresh = false): Promise<NocoRecord[]> {
-    if (!cachedClients || refresh) {
-      cachedClients = client.fetchRecords(TABLES.clients.id, 1000)
+    if (refresh) {
+      cachedClients = undefined
+      cached = undefined
     }
-    return await cachedClients
+    if (!cachedClients) cachedClients = readTable(TABLES.clients.id, 'clients')
+    try {
+      return await cachedClients
+    } catch (error) {
+      cachedClients = undefined
+      throw error
+    }
+  }
+
+  async function snapshot(refresh = false): Promise<NocoProfileFillerSnapshot> {
+    if (refresh) {
+      cached = undefined
+      cachedClients = undefined
+    }
+    if (!cached) {
+      cached = (async () => {
+        const clients = await listClients()
+        const autoresponses = await readTable(TABLES.hhAutoresponses.id, 'hh_autoresponses')
+        const profiles = await readTable(TABLES.dolphinProfiles.id, 'dolphin_profiles')
+        const accounts = await readTable(TABLES.platformAccounts.id, 'platform_accounts')
+        const cvRows = await readTable(TABLES.cvProcessing.id, 'cv_processing')
+        const stacks = await readTable(TABLES.stacks.id, 'stacks')
+        return { clients, autoresponses, profiles, accounts, cvRows, stacks }
+      })()
+    }
+    try {
+      return await cached
+    } catch (error) {
+      cached = undefined
+      throw error
+    }
   }
 
   async function resolveClient(expectedClientId: number,
     market: ProfileFillerMarket): Promise<ResolvedClient> {
-    const data = await snapshot(true)
+    const data = await snapshot()
     const clientRow = data.clients.find(row => Number(row.Id) === expectedClientId)
     if (!clientRow) {
       throw profileFillerError('profile_client_not_found',

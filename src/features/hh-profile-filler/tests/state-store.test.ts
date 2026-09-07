@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { eligibleJobs, emptyState, markJobFailure, observeStatusTransitions } from '../state-store.ts'
+import { deferJobWithoutAttempt, eligibleJobs, emptyState, markDryRunPassed, markJobFailure,
+  observeStatusTransitions } from '../state-store.ts'
 
 export function runStateStoreTests() {
   const state = emptyState('2026-09-03T13:53:37Z')
@@ -39,4 +40,16 @@ export function runStateStoreTests() {
   markJobFailure(job, 'second', 'second', '2026-09-04T18:00:00Z')
   markJobFailure(job, 'third', 'third', '2026-09-05T18:00:00Z')
   assert.equal(job.status, 'exhausted')
+
+  const deferredJob = state.jobs[1]
+  markDryRunPassed(deferredJob, 'artifact')
+  deferJobWithoutAttempt(deferredJob, 'profile_noco_rate_limited', 'rate limited', 120_000,
+    '2026-09-03T18:00:00Z')
+  assert.equal(deferredJob.status, 'dry_run_passed')
+  assert.equal(deferredJob.attemptCount, 0)
+  assert.equal(deferredJob.nextAttemptAt, '2026-09-03T18:02:00.000Z')
+  assert.equal(eligibleJobs(state, '2026-09-03T18:01:59Z').includes(deferredJob), false)
+  assert.equal(eligibleJobs(state, '2026-09-03T18:02:00Z').includes(deferredJob), true)
+  markDryRunPassed(deferredJob, 'artifact')
+  assert.equal(deferredJob.nextAttemptAt, undefined)
 }

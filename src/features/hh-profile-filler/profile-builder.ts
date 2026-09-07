@@ -17,6 +17,58 @@ function unique(values: string[]): string[] {
   })
 }
 
+function nameParts(value?: string): { first?: string; last?: string } {
+  const parts = String(value ?? '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length < 2) return {}
+  return { first: parts[0], last: parts[parts.length - 1] }
+}
+
+function latinName(value?: string): string {
+  const transliteration: Record<string, string> = {
+    а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z',
+    и: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r',
+    с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh',
+    щ: 'shch', ы: 'y', э: 'e', ю: 'yu', я: 'ya', ь: '', ъ: ''
+  }
+  return [...String(value ?? '').trim().toLowerCase()]
+    .map(character => transliteration[character] ?? character)
+    .join('')
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function sameName(left?: string, right?: string): boolean {
+  const a = latinName(left)
+  const b = latinName(right)
+  return Boolean(a && b && a === b)
+}
+
+function assertSourceIdentity(client: ResolvedClient, extracted: CvProfile): void {
+  const clientFullName = nameParts(client.fallbacks.fullName ?? client.clientName)
+  const cvFullName = nameParts(extracted.fullName)
+  const expectedFirst = client.fallbacks.firstName ?? clientFullName.first
+  const expectedLast = client.fallbacks.lastName ?? clientFullName.last
+  const actualFirst = extracted.firstName ?? cvFullName.first
+  const actualLast = extracted.lastName ?? cvFullName.last
+  if (expectedFirst && expectedLast && actualFirst && actualLast &&
+      !sameName(expectedFirst, actualFirst) && !sameName(expectedLast, actualLast)) {
+    throw profileFillerError('profile_cv_identity_mismatch',
+      `The final CV belongs to "${[actualFirst, actualLast].join(' ')}", but Noco client ` +
+      `${client.clientId} is "${client.clientName}". No HH changes were made.`, 'validate_sources')
+  }
+}
+
+function usableBirthDate(value?: string, now = new Date()): string | undefined {
+  if (!value) return undefined
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) return value
+  const date = new Date(parsed)
+  let age = now.getUTCFullYear() - date.getUTCFullYear()
+  const birthdayPending = now.getUTCMonth() < date.getUTCMonth() ||
+    (now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() < date.getUTCDate())
+  if (birthdayPending) age -= 1
+  return age >= 14 && age <= 100 ? value : undefined
+}
+
 function nocoEducation(value?: string): CvEducation[] {
   if (!value) return []
   try {
@@ -85,13 +137,26 @@ function employers(profile: CvProfile): EmployerCandidate[] {
 }
 
 export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfile,
-  now = new Date().toISOString()): PreparedProfile {
+  now = new Date().toISOString(), options: { useNocoIdentity?: boolean } = {}): PreparedProfile {
+  if (!options.useNocoIdentity) assertSourceIdentity(client, extracted)
+  const clientName = nameParts(client.fallbacks.fullName ?? client.clientName)
+  const nocoFirstName = client.fallbacks.firstName ?? clientName.first
+  const nocoLastName = client.fallbacks.lastName ?? clientName.last
+  const useNocoIdentity = Boolean(options.useNocoIdentity && nocoFirstName && nocoLastName)
+  if (options.useNocoIdentity && !useNocoIdentity) {
+    throw profileFillerError('profile_noco_identity_missing',
+      `Noco does not contain an unambiguous first and last name for client ${client.clientId}.`,
+      'validate_sources')
+  }
   const profile: CvProfile = {
     ...extracted,
-    fullName: first(extracted.fullName, client.fallbacks.fullName),
-    firstName: first(extracted.firstName, client.fallbacks.firstName),
-    lastName: first(extracted.lastName, client.fallbacks.lastName),
-    birthDate: first(extracted.birthDate, client.fallbacks.birthDate),
+    fullName: useNocoIdentity ? `${nocoFirstName} ${nocoLastName}` :
+      first(extracted.fullName, client.fallbacks.fullName),
+    firstName: useNocoIdentity ? nocoFirstName : first(extracted.firstName, client.fallbacks.firstName),
+    lastName: useNocoIdentity ? nocoLastName : first(extracted.lastName, client.fallbacks.lastName),
+    middleName: useNocoIdentity ? undefined : extracted.middleName,
+    birthDate: first(usableBirthDate(extracted.birthDate, new Date(now)),
+      usableBirthDate(client.fallbacks.birthDate, new Date(now))),
     location: client.market === 'En' ? 'Tbilisi, Georgia' :
       first(extracted.location, client.fallbacks.location),
     contacts: {

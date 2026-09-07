@@ -7,8 +7,8 @@ import { createCvExtractor } from './cv-extractor.ts'
 import { buildPreparedProfile } from './profile-builder.ts'
 import { errorCode, errorStage, ProfileFillerError, safeErrorMessage } from './errors.ts'
 import { withAuthorizedHHPage } from './hh-session.ts'
-import { configurePrivacyAndStopList, createResumeDraft, deleteResume, inspectHH,
-  listResumes, type ResumeSnapshot } from './hh-resume-ui.ts'
+import { configurePrivacyAndStopList, createResumeDraft, deleteResume, duplicateResumeVariant,
+  inspectHH, listResumes, professionForTitle, type ResumeSnapshot } from './hh-resume-ui.ts'
 import type { PreparedProfile, ProfileFillerMarket, ProfileFillerResult } from './types.ts'
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
@@ -61,6 +61,7 @@ export function createProfileFillerService(options: {
     configurePrivacyAndStopList: typeof configurePrivacyAndStopList
     createResumeDraft: typeof createResumeDraft
     deleteResume: typeof deleteResume
+    duplicateResumeVariant: typeof duplicateResumeVariant
     inspectHH: typeof inspectHH
     listResumes: typeof listResumes
   }
@@ -70,15 +71,16 @@ export function createProfileFillerService(options: {
   let extractor = options.extractor
   const withPage = options.withPage ?? withAuthorizedHHPage
   const ui = options.ui ?? { configurePrivacyAndStopList, createResumeDraft, deleteResume,
-    inspectHH, listResumes }
+    duplicateResumeVariant, inspectHH, listResumes }
 
-  async function prepare(clientId: number, market: ProfileFillerMarket): Promise<PreparedProfile> {
+  async function prepare(clientId: number, market: ProfileFillerMarket,
+    useNocoIdentity = false): Promise<PreparedProfile> {
     const client = await repository.resolveClient(clientId, market)
     const cv = await drive.loadCv(client.cvUrl)
     const selfPresentations = await drive.loadSelfPresentations(client.studentFolderUrl)
     extractor ??= createCvExtractor()
     const extracted = await extractor.extract([cv, ...selfPresentations], market)
-    return buildPreparedProfile(client, extracted)
+    return buildPreparedProfile(client, extracted, new Date().toISOString(), { useNocoIdentity })
   }
 
   async function dryRun(profile: PreparedProfile, jobId?: string): Promise<ProfileFillerResult> {
@@ -105,53 +107,94 @@ export function createProfileFillerService(options: {
     }
   }
 
-  async function execute(profile: PreparedProfile, jobId?: string): Promise<ProfileFillerResult> {
+  async function execute(profile: PreparedProfile, jobId?: string,
+    executionOptions: { preserveExisting?: boolean;
+      resumeIdsByTitle?: Record<string, string> } = {}): Promise<ProfileFillerResult> {
+    const preserveExisting = executionOptions.preserveExisting === true
     return await withPage(profile.client, async (page, artifactDir) => {
       const oldResumes = await ui.listResumes(page)
       const snapshotFile = path.join(artifactDir, 'old-resumes.json')
       fs.writeFileSync(snapshotFile, `${JSON.stringify(oldResumes, null, 2)}\n`, { mode: 0o600 })
       const created: ResumeSnapshot[] = []
+      const duplicated: ResumeSnapshot[] = []
       const deleted: ResumeSnapshot[] = []
+      const targets: ResumeSnapshot[] = []
       try {
+        const baselineTitle = professionForTitle(profile.titles[0], profile.client.market).trim()
+        const baseline = oldResumes.find(item => !item.isDraft && item.title.trim() === baselineTitle)
         for (const title of profile.titles) {
+          const profession = professionForTitle(title, profile.client.market).trim()
+          const existing = oldResumes.find(item => !deleted.some(removed => removed.id === item.id) &&
+            item.title.trim() === profession)
+          if (existing && !existing.isDraft) {
+            targets.push(existing)
+            continue
+          }
           try {
-            created.push(await ui.createResumeDraft(page, profile, title, artifactDir))
+            const resume = existing || executionOptions.resumeIdsByTitle?.[title]
+              ? await ui.createResumeDraft(page, profile, title, artifactDir,
+                  executionOptions.resumeIdsByTitle?.[title] ?? existing?.id)
+              : baseline
+                ? await ui.duplicateResumeVariant(page, baseline, title, profile.client.stack,
+                    profile.client.market)
+                : await ui.createResumeDraft(page, profile, title, artifactDir)
+            created.push(resume)
+            targets.push(resume)
+            if (baseline && !resume.isDraft) duplicated.push(resume)
           } catch (error) {
             if (error instanceof ProfileFillerError && error.code === 'profile_hh_resume_limit') {
+              if (preserveExisting) throw error
               const replacement = oldResumes.find(item =>
+                item.id !== baseline?.id && item.id !== existing?.id &&
+                !targets.some(target => target.id === item.id) &&
                 !deleted.some(removed => removed.id === item.id))
               if (!replacement) throw error
               await ui.deleteResume(page, replacement)
               deleted.push(replacement)
-              created.push(await ui.createResumeDraft(page, profile, title, artifactDir))
+              const resume = existing || executionOptions.resumeIdsByTitle?.[title]
+                ? await ui.createResumeDraft(page, profile, title, artifactDir,
+                    executionOptions.resumeIdsByTitle?.[title] ?? existing?.id)
+                : baseline
+                  ? await ui.duplicateResumeVariant(page, baseline, title, profile.client.stack,
+                      profile.client.market)
+                  : await ui.createResumeDraft(page, profile, title, artifactDir)
+              created.push(resume)
+              targets.push(resume)
+              if (baseline && !resume.isDraft) duplicated.push(resume)
             } else throw error
           }
         }
 
         const stopList = { added: [] as string[], existing: [] as string[],
           skipped: [] as Array<{ name: string; reason: string }> }
-        for (const resume of created) {
+        for (const resume of targets) {
           const result = await ui.configurePrivacyAndStopList(page, resume, profile)
           stopList.added.push(...result.added)
           stopList.existing.push(...result.existing)
           stopList.skipped.push(...result.skipped)
         }
 
-        for (const resume of oldResumes) {
-          if (!deleted.some(item => item.id === resume.id)) {
-            await ui.deleteResume(page, resume)
-            deleted.push(resume)
+        if (!preserveExisting) {
+          for (const resume of oldResumes) {
+            if (!deleted.some(item => item.id === resume.id) &&
+                !targets.some(item => item.id === resume.id)) {
+              await ui.deleteResume(page, resume)
+              deleted.push(resume)
+            }
           }
         }
         const finalResumes = await ui.listResumes(page)
         const finalIds = new Set(finalResumes.map(item => item.id))
-        const missing = created.filter(item => !finalIds.has(item.id))
-        const survivors = oldResumes.filter(item => finalIds.has(item.id))
+        const missing = targets.filter(item => !finalIds.has(item.id))
+        const survivors = preserveExisting ? [] : oldResumes.filter(item =>
+          finalIds.has(item.id) && !targets.some(target => target.id === item.id))
         const published = finalResumes.filter(item =>
-          created.some(createdResume => createdResume.id === item.id) && !item.isDraft)
+          created.some(createdResume => createdResume.id === item.id) && !item.isDraft &&
+          !duplicated.some(duplicate => duplicate.id === item.id))
         const titles = new Set(finalResumes.filter(item =>
-          created.some(createdResume => createdResume.id === item.id)).map(item => item.title.trim()))
-        const missingTitles = profile.titles.filter(title => !titles.has(title.trim()))
+          targets.some(target => target.id === item.id)).map(item => item.title.trim()))
+        const missingTitles = profile.titles.filter(title =>
+          !titles.has(professionForTitle(title, profile.client.market).trim()))
         if (missing.length || survivors.length || published.length || missingTitles.length) {
           throw new ProfileFillerError('profile_hh_final_verification_failed',
             `Final HH verification failed: ${missing.length} new drafts missing, ` +
@@ -168,7 +211,9 @@ export function createProfileFillerService(options: {
           market: profile.client.market,
           dolphinProfileId: profile.client.dolphinProfileId,
           stage: 'completed',
-          message: `Created ${created.length} HH draft(s) and removed ${deleted.length} old resume(s).`,
+          message: preserveExisting
+            ? `Created ${created.length} HH resume variant(s); existing resumes were preserved.`
+            : `Created ${created.length} HH resume variant(s) and removed ${deleted.length} old resume(s).`,
           artifactDir,
           createdResumeTitles: created.map(item => item.title),
           deletedResumeIds: deleted.map(item => item.id),
@@ -198,9 +243,9 @@ export function createProfileFillerService(options: {
   }
 
   async function run(clientId: number, market: ProfileFillerMarket,
-    dryRunOnly = false, jobId?: string): Promise<ProfileFillerResult> {
+    dryRunOnly = false, jobId?: string, useNocoIdentity = false): Promise<ProfileFillerResult> {
     try {
-      const prepared = await prepare(clientId, market)
+      const prepared = await prepare(clientId, market, useNocoIdentity)
       const checked = await dryRun(prepared, jobId)
       return dryRunOnly ? checked : await execute(prepared, jobId)
     } catch (error) {
