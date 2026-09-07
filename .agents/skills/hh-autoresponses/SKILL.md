@@ -1,6 +1,6 @@
 ---
 name: hh-autoresponses
-description: Operate HH autoresponse orchestrator workflows in the hh-autoparcer repo. Use when Codex is asked to launch, schedule, supervise, check status, debug reports, verify Dolphin/Noco readiness, prove stop-list behavior, or change/commit HH autoresponse orchestration code. Default to all enabled ready profiles across Ru and En when no profile scope is supplied; for schedule requests without a time, use the next 04:40 GMT+3.
+description: Operate HH autoresponse orchestrator workflows in the hh-autoparcer repo. Use when Codex is asked to launch, schedule, supervise, check status, debug reports, verify Dolphin/Noco readiness, prove stop-list behavior, or change/commit HH autoresponse orchestration code. Default to all enabled ready profiles across Ru and En when no profile scope is supplied; for schedule requests without a time, use the next Monday-Thursday 04:40 GMT+3.
 ---
 
 # HH Autoresponses
@@ -30,8 +30,9 @@ When the user provides a minimal prompt such as `$hh-autoresponses launch`, `$hh
 
 For scheduling:
 
-- If the user asks to schedule without a time, schedule the next occurrence of `04:40 GMT+3`.
-- If the user says `launch now`, `run now`, or otherwise asks for an immediate run, do not schedule; start immediately.
+- If the user asks to schedule without a time, schedule the next Monday-Thursday occurrence of `04:40 GMT+3`.
+- Only launch or schedule routine autoresponses Monday through Thursday. If the user asks to launch immediately on Friday, Saturday, or Sunday, stop/avoid launch and ask for an explicit weekend override.
+- If the user says `launch now`, `run now`, or otherwise asks for an immediate run on Monday through Thursday, do not schedule; start immediately.
 - If the requested schedule could mean more than one date, use the next future occurrence and state the exact date/time before registering it.
 - For schedule requests, verify Dolphin/client state immediately and schedule the same check for one hour before launch. These extra checks are silent in Telegram when OK and report only error results.
 
