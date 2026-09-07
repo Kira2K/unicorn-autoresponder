@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import LinkedInAuthStatus from './LinkedInAuthStatus.vue'
 import LinkedInAuthHistory from './LinkedInAuthHistory.vue'
 import ProfileFillerDialog from './ProfileFillerDialog.vue'
+import ProfileFillerAccountAction from './ProfileFillerAccountAction.vue'
 import CommentMonitorCell from './CommentMonitorCell.vue'
 import ConnectionInviterCell from './ConnectionInviterCell.vue'
 import { formatDate, primaryAction, runForAccount } from './linkedin-auth-view'
@@ -16,7 +17,7 @@ const filler = useProfileFiller()
 const comments = useCommentMonitor()
 const connections = useConnectionInviter()
 // Connection runs use an account-scoped backend gate and must not disable unrelated accounts.
-const busy = computed(() => auth.active.value || filler.active.value)
+const busy = computed(() => auth.active.value || filler.busy.value)
 const nocoWait = computed(() => Math.max(1, Math.ceil(Number(auth.nocoQueue.value.waitMs || 0) / 1000)))
 </script>
 
@@ -67,8 +68,7 @@ const nocoWait = computed(() => Math.max(1, Math.ceil(Number(auth.nocoQueue.valu
                 <Button label="Check settings" size="small" severity="secondary" outlined :disabled="busy" :data-testid="`linkedin-check-${account.platformAccountId}`" @click="auth.start(account, 'check')" />
                 <Button :label="primaryAction(account).label" size="small" :disabled="busy || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-connect-${account.platformAccountId}`" @click="auth.start(account, primaryAction(account).action)" />
                 <Button v-if="account.unipileAccountId" label="Refresh session" size="small" severity="warn" outlined :disabled="busy || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-force-${account.platformAccountId}`" @click="auth.start(account, 'force_reauth')" />
-                <Button label="Profile Filler" size="small" severity="help" outlined
-                  :disabled="busy" :data-testid="`profile-filler-${account.platformAccountId}`" @click="filler.open(account)" />
+                <ProfileFillerAccountAction :account="account" :filler="filler" :blocked="auth.active.value" />
               </div></td>
             </tr>
             <tr v-if="!auth.filtered.value.length"><td colspan="9">No LinkedIn accounts found.</td></tr>

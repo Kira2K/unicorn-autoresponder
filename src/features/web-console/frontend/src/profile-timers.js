@@ -14,17 +14,18 @@ export function overallTime(result, now) {
 }
 
 export function stepTimer(step, resultStatus, now) {
+  const active = ['running', 'verifying'].includes(resultStatus)
   if (['verified', 'verification_delayed', 'pending_retry', 'pending'].includes(step.status)) return ''
-  if (step.nextActionAt && resultStatus === 'running') {
+  if (step.nextActionAt && active) {
     const remaining = Date.parse(step.nextActionAt) - now
-    const action = step.status === 'waiting' ? 'write' : 'check'
-    return remaining > 0 ? `Next ${action} in ${duration(remaining)}` : `${action} is due now`
+    const action = step.status === 'waiting' ? 'Отправка' : 'Проверка'
+    return remaining > 0 ? `${action} через ${duration(remaining)}` : `${action}: ожидаем обновления статуса`
   }
   if (step.status === 'failed' && step.durationMs !== undefined) {
-    return `Stopped after ${duration(step.durationMs)}`
+    return `Остановлено через ${duration(step.durationMs)}`
   }
-  if (step.updatedAt && resultStatus === 'running') {
-    return `In this status ${duration(now - Date.parse(step.updatedAt))}`
+  if (step.updatedAt && active) {
+    return `В этом состоянии ${duration(now - Date.parse(step.updatedAt))}`
   }
   return ''
 }

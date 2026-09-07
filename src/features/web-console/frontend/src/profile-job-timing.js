@@ -1,7 +1,7 @@
 export function jobElapsedSeconds(job, now = Date.now()) {
   if (!job?.createdAt) return 0
   const active = ['generating_cv', 'generating_profile', 'validating', 'previewing',
-    'retrying', 'running'].includes(job.status)
+    'retrying', 'running', 'verifying'].includes(job.status)
   const end = active ? now : Date.parse(job.finishedAt || job.updatedAt)
   return Math.max(0, Math.floor((end - Date.parse(job.createdAt)) / 1000))
 }

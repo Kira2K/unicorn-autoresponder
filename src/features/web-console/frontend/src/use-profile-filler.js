@@ -4,111 +4,63 @@ import { cvUploadError } from './profile-cv-upload'
 import { useProfileDraft } from './use-profile-draft'
 import { profileUploadEvents } from './profile-upload-events'
 import { jobElapsedSeconds, jobRetrySeconds } from './profile-job-timing'
-const TERMINAL = new Set([
-  'preview_ready', 'waiting_retry', 'pending_verification', 'succeeded', 'failed',
-  'needs_expert_review'
-])
+import { useProfileSession } from './use-profile-session.js'
+import { useProfileActions } from './use-profile-actions.js'
 
 export function useProfileFiller() {
-  const visible = ref(false); const account = ref(null); const job = ref(null); const history = ref([])
-  const error = ref('')
-  const clock = ref(Date.now())
   const draft = useProfileDraft()
-  let timer
-  let historyRequest = Promise.resolve()
-  const active = computed(() => ['generating_cv', 'generating_profile', 'validating',
-    'previewing', 'retrying', 'running'].includes(job.value?.status))
-  const elapsedSeconds = computed(() => jobElapsedSeconds(job.value, clock.value))
-  const retrySeconds = computed(() => jobRetrySeconds(job.value, clock.value))
+  const session = useProfileSession(api, draft)
+  const actions = useProfileActions(api, session, draft)
+  /** @type {import('vue').Ref<import('./profile-ui-types.ts').ProfileUiSource>} */
+  const source = ref('drive')
+  const cvFile = ref(null)
+  const clock = ref(Date.now())
   const clockTimer = setInterval(() => { clock.value = Date.now() }, 1000)
-  const blockingIssues = computed(() =>
-    Boolean(job.value?.preview?.issues?.some(item => item.level === 'fatal')))
-  async function loadHistory() {
-    try {
-      const response = await api.adminProfileJobs()
-      history.value = response.jobs.filter(item =>
-        item.platformAccountId === account.value?.platformAccountId)
-    } catch (caught) { error.value = caught.message || 'Could not load Profile Filler history.' }
+  const busy = computed(() => session.active.value || actions.pending.value || session.loading.value)
+  const elapsedSeconds = computed(() => jobElapsedSeconds(session.job.value, clock.value))
+  const retrySeconds = computed(() => jobRetrySeconds(session.job.value, clock.value))
+  const blockingIssues = computed(() => Boolean(session.job.value?.preview?.issues?.some(item => item.level === 'fatal')))
+  function selectCv(file) {
+    if (busy.value) return
+    const error = cvUploadError(file)
+    session.error.value = error
+    if (!error) { cvFile.value = file; source.value = 'upload' }
   }
-  function open(selected) {
-    account.value = selected; job.value = null; history.value = []; error.value = ''
-    draft.reset(); visible.value = true; historyRequest = loadHistory()
+  function selectFile(file) {
+    return actions.request(async () => {
+      try { await draft.load(file); source.value = 'json' }
+      catch { session.error.value = 'Не удалось прочитать JSON. Проверьте формат и размер до 250 КБ.' }
+    })
   }
-  async function selectFile(file) {
-    error.value = ''; job.value = null
-    try { await draft.load(file) }
-    catch (caught) { draft.reset(); error.value = caught.message || 'Could not analyze the selected file.' }
+  function generate() {
+    if (source.value === 'upload' && !cvFile.value) {
+      session.error.value = 'Выберите CV в формате PDF или DOCX.'
+      return
+    }
+    return actions.generate(source.value === 'upload' ? cvFile.value : undefined)
   }
-  function close() { if (!active.value) visible.value = false }
-  async function poll(jobId) {
-    try {
-      job.value = await api.adminProfileJob(jobId)
-      error.value = ''
-      draft.syncPreview(job.value.preview)
-      if (!TERMINAL.has(job.value.status)) timer = setTimeout(() => poll(jobId), 1000)
-      else await loadHistory()
-    } catch (caught) { error.value = caught.message || 'Could not refresh Profile Filler.' }
+  function restartGeneration() {
+    if (busy.value) return
+    session.reset()
+    source.value = cvFile.value ? 'upload' : 'drive'
   }
-  async function preview() {
-    error.value = ''
-    if (!draft.document.value) { error.value = 'Choose a profile JSON file first.'; return }
-    try {
-      const analysis = await draft.analyze()
-      if (!analysis.valid) { error.value = 'Fix the blocking fields shown below.'; return }
-      await historyRequest
-      job.value = await api.startAdminProfilePreview(account.value.platformAccountId, draft.document.value)
-      void poll(job.value.jobId)
-    } catch (caught) { error.value = caught.message || 'Could not create preview.' }
-  }
-  async function generate(file) {
-    error.value = ''
-    const fileError = file && cvUploadError(file)
-    if (fileError) { error.value = fileError; return }
-    try {
-      await historyRequest
-      job.value = await api.startAdminProfileGeneration(account.value.platformAccountId, file)
-      void poll(job.value.jobId)
-    } catch (caught) { error.value = caught.message || 'Could not generate profile from CV.' }
-  }
-  const { chooseFile, chooseGenerationFile, dropFile, dropGenerationFile } =
-    profileUploadEvents(selectFile, generate)
-  async function apply() {
-    if (draft.dirty.value) { error.value = 'Rebuild Preview before Apply.'; return }
-    if (!window.confirm('Apply this exact preview to LinkedIn?')) return
-    error.value = ''
-    try {
-      job.value = await api.applyAdminProfileJob(job.value.jobId, job.value.planHash)
-      void poll(job.value.jobId)
-    } catch (caught) { error.value = caught.message || 'Could not apply Profile Filler.' }
-  }
-  async function resume() {
-    error.value = ''
-    try {
-      job.value = await api.resumeAdminProfileJob(job.value.jobId)
-      void poll(job.value.jobId)
-    } catch (caught) { error.value = caught.message || 'Could not resume generation.' }
-  }
-
   async function resolveIssues(fixes) {
+    if (busy.value || session.job.value?.preview?.generation) return
     draft.fix(fixes)
-    await preview()
+    await actions.preview()
   }
-
-  function showHistory(item) { job.value = item; error.value = ''; draft.syncPreview(item.preview) }
-  async function rollback() {
-    if (!window.confirm('Restore the values saved before this change?')) return
-    error.value = ''
-    try {
-      job.value = await api.rollbackAdminProfileJob(job.value.jobId); void poll(job.value.jobId)
-    } catch (caught) { error.value = caught.message || 'Could not roll back Profile Filler.' }
+  function open(account) {
+    if (actions.pending.value || session.loading.value) return
+    if (session.account.value?.platformAccountId !== account.platformAccountId && !session.active.value) {
+      source.value = 'drive'
+      cvFile.value = null
+    }
+    void session.open(account)
   }
-
-  onUnmounted(() => { clearTimeout(timer); clearInterval(clockTimer) })
-  return { account, active, apply, blockingIssues, chooseFile, chooseGenerationFile, close,
-    draft: draft.document, dirty: draft.dirty,
-    dropFile, dropGenerationFile, error, generate, history, issues: draft.issues,
-    job, open, preview, retryPreview: preview,
-    elapsedSeconds, resolveIssues, resume, retrySeconds, rollback,
-    selectedFile: draft.selectedFile, showHistory, updateDraft: draft.update,
-    validDraft: draft.valid, visible }
+  const upload = profileUploadEvents(selectFile, selectCv)
+  onUnmounted(() => { session.dispose(); clearInterval(clockTimer) })
+  return { ...session, ...actions, ...upload, open, generate, source, cvFile, busy,
+    draft: draft.document, dirty: draft.dirty, issues: draft.issues, selectedFile: draft.selectedFile,
+    validDraft: draft.valid, updateDraft: draft.update, elapsedSeconds, retrySeconds, blockingIssues,
+    retryPreview: actions.preview, restartGeneration, resolveIssues }
 }
