@@ -21,7 +21,8 @@ This reference expands the launch, scheduling, and monitoring routines for the H
 - Exclusions use `ORCHESTRATOR_EXCLUDE_CLIENT_NAMES` or IDs only when the user explicitly asks.
 - If the user provides no response limit, use `120`.
 - If the user provides no market, run `Ru` then `En`.
-- If the user asks to schedule without a time, use the next `04:40 GMT+3`.
+- If the user asks to schedule without a time, use the next Monday-Thursday `04:40 GMT+3`.
+- Routine launches and scheduled runs are Monday-Thursday only. On Friday, Saturday, or Sunday, do not launch unless the user explicitly confirms a weekend override.
 - A scheduled time must be converted to an exact date/time with timezone and checked for AM/PM mistakes.
 
 ## Prelaunch Readiness
@@ -139,7 +140,8 @@ If profiles remain open after a failed run, identify exact affected Dolphin prof
 
 When scheduling:
 
-- If no time is supplied, schedule the next `04:40 GMT+3`.
+- If no time is supplied, schedule the next Monday-Thursday `04:40 GMT+3`.
+- Register recurring daily-style wrappers as Monday-Thursday only, and keep a weekday guard inside the wrapper so accidental Friday-Sunday triggers exit before Noco, Dolphin, or HH automation starts.
 - Convert the requested or default time to an absolute local date/time and include the timezone in the schedule notes.
 - Verify AM/PM and date boundaries, especially for `GMT+3` versus local machine time.
 - Run the extra Dolphin/client-state check immediately. If it is OK, do not send a new Telegram message. If it errors, report it to `summary_logs_channel_id` only.
