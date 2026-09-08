@@ -6,6 +6,8 @@ import ProfileFillerDialog from './ProfileFillerDialog.vue'
 import ProfileFillerAccountAction from './ProfileFillerAccountAction.vue'
 import CommentMonitorCell from './CommentMonitorCell.vue'
 import ConnectionInviterCell from './ConnectionInviterCell.vue'
+import PostWriterCell from './PostWriterCell.vue'
+import PostWriterWorkspace from './PostWriterWorkspace.vue'
 import { formatDate, primaryAction, runForAccount } from './linkedin-auth-view'
 import { useLinkedInAuth } from './use-linkedin-auth'
 import { useProfileFiller } from './use-profile-filler'
@@ -27,6 +29,7 @@ const nocoWait = computed(() => Math.max(1, Math.ceil(Number(auth.nocoQueue.valu
     <template #subtitle>Local Dolphin and Unipile connection for all students</template>
     <template #content>
       <div class="linkedin-toolbar">
+        <PostWriterWorkspace />
         <InputText v-model="auth.query.value" placeholder="Search student, URL, account or error" data-testid="linkedin-search" />
         <span v-if="auth.active.value" class="linkedin-running-note">One authorization is running</span>
       </div>
@@ -69,6 +72,7 @@ const nocoWait = computed(() => Math.max(1, Math.ceil(Number(auth.nocoQueue.valu
                 <Button :label="primaryAction(account).label" size="small" :disabled="busy || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-connect-${account.platformAccountId}`" @click="auth.start(account, primaryAction(account).action)" />
                 <Button v-if="account.unipileAccountId" label="Refresh session" size="small" severity="warn" outlined :disabled="busy || Boolean(account.readinessErrorCode)" :data-testid="`linkedin-force-${account.platformAccountId}`" @click="auth.start(account, 'force_reauth')" />
                 <ProfileFillerAccountAction :account="account" :filler="filler" :blocked="auth.active.value" />
+                <PostWriterCell :account="account" />
               </div></td>
             </tr>
             <tr v-if="!auth.filtered.value.length"><td colspan="9">No LinkedIn accounts found.</td></tr>

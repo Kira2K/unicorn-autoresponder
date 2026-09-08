@@ -1,4 +1,9 @@
 const crypto = require('node:crypto')
+const { registerPostWriterRoutes } = require('./post-writer-routes.ts') as typeof import('./post-writer-routes.ts')
+const { createLivePostWriter } = require('../../linkedin-automation/post-writer/runtime.ts') as typeof import('../../linkedin-automation/post-writer/runtime.ts')
+const { createMockPostWriter } = require('../../linkedin-automation/post-writer/mock.ts') as typeof import('../../linkedin-automation/post-writer/mock.ts')
+const { createTextRuntime } = require('../../linkedin-automation/post-writer/text-runtime.ts') as typeof import('../../linkedin-automation/post-writer/text-runtime.ts')
+const { registerPostTextRoutes } = require('./post-text-routes.ts') as typeof import('./post-text-routes.ts')
 const express = require('express')
 const cookieParser = require('cookie-parser')
 const { createWebConsoleRepository } = require('./repository.ts') as {
@@ -470,6 +475,7 @@ function createWebConsoleApp(options: {
   commentMonitor?: import('./comment-monitor-types.ts').CommentMonitorService
   connectionInviter?: import('./connection-inviter-types.ts').ConnectionInviterService
   initializeConnectionInviter?: boolean
+  postWriter?: import('../../linkedin-automation/post-writer/service.ts').PostWriterService
   useMockData?: boolean
 } = {}) {
   const useMockData = options.useMockData ?? process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
@@ -530,6 +536,11 @@ function createWebConsoleApp(options: {
   if (!useMockData && !options.connectionInviter && options.initializeConnectionInviter) {
     getLiveConnectionInviter()
   }
+  const postWriter = options.postWriter ?? (useMockData
+    ? createMockPostWriter(linkedinOperationGate)
+    : createLivePostWriter(lazyLinkedInRepository as { listAccounts(): Promise<import('../../linkedin-automation/account-connection/types.ts').LinkedInAuthAccountRow[]> },
+      linkedinOperationGate))
+  const textRuntime = createTextRuntime(useMockData)
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
     api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
@@ -828,6 +839,8 @@ function createWebConsoleApp(options: {
     requireAdmin: requireRole('admin'),
     service: connectionInviter
   })
+  registerPostWriterRoutes(app, requireRole('admin'), postWriter)
+  registerPostTextRoutes(app, requireRole('admin'), textRuntime)
   app.get('/api/admin/noco-queue', requireRole('admin'), (_req: Request, res: Response) => {
     res.json(sharedNocoRequestLimiter.snapshot())
   })

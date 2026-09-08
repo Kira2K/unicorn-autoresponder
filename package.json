@@ -3,6 +3,12 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "linkedin:posts:standalone": "node src/features/linkedin-automation/post-writer/standalone-cli.ts",
+    "linkedin:posts:test": "node --test src/features/linkedin-automation/post-writer/tests/*.test.ts",
+    "linkedin:posts:e2e": "node src/features/web-console/e2e/linkedin-post-writer.e2e.ts",
+    "linkedin:posts:mock": "node src/features/web-console/e2e/post-writer-demo.ts",
+    "noco:linkedin-post-writer-schema:dry-run": "node src/integrations/noco/linkedin-post-writer-schema/index.ts --dry-run",
+    "noco:linkedin-post-writer-schema:apply": "node src/integrations/noco/linkedin-post-writer-schema/index.ts --apply",
     "dolphyn": "node src/features/diagnostics/dolphyn-connector.ts",
     "linkedin:auth": "node src/features/linkedin-automation/account-connection/cli.ts",
     "linkedin:auth:test": "node src/features/linkedin-automation/account-connection/tests/run-all.test.ts",

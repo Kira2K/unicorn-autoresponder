@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict'
+import type { Page } from 'playwright'
+export async function checkTextWorkspace(page: Page, base: string) {
+  await page.keyboard.press('Escape')
+  await page.getByTestId('post-text-open').click()
+  const workspace = page.getByTestId('post-text-workspace')
+  await workspace.getByTestId('post-text-name').fill('Independent test author')
+  await workspace.getByTestId('post-text-role').fill('Backend Engineer')
+  await workspace.getByTestId('post-cv').setInputFiles({ name: 'test-cv.pdf', mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.7 mock CV with a known fixture response') })
+  await workspace.getByText('test-cv.pdf', { exact: false }).waitFor()
+  await workspace.getByTestId('post-text-topic').fill('Go error boundaries')
+  await workspace.getByTestId('post-text-memes').check()
+  const before = await (await page.request.get(`${base}/api/post-writer/text`)).json()
+  assert.equal(before.jobs.length, 0, 'selecting CV must not start generation')
+  await workspace.getByTestId('post-text-start').click()
+  await workspace.getByRole('heading', { name: 'Текст готов — не опубликован' }).waitFor({ timeout: 30_000 })
+  const generated = await (await page.request.get(`${base}/api/post-writer/text`)).json()
+  assert.equal(generated.jobs.length, 1)
+  assert.equal(generated.jobs[0].status, 'ready')
+  assert.equal(generated.jobs[0].checkpoint.topic.title, 'Go error boundaries')
+  assert.ok(generated.authors[0].cvRef)
+  assert.equal(generated.jobs[0].postId, undefined)
+  assert.equal(generated.jobs[0].meme.status, 'ready')
+  assert.equal(generated.jobs[0].meme.imageCalls, 1)
+  await workspace.getByRole('button', { name: 'Открыть мем крупно' }).waitFor()
+  await page.reload()
+  await page.getByTestId('admin-linkedin-tab').click()
+  await page.getByTestId('post-text-open').click()
+  await page.getByRole('heading', { name: 'Текст готов — не опубликован' }).waitFor()
+  assert.equal(await page.getByTestId('post-text-name').inputValue(), 'Independent test author')
+  assert.equal(await page.getByTestId('post-text-role').inputValue(), 'Backend Engineer')
+}

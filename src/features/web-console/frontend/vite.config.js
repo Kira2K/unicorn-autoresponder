@@ -23,6 +23,8 @@ export default defineConfig({
     }
   },
   build: {
+    rollupOptions: { input: { console: fileURLToPath(new URL('./index.html', import.meta.url)),
+      writer: fileURLToPath(new URL('./writer.html', import.meta.url)) } },
     outDir: fileURLToPath(new URL('../../../../dist/web-console', import.meta.url)),
     emptyOutDir: true
   }
