@@ -1693,6 +1693,19 @@ function createWebConsoleApp(options: {
   })
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const upstreamStatus = Number((error as any)?.response?.status)
+    const upstreamCode = String((error as any)?.code ?? '')
+    if (upstreamStatus === 429) {
+      res.status(429).json({ error: 'backend_overloaded', message: 'The data service is temporarily rate limited.' })
+      return
+    }
+    if (
+      [502, 503, 504].includes(upstreamStatus) ||
+      ['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'].includes(upstreamCode)
+    ) {
+      res.status(503).json({ error: 'backend_unavailable', message: 'The data service is temporarily unavailable.' })
+      return
+    }
     if ((error as any)?.code === 'not_found') {
       res.status(404).json({ error: 'not_found', message: error instanceof Error ? error.message : String(error) })
       return

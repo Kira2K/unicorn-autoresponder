@@ -66,9 +66,8 @@ function createNocoClient(options: {
     endpoint: string,
     body?: unknown
   ): Promise<T> {
-    let attempt = 0
-    while (true) {
-      const delay = retryDelaysMs[Math.min(attempt, retryDelaysMs.length - 1)]
+    let lastError: any
+    for (const delay of retryDelaysMs) {
       if (delay) {
         await wait(delay)
       }
@@ -93,9 +92,10 @@ function createNocoClient(options: {
         if (!isRetryableNocoError(error)) {
           throw error
         }
-        attempt += 1
+        lastError = error
       }
     }
+    throw lastError ?? new Error(`NocoDB request failed: ${method.toUpperCase()} ${endpoint}`)
   }
 
   async function fetchTableMeta(tableId: string): Promise<any> {
