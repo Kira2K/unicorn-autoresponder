@@ -5,6 +5,9 @@ description: Operate HH autoresponse orchestrator workflows in the hh-autoparcer
 
 # HH Autoresponses
 
+HH Profile Filler is operationally independent. Never invoke it from an autoresponse wrapper,
+`finally` block, or autoresponse scheduled task.
+
 ## Operating Model
 
 - Treat "all profiles" or "all HH autoresponses" as both `Ru` and `En` markets unless the user narrows the scope.

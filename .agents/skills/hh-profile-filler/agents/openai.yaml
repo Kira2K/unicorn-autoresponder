@@ -1,0 +1,4 @@
+interface:
+  display_name: HH Profile Filler
+  short_description: Fill HH resumes from Drive and Noco safely.
+  default_prompt: Use $hh-profile-filler to prepare, fill, schedule, or diagnose an HH profile-filling job.

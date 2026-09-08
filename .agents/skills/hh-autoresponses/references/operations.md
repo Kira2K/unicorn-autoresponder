@@ -1,5 +1,11 @@
 # HH Autoresponses Operations
 
+## Daily process isolation
+
+Run autoresponses through their own wrapper and Windows task. Do not invoke Profile Filler from an
+autoresponse wrapper, `finally` block, child process, or autoresponse scheduled task. Profile Filler
+has a separate runner, schedule, process lifetime, exit code, and retry queue.
+
 This reference expands the launch, scheduling, and monitoring routines for the HH autoresponse orchestrator.
 
 ## Source Map
