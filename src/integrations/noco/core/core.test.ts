@@ -108,6 +108,17 @@ async function runTests(): Promise<void> {
   assert.deepEqual(await retrying.request('get', '/test'), { ok: true })
   assert.ok(Date.now() - retryStarted >= 20)
 
+  const persistentlyLimited = createMockRequester([
+    httpError(429, 'Too Many Requests')
+  ])
+  const failFastClient = createNocoClient({
+    requester: persistentlyLimited.requester,
+    retryDelaysMs: [0],
+    limiter: createNocoRequestLimiter({ cooldownMs: 1, log() {} })
+  })
+  await assert.rejects(() => failFastClient.request('get', '/test'), /Too Many Requests/)
+  assert.equal(persistentlyLimited.calls.length, 1)
+
   assert.deepEqual(uniqueRelatedIds([1, 1, 2, 0]), [1, 2])
   assert.deepEqual(buildLinkPayloads([1, 1, 2]), [
     [{ Id: 1 }, { Id: 2 }],
