@@ -238,7 +238,8 @@ export type WebConsoleRepository = {
   getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null>
   getProviderClientsForStatus(statusLabel: string): Promise<ProviderClientRow[]>
   listEnglishLevels(): Promise<WebOption[]>
-  listPlatforms(): Promise<WebOption[]>
+  isPlatformAccountPolicyEnabled(clientId: number): Promise<boolean>
+  listPlatforms(clientId?: number): Promise<WebOption[]>
   updateClientProfile(clientId: number, patch: ClientProfilePatch): Promise<ClientDashboard>
   createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard>
   updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard>

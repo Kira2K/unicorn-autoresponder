@@ -1091,21 +1091,23 @@ function createWebConsoleApp(options: {
     }
   })
 
-  app.get('/api/client/profile-options', requireRole('client'), async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+  app.get('/api/client/profile-options', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
-      const [englishLevels, platforms] = await Promise.all([
+      const clientId = Number(req.webSession!.clientId)
+      const [englishLevels, platforms, platformAccountPolicyEnabled] = await Promise.all([
         repository.listEnglishLevels(),
-        repository.listPlatforms()
+        repository.listPlatforms(clientId),
+        repository.isPlatformAccountPolicyEnabled(clientId)
       ])
-      res.json({ englishLevels, platforms })
+      res.json({ englishLevels, platforms, platformAccountPolicyEnabled })
     } catch (error) {
       next(error)
     }
   })
 
-  app.get('/api/platforms', requireRole('client'), async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+  app.get('/api/platforms', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
-      res.json({ platforms: await repository.listPlatforms() })
+      res.json({ platforms: await repository.listPlatforms(Number(req.webSession!.clientId)) })
     } catch (error) {
       next(error)
     }
@@ -1712,6 +1714,14 @@ function createWebConsoleApp(options: {
     }
     if ((error as any)?.code === 'forbidden') {
       res.status(403).json({ error: 'forbidden', message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    if (String((error as any)?.code || '').startsWith('platform_account_')) {
+      res.status(400).json({
+        error: (error as any).code,
+        message: error instanceof Error ? error.message : String(error),
+        ...((error as any)?.fields ? { fields: (error as any).fields } : {})
+      })
       return
     }
     if ((error as any)?.code === 'invalid_google_folder' || (error as any)?.code === 'telegram_message_too_long') {
