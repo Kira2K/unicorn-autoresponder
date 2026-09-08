@@ -24,6 +24,9 @@ const {
   buildClientPatch,
   buildResumeWorkflowPatch,
   cvProcessingClientId,
+  githubLegacyUrlCandidates,
+  githubUrlFromAccount,
+  githubUrlMigrationPatch,
   isLinkedInPlatformAccount,
   LINKEDIN_PLATFORM_ID,
   profileClientId,
@@ -35,6 +38,9 @@ const {
   buildClientPatch(input: any): Record<string, unknown>
   buildResumeWorkflowPatch(input: any): Record<string, unknown>
   cvProcessingClientId(record: Record<string, unknown> & { Id: number }): number | null
+  githubLegacyUrlCandidates(record: Record<string, unknown> & { Id: number }): Array<{ field: string; url: string }>
+  githubUrlFromAccount(record: Record<string, unknown> & { Id: number }): string
+  githubUrlMigrationPatch(record: Record<string, unknown> & { Id: number }, submittedUrl: unknown): Record<string, unknown>
   isLinkedInPlatformAccount(account: Record<string, unknown> & { Id: number }): boolean
   LINKEDIN_PLATFORM_ID: number
   profileClientId(profile: Record<string, unknown> & { Id: number }): number | null
@@ -233,7 +239,7 @@ function createFixtureNocoClient() {
       Id: 12,
       account_label: 'Client One LinkedIn',
       login: 'client-one.linkedin@example.com',
-      linkedin_url: 'https://linkedin.com/in/client-one',
+      url: 'https://linkedin.com/in/client-one',
       rel_platformAccounts_client: { Id: 1 },
       rel_platformAccounts_platform: { Id: 16, name: 'linkedin', label: 'linkedin' }
     },
@@ -243,7 +249,7 @@ function createFixtureNocoClient() {
       account_label: 'Client One GitHub',
       login: 'https://github.com/client-one',
       rel_platformAccounts_client: { Id: 1 },
-      rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
+      rel_platformAccounts_platform: { Id: 29, name: 'github', label: 'github' }
     },
     {
       Id: 17,
@@ -253,7 +259,7 @@ function createFixtureNocoClient() {
       phone: '+79990001122',
       password: 'tg-cloud-pass',
       rel_platformAccounts_client: { Id: 1 },
-      rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
+      rel_platformAccounts_platform: { Id: 24, name: 'telegram', label: 'telegram_ru' }
     },
     {
       Id: 18,
@@ -263,7 +269,7 @@ function createFixtureNocoClient() {
       telegram_session_status: 'active',
       telegram_tdlib_db_path: 'stale-phone-session',
       rel_platformAccounts_client: { Id: 1 },
-      rel_platformAccounts_platform: { Id: 7, name: 'phone', label: 'phone_en' }
+      rel_platformAccounts_platform: { Id: 28, name: 'phone', label: 'phone_en' }
     },
     {
       Id: 19,
@@ -271,7 +277,42 @@ function createFixtureNocoClient() {
       account_label: 'Completely custom label',
       phone: '+79990005566',
       rel_platformAccounts_client: { Id: 1 },
-      rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
+      rel_platformAccounts_platform: { Id: 23, name: 'telegram', label: 'telegram_en' }
+    },
+    {
+      Id: 60,
+      platform: 'whatsapp',
+      account_label: 'Legacy WhatsApp',
+      phone: '+441234567890',
+      clients_id: 1,
+      platforms_id: 20,
+      rel_platformAccounts_platform: { Id: 20, name: 'whatsapp', label: 'whatsapp' }
+    },
+    {
+      Id: 61,
+      platform: 'legacy_unknown',
+      account_label: 'Legacy Unknown',
+      clients_id: 1
+    },
+    {
+      Id: 62,
+      platform: 'email_ru',
+      account_label: 'Legacy Email RU',
+      login: 'legacy-ru@example.com',
+      password: 'legacy-ru-secret',
+      clients_id: 1,
+      platforms_id: 26,
+      rel_platformAccounts_platform: { Id: 26, name: 'email_ru', label: null }
+    },
+    {
+      Id: 63,
+      platform: 'github',
+      account_label: 'Ambiguous GitHub',
+      login: 'https://github.com/one',
+      nickname: 'https://github.com/two',
+      clients_id: 1,
+      platforms_id: 29,
+      rel_platformAccounts_platform: { Id: 29, name: 'github', label: 'github' }
     },
     {
       Id: 11,
@@ -299,7 +340,7 @@ function createFixtureNocoClient() {
       Id: 15,
       account_label: 'Provider Match LinkedIn',
       login: 'provider-match.linkedin@example.com',
-      linkedin_url: 'https://linkedin.com/in/provider-match',
+      url: 'https://linkedin.com/in/provider-match',
       clients_id: 3,
       rel_platformAccounts_platform: { Id: 16 }
     },
@@ -309,7 +350,7 @@ function createFixtureNocoClient() {
       account_label: 'Provider Match GitHub',
       login: 'https://github.com/provider-match-client',
       clients_id: 3,
-      rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
+      rel_platformAccounts_platform: { Id: 29, name: 'github', label: 'github' }
     },
     {
       Id: 26,
@@ -317,7 +358,7 @@ function createFixtureNocoClient() {
       account_label: 'Provider Match Telegram RU',
       login: '@provider_match_ru',
       clients_id: 3,
-      rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
+      rel_platformAccounts_platform: { Id: 24, name: 'telegram', label: 'telegram_ru' }
     },
     {
       Id: 27,
@@ -325,7 +366,7 @@ function createFixtureNocoClient() {
       account_label: 'Provider Match Telegram EN',
       nickname: '@provider_match_en',
       clients_id: 3,
-      rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
+      rel_platformAccounts_platform: { Id: 23, name: 'telegram', label: 'telegram_en' }
     },
     {
       Id: 20,
@@ -367,12 +408,17 @@ function createFixtureNocoClient() {
     }
   ]
   const platforms: Array<Record<string, any> & { Id: number }> = [
-    { Id: 1, label: 'hh_ru', name: 'hh' },
-    { Id: 2, label: 'telegram_ru' },
-    { Id: 4, label: 'telegram_en' },
-    { Id: 7, label: 'phone_en', name: 'phone' },
+    { Id: 10, label: 'hh_en', name: 'hh' },
+    { Id: 11, label: 'hh_ru', name: 'hh' },
     { Id: 16, label: 'linkedin', name: 'linkedin' },
-    { Id: 17, label: 'github', name: 'github' }
+    { Id: 20, label: 'whatsapp', name: 'whatsapp' },
+    { Id: 23, label: 'telegram_en' },
+    { Id: 24, label: 'telegram_ru' },
+    { Id: 25, label: 'email_en', name: 'email' },
+    { Id: 26, label: null, name: 'email_ru' },
+    { Id: 27, label: 'email_ru', name: 'email' },
+    { Id: 28, label: 'phone_en', name: 'phone' },
+    { Id: 29, label: 'github', name: 'github' }
   ]
   const englishLevels: Array<Record<string, any> & { Id: number }> = [
     { Id: 3, level: 'B1', rank: 3 },
@@ -710,6 +756,61 @@ async function runTests(): Promise<void> {
     platforms_id: 16,
     email_password: 'new-mail-secret'
   })
+  assert.deepEqual(buildAccountPatch({
+    platformId: 29,
+    platform: 'github',
+    linkedInUrl: 'https://github.com/client'
+  }, { includeBlankSecrets: true }), {
+    platform: 'github',
+    url: 'https://github.com/client',
+    platforms_id: 29
+  })
+  assert.equal(githubUrlFromAccount({ Id: 1, url: 'https://github.com/canonical', login: 'https://github.com/legacy' }), 'https://github.com/canonical')
+  assert.equal(githubUrlFromAccount({ Id: 1, login: 'https://github.com/legacy' }), 'https://github.com/legacy')
+  assert.equal(githubUrlFromAccount({ Id: 1, login: 'prefix https://github.com/not-whole-field' }), '')
+  const githubLegacyFields = [
+    'account_label',
+    'login',
+    'phone',
+    'phone_en',
+    'email',
+    'nickname',
+    'foreign_number',
+    'recovery_codes',
+    'password',
+    'email_password'
+  ]
+  for (const field of githubLegacyFields) {
+    const record = { Id: 1, [field]: 'https://github.com/from-legacy' }
+    assert.deepEqual(githubLegacyUrlCandidates(record).map(candidate => candidate.field), [field])
+    assert.deepEqual(githubUrlMigrationPatch(record, 'https://github.com/from-legacy'), {
+      [field]: field === 'account_label' ? 'github' : ''
+    })
+  }
+  assert.deepEqual(githubUrlMigrationPatch({
+    Id: 1,
+    login: 'https://github.com/duplicate',
+    nickname: 'https://www.github.com/duplicate'
+  }, 'https://github.com/duplicate'), {
+    login: '',
+    nickname: ''
+  })
+  assert.deepEqual(githubUrlMigrationPatch({
+    Id: 1,
+    url: 'https://github.com/canonical',
+    login: 'https://www.github.com/canonical',
+    nickname: 'https://github.com/different'
+  }, 'https://github.com/canonical'), {
+    login: ''
+  })
+  assert.throws(
+    () => githubUrlMigrationPatch({
+      Id: 1,
+      login: 'https://github.com/one',
+      nickname: 'https://github.com/two'
+    }, 'https://github.com/one'),
+    (error: any) => error.code === 'platform_account_github_url_ambiguous'
+  )
   assert.deepEqual(buildChangedClientPatch({
     firstName: 'Client',
     lastName: 'One',
@@ -1595,7 +1696,17 @@ async function runTests(): Promise<void> {
     result = await request(server.baseUrl, '/api/client/profile-options', {}, clientLogin.cookie)
     assert.equal(result.response.status, 200)
     assert.deepEqual(result.body.englishLevels.map((level: any) => level.label), ['B1', 'B2', 'C1'])
-    assert(result.body.platforms.some((platform: any) => platform.label === 'linkedin'))
+    assert.deepEqual(result.body.platforms, [
+      { id: 25, label: 'email_en' },
+      { id: 27, label: 'email_ru' },
+      { id: 29, label: 'github' },
+      { id: 10, label: 'hh_en' },
+      { id: 11, label: 'hh_ru' },
+      { id: 16, label: 'linkedin' },
+      { id: 28, label: 'phone_en' },
+      { id: 23, label: 'telegram_en' },
+      { id: 24, label: 'telegram_ru' }
+    ])
 
     result = await request(server.baseUrl, '/api/client/me', {
       method: 'PATCH',
@@ -1645,47 +1756,83 @@ async function runTests(): Promise<void> {
       body: JSON.stringify({
         platformId: 16,
         platform: 'linkedin',
-        accountLabel: 'Updated LinkedIn',
         login: 'updated.linkedin@example.com',
-        phone: '+1000',
-        email: 'updated.linkedin@example.com',
-        nickname: 'updated-li',
         linkedInUrl: 'https://linkedin.com/in/updated',
-        foreignNumber: '+15550001111',
-        recoveryCodes: 'code-1',
-        password: 'new-secret',
-        emailPassword: 'new-email-secret'
+        recoveryCodes: 'recovery-one',
+        password: 'new-secret'
       })
     }, clientLogin.cookie)
     assert.equal(result.response.status, 201, JSON.stringify(result.body))
-    const createdAccount = result.body.platformAccounts.find((account: any) => account.accountLabel === 'Updated LinkedIn')
+    const createdAccount = result.body.platformAccounts.find((account: any) =>
+      account.accountLabel === 'linkedin' && account.login === 'updated.linkedin@example.com')
     assert(createdAccount)
     assert.equal(createdAccount.platform, 'linkedin')
+    assert.equal(createdAccount.linkedInUrl, 'https://linkedin.com/in/updated')
+    assert.equal(createdAccount.recoveryCodes, 'recovery-one')
     assert.equal(createdAccount.password, '***')
-    assert.equal(createdAccount.emailPassword, '***')
+    assert.equal(createdAccount.emailPassword, undefined)
 
     result = await request(server.baseUrl, `/api/client/platform-accounts/${createdAccount.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        accountLabel: 'Updated LinkedIn Edited',
         login: 'edited.linkedin@example.com',
-        phone: '+2000',
-        password: '',
-        emailPassword: 'replacement-email-secret'
+        linkedInUrl: 'https://linkedin.com/in/edited',
+        recoveryCodes: 'recovery-two',
+        password: 'replacement-secret'
       })
     }, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     const editedAccount = result.body.platformAccounts.find((account: any) => account.id === createdAccount.id)
-    assert.equal(editedAccount.accountLabel, 'Updated LinkedIn Edited')
+    assert.equal(editedAccount.accountLabel, 'linkedin')
     assert.equal(editedAccount.login, 'edited.linkedin@example.com')
+    assert.equal(editedAccount.linkedInUrl, 'https://linkedin.com/in/edited')
+    assert.equal(editedAccount.recoveryCodes, 'recovery-two')
     assert.equal(editedAccount.password, '***')
-    assert.equal(editedAccount.emailPassword, '***')
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${createdAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        login: 'edited.linkedin@example.com',
+        linkedInUrl: 'https://linkedin.com/in/edited'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_required_fields_missing')
+    assert.deepEqual(result.body.fields, ['password'])
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${createdAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        login: 'edited.linkedin@example.com',
+        linkedInUrl: 'https://linkedin.com/in/edited',
+        password: 'replacement-secret',
+        phone: '+2000'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_fields_not_allowed')
+    assert.deepEqual(result.body.fields, ['phone'])
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${createdAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platformId: 29,
+        login: 'edited.linkedin@example.com',
+        linkedInUrl: 'https://linkedin.com/in/edited',
+        password: 'replacement-secret'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_platform_immutable')
 
     result = await request(server.baseUrl, '/api/client/platform-accounts/15', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountLabel: 'Not mine' })
+      body: JSON.stringify({ login: 'not-mine@example.com', password: 'secret', linkedInUrl: 'https://linkedin.com/in/not-mine' })
     }, clientLogin.cookie)
     assert.equal(result.response.status, 404)
 
@@ -1694,6 +1841,118 @@ async function runTests(): Promise<void> {
     }, clientLogin.cookie)
     assert.equal(result.response.status, 200, JSON.stringify(result.body))
     assert.equal(result.body.platformAccounts.some((account: any) => account.id === createdAccount.id), false)
+
+    const platformAccountCases = [
+      { platformId: 25, platform: 'email_en', fields: { login: 'email-en@example.com', password: 'email-en-secret' } },
+      { platformId: 27, platform: 'email_ru', fields: { login: 'email-ru@example.com', password: 'email-ru-secret' } },
+      { platformId: 10, platform: 'hh_en', fields: { login: 'hh-en-login', phone: '+441111111111', password: 'hh-en-secret' } },
+      { platformId: 11, platform: 'hh_ru', fields: { login: 'hh-ru-login', phone: '+79991111111', password: 'hh-ru-secret' } },
+      { platformId: 23, platform: 'telegram_en', fields: { login: '@telegram_en', nickname: 'telegram-en' } },
+      { platformId: 24, platform: 'telegram_ru', fields: { login: '@telegram_ru', nickname: 'telegram-ru' } },
+      { platformId: 16, platform: 'linkedin', fields: { login: 'linkedin@example.com', password: 'linkedin-secret', linkedInUrl: 'https://linkedin.com/in/policy-test', recoveryCodes: 'linkedin-recovery-codes' } },
+      { platformId: 29, platform: 'github', fields: { linkedInUrl: 'https://github.com/policy-test' } },
+      { platformId: 28, platform: 'phone_en', fields: { phone: '+442222222222' } }
+    ]
+    for (const accountCase of platformAccountCases) {
+      result = await request(server.baseUrl, '/api/client/platform-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platformId: accountCase.platformId,
+          platform: accountCase.platform,
+          ...accountCase.fields
+        })
+      }, clientLogin.cookie)
+      assert.equal(result.response.status, 201, `${accountCase.platform}: ${JSON.stringify(result.body)}`)
+      const created = result.body.platformAccounts
+        .filter((account: any) => account.accountLabel === accountCase.platform)
+        .at(-1)
+      assert(created, `Missing created ${accountCase.platform} account`)
+      if (accountCase.platform === 'github') {
+        assert.equal(created.linkedInUrl, 'https://github.com/policy-test')
+        assert.equal(created.login, '')
+      }
+      result = await request(server.baseUrl, `/api/client/platform-accounts/${created.id}`, {
+        method: 'DELETE'
+      }, clientLogin.cookie)
+      assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    }
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformId: 29, platform: 'github' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_required_fields_missing')
+    assert.deepEqual(result.body.fields, ['linkedInUrl'])
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platformId: 29,
+        platform: 'github',
+        linkedInUrl: 'https://github.com/policy-test',
+        login: 'not-allowed'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_fields_not_allowed')
+    assert.deepEqual(result.body.fields, ['login'])
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformId: 26, platform: 'email_ru', login: 'duplicate@example.com', password: 'secret' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_unsupported_platform')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/62', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: 'legacy-ru-updated@example.com', password: 'replacement-secret' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.platformAccounts.find((account: any) => account.id === 62)?.login, 'legacy-ru-updated@example.com')
+
+    for (const unsupportedId of [60, 61]) {
+      result = await request(server.baseUrl, `/api/client/platform-accounts/${unsupportedId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '+449999999999' })
+      }, clientLogin.cookie)
+      assert.equal(result.response.status, 400)
+      assert.equal(result.body.error, 'platform_account_unsupported_platform')
+    }
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformId: 20, platform: 'whatsapp', phone: '+443333333333' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_unsupported_platform')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/24', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linkedInUrl: 'https://github.com/client-one' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    const migratedGithub = result.body.platformAccounts.find((account: any) => account.id === 24)
+    assert.equal(migratedGithub.linkedInUrl, 'https://github.com/client-one')
+    assert.equal(migratedGithub.login, '')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/63', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linkedInUrl: 'https://github.com/one' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_github_url_ambiguous')
+    assert.deepEqual(result.body.fields, ['login', 'nickname'])
 
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, clientLogin.cookie)
     assert.equal(result.response.status, 403)

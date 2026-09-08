@@ -1714,6 +1714,14 @@ function createWebConsoleApp(options: {
       res.status(403).json({ error: 'forbidden', message: error instanceof Error ? error.message : String(error) })
       return
     }
+    if (String((error as any)?.code || '').startsWith('platform_account_')) {
+      res.status(400).json({
+        error: (error as any).code,
+        message: error instanceof Error ? error.message : String(error),
+        ...((error as any)?.fields ? { fields: (error as any).fields } : {})
+      })
+      return
+    }
     if ((error as any)?.code === 'invalid_google_folder' || (error as any)?.code === 'telegram_message_too_long') {
       res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return

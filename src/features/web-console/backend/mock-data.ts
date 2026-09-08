@@ -124,7 +124,7 @@ const mockPlatformAccounts = [
     Id: 103,
     account_label: 'Kira LinkedIn',
     login: 'kira.linkedin@example.com',
-    linkedin_url: 'https://linkedin.com/in/kira-test',
+    url: 'https://linkedin.com/in/kira-test',
     phone: '',
     email: '',
     password: '',
@@ -140,8 +140,8 @@ const mockPlatformAccounts = [
     email: '',
     password: '',
     clients_id: 1,
-    platforms_id: 17,
-    rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
+    platforms_id: 29,
+    rel_platformAccounts_platform: { Id: 29, name: 'github', label: 'github' }
   },
   {
     Id: 102,
@@ -152,8 +152,8 @@ const mockPlatformAccounts = [
     email: '',
     password: 'phone number from related HH',
     clients_id: 1,
-    platforms_id: 2,
-    rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
+    platforms_id: 24,
+    rel_platformAccounts_platform: { Id: 24, name: 'telegram', label: 'telegram_ru' }
   },
   {
     Id: 104,
@@ -164,8 +164,8 @@ const mockPlatformAccounts = [
     email: '',
     password: 'phone number from related HH',
     clients_id: 1,
-    platforms_id: 4,
-    rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
+    platforms_id: 23,
+    rel_platformAccounts_platform: { Id: 23, name: 'telegram', label: 'telegram_en' }
   },
   {
     Id: 105,
@@ -176,8 +176,23 @@ const mockPlatformAccounts = [
     email: '',
     password: 'not-a-telegram-account',
     clients_id: 1,
-    platforms_id: 7,
-    rel_platformAccounts_platform: { Id: 7, name: 'phone', label: 'phone_en' }
+    platforms_id: 28,
+    rel_platformAccounts_platform: { Id: 28, name: 'phone', label: 'phone_en' }
+  },
+  {
+    Id: 107,
+    platform: 'whatsapp',
+    account_label: 'Legacy WhatsApp',
+    phone: '+441234567890',
+    clients_id: 1,
+    platforms_id: 20,
+    rel_platformAccounts_platform: { Id: 20, name: 'whatsapp', label: 'whatsapp' }
+  },
+  {
+    Id: 108,
+    platform: 'legacy_unknown',
+    account_label: 'Legacy Unknown',
+    clients_id: 1
   },
   {
     Id: 201,
@@ -223,7 +238,7 @@ const mockPlatformAccounts = [
     Id: 205,
     account_label: 'Ilyas LinkedIn',
     login: 'ilyas.linkedin@example.com',
-    linkedin_url: 'https://linkedin.com/in/ilyas-provider',
+    url: 'https://linkedin.com/in/ilyas-provider',
     clients_id: 2,
     platforms_id: 16,
     rel_platformAccounts_platform: { Id: 16, name: 'linkedin', label: 'linkedin' }
@@ -234,8 +249,8 @@ const mockPlatformAccounts = [
     account_label: 'Ilyas GitHub',
     login: 'https://github.com/ilyas-provider-client',
     clients_id: 2,
-    platforms_id: 17,
-    rel_platformAccounts_platform: { Id: 17, name: 'github', label: 'github' }
+    platforms_id: 29,
+    rel_platformAccounts_platform: { Id: 29, name: 'github', label: 'github' }
   },
   {
     Id: 207,
@@ -243,8 +258,8 @@ const mockPlatformAccounts = [
     account_label: 'Ilyas Telegram RU',
     login: '@ilyas_ru',
     clients_id: 2,
-    platforms_id: 2,
-    rel_platformAccounts_platform: { Id: 2, name: 'telegram', label: 'telegram_ru' }
+    platforms_id: 24,
+    rel_platformAccounts_platform: { Id: 24, name: 'telegram', label: 'telegram_ru' }
   },
   {
     Id: 208,
@@ -252,8 +267,8 @@ const mockPlatformAccounts = [
     account_label: 'Ilyas Telegram EN',
     nickname: '@ilyas_en',
     clients_id: 2,
-    platforms_id: 4,
-    rel_platformAccounts_platform: { Id: 4, name: 'telegram', label: 'telegram_en' }
+    platforms_id: 23,
+    rel_platformAccounts_platform: { Id: 23, name: 'telegram', label: 'telegram_en' }
   },
   {
     Id: 209,
@@ -293,13 +308,17 @@ const mockPlatformAccounts = [
 ]
 
 const mockPlatforms = [
-  { Id: 1, label: 'hh_ru', name: 'hh' },
-  { Id: 2, label: 'telegram_ru' },
-  { Id: 4, label: 'telegram_en' },
-  { Id: 7, label: 'phone_en', name: 'phone' },
-  { Id: 3, label: 'email_en', name: 'email' },
+  { Id: 10, label: 'hh_en', name: 'hh' },
+  { Id: 11, label: 'hh_ru', name: 'hh' },
   { Id: 16, label: 'linkedin', name: 'linkedin' },
-  { Id: 17, label: 'github', name: 'github' }
+  { Id: 20, label: 'whatsapp', name: 'whatsapp' },
+  { Id: 23, label: 'telegram_en' },
+  { Id: 24, label: 'telegram_ru' },
+  { Id: 25, label: 'email_en', name: 'email' },
+  { Id: 26, label: null, name: 'email_ru' },
+  { Id: 27, label: 'email_ru', name: 'email' },
+  { Id: 28, label: 'phone_en', name: 'phone' },
+  { Id: 29, label: 'github', name: 'github' }
 ]
 
 const mockEnglishLevels = [
