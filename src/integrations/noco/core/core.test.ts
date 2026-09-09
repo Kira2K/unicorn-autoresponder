@@ -374,6 +374,25 @@ async function runTests(): Promise<void> {
   assert.ok(sharedStarts[4] - sharedStarts[3] >= 100,
     'clients sharing one limiter must share the completed-request batch')
 
+  const persistentlyLimited = createMockRequester([
+    httpError(429, 'Too Many Requests')
+  ])
+  const failFastClient = createNocoClient({
+    requester: persistentlyLimited.requester,
+    retryDelaysMs: [0],
+    limiter: createNocoRequestLimiter({ cooldownMs: 1, log() {} })
+  })
+  await assert.rejects(() => failFastClient.request('get', '/test'),
+    (error: Error & { code?: string }) => error.code === 'noco_rate_limited')
+  assert.equal(persistentlyLimited.calls.length, 1)
+
+  const exhaustedReads = createMockRequester([timeout, timeout, { ok: true }])
+  await assert.rejects(() => createNocoClient({
+    requester: exhaustedReads.requester, retryDelaysMs: [0, 0]
+  }).request('get', '/exhausted'),
+  (error: Error & { code?: string }) => error.code === 'noco_timeout')
+  assert.equal(exhaustedReads.calls.length, 2)
+
   assert.deepEqual(uniqueRelatedIds([1, 1, 2, 0]), [1, 2])
   assert.deepEqual(buildLinkPayloads([1, 1, 2]), [
     [{ Id: 1 }, { Id: 2 }],

@@ -463,9 +463,18 @@ function telegramPlatformIds(platforms: NocoRecord[]): Set<number> {
     .filter(id => Number.isFinite(id) && id > 0))
 }
 
-function isTelegramPlatformAccount(account: NocoRecord, platformIds: Set<number>): boolean {
+function isTelegramPlatformAccount(account: NocoRecord, platformIds: Set<number> = new Set()): boolean {
   const platformId = accountPlatformId(account)
-  return platformId !== null && platformIds.has(platformId)
+  if (platformId !== null && platformIds.has(platformId)) return true
+  const telegramLabels = new Set(['telegram_ru', 'telegram_en'])
+  return [
+    account.platform,
+    account.label,
+    linkedLabel(account.rel_platformAccounts_platform),
+    linkedName(account.rel_platformAccounts_platform)
+  ]
+    .map(value => normalizeStatusText(value).replace(/\s+/g, '_'))
+    .some(value => telegramLabels.has(value))
 }
 
 function cvProcessingClientId(record: NocoRecord): number | null {
@@ -784,7 +793,10 @@ function extractCreatedRecordId(value: any): number | null {
 }
 
 function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebConsoleRepository {
-  const nocoClient = options.nocoClient ?? createNocoClient()
+  const nocoClient = options.nocoClient ?? createNocoClient({
+    retryDelaysMs: [0, 1000],
+    requestTimeoutMs: 10000
+  })
 
   async function fetchClients(): Promise<NocoRecord[]> {
     return await nocoClient.fetchRecords(TABLES.clients.id, 1000)
@@ -858,14 +870,11 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       const expected = new Set(uniqueStatuses)
       return (await fetchCvProcessing()).filter(record => expected.has(normalizeText(record.status)))
     }
-    const rows: NocoRecord[][] = []
-    for (const status of uniqueStatuses) {
-      rows.push(await nocoClient.fetchRecords(TABLES.cvProcessing.id, 1000, {
-        where: `(status,eq,${status})`
-      }) as NocoRecord[])
-    }
+    const rows = await nocoClient.fetchRecords(TABLES.cvProcessing.id, 1000, {
+      where: uniqueStatuses.map(status => `(status,eq,${status})`).join('~or')
+    }) as NocoRecord[]
     const byId = new Map<number, NocoRecord>()
-    for (const record of rows.flat()) {
+    for (const record of rows) {
       const id = Number(record.Id)
       if (Number.isFinite(id) && id > 0 && uniqueStatuses.includes(normalizeText(record.status))) {
         byId.set(id, record)
@@ -885,19 +894,38 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     return statusColumn?.colOptions?.options ?? []
   }
 
-  async function dashboardForClient(client: NocoRecord, fullAccess = false): Promise<ClientDashboard> {
-    const telegramIds = telegramPlatformIds(await fetchPlatforms())
-    const clientPlatformAccounts = (await fetchPlatformAccountsForClient(Number(client.Id)))
-      .sort((a, b) => Number(a.Id) - Number(b.Id))
+  function dashboardFromRecords(
+    client: NocoRecord,
+    clientPlatformAccounts: NocoRecord[],
+    fullAccess = false
+  ): ClientDashboard {
+    clientPlatformAccounts.sort((a, b) => Number(a.Id) - Number(b.Id))
     const linkedInEmailByClientId = buildLinkedInEmailByClientId(clientPlatformAccounts)
     const platformAccounts = clientPlatformAccounts
-      .map(account => toPlatformAccount(account, fullAccess, telegramIds))
+      .map(account => toPlatformAccount(account, fullAccess))
 
     return {
       client: toClient(client),
       platformAccounts,
       linkedInEmail: linkedInEmailByClientId.get(Number(client.Id)) ?? ''
     }
+  }
+
+  async function dashboardForClient(client: NocoRecord, fullAccess = false): Promise<ClientDashboard> {
+    return dashboardFromRecords(
+      client,
+      await fetchPlatformAccountsForClient(Number(client.Id)),
+      fullAccess
+    )
+  }
+
+  async function dashboardForClientId(clientId: number, fullAccess = false): Promise<ClientDashboard> {
+    const [client, clientPlatformAccounts] = await Promise.all([
+      fetchClientById(clientId),
+      fetchPlatformAccountsForClient(clientId)
+    ])
+    if (!client) throw notFoundError(`Client ${clientId} was not found`)
+    return dashboardFromRecords(client, clientPlatformAccounts, fullAccess)
   }
 
   async function getOwnedPlatformAccount(clientId: number, accountId: number): Promise<NocoRecord> {
@@ -908,10 +936,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
   }
 
   async function refetchDashboard(clientId: number, fullAccess = false): Promise<ClientDashboard> {
-    const clients = await fetchClients()
-    const client = clients.find(candidate => Number(candidate.Id) === Number(clientId))
-    if (!client) throw notFoundError(`Client ${clientId} was not found`)
-    return await dashboardForClient(client, fullAccess)
+    return await dashboardForClientId(clientId, fullAccess)
   }
 
   async function findClientRecordByTelegramChatId(chatId: string): Promise<NocoRecord | null> {
@@ -997,7 +1022,9 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
   return {
     async findClientByCalendarEmail(email: string): Promise<WebClient | null> {
       const normalized = normalizeEmail(email)
-      const clients = await fetchClients()
+      const clients = await nocoClient.fetchRecords(TABLES.clients.id, 100, {
+        where: `(calendar_email,eq,${normalized})`
+      }) as NocoRecord[]
       const match = clients.find(client => normalizeEmail(client.calendar_email) === normalized)
       return match ? toClient(match) : null
     },
@@ -1007,10 +1034,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async getClientDashboard(clientId: number, options: { fullAccess?: boolean } = {}): Promise<ClientDashboard> {
-      const clients = await fetchClients()
-      const client = clients.find(candidate => Number(candidate.Id) === Number(clientId))
-      if (!client) throw new Error(`Client ${clientId} was not found`)
-      return await dashboardForClient(client, Boolean(options.fullAccess))
+      return await dashboardForClientId(clientId, Boolean(options.fullAccess))
     },
 
     async getClientById(clientId: number): Promise<WebClient> {

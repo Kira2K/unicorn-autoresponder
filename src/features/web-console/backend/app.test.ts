@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { normalizeNocoError } = require('../../../integrations/noco/core/error-policy.ts') as
+  typeof import('../../../integrations/noco/core/error-policy.ts')
 const {
   buildProfileAccessInput,
   createWebConsoleApp,
@@ -472,8 +474,15 @@ function createFixtureNocoClient() {
     }
   ]
 
-  function applyWhere(records: Array<Record<string, any> & { Id: number }>, query?: Record<string, any>) {
+  function applyWhere(
+    records: Array<Record<string, any> & { Id: number }>,
+    query?: Record<string, any>
+  ): Array<Record<string, any> & { Id: number }> {
     const where = String(query?.where ?? '').trim()
+    const clauses = where.split('~or').map(clause => clause.trim()).filter(Boolean)
+    if (clauses.length > 1) {
+      return records.filter(record => clauses.some(clause => applyWhere([record], { where: clause }).length > 0))
+    }
     const match = /^\(([^,]+),eq,(.*)\)$/.exec(where)
     if (!match) return records
     const field = match[1]
@@ -814,6 +823,31 @@ async function runTests(): Promise<void> {
 
   const noco = createFixtureNocoClient()
   const repository = createWebConsoleRepository({ nocoClient: noco })
+  noco.fetchCalls.length = 0
+  assert.equal((await repository.findClientByCalendarEmail('CLIENT@example.com'))?.id, 1)
+  assert.deepEqual(noco.fetchCalls, [{
+    tableId: 'mxza381054ldlza',
+    where: '(calendar_email,eq,client@example.com)'
+  }])
+
+  noco.fetchCalls.length = 0
+  await repository.getProviderResumeTasks()
+  const resumeTaskReads = noco.fetchCalls.filter((call: any) => call.tableId === 'mhiysd8l0f33bny')
+  assert.equal(resumeTaskReads.length, 1)
+  assert.match(resumeTaskReads[0].where, /~or/)
+
+  noco.fetchCalls.length = 0
+  await repository.getClientDashboard(1)
+  assert.ok(noco.fetchCalls.some((call: any) =>
+    call.tableId === 'mxza381054ldlza' && call.where === '(Id,eq,1)'
+  ))
+  assert.equal(noco.fetchCalls.some((call: any) =>
+    call.tableId === 'mxza381054ldlza' && !call.where
+  ), false)
+  assert.equal(noco.fetchCalls.some((call: any) =>
+    call.tableId === 'mg3ovkendur1kpo'
+  ), false)
+
   const telegramAccounts = await repository.getTelegramPlatformAccountsForClient(1)
   assert.deepEqual(telegramAccounts.map((account: any) => account.id), [17, 19])
   assert.equal(telegramAccounts.every((account: any) => account.isTelegramAccount), true)
@@ -1050,6 +1084,36 @@ async function runTests(): Promise<void> {
       body: JSON.stringify({ email: 'client@example.com', password: 'bad' })
     })
     assert.equal(result.response.status, 401)
+
+    const normalFetchRecords = noco.fetchRecords
+    try {
+      const failures = [
+        ...[429, 502, 503, 504].map(status => ({
+          error: Object.assign(new Error(`upstream ${status}`), { response: { status } }),
+          status: status === 429 ? 429 : 503
+        })),
+        ...['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+          'noco_timeout', 'noco_unreachable', 'noco_service_unavailable'].map(code => ({
+          error: Object.assign(new Error('upstream unavailable'), { code }), status: 503
+        })),
+        { error: Object.assign(new Error('upstream busy'), { code: 'noco_rate_limited' }), status: 429 }
+      ]
+      for (const failure of failures) {
+        for (const error of [failure.error, normalizeNocoError(failure.error)]) {
+          noco.fetchRecords = async () => { throw error }
+          result = await request(server.baseUrl, '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: 'client@example.com', password: '1234' })
+          })
+          assert.equal(result.response.status, failure.status, error.code ?? error.message)
+          assert.equal(result.body.error, failure.status === 429
+            ? 'backend_overloaded' : 'backend_unavailable')
+        }
+      }
+    } finally {
+      noco.fetchRecords = normalFetchRecords
+    }
 
     const clientLogin = await request(server.baseUrl, '/api/auth/login', {
       method: 'POST',
