@@ -6,6 +6,8 @@ import { runServiceTests } from './service.test.ts'
 import { runProcessIsolationTests } from './process-isolation.test.ts'
 import { runHHResumeUiTests } from './hh-resume-ui.test.ts'
 import { runPendingRunnerTests } from './pending-runner.test.ts'
+import { runDriveSourceTests } from './drive-source.test.ts'
+import { runHHLiveDomTests } from './hh-live-dom.test.ts'
 
 async function main() {
   runStateStoreTests()
@@ -14,6 +16,8 @@ async function main() {
   await runNocoRepositoryTests()
   await runServiceTests()
   await runHHResumeUiTests()
+  await runHHLiveDomTests()
+  await runDriveSourceTests()
   runPendingRunnerTests()
   runProcessIsolationTests()
   console.log('HH profile filler tests passed.')

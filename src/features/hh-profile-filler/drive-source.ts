@@ -9,10 +9,11 @@ export type SourceDocument = {
   mimeType: 'application/pdf' |
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   revision: string
-  source: 'cv' | 'self_presentation'
+  source: 'cv' | 'experience_description'
 }
 
 const GOOGLE_DOC = 'application/vnd.google-apps.document'
+const GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
 const PDF = 'application/pdf'
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
@@ -45,9 +46,14 @@ export function createDriveSourceLoader(options: {
   drive?: any
 } = {}) {
   const maxBytes = options.maxBytes ?? Number(process.env.HH_PROFILE_CV_MAX_BYTES ?? 20 * 1024 * 1024)
-  const localCredentialCandidates = fs.readdirSync(process.cwd(), { withFileTypes: true })
-    .filter(item => item.isFile() && /^project-.*\.json$/i.test(item.name))
-    .map(item => path.resolve(process.cwd(), item.name))
+  const credentialRoots = [process.cwd()]
+  if (process.env.DOTENV_CONFIG_PATH) {
+    credentialRoots.push(path.dirname(path.resolve(process.env.DOTENV_CONFIG_PATH)))
+  }
+  const localCredentialCandidates = [...new Set(credentialRoots.flatMap(root =>
+    fs.existsSync(root) ? fs.readdirSync(root, { withFileTypes: true })
+      .filter(item => item.isFile() && /^project-.*\.json$/i.test(item.name))
+      .map(item => path.resolve(root, item.name)) : []))]
   const credentialsFile = String(process.env.GOOGLE_APPLICATION_CREDENTIALS ?? '').trim() ||
     (localCredentialCandidates.length === 1 ? localCredentialCandidates[0] : undefined)
   const drive = options.drive ?? google.drive({
@@ -107,27 +113,37 @@ export function createDriveSourceLoader(options: {
     return await download(driveId(url), 'cv')
   }
 
-  async function loadSelfPresentations(folderUrl?: string): Promise<SourceDocument[]> {
+  async function loadExperienceDescriptions(folderUrl?: string): Promise<SourceDocument[]> {
     if (!folderUrl) return []
     const folderId = driveId(folderUrl)
-    let response: any
-    try {
-      response = await drive.files.list({
-        q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed = false`,
-        fields: 'files(id,name,mimeType,modifiedTime)',
-        orderBy: 'modifiedTime desc',
-        pageSize: 100
-      })
-    } catch {
-      throw profileFillerError('profile_drive_folder_unavailable',
-        'The student Google Drive folder cannot be listed.', 'load_sources')
+    async function listChildren(parentId: string): Promise<any[]> {
+      try {
+        const response = await drive.files.list({
+          q: `'${parentId.replace(/'/g, "\\'")}' in parents and trashed = false`,
+          fields: 'files(id,name,mimeType,modifiedTime)',
+          orderBy: 'modifiedTime desc',
+          pageSize: 100
+        })
+        return response.data.files ?? []
+      } catch {
+        throw profileFillerError('profile_drive_folder_unavailable',
+          'The student Google Drive folder cannot be listed.', 'load_sources')
+      }
     }
-    const matches = (response.data.files ?? []).filter((file: any) =>
-      normalizedTitle(file.name) === 'самопрезентация')
+
+    const presentationFolders = (await listChildren(folderId)).filter((file: any) =>
+      file.mimeType === GOOGLE_FOLDER && normalizedTitle(file.name) === 'самопрезентация')
+    const matches: any[] = []
+    for (const folder of presentationFolders) {
+      matches.push(...(await listChildren(String(folder.id))).filter((file: any) =>
+        file.mimeType !== GOOGLE_FOLDER && normalizedTitle(file.name).includes('описание опыта')))
+    }
     const documents: SourceDocument[] = []
-    for (const file of matches) documents.push(await download(String(file.id), 'self_presentation'))
+    for (const file of matches) {
+      documents.push(await download(String(file.id), 'experience_description'))
+    }
     return documents
   }
 
-  return { loadCv, loadSelfPresentations }
+  return { loadCv, loadExperienceDescriptions }
 }
