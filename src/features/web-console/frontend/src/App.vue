@@ -2,6 +2,10 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
 import LinkedInAuthTab from './LinkedInAuthTab.vue'
+import {
+  normalizePlatformAccountLabel,
+  platformAccountPolicy
+} from '../../platform-account-policy.ts'
 
 function emptyEducationEntry() {
   return {
@@ -41,6 +45,17 @@ const emptyAccountForm = {
   recoveryCodes: '',
   password: '',
   emailPassword: ''
+}
+const ACCOUNT_FIELD_LABELS = {
+  login: 'Login',
+  phone: 'Phone',
+  email: 'Email',
+  nickname: 'Nickname',
+  linkedInUrl: 'URL',
+  foreignNumber: 'Foreign number',
+  recoveryCodes: 'Recovery codes',
+  password: 'Password',
+  emailPassword: 'Email password'
 }
 
 const session = ref(null)
@@ -152,7 +167,7 @@ function accountContact(account) {
   return account?.login || account?.nickname || account?.phone || account?.foreignNumber || account?.email || ''
 }
 
-const githubUrl = computed(() => accountContact(accountRows.value.find(account => platformKey(account) === 'github')))
+const githubUrl = computed(() => accountUrl(accountRows.value.find(account => platformKey(account) === 'github')))
 const linkedInProfileUrl = computed(() => accountRows.value.find(account => platformKey(account) === 'linkedin')?.linkedInUrl || '')
 const telegramRuContact = computed(() => accountContact(accountRows.value.find(account => platformKey(account) === 'telegram_ru')))
 const telegramEnContact = computed(() => accountContact(accountRows.value.find(account => platformKey(account) === 'telegram_en')))
@@ -163,6 +178,29 @@ const selectedTelegramAccount = computed(() =>
   null
 )
 const editingAccount = computed(() => Boolean(accountForm.value.id))
+const selectedAccountPlatform = computed(() =>
+  editingAccount.value
+    ? normalizePlatformAccountLabel(accountForm.value.platform)
+    : normalizePlatformAccountLabel(selectPlatformLabel(accountForm.value.platformId))
+)
+const selectedAccountPolicy = computed(() => platformAccountPolicy(selectedAccountPlatform.value))
+const accountDisplayLabel = computed(() => selectedAccountPlatform.value || accountForm.value.accountLabel)
+
+function accountFieldEnabled(field) {
+  return selectedAccountPolicy.value?.fields.includes(field) ?? false
+}
+
+function accountFieldRequired(field) {
+  return selectedAccountPolicy.value?.requiredFields.includes(field) ?? false
+}
+
+function accountUrl(account) {
+  return account?.linkedInUrl || ''
+}
+
+function canEditPlatformAccount(account) {
+  return Boolean(platformAccountPolicy(account?.platform))
+}
 const dryRunText = computed(() => {
   if (!dryRunResult.value) return ''
   return `${dryRunResult.value.message} ${dryRunResult.value.plannedCommand.command}`
@@ -1684,6 +1722,7 @@ async function saveProfile() {
 }
 
 function editAccount(account) {
+  if (!canEditPlatformAccount(account)) return
   accountMessage.value = ''
   accountError.value = ''
   accountEditorOpen.value = true
@@ -1696,7 +1735,7 @@ function editAccount(account) {
     phone: account.phone || '',
     email: account.email || '',
     nickname: account.nickname || '',
-    linkedInUrl: account.linkedInUrl || '',
+    linkedInUrl: accountUrl(account),
     foreignNumber: account.foreignNumber || '',
     recoveryCodes: account.recoveryCodes || '',
     password: '',
@@ -1706,11 +1745,15 @@ function editAccount(account) {
 
 function accountPayload() {
   const selectedPlatform = selectPlatformLabel(accountForm.value.platformId)
+  const policy = selectedAccountPolicy.value
+  const fields = Object.fromEntries(
+    (policy?.fields || []).map(field => [field, accountForm.value[field]])
+  )
+  if (editingAccount.value) return fields
   return {
-    ...accountForm.value,
     platformId: accountForm.value.platformId ? Number(accountForm.value.platformId) : null,
-    platform: selectedPlatform || accountForm.value.platform,
-    id: undefined
+    platform: selectedPlatform,
+    ...fields
   }
 }
 
@@ -1720,8 +1763,14 @@ async function saveAccount() {
   accountError.value = ''
   try {
     const payload = accountPayload()
-    if (!payload.platform && !payload.platformId) {
+    if (!selectedAccountPolicy.value) {
       accountError.value = 'Choose a platform'
+      return
+    }
+    const missingFields = selectedAccountPolicy.value.requiredFields
+      .filter(field => !String(payload[field] || '').trim())
+    if (missingFields.length) {
+      accountError.value = `Fill required fields: ${missingFields.map(field => ACCOUNT_FIELD_LABELS[field]).join(', ')}`
       return
     }
     const previousTelegramIds = new Set(telegramAccounts.value.map(account => Number(account.id)))
@@ -2917,55 +2966,59 @@ onUnmounted(() => {
               <span v-if="accountMessage" class="success-text" data-testid="account-save-message">{{ accountMessage }}</span>
               <span v-if="accountError" class="error-text" data-testid="account-error">{{ accountError }}</span>
             </div>
-            <form v-if="isClient && accountEditorOpen" class="account-form" data-testid="account-form" @submit.prevent="saveAccount">
-              <label class="field">
+            <form v-if="isClient && accountEditorOpen" class="account-form" data-testid="account-form" novalidate @submit.prevent="saveAccount">
+              <label v-if="!editingAccount" class="field">
                 <span>Platform</span>
-                <select v-model="accountForm.platformId" class="native-select" data-testid="account-platform">
+                <select v-model="accountForm.platformId" class="native-select" required data-testid="account-platform">
                   <option value="">Choose platform</option>
                   <option v-for="platform in platforms" :key="platform.id" :value="String(platform.id)">
                     {{ platform.label }}
                   </option>
                 </select>
               </label>
+              <label v-else class="field">
+                <span>Platform</span>
+                <InputText :model-value="accountForm.platform" disabled data-testid="account-platform-locked" />
+              </label>
               <label class="field">
                 <span>Label</span>
-                <InputText v-model="accountForm.accountLabel" data-testid="account-label" />
+                <InputText :model-value="accountDisplayLabel" disabled data-testid="account-label" />
               </label>
               <label class="field">
                 <span>Login</span>
-                <InputText v-model="accountForm.login" data-testid="account-login" />
+                <InputText v-model="accountForm.login" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" data-testid="account-login" />
               </label>
               <label class="field">
                 <span>Phone</span>
-                <InputText v-model="accountForm.phone" data-testid="account-phone" />
+                <InputText v-model="accountForm.phone" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" data-testid="account-phone" />
               </label>
               <label class="field">
                 <span>Email</span>
-                <InputText v-model="accountForm.email" data-testid="account-email" />
+                <InputText v-model="accountForm.email" :disabled="!accountFieldEnabled('email')" :required="accountFieldRequired('email')" data-testid="account-email" />
               </label>
               <label class="field">
                 <span>Nickname</span>
-                <InputText v-model="accountForm.nickname" data-testid="account-nickname" />
+                <InputText v-model="accountForm.nickname" :disabled="!accountFieldEnabled('nickname')" :required="accountFieldRequired('nickname')" data-testid="account-nickname" />
               </label>
               <label class="field wide-field">
-                <span>LinkedIn URL</span>
-                <InputText v-model="accountForm.linkedInUrl" data-testid="account-linkedin-url" />
+                <span>URL</span>
+                <InputText v-model="accountForm.linkedInUrl" :disabled="!accountFieldEnabled('linkedInUrl')" :required="accountFieldRequired('linkedInUrl')" data-testid="account-linkedin-url" />
               </label>
               <label class="field">
                 <span>Foreign number</span>
-                <InputText v-model="accountForm.foreignNumber" data-testid="account-foreign-number" />
+                <InputText v-model="accountForm.foreignNumber" :disabled="!accountFieldEnabled('foreignNumber')" :required="accountFieldRequired('foreignNumber')" data-testid="account-foreign-number" />
               </label>
               <label class="field">
                 <span>Recovery codes</span>
-                <InputText v-model="accountForm.recoveryCodes" data-testid="account-recovery-codes" />
+                <InputText v-model="accountForm.recoveryCodes" :disabled="!accountFieldEnabled('recoveryCodes')" :required="accountFieldRequired('recoveryCodes')" data-testid="account-recovery-codes" />
               </label>
               <label class="field">
                 <span>Password</span>
-                <Password v-model="accountForm.password" :feedback="false" toggle-mask data-testid="account-password-widget" input-class="password-input" />
+                <Password v-model="accountForm.password" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('password')" :required="accountFieldRequired('password')" data-testid="account-password-widget" input-class="password-input" />
               </label>
               <label class="field">
                 <span>Email password</span>
-                <Password v-model="accountForm.emailPassword" :feedback="false" toggle-mask data-testid="account-email-password-widget" input-class="password-input" />
+                <Password v-model="accountForm.emailPassword" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('emailPassword')" :required="accountFieldRequired('emailPassword')" data-testid="account-email-password-widget" input-class="password-input" />
               </label>
               <div class="form-actions wide-field">
                 <Button type="submit" :label="editingAccount ? 'Save account' : 'Add account'" icon="pi pi-save" :loading="accountSaving" data-testid="save-account-button" />
@@ -2980,6 +3033,11 @@ onUnmounted(() => {
               <Column field="phone" header="Phone" />
               <Column field="email" header="Email" />
               <Column field="nickname" header="Nickname" />
+              <Column header="URL">
+                <template #body="{ data }">
+                  <span>{{ accountUrl(data) || 'empty' }}</span>
+                </template>
+              </Column>
               <Column header="Password">
                 <template #body="{ data }">
                   <Tag v-if="data.password" :value="data.password" severity="secondary" />
@@ -2989,7 +3047,7 @@ onUnmounted(() => {
               <Column v-if="isClient" header="Actions">
                 <template #body="{ data }">
                   <div class="row-actions">
-                    <Button icon="pi pi-pencil" aria-label="Edit account" size="small" severity="secondary" data-testid="edit-account-button" @click="editAccount(data)" />
+                    <Button icon="pi pi-pencil" aria-label="Edit account" size="small" severity="secondary" :disabled="!canEditPlatformAccount(data)" :title="canEditPlatformAccount(data) ? 'Edit account' : 'Unsupported platform is read-only'" data-testid="edit-account-button" @click="editAccount(data)" />
                     <Button icon="pi pi-trash" aria-label="Delete account" size="small" severity="danger" data-testid="delete-account-button" @click="deleteAccount(data)" />
                   </div>
                 </template>

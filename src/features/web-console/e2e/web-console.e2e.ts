@@ -12,7 +12,18 @@ const AI_TAILOR_PDF = path.join(AI_TAILOR_FIXTURE_DIR, 'Kira Samsonova React.pdf
 const AI_TAILOR_JOB_REQUIREMENTS = fs.readFileSync(path.join(AI_TAILOR_FIXTURE_DIR, 'AI-tailor-test-text.txt'), 'utf8')
 const API_PORT = 4310
 const UI_PORT = 4311
-const MOCK_PLATFORM_LABELS = ['email_en', 'github', 'hh_ru', 'linkedin', 'telegram_ru']
+const MOCK_PLATFORM_FIELDS: Record<string, string[]> = {
+  email_en: ['login', 'password'],
+  email_ru: ['login', 'password'],
+  github: ['linkedInUrl'],
+  hh_en: ['login', 'phone', 'password'],
+  hh_ru: ['login', 'phone', 'password'],
+  linkedin: ['login', 'password', 'linkedInUrl', 'recoveryCodes'],
+  phone_en: ['phone'],
+  telegram_en: ['login', 'nickname'],
+  telegram_ru: ['login', 'nickname']
+}
+const MOCK_PLATFORM_LABELS = Object.keys(MOCK_PLATFORM_FIELDS)
 
 function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -146,37 +157,62 @@ async function runTests(): Promise<void> {
     await assertText(page, 'Testy')
     await assertText(page, 'McClient')
     await page.getByTestId('accounts-table').getByText('hh_ru', { exact: false }).first().waitFor()
+    for (const legacyLabel of ['Legacy WhatsApp', 'Legacy Unknown']) {
+      const legacyRow = page.getByTestId('accounts-table').locator('tr').filter({ hasText: legacyLabel })
+      assert.equal(await legacyRow.getByTestId('edit-account-button').isDisabled(), true)
+      assert.equal(await legacyRow.getByTestId('delete-account-button').isDisabled(), false)
+    }
+    const legacyGithubRow = page.getByTestId('accounts-table').locator('tr').filter({ hasText: 'Kira GitHub' })
+    await legacyGithubRow.getByTestId('edit-account-button').click()
+    assert.equal(await page.getByTestId('account-platform-locked').inputValue(), 'github')
+    assert.equal(await page.getByTestId('account-linkedin-url').inputValue(), 'https://github.com/kira-test')
+    assert.equal(await page.getByTestId('account-login').isDisabled(), true)
+    await page.getByTestId('save-account-button').click()
+    await page.getByTestId('account-save-message').getByText('Account updated', { exact: false }).waitFor()
+    const migratedGithubRow = page.getByTestId('accounts-table').locator('tr').filter({ hasText: 'https://github.com/kira-test' })
+    await migratedGithubRow.getByTestId('edit-account-button').click()
+    assert.equal(await page.getByTestId('account-linkedin-url').inputValue(), 'https://github.com/kira-test')
+    assert.equal(await page.getByTestId('account-login').inputValue(), '')
+    await page.getByTestId('close-account-editor-button').click()
     assert.equal(await page.getByTestId('account-form').count(), 0)
     await page.getByTestId('open-account-editor-button').click()
     await page.getByTestId('account-form').waitFor()
     await page.getByTestId('account-platform').selectOption({ label: 'linkedin' })
-    await page.getByTestId('account-label').fill('Test LinkedIn')
+    assert.equal(await page.getByTestId('account-label').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-phone').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-email').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-nickname').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-foreign-number').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-recovery-codes').isDisabled(), false)
+    assert.equal(await page.getByTestId('account-email-password-widget').locator('input').isDisabled(), true)
+    await page.getByTestId('save-account-button').click()
+    await page.getByTestId('account-error').getByText('Login, Password, URL', { exact: false }).waitFor()
     await page.getByTestId('account-login').fill('test.linkedin@example.com')
-    await page.getByTestId('account-phone').fill('+15550101010')
-    await page.getByTestId('account-email').fill('test.linkedin@example.com')
-    await page.getByTestId('account-nickname').fill('test-li')
     await page.getByTestId('account-linkedin-url').fill('https://linkedin.com/in/test')
-    await page.getByTestId('account-foreign-number').fill('+442071234567')
-    await page.getByTestId('account-recovery-codes').fill('code-a')
+    await page.getByTestId('account-recovery-codes').fill('recovery-one')
     await page.getByTestId('account-password-widget').locator('input').fill('secret-one')
-    await page.getByTestId('account-email-password-widget').locator('input').fill('mail-secret-one')
     await page.getByTestId('save-account-button').click()
     await page.getByTestId('account-save-message').getByText('Account added', { exact: false }).waitFor()
-    await assertText(page, 'Test LinkedIn')
     await assertText(page, 'test.linkedin@example.com')
+    await page.getByTestId('accounts-table').getByText('https://linkedin.com/in/test', { exact: true }).waitFor()
     await page.getByTestId('edit-account-button').last().click()
-    await page.getByTestId('account-label').fill('Test LinkedIn Edited')
+    await page.getByTestId('account-platform-locked').waitFor()
+    assert.equal(await page.getByTestId('account-platform-locked').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-label').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-recovery-codes').inputValue(), 'recovery-one')
     await page.getByTestId('account-login').fill('edited.linkedin@example.com')
+    await page.getByTestId('account-linkedin-url').fill('https://linkedin.com/in/edited')
+    await page.getByTestId('account-recovery-codes').fill('recovery-two')
     await page.getByTestId('account-password-widget').locator('input').fill('secret-two')
     await page.getByTestId('save-account-button').click()
     await page.getByTestId('account-save-message').getByText('Account updated', { exact: false }).waitFor()
-    await assertText(page, 'Test LinkedIn Edited')
     await assertText(page, 'edited.linkedin@example.com')
+    await page.getByTestId('accounts-table').getByText('https://linkedin.com/in/edited', { exact: true }).waitFor()
     await assertText(page, '***')
     page.once('dialog', (dialog: any) => dialog.accept())
     await page.getByTestId('delete-account-button').last().click()
     await page.getByTestId('account-save-message').getByText('Account deleted', { exact: false }).waitFor()
-    assert.equal(await page.getByText('Test LinkedIn Edited').count(), 0)
+    assert.equal(await page.getByText('edited.linkedin@example.com', { exact: true }).count(), 0)
 
     await page.getByTestId('telegram-card').waitFor()
     assert.equal(await page.locator('[data-testid^="telegram-account-tab-"]').count(), 2)
@@ -262,34 +298,70 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByTestId('telegram-workspace').count(), 0)
     await page.getByTestId('telegram-status').getByText('active', { exact: false }).waitFor()
 
-    for (const platformLabel of MOCK_PLATFORM_LABELS) {
-      const label = `All platforms ${platformLabel}`
+    const createdAccountValues: Record<string, string> = {}
+    for (const [platformIndex, platformLabel] of MOCK_PLATFORM_LABELS.entries()) {
       await page.getByTestId('open-account-editor-button').click()
       await page.getByTestId('account-form').waitFor()
+      if (platformIndex === 0) {
+        const optionLabels = (await page.getByTestId('account-platform').locator('option').allTextContents())
+          .map((label: string) => label.trim())
+        assert.equal(optionLabels.includes('whatsapp'), false)
+        assert.equal(optionLabels.filter((label: string) => label === 'email_ru').length, 1)
+        for (const supportedPlatform of MOCK_PLATFORM_LABELS) {
+          assert(optionLabels.includes(supportedPlatform), `Missing ${supportedPlatform} platform option`)
+        }
+      }
       await page.getByTestId('account-platform').selectOption({ label: platformLabel })
-      await page.getByTestId('account-label').fill(label)
-      await page.getByTestId('account-login').fill(platformLabel === 'github' ? 'https://github.com/all-platforms' : `all-${platformLabel}@example.com`)
-      await page.getByTestId('account-phone').fill(`+1555000${MOCK_PLATFORM_LABELS.indexOf(platformLabel) + 1}`)
-      await page.getByTestId('account-email').fill(`all-${platformLabel}@example.com`)
-      await page.getByTestId('account-nickname').fill(`all-${platformLabel}`)
-      await page.getByTestId('account-linkedin-url').fill(`https://example.com/${platformLabel}`)
-      await page.getByTestId('account-foreign-number').fill(`+44207000${MOCK_PLATFORM_LABELS.indexOf(platformLabel) + 1}`)
-      await page.getByTestId('account-recovery-codes').fill(`recovery-${platformLabel}`)
-      await page.getByTestId('account-password-widget').locator('input').fill(`secret-${platformLabel}`)
-      await page.getByTestId('account-email-password-widget').locator('input').fill(`mail-secret-${platformLabel}`)
+      assert.equal(await page.getByTestId('account-label').isDisabled(), true)
+      assert.equal(await page.getByTestId('account-label').inputValue(), platformLabel)
+
+      const fieldLocators: Record<string, any> = {
+        login: page.getByTestId('account-login'),
+        phone: page.getByTestId('account-phone'),
+        email: page.getByTestId('account-email'),
+        nickname: page.getByTestId('account-nickname'),
+        linkedInUrl: page.getByTestId('account-linkedin-url'),
+        foreignNumber: page.getByTestId('account-foreign-number'),
+        recoveryCodes: page.getByTestId('account-recovery-codes'),
+        password: page.getByTestId('account-password-widget').locator('input'),
+        emailPassword: page.getByTestId('account-email-password-widget').locator('input')
+      }
+      const activeFields = new Set(MOCK_PLATFORM_FIELDS[platformLabel])
+      for (const [field, locator] of Object.entries(fieldLocators)) {
+        assert.equal(await locator.isDisabled(), !activeFields.has(field), `${platformLabel}.${field}`)
+      }
+
+      const values: Record<string, string> = {
+        login: `all-${platformLabel}@example.com`,
+        phone: `+1555000${platformIndex + 1}`,
+        nickname: `all-${platformLabel}`,
+        linkedInUrl: platformLabel === 'github'
+          ? 'https://github.com/all-platforms'
+          : `https://linkedin.com/in/all-${platformLabel}`,
+        recoveryCodes: `recovery-${platformLabel}`,
+        password: `secret-${platformLabel}`
+      }
+      for (const field of activeFields) await fieldLocators[field].fill(values[field])
+      createdAccountValues[platformLabel] = values.linkedInUrl && activeFields.has('linkedInUrl')
+        ? values.linkedInUrl
+        : values.phone && activeFields.has('phone')
+          ? values.phone
+          : values.login
       await page.getByTestId('save-account-button').click()
       await page.getByTestId('account-save-message').getByText('Account added', { exact: false }).waitFor()
-      await page.getByTestId('accounts-table').getByText(label, { exact: true }).waitFor()
-      if (platformLabel === 'telegram_ru') {
+      await page.getByTestId('accounts-table').getByText(createdAccountValues[platformLabel], { exact: true }).last().waitFor()
+      if (platformLabel === 'telegram_en') {
         assert.equal(await page.locator('[data-testid^="telegram-account-tab-"]').count(), 3)
         await page.getByTestId('telegram-status').getByText('disconnected', { exact: false }).waitFor()
+      }
+      if (platformLabel === 'telegram_ru') {
+        assert.equal(await page.locator('[data-testid^="telegram-account-tab-"]').count(), 4)
       }
     }
 
     assert.equal(await page.getByTestId('account-form').count(), 0)
     for (const platformLabel of MOCK_PLATFORM_LABELS) {
-      await page.getByTestId('accounts-table').getByText(`All platforms ${platformLabel}`, { exact: true }).waitFor()
-      await page.getByTestId('accounts-table').getByText(platformLabel === 'github' ? 'https://github.com/all-platforms' : `all-${platformLabel}@example.com`, { exact: false }).first().waitFor()
+      await page.getByTestId('accounts-table').getByText(createdAccountValues[platformLabel], { exact: true }).last().waitFor()
     }
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '02-client-all-platform-accounts.png'), fullPage: true })
 
@@ -316,6 +388,29 @@ async function runTests(): Promise<void> {
     await page.getByTestId('login-page').waitFor()
     assert.equal(await page.getByTestId('client-dashboard').count(), 0)
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '03-client-logout.png'), fullPage: true })
+
+    await page.getByTestId('email-input').fill('latest@example.com')
+    await page.locator('input[type="password"]').fill('1234')
+    await page.getByTestId('login-button').click()
+    await page.getByTestId('client-dashboard').waitFor()
+    await page.getByTestId('open-account-editor-button').click()
+    const secondClientOptions = (await page.getByTestId('account-platform').locator('option').allTextContents())
+      .map((label: string) => label.trim())
+    assert.equal(secondClientOptions.includes('whatsapp'), false)
+    assert.equal(secondClientOptions.filter((label: string) => label === 'email_ru').length, 1)
+    await page.getByTestId('account-platform').selectOption({ label: 'github' })
+    assert.equal(await page.getByTestId('account-label').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-login').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-phone').isDisabled(), true)
+    assert.equal(await page.getByTestId('account-linkedin-url').isDisabled(), false)
+    await page.getByTestId('account-form').getByText('URL', { exact: true }).waitFor()
+    await page.getByTestId('close-account-editor-button').click()
+    await page.getByTestId('edit-account-button').first().click()
+    await page.getByTestId('account-platform-locked').waitFor()
+    assert.equal(await page.getByTestId('account-label').isDisabled(), true)
+    await page.getByTestId('close-account-editor-button').click()
+    await page.getByTestId('logout-button').click()
+    await page.getByTestId('login-page').waitFor()
 
     await wait(15300)
     await page.getByTestId('email-input').fill('missing-profiles@example.com')

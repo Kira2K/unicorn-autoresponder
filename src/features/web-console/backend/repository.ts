@@ -14,6 +14,12 @@ const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as 
     actorRole: 'provider'
   }): import('./types.ts').DolphinProfileStatus
 }
+const {
+  CANONICAL_EMAIL_RU_PLATFORM_ID,
+  normalizePlatformAccountLabel,
+  platformAccountLabelFromId,
+  platformAccountPolicy
+} = require('../platform-account-policy.ts') as typeof import('../platform-account-policy.ts')
 
 type ClientDashboard = import('./types.ts').ClientDashboard
 type ClientProfilePatch = import('./types.ts').ClientProfilePatch
@@ -264,13 +270,8 @@ function isLinkedInPlatformAccount(account: NocoRecord): boolean {
   return accountPlatformId(account) === LINKEDIN_PLATFORM_ID
 }
 
-function isPlatformAccountForLabel(account: NocoRecord, label: string): boolean {
-  const expected = normalizedPlatformLabel(label)
-  return normalizedPlatformLabel(account.platform) === expected || platformLabelFromRelation(account) === expected
-}
-
 function isGitHubPlatformAccount(account: NocoRecord): boolean {
-  return isPlatformAccountForLabel(account, GITHUB_PLATFORM_LABEL)
+  return platformAccountRecordLabel(account) === GITHUB_PLATFORM_LABEL
 }
 
 function buildLinkedInEmailByClientId(accounts: NocoRecord[]): Map<number, string> {
@@ -505,18 +506,112 @@ function platformContact(platformAccounts: NocoRecord[], labels: string[]): stri
   return ''
 }
 
+const GITHUB_LEGACY_URL_FIELDS = [
+  'account_label',
+  'login',
+  'phone',
+  'phone_en',
+  'email',
+  'nickname',
+  'foreign_number',
+  'recovery_codes',
+  'password',
+  'email_password'
+] as const
+
+type GitHubUrlCandidate = {
+  field: typeof GITHUB_LEGACY_URL_FIELDS[number]
+  key: string
+  url: string
+}
+
+function platformAccountUrl(account: NocoRecord | undefined): string {
+  return normalizeText(account?.url ?? account?.linkedin_url)
+}
+
+function githubUrlCandidate(value: unknown): { key: string; url: string } | null {
+  const text = normalizeText(value)
+  if (!text) return null
+  try {
+    const parsed = new URL(text)
+    const hostname = parsed.hostname.toLowerCase()
+    if (!['http:', 'https:'].includes(parsed.protocol) || !['github.com', 'www.github.com'].includes(hostname)) {
+      return null
+    }
+    parsed.hostname = 'github.com'
+    return { key: parsed.href, url: text }
+  } catch {
+    return null
+  }
+}
+
+function githubLegacyUrlCandidates(account: NocoRecord): GitHubUrlCandidate[] {
+  const candidates: GitHubUrlCandidate[] = []
+  for (const field of GITHUB_LEGACY_URL_FIELDS) {
+    const candidate = githubUrlCandidate(account[field])
+    if (candidate) candidates.push({ field, ...candidate })
+  }
+  return candidates
+}
+
+function uniqueGithubLegacyUrls(account: NocoRecord): GitHubUrlCandidate[] {
+  const unique = new Map<string, GitHubUrlCandidate>()
+  for (const candidate of githubLegacyUrlCandidates(account)) {
+    if (!unique.has(candidate.key)) unique.set(candidate.key, candidate)
+  }
+  return [...unique.values()]
+}
+
+function githubUrlFromAccount(account: NocoRecord | undefined): string {
+  if (!account) return ''
+  const canonical = platformAccountUrl(account)
+  if (canonical) return canonical
+  const candidates = uniqueGithubLegacyUrls(account)
+  return candidates.length === 1 ? candidates[0].url : ''
+}
+
+function githubUrlMigrationPatch(account: NocoRecord, submittedUrl: unknown): Record<string, unknown> {
+  const canonical = githubUrlCandidate(platformAccountUrl(account))
+  const submitted = githubUrlCandidate(submittedUrl)
+  const candidates = githubLegacyUrlCandidates(account)
+  const uniqueCandidates = new Map(candidates.map(candidate => [candidate.key, candidate]))
+
+  if (!platformAccountUrl(account) && uniqueCandidates.size > 1) {
+    throw platformAccountInputError(
+      'platform_account_github_url_ambiguous',
+      'Multiple different GitHub URLs were found in legacy fields.',
+      [...new Set(candidates.map(candidate => candidate.field))]
+    )
+  }
+
+  const keysToClear = new Set<string>()
+  if (!platformAccountUrl(account) && uniqueCandidates.size === 1) {
+    keysToClear.add(uniqueCandidates.keys().next().value as string)
+  } else {
+    if (canonical) keysToClear.add(canonical.key)
+    if (submitted) keysToClear.add(submitted.key)
+  }
+
+  const patch: Record<string, unknown> = {}
+  for (const candidate of candidates) {
+    if (!keysToClear.has(candidate.key)) continue
+    patch[candidate.field] = candidate.field === 'account_label' ? 'github' : ''
+  }
+  return patch
+}
+
 function githubUrl(platformAccounts: NocoRecord[]): string {
   const account = platformAccounts
     .filter(isGitHubPlatformAccount)
     .sort((a, b) => Number(a.Id) - Number(b.Id))[0]
-  return normalizeText(account?.login)
+  return githubUrlFromAccount(account)
 }
 
 function linkedInUrl(platformAccounts: NocoRecord[]): string {
   const account = platformAccounts
     .filter(isLinkedInPlatformAccount)
     .sort((a, b) => Number(a.Id) - Number(b.Id))[0]
-  return normalizeText(account?.linkedin_url)
+  return platformAccountUrl(account)
 }
 
 function hasGitHubPlatformAccount(platformAccounts: NocoRecord[]): boolean {
@@ -615,10 +710,11 @@ function maskSecret(value: unknown, fullAccess: boolean): string | undefined {
 }
 
 function toPlatformAccount(record: NocoRecord, fullAccess: boolean, telegramIds: Set<number> = new Set()): WebPlatformAccount {
+  const platform = platformAccountRecordLabel(record)
   return {
     id: Number(record.Id),
     clientId: accountClientId(record) || undefined,
-    platform: normalizeText(record.platform || linkedName(record.rel_platformAccounts_platform)),
+    platform,
     platformId: accountPlatformId(record) || undefined,
     isTelegramAccount: isTelegramPlatformAccount(record, telegramIds),
     accountLabel: normalizeText(record.account_label || record.label || record.platform || linkedLabel(record.rel_platformAccounts_platform)),
@@ -626,7 +722,7 @@ function toPlatformAccount(record: NocoRecord, fullAccess: boolean, telegramIds:
     phone: normalizeText(record.phone || record.phone_en),
     email: normalizeText(record.email),
     nickname: normalizeText(record.nickname) || undefined,
-    linkedInUrl: normalizeText(record.linkedin_url) || undefined,
+    linkedInUrl: (platform === 'github' ? githubUrlFromAccount(record) : platformAccountUrl(record)) || undefined,
     foreignNumber: normalizeText(record.foreign_number) || undefined,
     recoveryCodes: normalizeText(record.recovery_codes) || undefined,
     password: maskSecret(record.password, fullAccess),
@@ -655,6 +751,38 @@ function toOption(record: NocoRecord, fields: string[]): WebOption {
     id: Number(record.Id),
     label: optionLabel(record, fields)
   }
+}
+
+function platformRecordLabel(record: NocoRecord): string {
+  return normalizePlatformAccountLabel(record.label ?? record.platform ?? record.name)
+}
+
+function supportedPlatformOptions(records: NocoRecord[]): WebOption[] {
+  const selected = new Map<string, NocoRecord>()
+  for (const record of records) {
+    const label = platformRecordLabel(record)
+    if (!platformAccountPolicy(label)) continue
+    const current = selected.get(label)
+    if (!current) {
+      selected.set(label, record)
+      continue
+    }
+
+    const recordId = Number(record.Id)
+    const currentId = Number(current.Id)
+    const useCanonicalEmailRu = label === 'email_ru' &&
+      recordId === CANONICAL_EMAIL_RU_PLATFORM_ID &&
+      currentId !== CANONICAL_EMAIL_RU_PLATFORM_ID
+    const recordHasCanonicalLabel = normalizePlatformAccountLabel(record.label) === label
+    const currentHasCanonicalLabel = normalizePlatformAccountLabel(current.label) === label
+    if (useCanonicalEmailRu || (recordHasCanonicalLabel && !currentHasCanonicalLabel)) {
+      selected.set(label, record)
+    }
+  }
+
+  return [...selected.entries()]
+    .map(([label, record]) => ({ id: Number(record.Id), label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 }
 
 function cleanOptionalText(value: unknown): string | undefined {
@@ -755,7 +883,7 @@ function buildAccountPatch(input: PlatformAccountInput, options: { includeBlankS
     ['phone', 'phone'],
     ['email', 'email'],
     ['nickname', 'nickname'],
-    ['linkedInUrl', 'linkedin_url'],
+    ['linkedInUrl', 'url'],
     ['foreignNumber', 'foreign_number'],
     ['recoveryCodes', 'recovery_codes']
   ]
@@ -776,6 +904,97 @@ function buildAccountPatch(input: PlatformAccountInput, options: { includeBlankS
     if (value || options.includeBlankSecrets) patch[nocoField] = value
   }
   return patch
+}
+
+function platformAccountInputError(
+  code: string,
+  message: string,
+  fields: string[] = []
+): Error & { code: string; fields?: string[] } {
+  return Object.assign(new Error(message), {
+    code,
+    ...(fields.length ? { fields } : {})
+  })
+}
+
+function platformAccountRecordLabel(account: NocoRecord): string {
+  const platformId = accountPlatformId(account)
+  if (platformId) return platformAccountLabelFromId(platformId) ?? ''
+  const candidates = [
+    account.platform,
+    linkedLabel(account.rel_platformAccounts_platform),
+    linkedName(account.rel_platformAccounts_platform)
+  ].map(normalizePlatformAccountLabel).filter(Boolean)
+  return candidates.find(candidate => Boolean(platformAccountPolicy(candidate))) ?? candidates[0] ?? ''
+}
+
+function validatePlatformAccountFields(
+  input: PlatformAccountInput,
+  platform: string,
+  options: { allowPlatformIdentity: boolean }
+): void {
+  const policy = platformAccountPolicy(platform)
+  if (!policy) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Platform account ${platform || 'unknown'} is not supported.`
+    )
+  }
+
+  const identityFields = options.allowPlatformIdentity ? ['platformId', 'platform'] : []
+  const allowedFields = new Set<string>([...identityFields, ...policy.fields])
+  const disallowedFields = Object.keys(input).filter(field => !allowedFields.has(field))
+  if (disallowedFields.length) {
+    throw platformAccountInputError(
+      'platform_account_fields_not_allowed',
+      `Fields are not allowed for ${platform}: ${disallowedFields.join(', ')}.`,
+      disallowedFields
+    )
+  }
+
+  const missingFields = policy.requiredFields.filter(field => !normalizeText(input[field]))
+  if (missingFields.length) {
+    throw platformAccountInputError(
+      'platform_account_required_fields_missing',
+      `Required fields are missing for ${platform}: ${missingFields.join(', ')}.`,
+      [...missingFields]
+    )
+  }
+}
+
+function resolveCreatePlatform(
+  input: PlatformAccountInput,
+  platforms: NocoRecord[]
+): { id: number; label: string } {
+  const platformId = cleanNullableId(input.platformId)
+  const requestedLabel = normalizePlatformAccountLabel(input.platform)
+  const canonicalOption = platformId === undefined
+    ? supportedPlatformOptions(platforms).find(option => option.label === requestedLabel)
+    : undefined
+  const resolvedPlatformId = platformId ?? canonicalOption?.id
+  const record = platforms.find(candidate => Number(candidate.Id) === resolvedPlatformId)
+  const label = record ? platformRecordLabel(record) : requestedLabel
+
+  if (!record || !platformAccountPolicy(label)) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Platform account ${requestedLabel || platformId || 'unknown'} is not supported.`
+    )
+  }
+  if (requestedLabel && requestedLabel !== label) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Platform ${requestedLabel} does not match platform ID ${record.Id}.`
+    )
+  }
+  if (label === 'email_ru' && Number(record.Id) !== CANONICAL_EMAIL_RU_PLATFORM_ID) {
+    throw platformAccountInputError(
+      'platform_account_unsupported_platform',
+      `Use canonical email_ru platform ID ${CANONICAL_EMAIL_RU_PLATFORM_ID}.`
+    )
+  }
+
+  return { id: Number(record.Id), label }
 }
 
 function notFoundError(message: string): Error & { code?: string } {
@@ -1195,9 +1414,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async listPlatforms(): Promise<WebOption[]> {
-      return (await fetchPlatforms())
-        .sort((a, b) => optionLabel(a, ['label', 'platform', 'name']).localeCompare(optionLabel(b, ['label', 'platform', 'name'])))
-        .map(record => toOption(record, ['label', 'platform', 'name']))
+      return supportedPlatformOptions(await fetchPlatforms())
     },
 
     async updateClientProfile(clientId: number, input: ClientProfilePatch): Promise<ClientDashboard> {
@@ -1210,8 +1427,15 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard> {
-      const record = buildAccountPatch(input, { includeBlankSecrets: true })
-      if (!record.account_label) record.account_label = String(record.platform || 'Platform account')
+      const platform = resolveCreatePlatform(input, await fetchPlatforms())
+      const normalizedInput: PlatformAccountInput = {
+        ...input,
+        platformId: platform.id,
+        platform: platform.label
+      }
+      validatePlatformAccountFields(normalizedInput, platform.label, { allowPlatformIdentity: true })
+      const record = buildAccountPatch(normalizedInput, { includeBlankSecrets: true })
+      record.account_label = platform.label
       await nocoClient.createRecord(TABLES.platformAccounts.id, {
         ...record,
         clients_id: Number(clientId)
@@ -1220,8 +1444,32 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     },
 
     async updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard> {
-      await getOwnedPlatformAccount(clientId, accountId)
-      const patch = buildAccountPatch(input, { includeBlankSecrets: false })
+      const account = await getOwnedPlatformAccount(clientId, accountId)
+      const platform = platformAccountRecordLabel(account)
+      const currentPlatformId = accountPlatformId(account)
+      const requestedPlatformId = cleanNullableId(input.platformId)
+      const requestedPlatform = normalizePlatformAccountLabel(input.platform)
+      if (
+        (requestedPlatformId !== undefined && requestedPlatformId !== currentPlatformId) ||
+        (requestedPlatform && requestedPlatform !== platform)
+      ) {
+        throw platformAccountInputError(
+          'platform_account_platform_immutable',
+          'The platform of an existing account cannot be changed.'
+        )
+      }
+      const fieldsOnly = { ...input }
+      delete fieldsOnly.platformId
+      delete fieldsOnly.platform
+      const githubMigration = platform === 'github'
+        ? githubUrlMigrationPatch(account, fieldsOnly.linkedInUrl)
+        : {}
+      validatePlatformAccountFields(fieldsOnly, platform, { allowPlatformIdentity: false })
+      const patch = {
+        ...buildAccountPatch(fieldsOnly, { includeBlankSecrets: false }),
+        ...githubMigration
+      }
+      patch.account_label = platform
       if (Object.keys(patch).length) {
         await nocoClient.patchRecord(TABLES.platformAccounts.id, Number(accountId), patch)
       }
@@ -1329,6 +1577,11 @@ module.exports = {
   buildClientPatch,
   buildResumeWorkflowPatch,
   cvProcessingClientId,
+  githubLegacyUrlCandidates,
+  githubUrlCandidate,
+  githubUrlFromAccount,
+  githubUrlMigrationPatch,
+  platformAccountUrl,
   toClient,
   toPlatformAccount,
   telegramPlatformIds,
