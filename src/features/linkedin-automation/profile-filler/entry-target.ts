@@ -8,9 +8,16 @@ export function entryCandidates(profile: JsonObject, spec: VerificationSpec): Js
   if (spec.kind !== 'experience' && spec.kind !== 'education') return []
   const entries = section(profile, spec.kind)
   if (spec.id) return entries.filter(item => item.id === spec.id)
-  return spec.kind === 'experience'
-    ? experienceCandidates(entries, { match: spec.expected, data: spec.expected })
-    : educationCandidates(entries, { match: spec.expected, data: spec.expected })
+  if (spec.kind === 'experience') {
+    const data = spec.expected
+    if (!data.company || !data.jobTitle) throw codedError('profile_entry_identity_missing', 'Experience identity is missing.')
+    const complete = { ...data, company: data.company, jobTitle: data.jobTitle }
+    return experienceCandidates(entries, { match: complete, data: complete })
+  }
+  const data = spec.expected
+  if (!data.school) throw codedError('profile_entry_identity_missing', 'Education identity is missing.')
+  const complete = { ...data, school: data.school }
+  return educationCandidates(entries, { match: complete, data: complete })
 }
 
 export function entryTarget(profile: JsonObject, spec: VerificationSpec) {

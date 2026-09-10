@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict'
 import { generationErrorText, profileStageText } from './profile-generation-view.js'
+import { preparationFailed, profileStatus } from './profile-workflow-view.js'
 import { cvMime, cvUploadError, DOCX_MIME, PDF_MIME } from './profile-cv-upload.js'
 import './profile-preview-view.test.js'
 import './profile-session.test.js'
 import './profile-actions.test.js'
+import './profile-field-status.test.js'
+import './profile-fields.test.js'
 import { testProfileObserver } from './profile-job-observer.test.js'
 
 await testProfileObserver()
+assert(preparationFailed({ status: 'failed', phase: 'preview_failed' }))
+assert.equal(profileStatus({ status: 'failed', phase: 'preview_failed' }), 'Не удалось подготовить Preview')
+assert(!preparationFailed({ status: 'failed', phase: 'run_failed' }))
+assert(!preparationFailed({ status: 'failed', phase: 'preview_failed', result: { steps: [] } }))
 
 assert.equal(profileStageText('extracting_cv_facts'), 'Читаем факты из CV')
 assert.equal(profileStageText('resolving_job_titles'),

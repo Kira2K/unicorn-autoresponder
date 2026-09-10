@@ -133,6 +133,9 @@ async function run() {
     await (require('./profile-parallel-check.ts') as {
       checkParallelProfiles(page: import('playwright').Page): Promise<void>
     }).checkParallelProfiles(page)
+    await (require('./profile-preparation-check.ts') as {
+      checkProfilePreparation(page: import('playwright').Page): Promise<void>
+    }).checkProfilePreparation(page)
   } finally {
     if (browser) await browser.close()
     await stop(frontend)

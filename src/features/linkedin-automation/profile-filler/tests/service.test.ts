@@ -14,6 +14,16 @@ async function settled(service: any, jobId: string, expected: string) {
 }
 
 async function run() {
+  await require('./preview-save.test.ts').testPreviewSave()
+  await require('./field-target.test.ts').testFieldTarget()
+  await require('./field-skills-restore.test.ts').testFieldSkillsRestore()
+  await require('./field-snapshot.test.ts').testFieldSnapshot()
+  await require('./field-selection.test.ts').testFieldSelection()
+  await require('./field-edit.test.ts').testFieldEdits()
+  await require('./generation-stop.test.ts').testGenerationStop()
+  await require('./generation-run-stop.test.ts').testGenerationRunStop()
+  await require('./partial-plan.test.ts').testPartialPlan()
+  await require('./partial-apply.test.ts').testPartialApply()
   await require('./noco-reads.test.ts').testNocoReads()
   await require('./noco-http-budget.test.ts').testNocoHttpBudget()
   await require('./apply-boundary.test.ts').testApplyBoundary()

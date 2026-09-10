@@ -6,10 +6,12 @@ import { differs, educationCandidates } from '../profile-match.ts'
 import { educationPayload } from '../payloads.ts'
 import { validateEntryDates } from '../date-policy.ts'
 import { sharedEntryTargets } from '../entry-claims.ts'
+import { selectedEntry, requireSelectedIdentity, entrySelected } from '../field-selection.ts'
 
 export function planEducation(
-  desired: ProfileInput, current: JsonObject, issues: ValidationIssue[], budget?: EntrySkillBudget
+  desired: ProfileInput, current: JsonObject, issues: ValidationIssue[], budget?: EntrySkillBudget, disabled: string[] = []
 ): PlanStep[] {
+  if (!desired.education.some((_, index) => entrySelected('education', index, disabled))) return []
   if (desired.education.length && !sectionReadable(current, 'education')) {
     issues.push({ level: 'fatal', path: 'profile.education',
       message: 'LinkedIn Education is temporarily unavailable.',
@@ -17,8 +19,11 @@ export function planEducation(
     return []
   }
   const entries = section(current, 'education')
-  const shared = sharedEntryTargets(entries, desired.education, educationCandidates)
+  const shared = sharedEntryTargets(entries, desired.education, (items, entry) =>
+    entrySelected('education', desired.education.indexOf(entry), disabled) ? educationCandidates(items, entry) : [])
   return desired.education.flatMap((entry, index) => {
+    const selectedData = selectedEntry(entry.data, 'education', index, disabled)
+    if (!selectedData) return []
     if (shared.has(index)) {
       issues.push({ level: 'fatal', path: `profile.education[${index}].match`,
         message: 'Several CV records target the same LinkedIn Education entry.',
@@ -33,6 +38,12 @@ export function planEducation(
       return []
     }
     const existing = matches[0]
+    if (!existing && entry.match.linkedInId) {
+      issues.push({ level: 'fatal', path: `profile.education[${index}].match`,
+        message: 'Выбранная запись образования больше не найдена в LinkedIn.',
+        resolution: 'Подготовьте новый Preview. Другая запись не будет выбрана автоматически.' })
+      return []
+    }
     const id = existing && typeof existing.id === 'string' ? existing.id : undefined
     if (existing && !id) {
       issues.push({ level: 'fatal', path: `profile.education[${index}]`,
@@ -40,17 +51,12 @@ export function planEducation(
         resolution: 'Refresh the profile before Apply.' })
       return []
     }
-    if (!existing && !entry.data.startDate) {
-      issues.push({ level: 'fatal', path: `profile.education[${index}].data.start_date`,
-        message: 'Unipile v2 requires start_date to create an Education.',
-        resolution: 'Add the missing date to the approved CV and regenerate.' })
-      return []
-    }
+    if (!existing && !requireSelectedIdentity(selectedData, 'education', index, issues)) return []
     const before = existing ? normalizeEducation(existing) : undefined
-    if (!validateEntryDates(entry.data, before, `profile.education[${index}]`, issues)) return []
-    if (before && !differs(before, desiredEducation(entry.data))) return []
-    const selected = budget?.take(entry.data.skills)
-    const data = selected ? { ...entry.data, skills: selected.accepted } : entry.data
+    if (!validateEntryDates(selectedData, before, `profile.education[${index}]`, issues)) return []
+    if (before && !differs(before, desiredEducation(selectedData))) return []
+    const selected = budget?.take(selectedData.skills)
+    const data = selected ? { ...selectedData, skills: selected.accepted } : selectedData
     if (selected?.blocked.length) issues.push({ level: 'warning',
       path: `profile.education[${index}].data.skills`,
       message: `${selected.blocked.length} Education Skills would exceed LinkedIn's 100-Skill limit.`,

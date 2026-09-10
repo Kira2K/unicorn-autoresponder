@@ -1,4 +1,6 @@
 const ERRORS = {
+  profile_generation_stopped: 'Подготовка остановлена. Можно запустить новую генерацию.',
+  profile_generation_stop_unavailable: 'Кнопка останавливает только подготовку Preview, не заполнение LinkedIn.',
   profile_cv_not_ready: 'Финальное английское CV не найдено. Загрузите PDF/DOCX.',
   profile_cv_credentials_missing: 'Не настроен доступ к CV на Drive. Обратитесь к администратору.',
   profile_cv_url_invalid: 'Ссылка на финальное CV некорректна. Загрузите файл.',
@@ -29,6 +31,7 @@ const ERRORS = {
   unipile_http_429: 'Unipile ограничил запросы. Дождитесь разрешённого времени повтора.',
   noco_rate_limited: 'NocoDB временно ограничила запросы. Дождитесь окончания паузы.',
   profile_preview_stale: 'Профиль изменился после подготовки. Создайте новый Preview.',
+  linkedin_provider_id_mismatch: 'Не удалось подтвердить владельца профиля LinkedIn. Изменения не сохранены; нужна проверка подключения.',
   profile_section_unavailable: 'Раздел LinkedIn временно недоступен. Изменения не отправлены.',
   profile_entry_ambiguous: 'Нельзя однозначно сопоставить записи CV и LinkedIn. Нужна проверка.',
   profile_current_status_unsupported: 'Отметьте текущую работу в LinkedIn и подготовьте новый Preview.',
@@ -50,6 +53,10 @@ const ERRORS = {
   profile_filler_internal_error: 'Ошибка Profile Filler. Проверьте сохранённый статус перед повторным действием.'
 }
 const STAGES = {
+  saving_preview: 'Сохраняем подготовленный Preview',
+  waiting_preview_save: 'Дождитесь окончания паузы и повторите сохранение. Генерация не повторяется.',
+  stopping_generation: 'Останавливаем подготовку. Текущий запрос завершается; новых запросов не будет.',
+  generation_stopped: 'Подготовка остановлена',
   queued: 'Ожидаем очередь', extracting_cv_facts: 'Читаем факты из CV',
   generating_profile: 'Готовим тексты профиля', validating_profile: 'Проверяем полноту данных',
   resolving_job_titles: 'Подбираем должности для готовности к работе',

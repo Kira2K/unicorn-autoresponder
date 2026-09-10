@@ -7,6 +7,13 @@ export function issueTitle(issue) {
 }
 export function issueMessage(issue) {
   const message = String(issue.message || '')
+  const date = message.match(/^Unipile requires a month to write (start_date|end_date);/)
+  if (date) return `В CV не указан месяц ${date[1] === 'start_date' ? 'начала' : 'окончания'}. Без него эту запись нельзя отправить в LinkedIn.`
+  if (message.startsWith('The CV says Present')) return 'В CV запись отмечена как текущая, а в LinkedIn есть дата окончания.'
+  if (/requires start_date to create/.test(message)) return 'Для новой записи нужна дата начала: год и месяц.'
+  if (/has no stable LinkedIn ID/.test(message)) return 'У существующей записи не получен LinkedIn ID. Без него обновление небезопасно.'
+  if (/Skills would exceed/.test(message)) return 'Часть навыков записи не помещается в общий лимит 100 навыков.'
+  if (/not returned|temporarily unavailable/i.test(message)) return 'LinkedIn не вернул данные раздела. Они не считаются отсутствующими.'
   if (issue.path === 'profile.skills.omitted' && issue.suggestions?.length) {
     return `Не помещаются в лимит 100 навыков: ${issue.suggestions.join(', ')}.`
   }
@@ -19,4 +26,17 @@ export function issueMessage(issue) {
     'В плане только $1 из 100 навыков. Нужна повторная подготовка из CV.')
   return issue.level === 'fatal' ? 'Данные не прошли проверку. Уточните поле по подробностям ниже.'
     : 'Для этого раздела есть замечание. Проверьте подробности перед применением.'
+}
+export function issueResolution(issue) {
+  const value = String(issue.resolution || '')
+  if (/[а-яё]/i.test(value)) return value
+  if (/missing date|requires a month/.test(`${value} ${issue.message}`)) {
+    return 'Укажите подтверждённую дату через карандаш рядом с полем. Месяц автоматически не подставляется.'
+  }
+  if (/Mark the entry as current/.test(value)) return 'Отметьте запись как текущую в LinkedIn и подготовьте новый Preview.'
+  if (/readable|Refresh the profile/.test(value)) return 'Дождитесь доступности раздела и подготовьте новый Preview.'
+  if (/ambiguous|duplicate|difference before Apply/.test(value)) return 'Уточните совпадение с существующей записью. Возможный дубль отправлен не будет.'
+  if (/partially completed|omitted from this write/.test(value)) return 'Остальные доступные изменения можно применить. Эти данные будут пропущены; результат будет частичным.'
+  if (/verified catalog/.test(value)) return 'Уточните значение в каталоге LinkedIn. Неподтверждённое значение отправлено не будет.'
+  return value ? 'Исправьте поле через карандаш. Правка будет проверена отдельно.' : ''
 }

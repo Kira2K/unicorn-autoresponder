@@ -44,11 +44,20 @@ async function run() {
           size: upload.bytes.length }]); return job
       },
       async startPreview(id: number, body: any) { calls.push(['preview', id, body]); return job },
+      async editField(id: string, hash: string, change: import('../../linkedin-automation/profile-filler/field-change.ts').FieldChange) {
+        if (hash === 'stale') throw { code: 'profile_plan_hash_mismatch' }
+        if ('value' in change && !change.value) throw { code: 'profile_field_invalid', details: [{ path: change.path, level: 'fatal', message: 'Заполните поле.' }] }
+        calls.push(['edit-field', id, hash, change]); return { ...job, planHash: 'edited-hash' }
+      },
       async apply(id: string, hash: string) {
         if (hash === 'stale') throw { code: 'profile_preview_stale', message: 'private provider details' }
         calls.push(['apply', id, hash]); return job
       },
       async resume(id: string) { calls.push(['resume', id]); return job },
+      async stopGeneration(id: string) {
+        if (id === 'running') throw { code: 'profile_generation_stop_unavailable' }
+        calls.push(['stop-generation', id]); return { ...job, status: 'failed', phase: 'generation_stopped' }
+      },
       async rollback(id: string) { calls.push(['rollback', id]); return job },
       async get(id: string) { return id === job.jobId ? job : undefined },
       async list(id?: number) { historyAccounts.push(id); return [job] }
@@ -64,6 +73,8 @@ async function run() {
   try {
     const previewUrl = `${base}/api/admin/linkedin/accounts/7/profile-previews`
     const generationUrl = `${base}/api/admin/linkedin/accounts/7/profile-generations`
+    const stopUrl = `${base}/api/admin/linkedin/profile-jobs/job-1/stop-generation`
+    assert.equal((await fetch(stopUrl, { method: 'POST' })).status, 401)
     const parametersUrl = `${base}/api/admin/linkedin/accounts/7/profile-parameters?type=JOB_TITLE&keywords=QA`
     assert.equal((await fetch(previewUrl, { method: 'POST' })).status, 401)
     assert.equal((await fetch(generationUrl, { method: 'POST' })).status, 401)
@@ -76,6 +87,7 @@ async function run() {
       Cookie: provider
     } })).status, 403)
     const admin = await login(base, 'unicornveryevil@gmail.com', '101010')
+    assert.equal((await fetch(stopUrl, { method: 'POST', headers: { Cookie: provider } })).status, 403)
     const headers = { Cookie: admin, 'Content-Type': 'application/json' }
     const stale = await fetch(`${base}/api/admin/linkedin/profile-jobs/job-1/apply`, {
       method: 'POST', headers, body: JSON.stringify({ planHash: 'stale' })
@@ -123,6 +135,28 @@ async function run() {
     assert.deepEqual(calls.map(value => value[0]),
       ['preview', 'generate', 'generate', 'search', 'apply', 'resume', 'rollback'])
     assert.deepEqual(calls[2][2], { mimeType: 'application/pdf', size: 10 })
+    assert.equal((await fetch(stopUrl, { method: 'POST', headers })).status, 202)
+    assert.deepEqual(calls.at(-1), ['stop-generation', 'job-1'])
+    assert.equal((await fetch(stopUrl.replace('job-1', 'running'), { method: 'POST', headers })).status, 409)
+    const fieldUrl = `${base}/api/admin/linkedin/profile-jobs/job-1/fields`
+    assert.equal((await fetch(fieldUrl, { method: 'POST' })).status, 401)
+    assert.equal((await fetch(fieldUrl, { method: 'POST', headers: { Cookie: provider } })).status, 403)
+    const fieldRequest = (body: object) => fetch(fieldUrl, { method: 'POST', headers, body: JSON.stringify(body) })
+    assert.equal((await fieldRequest({ path: 'profile.headline' })).status, 400)
+    assert.equal((await fieldRequest({ path: 'profile.headline', planHash: 'safe-hash', value: 'x'.repeat(30_000) })).status, 400)
+    assert.equal((await fieldRequest({ path: 'profile.headline', planHash: 'stale', value: 'Engineer' })).status, 409)
+    const invalidField = await fieldRequest({ path: 'profile.headline', planHash: 'safe-hash', value: '' })
+    assert.equal(invalidField.status, 422)
+    assert.equal((await invalidField.json()).issues[0].message, 'Заполните поле.')
+    const edited = await fieldRequest({ path: 'profile.headline', planHash: 'safe-hash', value: 'Engineer' })
+    assert.equal(edited.status, 200)
+    assert.equal((await edited.json()).planHash, 'edited-hash')
+    assert.deepEqual(calls.at(-1), ['edit-field', 'job-1', 'safe-hash', { path: 'profile.headline', value: 'Engineer' }])
+    const selection = { path: 'profile.headline', planHash: 'safe-hash', enabled: false }
+    assert.equal((await fieldRequest(selection)).status, 200)
+    assert.deepEqual(calls.at(-1), ['edit-field', 'job-1', 'safe-hash', { path: 'profile.headline', enabled: false }])
+    assert.equal((await fieldRequest({ ...selection, enabled: 'false' })).status, 400)
+    assert.equal((await fieldRequest({ ...selection, value: 'Engineer' })).status, 400)
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error?: Error) =>
       error ? reject(error) : resolve()))

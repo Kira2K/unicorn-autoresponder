@@ -2,6 +2,7 @@ import type { JsonObject } from './input-types.ts'
 import type { ProfilePlan } from './plan-types.ts'
 import { educationCandidates, experienceCandidates } from './profile-match.ts'
 import { codedError } from './errors.ts'
+import { selectedEntriesInput } from './field-selection.ts'
 
 export function sharedEntryTargets<T>(entries: JsonObject[], desired: T[],
   candidates: (entries: JsonObject[], entry: T) => JsonObject[]) {
@@ -22,9 +23,10 @@ export function assertDistinctPlanTargets(plan: ProfilePlan) {
   const reject = () => { throw codedError('profile_entry_ambiguous',
     'Multiple CV entries target the same LinkedIn entry. Build a new Preview.') }
   if (plan.input && plan.entryPolicy) {
-    if (sharedEntryTargets(plan.entryPolicy.education ?? [], plan.input.education,
+    const input = selectedEntriesInput(plan.input, plan.disabledFields, plan.skippedChanges)
+    if (sharedEntryTargets(plan.entryPolicy.education ?? [], input.education,
       educationCandidates).size) reject()
-    if (sharedEntryTargets(plan.entryPolicy.experience ?? [], plan.input.experience,
+    if (sharedEntryTargets(plan.entryPolicy.experience ?? [], input.experience,
       experienceCandidates).size) reject()
   }
   const targets = new Set<string>()

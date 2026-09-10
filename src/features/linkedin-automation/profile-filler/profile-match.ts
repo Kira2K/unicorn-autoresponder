@@ -50,6 +50,7 @@ function educationDetailsMatch(item: JsonObject, data: EducationUpsert['data']) 
 }
 
 export function educationCandidates(entries: JsonObject[], entry: EducationUpsert) {
+  if (entry.match.linkedInId) return entries.filter(item => item.id === entry.match.linkedInId)
   const base = entries.filter(item => educationMatches(item, entry.match))
   const detailed = base.filter(item => educationDetailsMatch(item, entry.data))
   if (detailed.length) return detailed
@@ -62,6 +63,7 @@ export function educationCandidates(entries: JsonObject[], entry: EducationUpser
 }
 
 export function experienceCandidates(entries: JsonObject[], entry: ExperienceUpsert) {
+  if (entry.match.linkedInId) return entries.filter(item => item.id === entry.match.linkedInId)
   const strict = entries.filter(item => experienceMatches(item, entry.match))
   if (strict.length) return strict
   return entries.filter(item => normalized(name(item.company)) === normalized(entry.match.company) &&

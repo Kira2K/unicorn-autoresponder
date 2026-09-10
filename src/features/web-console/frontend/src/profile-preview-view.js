@@ -12,16 +12,27 @@ export function skillSummary(steps = []) {
 export function previewSummary(preview) {
   const steps = preview?.steps || []
   const profile = preview?.document?.profile
+  const blocked = section => {
+    const paths = [...(preview?.skippedChanges || []), ...(preview?.issues || [])
+      .filter(issue => issue.level === 'fatal').map(issue => issue.path || '')]
+    const base = `profile.${section}`
+    if (paths.includes(base)) return Array.isArray(profile?.[section]) ? profile[section].length : 1
+    return new Set(paths.filter(path => path.startsWith(`${base}[`))
+      .map(path => path.match(/\[\d+\]/)?.[0]).filter(Boolean)).size
+  }
   const entries = section => ({
     total: Array.isArray(profile?.[section]) ? profile[section].length : null,
     created: steps.filter(step => step.section === section && step.action === 'create').length,
-    updated: steps.filter(step => step.section === section && step.action === 'update').length
+    updated: steps.filter(step => step.section === section && step.action === 'update').length,
+    blocked: blocked(section)
   })
   return { experience: entries('experience'), education: entries('education'), skills: skillSummary(steps) }
 }
 export function previewGroups(preview) {
   return ['headline', 'about', 'experience', 'education', 'skills', 'open_to_work'].map(section => ({
     section, steps: (preview?.steps || []).filter(step => step.section === section)
-  })).filter(group => group.steps.length || Object.hasOwn(preview?.document?.profile || {}, group.section))
+  })).filter(group => group.steps.length || Object.hasOwn(preview?.document?.profile || {}, group.section) ||
+    (preview?.issues || []).some(issue => issue.path === `profile.${group.section}` ||
+      issue.path?.startsWith(`profile.${group.section}.`) || issue.path?.startsWith(`profile.${group.section}[`)))
 }
 export const omittedSkills = issues => (issues || []).filter(issue => issue.path === 'profile.skills.omitted')

@@ -10,9 +10,9 @@ export function desktopProfileJob() {
   }))
   const steps = [
     { id: 'headline', section: 'headline', action: 'update', before: 'Engineer', after: 'Platform Engineer | Go | Linux' },
-    ...experience.map((entry, index) => ({ id: `experience-${index}`, section: 'experience',
+    ...experience.map((entry, index) => ({ id: `experience-${index + 1}`, section: 'experience',
       action: index === 2 ? 'create' : 'update', before: index === 2 ? null : { ...entry.data, description: 'Previous description.' }, after: entry.data })),
-    ...education.map((entry, index) => ({ id: `education-${index}`, section: 'education', action: 'update',
+    ...education.map((entry, index) => ({ id: `education-${index + 1}`, section: 'education', action: 'update',
       before: entry.data, after: entry.data })),
     ...Array.from({ length: 6 }, (_, index) => ({ id: `skills-${index}`, section: 'skills', action: 'add',
       before: { count: 42 + index * 10 }, after: { count: Math.min(100, 52 + index * 10),

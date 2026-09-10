@@ -6,6 +6,9 @@ const { runProfileAnalysis } = require('../../linkedin-automation/profile-filler
 const { cvUploadFailure, parseCvBody, readCvUpload } = require('./profile-generation-upload.ts') as
   { cvUploadFailure(error: any): any; parseCvBody: Handler; readCvUpload(req: any): any }
 const CONFLICT_MESSAGES: Record<string, string> = {
+  linkedin_provider_id_mismatch: 'Аккаунт LinkedIn изменился. Обновите подключение перед редактированием.',
+  profile_generation_stop_unavailable: 'Можно остановить только подготовку Preview, не заполнение LinkedIn.',
+  profile_generation_stopped: 'Подготовка остановлена. Можно запустить новую генерацию.',
   profile_preview_stale: 'LinkedIn changed after this preview. Build a fresh preview before Apply.',
   profile_section_unavailable: 'LinkedIn did not return a required section. Wait and build a fresh preview.',
   profile_entry_ambiguous: 'Several CV entries match the same LinkedIn entry. Resolve the match and rebuild Preview.',
@@ -24,6 +27,8 @@ const CONFLICT_MESSAGES: Record<string, string> = {
 }
 function failure(error: any) {
   const code = String(error?.code ?? 'profile_filler_internal_error')
+  if (code === 'profile_field_invalid') return { status: 422, body: { error: code,
+    message: 'Поле не прошло проверку.', issues: Array.isArray(error.details) ? error.details : [] } }
   if (code === 'profile_parameter_search_invalid') {
     return { status: 400, body: { error: code, message: 'Enter at least two characters.' } }
   }
@@ -100,8 +105,23 @@ function registerProfileFillerRoutes(options: {
     try { res.status(202).json(await service.apply(String(req.params.jobId), String(req.body?.planHash ?? ''))) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
   })
+  app.post('/api/admin/linkedin/profile-jobs/:jobId/fields', requireAdmin, async (req, res) => {
+    if (typeof req.body?.path !== 'string' || typeof req.body?.planHash !== 'string' ||
+      JSON.stringify(req.body).length > 30_000 ||
+      (Object.hasOwn(req.body, 'enabled') && (typeof req.body.enabled !== 'boolean' || Object.hasOwn(req.body, 'value')))) {
+      res.status(400).json({ error: 'profile_field_invalid', message: 'Неверный запрос изменения поля.' }); return
+    }
+    try { res.json(await service.editField(String(req.params.jobId), req.body.planHash,
+      Object.hasOwn(req.body, 'enabled') ? { path: req.body.path, enabled: req.body.enabled }
+        : { path: req.body.path, value: req.body.value })) }
+    catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
+  })
   app.post('/api/admin/linkedin/profile-jobs/:jobId/resume', requireAdmin, async (req, res) => {
     try { res.status(202).json(await service.resume(String(req.params.jobId))) }
+    catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
+  })
+  app.post('/api/admin/linkedin/profile-jobs/:jobId/stop-generation', requireAdmin, async (req, res) => {
+    try { res.status(202).json(await service.stopGeneration(String(req.params.jobId))) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
   })
   app.post('/api/admin/linkedin/profile-jobs/:jobId/rollback', requireAdmin, async (req, res) => {

@@ -1,5 +1,7 @@
 import type { FillResult, ProfilePlan } from './plan-types.ts'
 import { profileDocument } from './profile-document.ts'
+import { hasBlockingIssues } from './partial-plan.ts'
+import { previewSaveRecovery } from './preview-save-state.ts'
 
 export type ProfileJobStatus =
   'generating_cv' | 'generating_profile' | 'validating' |
@@ -36,13 +38,20 @@ export function publicProfileJob(job: ProfileJob) {
     preview: job.plan && job.planHash ? {
       jobId: job.jobId, planHash: job.planHash, account: job.plan.account,
       identity: job.plan.identity, issues: job.plan.issues,
+      canApply: !hasBlockingIssues(job.plan), skippedChanges: job.plan.skippedChanges ?? [],
       generation: job.plan.generation,
+      editedFields: job.plan.fieldEdits?.map(edit => edit.path) ?? [],
+      disabledFields: job.plan.disabledFields ?? [],
+      currentValues: job.plan.snapshot?.values,
       document: job.plan.input ? profileDocument(job.plan.input) : undefined,
       steps: job.plan.steps.map(({ payload: _payload, verification: _verification, readOnly: _readOnly, ...step }) => step)
     } : undefined,
     result: job.result && { ...job.result,
       steps: job.result.steps.map(({ writeIntent: _intent, ...step }) => step) }, errorCode: job.errorCode,
-    retry: job.checkpoint?.retry,
+    previewRecovery: previewSaveRecovery(job),
+    retry: job.checkpoint?.pendingPreview?.nextRetryAt
+      ? { provider: 'noco' as const, nextRetryAt: job.checkpoint.pendingPreview.nextRetryAt }
+      : job.checkpoint?.retry,
     createdAt: job.createdAt, updatedAt: job.updatedAt, finishedAt: job.finishedAt
   }
 }

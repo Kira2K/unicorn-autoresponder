@@ -30,7 +30,7 @@ export async function persistMutation(context: MutationContext, result: FillResu
 export async function finishMutation(context: MutationContext, result: FillResult) {
   const { store, job, update, logger } = context
   const failed = result.steps.find(step => step.status !== 'verified')
-  const partial = !failed && hasOmittedSkills(job.plan?.issues ?? [])
+  const partial = !failed && (hasOmittedSkills(job.plan?.issues ?? []) || Boolean(job.plan?.skippedChanges?.length))
   const finishedAt = new Date().toISOString()
   const patch: Partial<ProfileJob> = {
     status: failed || partial ? 'needs_expert_review' : 'succeeded',

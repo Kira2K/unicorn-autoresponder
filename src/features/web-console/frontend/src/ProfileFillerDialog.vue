@@ -5,7 +5,6 @@ import ProfileFillerProgress from './ProfileFillerProgress.vue'
 import ProfileFillerHistory from './ProfileFillerHistory.vue'
 import ProfileFillerResult from './ProfileFillerResult.vue'
 import ProfileFillerFooter from './ProfileFillerFooter.vue'
-import ProfilePreviewSummary from './ProfilePreviewSummary.vue'
 import ProfileComparison from './ProfileComparison.vue'
 import ProfileIssues from './ProfileIssues.vue'
 import ProfileManualEditor from './ProfileManualEditor.vue'
@@ -16,6 +15,8 @@ const props = defineProps({ filler: { type: Object, required: true } })
 const stage = computed(() => profileStage(props.filler.job.value))
 const link = computed(() => profileLink(props.filler.account.value, props.filler.job.value))
 const stages = ['CV', 'Проверка изменений', 'Заполнение', 'Результат']
+const globalIssues = computed(() => (props.filler.job.value?.preview?.issues || []).filter(issue =>
+  !/^profile\.(headline|about|skills|experience|education|open_to_work)(?:\.|\[|$)/.test(issue.path || '')))
 </script>
 <template>
   <Dialog :visible="filler.visible.value" modal header="Заполнение LinkedIn"
@@ -57,17 +58,18 @@ const stages = ['CV', 'Проверка изменений', 'Заполнени
             <ProfileFillerProgress v-if="stage !== 3 && filler.job.value.result?.steps" :result="filler.job.value.result"
               :preview-steps="filler.job.value.preview?.steps" />
             <template v-if="filler.job.value.preview">
-              <ProfilePreviewSummary v-if="stage === 1" :preview="filler.job.value.preview" />
-              <ProfileIssues v-if="stage === 1" :issues="filler.job.value.preview.issues || []" />
-              <p v-if="filler.job.value.preview.generation && stage === 1" class="profile-muted">
-                Данные связаны с CV. Для исправления загрузите новое CV и подготовьте изменения заново.</p>
+              <ProfileIssues v-if="stage === 1" :issues="globalIssues" />
+              <p v-if="stage === 1" class="profile-muted">Галочка включает весь раздел, карандаш меняет поле.
+                Даты сохраняются кнопкой «Сохранить дату», остальные поля — при выходе из них.
+                LinkedIn изменится только после подтверждения.</p>
               <ProfileManualEditor v-if="stage === 1" :filler="filler" />
-              <p v-if="filler.dirty.value" role="alert">Документ изменён. Пересоберите Preview перед применением.</p>
-              <ProfileComparison v-if="stage === 1" :preview="filler.job.value.preview" />
-              <details v-else><summary>Подтверждённый план изменений</summary>
-                <ProfilePreviewSummary :preview="filler.job.value.preview" />
-                <ProfileIssues :issues="filler.job.value.preview.issues || []" />
-                <ProfileComparison :preview="filler.job.value.preview" /></details>
+              <p v-if="filler.manualDirty.value" role="alert">Документ изменён. Пересоберите Preview перед применением.</p>
+              <p v-else-if="filler.fields.dirty.value" role="status">Завершите исправление отмеченных полей или отмените правки.</p>
+              <ProfileComparison v-if="stage === 1" :preview="filler.job.value.preview" :editor="filler.fields"
+                :disabled="filler.busy.value || filler.manualDirty.value || filler.job.value.status !== 'preview_ready'" />
+              <details v-else><summary>План изменений и замечания</summary>
+                <ProfileIssues :issues="globalIssues" />
+                <ProfileComparison :preview="filler.job.value.preview" :result="filler.job.value.result" /></details>
             </template>
             <p v-if="stage !== 3 && filler.job.value.errorCode">
               {{ generationErrorText(filler.job.value.errorCode) || 'Не удалось завершить операцию; подробности ниже.' }}</p>
