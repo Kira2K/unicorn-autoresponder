@@ -5,7 +5,13 @@ export const profileSections = {
 const activeStatuses = new Set(['generating_cv', 'generating_profile', 'validating',
   'previewing', 'retrying', 'running', 'verifying'])
 export const isProfileActive = job => activeStatuses.has(job?.status)
+export const canStopProfileGeneration = job => ['generating_cv', 'generating_profile', 'validating',
+  'previewing', 'retrying', 'waiting_retry'].includes(job?.status)
+export const canApplyProfile = job => job?.preview?.canApply ??
+  !job?.preview?.issues?.some(issue => issue.level === 'fatal')
 export const profileSection = section => profileSections[section] || 'Раздел профиля'
+export const preparationFailed = job => job?.status === 'failed' && !job.result &&
+  ['preview_failed', 'generation_failed'].includes(job.phase)
 export function profileStage(job) {
   if (!job) return 0
   if (['running', 'verifying'].includes(job.status)) return 2
@@ -13,7 +19,11 @@ export function profileStage(job) {
   return 1
 }
 export function profileStatus(job) {
+  if (preparationFailed(job)) return 'Не удалось подготовить Preview'
+  if (job?.phase === 'generation_stopped') return 'Подготовка остановлена'
+  if (job?.phase === 'stopping_generation') return 'Останавливаем подготовку'
   if (job?.phase === 'partially_completed') return 'Заполнен частично'
+  if (job?.phase === 'waiting_preview_save') return 'Preview готов — нужно повторить сохранение'
   return ({ generating_cv: 'Читаем CV', generating_profile: 'Готовим тексты',
     validating: 'Проверяем данные', previewing: 'Сравниваем с LinkedIn',
     waiting_retry: 'Нужно продолжить подготовку', retrying: 'Ожидаем повторной попытки',

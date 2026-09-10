@@ -19,8 +19,8 @@ export type VerificationSpec =
   | { kind: 'headline'; expected: string }
   | { kind: 'about'; expected: string }
   | { kind: 'skills'; expected: string[]; exact?: boolean }
-  | { kind: 'experience'; id?: string; expected: ExperienceData }
-  | { kind: 'education'; id?: string; expected: EducationData }
+  | { kind: 'experience'; id?: string; expected: import('./field-selection.ts').ExperienceWrite }
+  | { kind: 'education'; id?: string; expected: import('./field-selection.ts').EducationWrite }
   | { kind: 'open_to_work'; expected: JsonObject }
 
 export type PlanStep = {
@@ -36,6 +36,11 @@ export type PlanStep = {
 }
 
 export type ProfilePlan = {
+  planning?: { profile: JsonObject; parameters: import('./parameter-search.ts').ParameterSearchCache }
+  disabledFields?: string[]
+  validationIssues?: ValidationIssue[]
+  fieldEdits?: Array<{ path: string; originalValue: unknown; value: string | string[]; updatedAt: string }>
+  skippedChanges?: string[]
   entryPolicy?: import('./approved-state.ts').ApprovedEntries
   skillPolicy?: { baseline: string[]; target: string[] }
   kind: 'apply' | 'rollback'
@@ -49,7 +54,7 @@ export type ProfilePlan = {
   generation?: GenerationMetadata
 }
 
-export type ProfilePreview = Omit<ProfilePlan, 'input' | 'steps' | 'skillPolicy' | 'entryPolicy'> & {
+export type ProfilePreview = Omit<ProfilePlan, 'input' | 'steps' | 'skillPolicy' | 'entryPolicy' | 'planning'> & {
   jobId: string
   planHash: string
   document?: JsonObject

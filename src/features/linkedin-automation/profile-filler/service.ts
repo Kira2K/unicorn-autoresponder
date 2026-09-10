@@ -2,6 +2,9 @@ const { createUnipileProfileAdapter } = require('../../../integrations/unipile/p
   { createUnipileProfileAdapter(): any }
 const { codedError, profileErrorDetails } = require('./errors.ts') as typeof import('./errors.ts')
 const { publicProfileJob } = require('./job-types.ts') as typeof import('./job-types.ts')
+const { stopProfileGeneration } = require('./stop-generation.ts') as typeof import('./stop-generation.ts')
+const { editProfileField } = require('./edit-field.ts') as typeof import('./edit-field.ts')
+const { hasBlockingIssues } = require('./partial-plan.ts') as typeof import('./partial-plan.ts')
 const { sameHash } = require('./job-state.ts') as
   { sameHash(left: string, right: string): boolean }
 const { runMutation } = require('./mutation-run.ts') as typeof import('./mutation-run.ts')
@@ -108,7 +111,7 @@ function createProfileFillerService(options: any = {}) {
       if (saved) {
         await recoverInterruptedJob(getStore(), saved); jobs.set(saved.jobId, saved)
         if (saved.status === 'verifying') void ensureVerification(saved)
-        return publicProfileJob(saved)
+        if (saved.phase !== 'generation_stopped') return publicProfileJob(saved)
       }
       return startProfileGeneration({ platformAccountId, loggerFor, getRepository, getStore,
         getClient, acquire, jobs, update, generationRuntime: options.generationRuntime,
@@ -140,8 +143,7 @@ function createProfileFillerService(options: any = {}) {
         if (!sameHash(stored.planHash, hash)) {
           throw codedError('profile_plan_hash_mismatch', 'Profile plan hash does not match.')
         }
-        if (stored.plan.issues.some((item: import('./input-types.ts').ValidationIssue) =>
-          item.level === 'fatal')) {
+        if (hasBlockingIssues(stored.plan)) {
           throw codedError('profile_preview_has_blocking_issues',
             'Profile preview contains blocking issues.')
         }
@@ -178,6 +180,9 @@ function createProfileFillerService(options: any = {}) {
       repository: getRepository(), acquire, executorOptions: options.executorOptions })
   }
   return { apply, recoverPending: recovery.start,
+    editField: (jobId: string, hash: string, change: import('./field-change.ts').FieldChange) =>
+      editProfileField({ jobId, hash, change, jobs, store: getStore(), client: getClient(), acquire, logger: loggerFor(jobId) }),
+    stopGeneration: (jobId: string) => stopProfileGeneration({ jobId, jobs, store: getStore() }),
     get: getJob,
     list: listJobs,
     resume, rollback, searchParameters,

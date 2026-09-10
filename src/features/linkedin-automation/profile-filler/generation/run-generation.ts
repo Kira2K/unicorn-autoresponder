@@ -6,8 +6,10 @@ const { logValidationFields } = require('../validation-logging.ts') as
 const { LINKEDIN_GUIDE } = require('./guide-rules.ts') as typeof import('./guide-rules.ts')
 const { persistStage } = require('./job-stage.ts') as typeof import('./job-stage.ts')
 const { createGenerationRuntime } = require('./runtime.ts') as {
-  createGenerationRuntime(value?: any, logger?: any): any
+  createGenerationRuntime(value?: any, logger?: any, job?: import('../job-types.ts').ProfileJob): any
 }
+const { preparationCall, preparationClient, preparationWait, checkPreparation,
+  releasePreparation, stoppedPhase, GENERATION_STOPPED } = require('./cancellation.ts') as typeof import('./cancellation.ts')
 const { validateWithRepair } = require('./validate-with-repair.ts') as
   typeof import('./validate-with-repair.ts')
 const { metricFactCount } = require('./metric-claims.ts') as typeof import('./metric-claims.ts')
@@ -19,16 +21,21 @@ async function runGeneration(options: any) {
   const { job, repository, generationRepository, store, update, release, logger } = options
   let handedToPreview = false
   try {
+    checkPreparation(job)
+    options = { ...options, client: preparationClient(job, options.client),
+      catalogRetry: { ...options.runtime?.catalogRetry,
+        sleep: (ms: number) => preparationWait(job, ms, options.runtime?.catalogRetry?.sleep) } }
     const runtime = await logAction(logger, 'generation_runtime_init', () =>
-      createGenerationRuntime(options.runtime, logger))
+      preparationCall(job, () => createGenerationRuntime(options.runtime, logger, job)))
     const context = options.cv ? { account: options.account } :
       await logAction(logger, 'generation_context_read', () =>
-        generationRepository.getGenerationContext(job.platformAccountId, options.account))
+        preparationCall(job, () => generationRepository.getGenerationContext(job.platformAccountId, options.account)))
     const profile = await logAction(logger, 'dolphin_proxy_read', () =>
-      runtime.loadProfile(context.account.dolphinProfileId))
+      preparationCall(job, () => runtime.loadProfile(context.account.dolphinProfileId)))
     const country = await logAction(logger, 'proxy_country_resolve', () =>
-      runtime.resolveCountry(profile?.proxy))
-    const cv = options.cv ?? await logAction(logger, 'cv_download', () => runtime.loadCv(context.cvUrl))
+      preparationCall(job, () => runtime.resolveCountry(profile?.proxy)))
+    const cv = options.cv ?? await logAction(logger, 'cv_download', () =>
+      preparationCall(job, () => runtime.loadCv(context.cvUrl)))
     if (options.cv) logger.event('cv_upload_select', 'succeeded')
     await logAction(logger, 'generation_stage', () =>
       persistStage({ job, store, update }, 'generating_cv', 'extracting_cv_facts', 'memory'),
@@ -58,22 +65,24 @@ async function runGeneration(options: any) {
     const checkpoint = { version: 1 as const, stage: 'resolving_job_titles' as const,
       profile: validated.value, issues: validated.issues, generation, catalogParameters: {} }
     await logAction(logger, 'generation_checkpoint_persist', async () => {
+      checkPreparation(job)
       const patch = { checkpoint, status: 'validating', phase: 'resolving_job_titles', updatedAt: new Date().toISOString() }
       await store.update(job.jobId, patch)
       update(patch)
     })
-    handedToPreview = await groundAndPreview({ ...options, account: context.account, generator: runtime.generator,
-      catalogRetry: options.runtime?.catalogRetry }, checkpoint)
+    handedToPreview = await groundAndPreview({ ...options, account: context.account, generator: runtime.generator }, checkpoint)
   } catch (error) {
     const now = new Date().toISOString()
-    const code = profileErrorCode(error)
+    const phase = stoppedPhase(job, 'generation_failed')
+    const code = phase === 'generation_stopped' ? GENERATION_STOPPED : profileErrorCode(error)
     logger.event('profile_generation', 'failed', profileErrorDetails(error))
-    update({ status: 'failed', phase: 'generation_failed', errorCode: code,
+    update({ status: 'failed', phase, errorCode: code,
       updatedAt: now, finishedAt: now })
-    await store.update(job.jobId, { status: 'failed', phase: 'generation_failed', errorCode: code,
+    await store.update(job.jobId, { status: 'failed', phase, errorCode: code,
       updatedAt: now, finishedAt: now }).catch(() => undefined)
   } finally {
     if (!handedToPreview) {
+      releasePreparation(job)
       logger.event('operation_release', 'started'); release()
       logger.event('operation_release', 'succeeded')
     }

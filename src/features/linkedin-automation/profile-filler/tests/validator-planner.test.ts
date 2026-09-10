@@ -19,7 +19,8 @@ async function run() {
   assert.equal(incomplete.valid, false)
   assert.ok(incomplete.issues.some((issue: any) => issue.level === 'fatal' && issue.suggestion))
   const current = { display_name: 'Student', profile_url: 'https://www.linkedin.com/in/student/',
-    description: 'Old', bio: '', specifics: { experience: [], education: [], skills: [] } }
+    description: 'Old', bio: '', specifics: { experience: [], education: [],
+      skills: Array.from({ length: 87 }, (_, index) => ({ name: `Existing ${index}` })) } }
   const searches: string[] = []
   const client = { async searchParameters(_accountId: string, type: string, value: string) {
     searches.push(`${type}:${value}`)

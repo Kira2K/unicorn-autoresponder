@@ -1,5 +1,6 @@
 import type { EducationData, ExperienceData, JsonObject, YearMonth } from './input-types.ts'
 import { isObject, text } from './validation/shared.ts'
+import type { ExperienceWrite, EducationWrite } from './field-selection.ts'
 
 export function name(value: unknown) {
   if (typeof value === 'string') return text(value)
@@ -63,7 +64,7 @@ export function normalizeExperience(item: JsonObject): JsonObject {
   }
 }
 
-export function desiredExperience(data: ExperienceData): JsonObject {
+export function desiredExperience(data: ExperienceWrite): JsonObject {
   return {
     company: data.company, job_title: data.jobTitle, location: data.location,
     workplace_type: data.workplaceType,
@@ -85,7 +86,7 @@ export function normalizeEducation(item: JsonObject): JsonObject {
   }
 }
 
-export function desiredEducation(data: EducationData): JsonObject {
+export function desiredEducation(data: EducationWrite): JsonObject {
   return {
     school: data.school, degree: data.degree, field_of_study: data.fieldOfStudy,
     start_date: dateKey(data.startDate), end_date: data.isCurrent ? 'present' : dateKey(data.endDate), grade: data.grade,

@@ -51,6 +51,7 @@ export type GenerationCheckpoint = {
   issues: import('../input-types.ts').ValidationIssue[]
   generation: GenerationMetadata
   catalogParameters?: import('../parameter-search.ts').ParameterSearchCache
+  pendingPreview?: { plan: import('../plan-types.ts').ProfilePlan; planHash: string; nextRetryAt?: string }
   retry?: { provider: 'unipile'; attempt: number; nextRetryAt?: string }
 }
 

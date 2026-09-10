@@ -40,3 +40,29 @@ await actions.generate({ name: 'cv.pdf' })
 assert.equal(actions.pending.value, false)
 assert(session.error.value)
 console.log('profile confirmation and single request tests passed')
+
+session.job.value = { ...job, preview: { canApply: true, skippedChanges: ['profile.education[0]'],
+  issues: [{ level: 'fatal', path: 'profile.education[0].data.end_date' }] } }
+actions.apply()
+assert.equal(actions.confirmation.value.jobId, job.jobId, 'partial plan requires explicit confirmation')
+actions.confirmation.value = null
+session.job.value = { ...job, status: 'generating_profile' }
+session.active.value = true
+let stops = 0, closed = 0, finishStop
+session.close = () => { closed += 1 }
+api.stopAdminProfileGeneration = async id => {
+  assert.equal(id, job.jobId); stops += 1
+  return new Promise(resolve => { finishStop = resolve })
+}
+const stopping = actions.stopGeneration()
+await actions.stopGeneration()
+assert.equal(stops, 1, 'active generation can be stopped once')
+assert.equal(closed, 0, 'do not pretend to stop before server acknowledgement')
+finishStop({ ...job, status: 'failed', phase: 'generation_stopped' })
+await stopping
+assert.equal(closed, 1)
+for (const status of ['running', 'verifying']) {
+  session.job.value = { ...job, status }
+  await actions.stopGeneration()
+}
+assert.equal(stops, 1, 'filling is not cancellable')

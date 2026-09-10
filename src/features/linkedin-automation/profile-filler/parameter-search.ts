@@ -9,6 +9,7 @@ export type ParameterSearchCache = Record<string, Parameter[]>
 
 const key = (value: string) => value.normalize('NFKC').trim().toLowerCase()
   .replace(/[_\-–—]+/g, ' ').replace(/\s+/g, ' ')
+export const parameterSearchKey = (type: SearchType, value: string) => `${type}:${key(value)}`
 
 export function createParameterSearch(
   client: ProfileClient, accountId: string, logger: ProfileLogger = NOOP_PROFILE_LOGGER,
@@ -16,7 +17,7 @@ export function createParameterSearch(
 ) {
   const cache = new Map<string, Promise<Parameter[]>>()
   return async (type: SearchType, value: string) => {
-    const cacheKey = `${type}:${key(value)}`
+    const cacheKey = parameterSearchKey(type, value)
     logger.event('parameter_search', 'started', { operation: type })
     try {
       let request = cache.get(cacheKey)

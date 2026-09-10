@@ -10,6 +10,7 @@ const summary = computed(() => previewSummary(props.preview))
       <span>{{ section === 'experience' ? 'Работы в документе' : 'Образование в документе' }}</span>
       <strong>{{ summary[section].total ?? 'Нет данных' }}</strong>
       <small>Добавить: {{ summary[section].created }} · Изменить: {{ summary[section].updated }}</small>
+      <small v-if="summary[section].blocked">Заблокировано: {{ summary[section].blocked }} — см. замечания к полям.</small>
     </div>
     <div><span>Навыки</span><strong>{{ summary.skills.target ?? 'Нет данных' }}</strong>
       <small v-if="summary.skills.existing !== null">

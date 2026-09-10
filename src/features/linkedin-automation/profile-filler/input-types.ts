@@ -34,7 +34,7 @@ export type ExperienceData = {
 
 export type ExperienceUpsert = {
   factId?: string
-  match: { company: string; jobTitle: string; startDate?: YearMonth }
+  match: { company: string; jobTitle: string; startDate?: YearMonth; linkedInId?: string }
   data: ExperienceData
 }
 
@@ -54,7 +54,7 @@ export type EducationData = {
 
 export type EducationUpsert = {
   factId?: string
-  match: { school: string; startDate?: YearMonth }
+  match: { school: string; startDate?: YearMonth; linkedInId?: string }
   data: EducationData
 }
 

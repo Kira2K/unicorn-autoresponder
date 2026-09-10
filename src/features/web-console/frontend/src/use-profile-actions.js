@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { profileRequestError } from './profile-generation-view.js'
+import { canStopProfileGeneration, canApplyProfile } from './profile-workflow-view.js'
 
 export function useProfileActions(api, session, draft) {
   const pending = ref(false)
@@ -31,7 +32,7 @@ export function useProfileActions(api, session, draft) {
     const job = session.job.value
     if (pending.value || session.active.value || !job) return
     if (kind === 'apply' && (job.status !== 'preview_ready' || draft.dirty.value ||
-      job.preview?.issues?.some(issue => issue.level === 'fatal'))) return
+      !canApplyProfile(job))) return
     if (kind === 'rollback' && !job.rollbackAvailable) return
     confirmation.value = { kind, jobId: job.jobId, planHash: job.planHash, job }
   }
@@ -46,7 +47,7 @@ export function useProfileActions(api, session, draft) {
         return
       }
       if (selected.kind === 'apply' && (job.status !== 'preview_ready' ||
-        job.preview?.issues?.some(issue => issue.level === 'fatal'))) return
+        !canApplyProfile(job))) return
       if (selected.kind === 'rollback' && !job.rollbackAvailable) return
       const result = selected.kind === 'apply'
         ? await api.applyAdminProfileJob(selected.jobId, selected.planHash)
@@ -58,6 +59,18 @@ export function useProfileActions(api, session, draft) {
   function resume() {
     return request(async () => session.observe(await api.resumeAdminProfileJob(session.job.value.jobId)))
   }
-  return { pending, confirmation, request, preview, generate, resume, confirm,
+  async function stopGeneration() {
+    const job = session.trackedJob?.value ?? session.job.value
+    if (pending.value || !canStopProfileGeneration(job)) return
+    pending.value = true
+    session.error.value = ''
+    try {
+      const result = await api.stopAdminProfileGeneration(job.jobId)
+      session.observe(result)
+      session.close()
+    } catch (error) { session.error.value = profileRequestError(error) }
+    finally { pending.value = false }
+  }
+  return { pending, confirmation, request, preview, generate, resume, confirm, stopGeneration,
     apply: () => askConfirmation('apply'), rollback: () => askConfirmation('rollback') }
 }

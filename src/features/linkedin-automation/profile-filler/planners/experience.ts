@@ -6,10 +6,12 @@ import { differs, experienceCandidates, experienceMatches } from '../profile-mat
 import { validateEntryDates } from '../date-policy.ts'
 import { experiencePayload } from '../payloads.ts'
 import { sharedEntryTargets } from '../entry-claims.ts'
+import { selectedEntry, requireSelectedIdentity, entrySelected } from '../field-selection.ts'
 
 export function planExperience(
-  desired: ProfileInput, current: JsonObject, issues: ValidationIssue[], budget?: EntrySkillBudget
+  desired: ProfileInput, current: JsonObject, issues: ValidationIssue[], budget?: EntrySkillBudget, disabled: string[] = []
 ): PlanStep[] {
+  if (!desired.experience.some((_, index) => entrySelected('experience', index, disabled))) return []
   if (desired.experience.length && !sectionReadable(current, 'experience')) {
     issues.push({ level: 'fatal', path: 'profile.experience',
       message: 'LinkedIn Experience is temporarily unavailable.',
@@ -17,13 +19,16 @@ export function planExperience(
     return []
   }
   const entries = section(current, 'experience')
-  const shared = sharedEntryTargets(entries, desired.experience, experienceCandidates)
+  const shared = sharedEntryTargets(entries, desired.experience, (items, entry) =>
+    entrySelected('experience', desired.experience.indexOf(entry), disabled) ? experienceCandidates(items, entry) : [])
   const unmatched = entries.filter(item => !desired.experience.some(entry =>
     experienceCandidates([item], entry).length))
   if (unmatched.length) issues.push({ level: 'warning', path: 'profile.experience.unmatched',
     message: `${unmatched.length} existing Experience entries are outside this CV plan and will be preserved.`,
     resolution: 'Review these entries separately; Profile Filler will not delete them.' })
   return desired.experience.flatMap((entry, index) => {
+    const selectedData = selectedEntry(entry.data, 'experience', index, disabled)
+    if (!selectedData) return []
     if (shared.has(index)) {
       issues.push({ level: 'fatal', path: `profile.experience[${index}].match`,
         message: 'Several CV records target the same LinkedIn Experience entry.',
@@ -38,6 +43,12 @@ export function planExperience(
       return []
     }
     const existing = matches[0]
+    if (!existing && entry.match.linkedInId) {
+      issues.push({ level: 'fatal', path: `profile.experience[${index}].match`,
+        message: 'Выбранное место работы больше не найдено в LinkedIn.',
+        resolution: 'Подготовьте новый Preview. Другая запись не будет выбрана автоматически.' })
+      return []
+    }
     if (existing && !experienceMatches(existing, entry.match)) {
       issues.push({ level: 'fatal', path: `profile.experience[${index}].match`,
         message: 'An existing Experience only partially matches this CV fact.',
@@ -51,17 +62,12 @@ export function planExperience(
         resolution: 'Refresh the profile before Apply.' })
       return []
     }
-    if (!existing && !entry.data.startDate) {
-      issues.push({ level: 'fatal', path: `profile.experience[${index}].data.start_date`,
-        message: 'Unipile v2 requires start_date to create an Experience.',
-        resolution: 'Add the missing date to the approved CV and regenerate.' })
-      return []
-    }
+    if (!existing && !requireSelectedIdentity(selectedData, 'experience', index, issues)) return []
     const before = existing ? normalizeExperience(existing) : undefined
-    if (!validateEntryDates(entry.data, before, `profile.experience[${index}]`, issues)) return []
-    if (before && !differs(before, desiredExperience(entry.data))) return []
-    const selected = budget?.take(entry.data.skills)
-    const data = selected ? { ...entry.data, skills: selected.accepted } : entry.data
+    if (!validateEntryDates(selectedData, before, `profile.experience[${index}]`, issues)) return []
+    if (before && !differs(before, desiredExperience(selectedData))) return []
+    const selected = budget?.take(selectedData.skills)
+    const data = selected ? { ...selectedData, skills: selected.accepted } : selectedData
     if (selected?.blocked.length) issues.push({ level: 'warning',
       path: `profile.experience[${index}].data.skills`,
       message: `${selected.blocked.length} Experience Skills would exceed LinkedIn's 100-Skill limit.`,

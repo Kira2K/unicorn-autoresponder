@@ -43,12 +43,14 @@ export function useProfileSession(api, draft) {
       if (token === version) error.value = profileRequestError(caught, 'Не удалось загрузить историю.')
     }
   }
-  function observe(value) {
+  function observe(value, refresh = true) {
     if (disposed) return
     trackedJob.value = value
     job.value = value
     draft.syncPreview(value.preview)
-    observer.start(value.jobId)
+    history.value = [value, ...history.value.filter(item => item.jobId !== value.jobId)]
+    if (refresh || isProfileActive(value)) observer.start(value.jobId)
+    else observer.stop()
   }
   function showHistory(value) {
     job.value = value

@@ -1,5 +1,6 @@
 import type { EducationData, ExperienceData, JsonObject, YearMonth } from './input-types.ts'
 import { desiredEducation, desiredExperience } from './profile-data.ts'
+import type { ExperienceWrite, EducationWrite } from './field-selection.ts'
 
 export function linkedInPayload(field: string, value: unknown): JsonObject {
   return { specifics: { linkedin: { [field]: value } } }
@@ -13,10 +14,10 @@ function editFields(fields: JsonObject, before: JsonObject | undefined, after: J
   return Object.fromEntries(Object.entries(fields).filter(([key]) => !same(before[key], after[key])))
 }
 
-export function experiencePayload(data: ExperienceData, id?: string, before?: JsonObject): JsonObject {
+export function experiencePayload(data: ExperienceWrite, id?: string, before?: JsonObject): JsonObject {
   const fields: JsonObject = {
-    job_title: data.catalog?.jobTitle ?? { name: data.jobTitle },
-    company: data.catalog?.company ?? { name: data.company },
+    ...(data.jobTitle !== undefined ? { job_title: data.catalog?.jobTitle ?? { name: data.jobTitle } } : {}),
+    ...(data.company !== undefined ? { company: data.catalog?.company ?? { name: data.company } } : {}),
     ...(data.location ? { location: data.catalog?.location ?? { name: data.location } } : {}),
     ...(data.workplaceType ? { workplace_type: data.workplaceType } : {}),
     ...(data.startDate?.month ? { start_date: date(data.startDate) } : {}),
@@ -31,9 +32,10 @@ export function experiencePayload(data: ExperienceData, id?: string, before?: Js
   return linkedInPayload('experience', body)
 }
 
-export function educationPayload(data: EducationData, id?: string, before?: JsonObject): JsonObject {
+export function educationPayload(data: EducationWrite, id?: string, before?: JsonObject): JsonObject {
   const fields: JsonObject = {
-    school: data.catalog?.school ?? { name: data.school }, ...(data.degree ? { degree: { name: data.degree } } : {}),
+    ...(data.school !== undefined ? { school: data.catalog?.school ?? { name: data.school } } : {}),
+    ...(data.degree ? { degree: { name: data.degree } } : {}),
     ...(data.fieldOfStudy ? { field_of_study: { name: data.fieldOfStudy } } : {}),
     ...(data.startDate?.month ? { start_date: date(data.startDate) } : {}),
     ...(data.endDate?.month ? { end_date: date(data.endDate) } : {}),
