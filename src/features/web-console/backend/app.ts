@@ -1,4 +1,9 @@
 const crypto = require('node:crypto')
+const { registerPostWriterRoutes } = require('./post-writer-routes.ts') as typeof import('./post-writer-routes.ts')
+const { createLivePostWriter } = require('../../linkedin-automation/post-writer/runtime.ts') as typeof import('../../linkedin-automation/post-writer/runtime.ts')
+const { createMockPostWriter } = require('../../linkedin-automation/post-writer/mock.ts') as typeof import('../../linkedin-automation/post-writer/mock.ts')
+const { createTextRuntime } = require('../../linkedin-automation/post-writer/text-runtime.ts') as typeof import('../../linkedin-automation/post-writer/text-runtime.ts')
+const { registerPostTextRoutes } = require('./post-text-routes.ts') as typeof import('./post-text-routes.ts')
 const express = require('express')
 const cookieParser = require('cookie-parser')
 const { createWebConsoleRepository } = require('./repository.ts') as {
@@ -127,6 +132,15 @@ const { createMockCommentMonitorService } = require('./comment-monitor-mock.ts')
 }
 const { registerCommentMonitorRoutes } = require('./comment-monitor-routes.ts') as {
   registerCommentMonitorRoutes(options: any): void
+}
+const { createConnectionInviterService } = require('../../linkedin-automation/connection-inviter/service.ts') as {
+  createConnectionInviterService(options?: any): import('./connection-inviter-types.ts').ConnectionInviterService
+}
+const { createMockConnectionInviterService } = require('./connection-inviter-mock.ts') as {
+  createMockConnectionInviterService(): import('./connection-inviter-types.ts').ConnectionInviterService
+}
+const { registerConnectionInviterRoutes } = require('./connection-inviter-routes.ts') as {
+  registerConnectionInviterRoutes(options: any): void
 }
 const { sharedNocoRequestLimiter } = require('../../../integrations/noco/core/request-limiter.ts') as {
   sharedNocoRequestLimiter: { snapshot(): Record<string, unknown> }
@@ -459,6 +473,9 @@ function createWebConsoleApp(options: {
   linkedinOperationGate?: any
   profileFiller?: import('./profile-filler-types.ts').ProfileFillerService
   commentMonitor?: import('./comment-monitor-types.ts').CommentMonitorService
+  connectionInviter?: import('./connection-inviter-types.ts').ConnectionInviterService
+  initializeConnectionInviter?: boolean
+  postWriter?: import('../../linkedin-automation/post-writer/service.ts').PostWriterService
   useMockData?: boolean
 } = {}) {
   const useMockData = options.useMockData ?? process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
@@ -501,6 +518,29 @@ function createWebConsoleApp(options: {
   const commentMonitor = options.commentMonitor ?? (useMockData
     ? createMockCommentMonitorService()
     : lazyCommentMonitor)
+  let liveConnectionInviter: import('./connection-inviter-types.ts').ConnectionInviterService | undefined
+  const getLiveConnectionInviter = () => liveConnectionInviter ??= createConnectionInviterService({
+    gate: linkedinOperationGate,
+    repository: lazyLinkedInRepository
+  })
+  const lazyConnectionInviter = new Proxy({}, {
+    get(_target, property) {
+      const service = getLiveConnectionInviter() as any
+      const value = service[property]
+      return typeof value === 'function' ? value.bind(service) : value
+    }
+  }) as import('./connection-inviter-types.ts').ConnectionInviterService
+  const connectionInviter = options.connectionInviter ?? (useMockData
+    ? createMockConnectionInviterService()
+    : lazyConnectionInviter)
+  if (!useMockData && !options.connectionInviter && options.initializeConnectionInviter) {
+    getLiveConnectionInviter()
+  }
+  const postWriter = options.postWriter ?? (useMockData
+    ? createMockPostWriter(linkedinOperationGate)
+    : createLivePostWriter(lazyLinkedInRepository as { listAccounts(): Promise<import('../../linkedin-automation/account-connection/types.ts').LinkedInAuthAccountRow[]> },
+      linkedinOperationGate))
+  const textRuntime = createTextRuntime(useMockData)
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
     api: options.dolphinProvisioningApi ?? (useMockData ? createMockDolphinProvisioningApi() : undefined),
@@ -532,6 +572,7 @@ function createWebConsoleApp(options: {
   const sendSummaryTelegramMessage = options.sendSummaryTelegramMessage ?? sendTelegramMessage
   const sessions = createSessionStore()
   const app = express()
+  app.locals.recoverProfileVerification = () => profileFiller.recoverPending?.() ?? Promise.resolve()
 
   app.use(express.json({ limit: '25mb' }))
   app.use(cookieParser())
@@ -793,6 +834,13 @@ function createWebConsoleApp(options: {
     requireAdmin: requireRole('admin'),
     service: commentMonitor
   })
+  registerConnectionInviterRoutes({
+    app,
+    requireAdmin: requireRole('admin'),
+    service: connectionInviter
+  })
+  registerPostWriterRoutes(app, requireRole('admin'), postWriter)
+  registerPostTextRoutes(app, requireRole('admin'), textRuntime)
   app.get('/api/admin/noco-queue', requireRole('admin'), (_req: Request, res: Response) => {
     res.json(sharedNocoRequestLimiter.snapshot())
   })
@@ -1695,13 +1743,14 @@ function createWebConsoleApp(options: {
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const upstreamStatus = Number((error as any)?.response?.status)
     const upstreamCode = String((error as any)?.code ?? '')
-    if (upstreamStatus === 429) {
+    if (upstreamStatus === 429 || upstreamCode === 'noco_rate_limited') {
       res.status(429).json({ error: 'backend_overloaded', message: 'The data service is temporarily rate limited.' })
       return
     }
     if (
       [502, 503, 504].includes(upstreamStatus) ||
-      ['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'].includes(upstreamCode)
+      ['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+        'noco_timeout', 'noco_unreachable', 'noco_service_unavailable'].includes(upstreamCode)
     ) {
       res.status(503).json({ error: 'backend_unavailable', message: 'The data service is temporarily unavailable.' })
       return

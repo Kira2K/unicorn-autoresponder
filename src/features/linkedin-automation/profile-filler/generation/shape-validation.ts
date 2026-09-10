@@ -1,6 +1,6 @@
 import type { ValidationIssue } from '../input-types.ts'
 
-const DATE = /^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/
+const DATE = /^(?:19|20|21)\d{2}(?:-(?:0[1-9]|1[0-2]))?$/
 const WORKPLACE = new Set(['ON_SITE', 'HYBRID', 'REMOTE'])
 
 function fatal(issues: ValidationIssue[], path: string, message: string) {
@@ -10,6 +10,7 @@ const object = (value: unknown) => Boolean(value) && typeof value === 'object' &
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0
 const texts = (value: unknown) => Array.isArray(value) && value.every(text)
 const date = (value: unknown) => value === undefined || typeof value === 'string' && DATE.test(value)
+const endDate = (value: unknown) => value === 'present' || date(value)
 const optionalText = (value: unknown) => value === undefined || typeof value === 'string'
 const parameters = (value: unknown) => Array.isArray(value) &&
   value.every(item => object(item) && text((item as any).name))
@@ -25,7 +26,7 @@ function experienceIssues(entries: any, issues: ValidationIssue[]) {
       !texts(data.skills) || !optionalText(data.location) || data.source_of_hire !== undefined) {
       fatal(issues, `${path}.data`, 'Experience company, job title and skills are required.')
     }
-    if (!date(data.start_date) || !date(data.end_date) ||
+    if (!date(data.start_date) || !endDate(data.end_date) ||
       data.workplace_type !== undefined && !WORKPLACE.has(data.workplace_type)) {
       fatal(issues, `${path}.data`, 'Experience dates or workplace type are invalid.')
     }
@@ -42,7 +43,7 @@ function educationIssues(entries: any, issues: ValidationIssue[]) {
       fatal(issues, path, 'Education must use upsert with match and data.'); return
     }
     if (!text(data.school) || !text(data.description) || !texts(data.skills) ||
-      !date(data.start_date) || !date(data.end_date) ||
+      !date(data.start_date) || !endDate(data.end_date) ||
       !['degree', 'field_of_study', 'grade', 'activities'].every(key => optionalText(data[key]))) {
       fatal(issues, `${path}.data`, 'Education school, skills or dates are invalid.')
     }

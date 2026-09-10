@@ -48,7 +48,9 @@ export function parseExperience(value: unknown, issues: ValidationIssue[]): Expe
       data: {
         company, jobTitle, startDate, workplaceType,
         location: text(data.location),
-        endDate: optionalDate(data.end_date, `${path}.data.end_date`, issues),
+        ...(data.end_date === 'present' ? { isCurrent: true } : {}),
+        endDate: data.end_date === 'present' ? undefined :
+          optionalDate(data.end_date, `${path}.data.end_date`, issues),
         description: typeof data.description === 'string' ? data.description : undefined,
         sourceOfHire, skills
       }

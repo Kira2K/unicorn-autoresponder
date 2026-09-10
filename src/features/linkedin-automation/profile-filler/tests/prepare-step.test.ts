@@ -14,6 +14,7 @@ const existing = { id: 'exp-1', company: { name: 'Acme' }, job_title: 'Engineer'
   started_on: '09/01/2024', description: 'Old', skills: [] }
 
 async function prepare(profile: any, step: any = experience) {
+  if (profile.specifics && !Object.hasOwn(profile.specifics, 'skills')) profile.specifics.skills = []
   return prepareStep({ async getOwnProfile() { return profile } }, 'acc-1', step, logger)
 }
 
@@ -22,7 +23,12 @@ async function run() {
   assert.equal(created.mode, 'write')
   assert.equal(created.step.action, 'create')
 
-  const edited = await prepare({ specifics: { experience: [existing] } })
+  await assert.rejects(() => prepare({ specifics: { experience: [existing] } }),
+    { code: 'profile_preview_stale' })
+  const approved = { ...experience, action: 'update', before: {
+    company: 'Acme', job_title: 'Engineer', start_date: '2024-09', description: 'Old', skills: []
+  }, verification: { ...experience.verification, id: 'exp-1' } }
+  const edited = await prepare({ specifics: { experience: [existing] } }, approved)
   assert.equal(edited.mode, 'write')
   assert.equal(edited.step.action, 'update')
   const editPayload = edited.step.payload.specifics.linkedin.experience
@@ -35,10 +41,8 @@ async function run() {
     kind: 'experience', id: 'exp-1', expected: { ...expected, skills: ['Unavailable Skill'] }
   } }
   const fullSkills = Array.from({ length: 100 }, (_, index) => ({ name: `Skill ${index}` }))
-  const capped = await prepare({ specifics: { experience: [existing], skills: fullSkills } }, update)
-  assert.deepEqual(capped.step.payload.specifics.linkedin.experience,
-    { operation: 'edit', id: 'exp-1', description: 'New' })
-  assert.equal(capped.omittedSkills, 1)
+  await assert.rejects(() => prepare({ specifics: { experience: [existing], skills: fullSkills } }, update),
+    { code: 'profile_preview_stale' })
 
   await assert.rejects(() => prepare({ specifics: { experience: [existing, { ...existing,
     id: 'exp-2' }] } }), { code: 'profile_entry_ambiguous' })
@@ -60,12 +64,11 @@ async function run() {
   const education = { id: 'education-1', section: 'education', action: 'create', before: null,
     after: {}, summary: 'Education', payload: {},
     verification: { kind: 'education', expected: educationExpected } }
-  const preparedEducation = await prepare({ specifics: { education: [{ id: 'edu-1',
+  const separateDegree = await prepare({ specifics: { education: [{ id: 'edu-1',
     school: { name: 'University' }, started_on: '09/01/2020', degree: 'Bachelor', skills: []
   }] } }, education)
-  assert.equal(preparedEducation.step.action, 'update')
-  assert.deepEqual(preparedEducation.step.payload.specifics.linkedin.education,
-    { operation: 'edit', id: 'edu-1', degree: { name: 'Master' } })
+  assert.equal(separateDegree.step.action, 'create')
+  assert.equal(separateDegree.step.verification.id, undefined)
 }
 
 run().then(() => console.log('profile pre-write preparation tests passed')).catch((error: unknown) => {

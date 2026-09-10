@@ -13,31 +13,31 @@ function setList(key, value) {
 
 <template>
   <fieldset class="profile-open-editor">
-    <legend>Open to Work</legend>
-    <label><span>Job titles</span>
+    <legend>Готовность к работе</legend>
+    <label><span>Должности</span>
       <textarea :value="text(value.job_titles)" @input="setList('job_titles', $event.target.value)" />
     </label>
-    <label><span>Locations</span>
+    <label><span>Местоположения</span>
       <textarea :value="text(value.locations)" @input="setList('locations', $event.target.value)" />
     </label>
-    <label><span>Workplace types</span>
+    <label><span>Форматы работы</span>
       <input :value="(value.workplace_types || []).join(', ')"
         @input="setList('workplace_types', $event.target.value.toUpperCase())" />
     </label>
-    <label><span>Employment types</span>
+    <label><span>Типы занятости</span>
       <input :value="(value.employment_types || []).join(', ')"
         @input="setList('employment_types', $event.target.value.toUpperCase())" />
     </label>
-    <label><span>Start</span>
+    <label><span>Начало работы</span>
       <select :value="value.start_date || ''" @change="set('start_date', $event.target.value)">
-        <option value="">Not specified</option><option value="IMMEDIATELY">Immediately</option>
-        <option value="FLEXIBLE">Flexible</option>
+        <option value="">Не указано</option><option value="IMMEDIATELY">Сразу</option>
+        <option value="FLEXIBLE">По договорённости</option>
       </select>
     </label>
-    <label><span>Visibility</span>
+    <label><span>Кому видно</span>
       <select :value="value.visibility || ''" @change="set('visibility', $event.target.value)">
-        <option value="">Choose</option><option value="RECRUITERS_ONLY">Recruiters only</option>
-        <option value="ALL">All LinkedIn members</option>
+        <option value="">Выберите</option><option value="RECRUITERS_ONLY">Только рекрутерам</option>
+        <option value="ALL">Всем пользователям LinkedIn</option>
       </select>
     </label>
   </fieldset>

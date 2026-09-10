@@ -1,17 +1,28 @@
 import type { JsonObject, ProfileInput, ValidationIssue } from '../input-types.ts'
 import { REQUIRED_ID_FIELDS } from '../mcp-contract.ts'
-import { createParameterSearch } from '../parameter-search.ts'
+import { createParameterSearch, type ParameterSearchCache } from '../parameter-search.ts'
 import type { PlanStep, ProfileClient } from '../plan-types.ts'
 import type { ProfileLogger } from '../profile-logger.ts'
 import { linkedInPayload } from '../payloads.ts'
 import { specifics } from '../profile-data.ts'
+import { editableFields } from '../editable-fields.ts'
 
 export async function planOpenToWork(
   client: ProfileClient, accountId: string, desired: ProfileInput,
-  current: JsonObject, issues: ValidationIssue[], logger?: ProfileLogger
+  current: JsonObject, issues: ValidationIssue[], logger?: ProfileLogger,
+  parameterCache?: ParameterSearchCache, disabled: string[] = []
 ): Promise<PlanStep[]> {
   if (!desired.openToWork) return []
-  const resolve = createParameterSearch(client, accountId, logger)
+  const off = (key: string) => disabled.includes(`profile.open_to_work.${key}`)
+  if (editableFields.open_to_work.every(off)) return []
+  const missing = ['job_titles', 'locations', 'workplace_types', 'visibility'].filter(off)
+  if (missing.length) {
+    issues.push({ level: 'fatal', path: 'profile.open_to_work',
+      message: 'Open to Work требует должности, города, форматы работы и видимость вместе.',
+      resolution: 'Включите обязательные поля или выключите все поля Open to Work.' })
+    return []
+  }
+  const resolve = createParameterSearch(client, accountId, logger, parameterCache)
   const titles: Array<{ title: string; id: string }> = []
   for (const [index, value] of desired.openToWork.jobTitles.entries()) {
     const issuePath = `profile.open_to_work.job_titles[${index}].name`
@@ -44,8 +55,8 @@ export async function planOpenToWork(
   const input = desired.openToWork
   const after: JsonObject = {
     job_title: titles, workplace: input.workplaceTypes.map(type => ({ type, location: locations })),
-    ...(input.startDate ? { start_date: input.startDate } : {}),
-    ...(input.employmentTypes.length ? { employment_type: input.employmentTypes } : {}),
+    ...(input.startDate && !off('start_date') ? { start_date: input.startDate } : {}),
+    ...(input.employmentTypes.length && !off('employment_types') ? { employment_type: input.employmentTypes } : {}),
     visibility: input.visibility
   }
   const currentSpecifics = specifics(current)

@@ -2,17 +2,14 @@ const { createNocoClient } = require('../../../integrations/noco/core/client.ts'
   createNocoClient(options?: any): any
 }
 const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
-  TABLES: Record<'clients' | 'dolphinProfiles' | 'platformAccounts', { id: string }>
+  TABLES: Record<'clients' | 'dolphinProfiles' | 'platformAccounts' | 'stacks', { id: string }>
 }
-const { LINKEDIN_AUTH_COLUMNS, inspectLinkedInAuthSchema } = require('../../../integrations/noco/linkedin-auth-schema/logic.ts') as {
+const { LINKEDIN_AUTH_COLUMNS } = require('../../../integrations/noco/linkedin-auth-schema/logic.ts') as {
   LINKEDIN_AUTH_COLUMNS: ReadonlyArray<{ title: string }>
-  inspectLinkedInAuthSchema(meta: any): { ok: boolean; missing: string[] }
 }
-const { LinkedInAuthError } = require('./errors.ts') as {
-  LinkedInAuthError: new (code: string, message: string) => Error
-}
-const { resolveLinkedInAuthTarget } = require('./noco-target.ts') as {
+const { resolveLinkedInAuthTarget, relatedClientId } = require('./noco-target.ts') as {
   resolveLinkedInAuthTarget(input: any): any
+  relatedClientId(row: any, relation: string): number | undefined
 }
 const { listLinkedInAuthAccounts } = require('./noco-account-list.ts') as {
   listLinkedInAuthAccounts(input: any): import('./types.ts').LinkedInAuthAccountRow[]
@@ -27,6 +24,13 @@ const { updateLinkedInUrl } = require('./noco-account-update.ts') as {
 const { linkedInNocoError } = require('./noco-error.ts') as {
   linkedInNocoError(error: unknown): unknown
 }
+const { listPrimaryStacks, updatePrimaryStack } = require('./noco-stacks.ts') as {
+  listPrimaryStacks(rows: any[]): Array<{ id: number; name: string }>
+  updatePrimaryStack(client: any, rows: any, clientId: number, stackId: number): Promise<{ id: number; name: string }>
+}
+const { assertLinkedInAuthNocoSchema } = require('./noco-schema-check.ts') as {
+  assertLinkedInAuthNocoSchema(client: any): Promise<void>
+}
 function createLinkedInAuthNocoRepository(
   client?: any,
   failureClient?: any
@@ -38,6 +42,8 @@ function createLinkedInAuthNocoRepository(
   })
   let rowsCache: { expiresAt: number; value: any } | undefined
   let rowsRequest: Promise<any> | undefined
+  let stacksCache: { expiresAt: number; value: any[] } | undefined
+  let stacksRequest: Promise<any[]> | undefined
   async function fetchRows() {
     try {
       const accounts = await client.fetchRecords(TABLES.platformAccounts.id, 1000, {
@@ -54,6 +60,22 @@ function createLinkedInAuthNocoRepository(
       throw linkedInNocoError(error)
     }
   }
+  async function loadStacks() {
+    if (stacksCache && stacksCache.expiresAt > Date.now()) return stacksCache.value
+    if (stacksRequest) return stacksRequest
+    const request: Promise<any[]> = client.fetchRecords(TABLES.stacks.id, 1000)
+      .catch((error: unknown) => {
+      throw linkedInNocoError(error)
+    })
+    stacksRequest = request
+    try {
+      const value = await request
+      stacksCache = { value, expiresAt: Date.now() + 120_000 }
+      return value
+    } finally {
+      stacksRequest = undefined
+    }
+  }
   async function loadRows() {
     if (rowsCache && rowsCache.expiresAt > Date.now()) return rowsCache.value
     if (rowsRequest) return rowsRequest
@@ -66,20 +88,24 @@ function createLinkedInAuthNocoRepository(
       rowsRequest = undefined
     }
   }
-  async function assertSchema(): Promise<void> {
-    let meta
-    try { meta = await client.fetchTableMeta(TABLES.platformAccounts.id) }
-    catch (error) { throw linkedInNocoError(error) }
-    const result = inspectLinkedInAuthSchema(meta)
-    if (!result.ok) {
-      throw new LinkedInAuthError(
-        'noco_linkedin_auth_schema_missing',
-        `Run the LinkedIn auth schema migration. Missing: ${result.missing.join(', ')}.`
-      )
-    }
-  }
   async function resolveTarget(clientName: string, platformAccountId?: number) {
     return resolveLinkedInAuthTarget({ ...(await loadRows()), clientName, platformAccountId })
+  }
+  async function getAccount(id: number, options: { fresh?: boolean } = {}) {
+    if (!Number.isSafeInteger(id) || id <= 0) throw new RangeError('Invalid account ID')
+    try {
+      const accounts = await client.fetchRecords(TABLES.platformAccounts.id, 100,
+        { where: `(Id,eq,${id})` }, options)
+      const row = accounts.find((value: { Id: number }) => Number(value.Id) === id)
+      const owner = row && relatedClientId(row, 'rel_platformAccounts_client')
+      if (!owner) return undefined
+      const clients = await client.fetchRecords(TABLES.clients.id, 100,
+        { where: `(Id,eq,${owner})` }, options)
+      const profiles = await client.fetchRecords(TABLES.dolphinProfiles.id, 100,
+        { where: `(clients_id,eq,${owner})` }, options)
+      return listLinkedInAuthAccounts({ accounts: [row], clients, profiles })
+        .find(account => account.platformAccountId === id)
+    } catch (error) { throw linkedInNocoError(error) }
   }
   async function updateAccountUrl(platformAccountId: number, value: unknown) {
     const linkedinUrl = await updateLinkedInUrl(client, platformAccountId, value)
@@ -93,8 +119,16 @@ function createLinkedInAuthNocoRepository(
     return linkedinUrl
   }
   return {
-    assertSchema,
+    assertSchema: () => assertLinkedInAuthNocoSchema(client),
+    getAccount,
     async listAccounts() { return listLinkedInAuthAccounts(await loadRows()) },
+    async listStacks() { return listPrimaryStacks(await loadStacks()) },
+    async updatePrimaryStack(clientId: number, stackId: number) {
+      const [rows, stacks] = await Promise.all([loadRows(), loadStacks()])
+      const result = await updatePrimaryStack(client, { ...rows, stacks }, clientId, stackId)
+      rowsCache = undefined
+      return result
+    },
     resolveTarget,
     updateLinkedInUrl: updateAccountUrl,
     async recordFailure(platformAccountId: number, input: any) {

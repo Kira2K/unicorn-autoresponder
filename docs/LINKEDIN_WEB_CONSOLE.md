@@ -95,9 +95,13 @@ date variants, and named Skill objects are converted deterministically. Each
 issue includes a path, correction hint, and example. The normalized document is
 editable in Preview and can be downloaded. Any edit disables `Apply` until a
 fresh read-only preview creates a new plan hash.
+Generated Preview is different: factual fields remain bound to the CV, so it cannot be
+edited or rebuilt as manual JSON. The administrator may only regenerate it from the CV.
 
-MCP v2 accepts Job Title, Company, Location, and Skills by name, so Preview does
-not query their parameter catalog. Experience `employment_type` is temporarily
+Preview uses exact unique catalog IDs for Job Title, Company, Location, and School when found.
+Confirmed CV names remain the fallback for Experience and Education identity fields. Skills are
+normalized, deduplicated, and sent by name without individual catalog searches. Experience
+`employment_type` is temporarily
 excluded: live Unipile v2 rejects it even with an ID returned by its own catalog.
 The analyzer removes that field with a visible warning. Open to Work
 `employment_types` remains supported. Preview resolves the Job Title and
@@ -111,18 +115,23 @@ warnings, resolves every mandatory LinkedIn ID from the current account catalog,
 then validates the final payload against the MCP-confirmed Unipile v2 contract.
 IDs supplied by uploaded JSON are ignored and never forwarded.
 
-Writes run sequentially. Each step gets exactly one read-only check. A write
-accepted but not yet visible becomes `verification_delayed`, and later writes
-continue. At the end, exactly one shared read-only check runs for the complete
-plan after a randomized 55-65 second pause. Immediately before every write,
+Writes run sequentially. Each step gets a fresh read-only check after 2-3 minutes;
+consecutive Skill batches are spaced 3-5 minutes apart. A write accepted but not yet
+visible becomes `verification_delayed`. Uncertain writes and unconfirmed creates/Skills block
+subsequent PATCHs. The backend then runs
+read-only checks after 5, 15, 30, and 60 minutes. Immediately before every write,
 Profile Filler reads the target field again. Existing Experience and Education
 entries are edited by provider ID,
 already matching fields are skipped, and Skills payloads contain only values
 still missing at write time. Multiple matching entries block the write instead
 of selecting one and creating or editing another duplicate. LinkedIn dates
-returned as `MM/DD/YYYY` are normalized before matching. Only an explicitly rejected write
-stops execution. Unresolved checks finish in the warning state
-`pending_verification`.
+returned as `MM/DD/YYYY` are normalized before matching. Timeout and `5xx` never repeat a
+write blindly. The saved `verifying` state resumes after backend restart using reads only.
+Full equality finishes as `succeeded`; unresolved sections finish as
+`needs_expert_review`.
+Omitted Skills produce `needs_expert_review / partially_completed`, not a success message.
+Durable write intent is saved before PATCH; saving failures stop new writes. Recovery only reads.
+History/reload resumes one observer; temporary read failures retry and `verifying` retains its timer.
 A fresh preview re-reads LinkedIn and contains only changes still required.
 The UI shows overall elapsed time, status age, and the countdown to each planned
 write or check. A verified step replaces its timer with a green check.
@@ -145,6 +154,37 @@ Profile Filler routes:
 - `POST /api/admin/linkedin/profile-jobs/:jobId/apply`
 - `POST /api/admin/linkedin/profile-jobs/:jobId/rollback`
 
+## Connection Inviter
+
+The LinkedIn table shows readiness, primary stack, the latest connection count,
+daily limit, today's 70/30 quotas, progress, timers, retries, and recent
+invitation history. The admin starts a run manually; a repeated start on the
+same local day only processes the confirmed remaining quota.
+
+Connection Inviter routes:
+
+- `GET /api/admin/linkedin/connection-runs`
+- `GET /api/admin/linkedin/connection-runs/:runId`
+- `GET /api/admin/linkedin/connection-runs/:runId/events`
+- `POST /api/admin/linkedin/connection-runs/:runId/stop`
+- `GET /api/admin/linkedin/connection-stacks`
+- `GET /api/admin/linkedin/accounts/:id/connection-readiness`
+- `GET /api/admin/linkedin/accounts/:id/connection-history`
+- `PUT /api/admin/linkedin/accounts/:id/connection-stack`
+- `POST /api/admin/linkedin/accounts/:id/connection-runs`
+
+Structured logs are written to
+`logs/linkedin-connections/connection-inviter-<pid>.jsonl`. Logs contain safe
+stages, durations, counters, retry state, and hashed candidate diagnostics;
+credentials, request bodies, names, profile URLs, and full headlines are not
+logged.
+
+Before an invitation POST the candidate must have a durable unique `sending`
+claim. Timeout, `5xx`, or an unconfirmed `2xx` is resolved through pending
+read-back and is never repeated blindly. `completed` requires both confirmed
+audience quotas; day closure or catalog exhaustion is reported as `partial`
+with the exact shortfall.
+
 ## Tests
 
 LinkedIn checks are isolated from the legacy web-console and support-bot tests:
@@ -153,7 +193,27 @@ LinkedIn checks are isolated from the legacy web-console and support-bot tests:
 npm run linkedin:web:test
 npm run linkedin:web:e2e
 npm run linkedin:web:check
+npm run linkedin:connections:test
+npm run linkedin:connections:e2e
 ```
 
 The last command also runs the LinkedIn authorization tests, typecheck, and the
 web build. All web tests use mock data and never start a real account connection.
+
+## Интерфейс для ПК
+
+- Широкое окно с этапами CV → Проверка изменений → Заполнение → Результат.
+  Ученик, ссылка на LinkedIn и панель действий всегда видны. Управление на русском,
+  сгенерированное содержимое остаётся на английском.
+- Выбор PDF/DOCX не запускает генерацию. Один запрос начинается по кнопке;
+  ошибка не сбрасывает выбранный файл. JSON остаётся в разделе для специалиста.
+- Preview показывает поля «Сейчас → Будет», количество записей документа и единый
+  расчёт Skills. Финальная проверка Skills не учитывается как повторное добавление.
+  Если данных старого задания не хватает, интерфейс не подставляет нули.
+- Подтверждение Apply содержит ученика, сводку и предупреждения. Передаётся сохранённый
+  planHash; повторный клик во время запроса заблокирован.
+- Сворачивание не останавливает backend и единственный цикл наблюдения. Просмотр истории
+  отделён от активного задания; кнопка в карточке ученика возвращает к прогрессу.
+- Прогресс объединён по разделам. Принятый PATCH отличается от подтверждённого результата;
+  таймеры считаются локально. Полный, частичный и неподтверждённый результат различаются явно.
+- Новых маршрутов, Noco-полей, фоновых провайдерских запросов и команды Stop нет.

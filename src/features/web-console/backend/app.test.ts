@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { normalizeNocoError } = require('../../../integrations/noco/core/error-policy.ts') as
+  typeof import('../../../integrations/noco/core/error-policy.ts')
 const {
   buildProfileAccessInput,
   createWebConsoleApp,
@@ -1186,29 +1188,30 @@ async function runTests(): Promise<void> {
 
     const normalFetchRecords = noco.fetchRecords
     try {
-      noco.fetchRecords = async () => {
-        throw Object.assign(new Error('Request failed with status code 429'), {
-          response: { status: 429 }
-        })
+      const failures = [
+        ...[429, 502, 503, 504].map(status => ({
+          error: Object.assign(new Error(`upstream ${status}`), { response: { status } }),
+          status: status === 429 ? 429 : 503
+        })),
+        ...['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+          'noco_timeout', 'noco_unreachable', 'noco_service_unavailable'].map(code => ({
+          error: Object.assign(new Error('upstream unavailable'), { code }), status: 503
+        })),
+        { error: Object.assign(new Error('upstream busy'), { code: 'noco_rate_limited' }), status: 429 }
+      ]
+      for (const failure of failures) {
+        for (const error of [failure.error, normalizeNocoError(failure.error)]) {
+          noco.fetchRecords = async () => { throw error }
+          result = await request(server.baseUrl, '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: 'client@example.com', password: '1234' })
+          })
+          assert.equal(result.response.status, failure.status, error.code ?? error.message)
+          assert.equal(result.body.error, failure.status === 429
+            ? 'backend_overloaded' : 'backend_unavailable')
+        }
       }
-      result = await request(server.baseUrl, '/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'client@example.com', password: '1234' })
-      })
-      assert.equal(result.response.status, 429)
-      assert.equal(result.body.error, 'backend_overloaded')
-
-      noco.fetchRecords = async () => {
-        throw Object.assign(new Error('timeout of 10000ms exceeded'), { code: 'ECONNABORTED' })
-      }
-      result = await request(server.baseUrl, '/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'client@example.com', password: '1234' })
-      })
-      assert.equal(result.response.status, 503)
-      assert.equal(result.body.error, 'backend_unavailable')
     } finally {
       noco.fetchRecords = normalFetchRecords
     }

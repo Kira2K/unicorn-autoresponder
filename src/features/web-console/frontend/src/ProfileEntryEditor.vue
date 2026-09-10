@@ -6,16 +6,16 @@ const props = defineProps({
 const emit = defineEmits(['change'])
 
 const experience = [
-  ['company', 'Company', 'text'], ['job_title', 'Job title', 'text'],
-  ['location', 'Location', 'text'], ['workplace_type', 'Workplace type', 'text'],
-  ['start_date', 'Start date', 'month'],
-  ['end_date', 'End date', 'month'], ['description', 'Description', 'textarea']
+  ['company', 'Компания', 'text'], ['job_title', 'Должность', 'text'],
+  ['location', 'Местоположение', 'text'], ['workplace_type', 'Формат работы', 'text'],
+  ['start_date', 'Начало', 'month'],
+  ['end_date', 'Окончание', 'month'], ['description', 'Описание', 'textarea']
 ]
 const education = [
-  ['school', 'School', 'text'], ['degree', 'Degree', 'text'],
-  ['field_of_study', 'Field of study', 'text'], ['start_date', 'Start date', 'month'],
-  ['end_date', 'End date', 'month'], ['grade', 'Grade', 'text'],
-  ['activities', 'Activities', 'textarea'], ['description', 'Description', 'textarea']
+  ['school', 'Учебное заведение', 'text'], ['degree', 'Степень', 'text'],
+  ['field_of_study', 'Направление', 'text'], ['start_date', 'Начало', 'month'],
+  ['end_date', 'Окончание', 'month'], ['grade', 'Оценка', 'text'],
+  ['activities', 'Активности', 'textarea'], ['description', 'Описание', 'textarea']
 ]
 const fields = props.kind === 'experience' ? experience : education
 
@@ -41,7 +41,7 @@ function skills(value) {
         @input="change(field[0], $event.target.value)" />
     </label>
     <label class="wide">
-      <span>Skills (one per line)</span>
+      <span>Навыки (по одному в строке)</span>
       <textarea :value="(entry.data?.skills || []).join('\n')" @input="skills($event.target.value)" />
     </label>
   </div>

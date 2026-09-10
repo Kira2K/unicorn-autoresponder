@@ -2,6 +2,9 @@ const { createUnipileProfileAdapter } = require('../../../integrations/unipile/p
   { createUnipileProfileAdapter(): any }
 const { codedError, profileErrorDetails } = require('./errors.ts') as typeof import('./errors.ts')
 const { publicProfileJob } = require('./job-types.ts') as typeof import('./job-types.ts')
+const { stopProfileGeneration } = require('./stop-generation.ts') as typeof import('./stop-generation.ts')
+const { editProfileField } = require('./edit-field.ts') as typeof import('./edit-field.ts')
+const { hasBlockingIssues } = require('./partial-plan.ts') as typeof import('./partial-plan.ts')
 const { sameHash } = require('./job-state.ts') as
   { sameHash(left: string, right: string): boolean }
 const { runMutation } = require('./mutation-run.ts') as typeof import('./mutation-run.ts')
@@ -13,13 +16,18 @@ const { startProfileGeneration } = require('./start-generation.ts') as
   { startProfileGeneration(options: any): Promise<any> }
 const { resumeProfileGeneration } = require('./resume-generation.ts') as
   { resumeProfileGeneration(options: any): Promise<any> }
-const { recoverInterruptedJob } = require('./job-state.ts') as
-  { recoverInterruptedJob(store: any, job: ProfileJob): Promise<ProfileJob> }
+const { recoverInterruptedJob, profileReadView } = require('./job-state.ts') as
+  typeof import('./job-state.ts')
 const { findParameterOptions } = require('./parameter-options.ts') as
   typeof import('./parameter-options.ts')
-const { getPublicJob, listPublicJobs } = require('./service-queries.ts') as {
-  getPublicJob(store: any, jobs: Map<string, ProfileJob>, id: string): Promise<any>
-  listPublicJobs(store: any, jobs: Map<string, ProfileJob>): Promise<any[]>
+const { approvedSections, assertApprovedState } = require('./approved-state.ts') as typeof import('./approved-state.ts')
+const { assertDistinctPlanTargets } = require('./entry-claims.ts') as typeof import('./entry-claims.ts')
+const { createVerificationRecovery } = require('./verification-recovery.ts') as
+  typeof import('./verification-recovery.ts')
+const { resolveProfileAccount } = require('./profile-account.ts') as {
+  resolveProfileAccount(repository: unknown, client: import('./plan-types.ts').ProfileClient,
+    id: number, sections: string[]): Promise<{ account: import('./plan-types.ts').ProfileAccount;
+      profile: import('./input-types.ts').JsonObject }>
 }
 const { startRollback } = require('./rollback.ts') as { startRollback(options: any): Promise<any> }
 type ProfileJob = import('./job-types.ts').ProfileJob
@@ -37,10 +45,51 @@ function createProfileFillerService(options: any = {}) {
   const gate = options.gate
   const jobs = new Map<string, ProfileJob>()
   const generationStarts = new Map<number, Promise<any>>()
+  const verificationStarts = new Set<string>()
   const update = (job: ProfileJob, patch: Partial<ProfileJob>) => Object.assign(job, patch)
   const acquire = (kind: string, id: string, platformAccountId: number) =>
     gate?.acquire(kind, id, String(platformAccountId)) ?? (() => undefined)
   const loggerFor = (jobId: string) => options.executorOptions?.logger ?? createProfileLogger({ jobId })
+  async function ensureVerification(job: ProfileJob) {
+    if (verificationStarts.has(job.jobId)) return true
+    if (job.status !== 'verifying' || !job.plan || !job.result) return false
+    verificationStarts.add(job.jobId)
+    const logger = loggerFor(job.jobId)
+    try {
+      const release = await logAction(logger, 'verification_operation_gate', () =>
+        acquire('profile_verify', job.jobId, job.platformAccountId))
+      jobs.set(job.jobId, job)
+      runMutation({ client: getClient(), store: getStore(), job,
+        update: patch => update(job, patch), release, resumeVerification: true,
+        executorOptions: { ...options.executorOptions, logger,
+          onSettled: () => verificationStarts.delete(job.jobId) } })
+      return true
+    } catch (error) {
+      verificationStarts.delete(job.jobId)
+      logger.event('verification_resume', 'failed', profileErrorDetails(error))
+      return false
+    }
+  }
+  const recovery = createVerificationRecovery({
+    list: () => getStore().listPendingVerification?.() ?? getStore().list(),
+    isActive: id => jobs.has(id) || verificationStarts.has(id),
+    recover: job => recoverInterruptedJob(getStore(), job),
+    resume: ensureVerification, logger: loggerFor('verification-recovery')
+  })
+  async function getJob(jobId: string) {
+    const active = jobs.get(jobId)
+    const job = active ?? await getStore().get(jobId)
+    if (!job) return undefined
+    return publicProfileJob(profileReadView(job, Boolean(active)))
+  }
+  async function listJobs(platformAccountId?: number) {
+    return (await getStore().list(platformAccountId))
+      .filter((stored: ProfileJob) => platformAccountId === undefined || stored.platformAccountId === platformAccountId)
+      .map((stored: ProfileJob) => {
+        const active = jobs.get(stored.jobId)
+        return publicProfileJob(profileReadView(active ?? stored, Boolean(active)))
+      })
+  }
   async function startPreview(platformAccountId: number, profileFile: unknown) {
     return startProfilePreview({ platformAccountId, profileFile, loggerFor, getRepository, getStore,
       getClient, acquire, jobs, update })
@@ -51,14 +100,18 @@ function createProfileFillerService(options: any = {}) {
     const request = (async () => {
       const local = [...jobs.values()].find(job => job.platformAccountId === platformAccountId &&
         ['generating_cv', 'generating_profile', 'validating', 'previewing', 'retrying',
-          'waiting_retry'].includes(job.status))
+          'waiting_retry', 'running', 'verifying'].includes(job.status))
       if (local) return publicProfileJob(local)
-      const saved = (await getStore().list()).find((job: ProfileJob) =>
-        job.platformAccountId === platformAccountId && (job.status === 'waiting_retry' ||
+      const store = getStore()
+      const candidates = await (store.listActive ? store.listActive(platformAccountId) : store.list(platformAccountId))
+      const saved = candidates.find((job: ProfileJob) =>
+        job.platformAccountId === platformAccountId && (['waiting_retry', 'running', 'verifying']
+          .includes(job.status) ||
           (job.checkpoint && ['validating', 'previewing', 'retrying'].includes(job.status))))
       if (saved) {
         await recoverInterruptedJob(getStore(), saved); jobs.set(saved.jobId, saved)
-        return publicProfileJob(saved)
+        if (saved.status === 'verifying') void ensureVerification(saved)
+        if (saved.phase !== 'generation_stopped') return publicProfileJob(saved)
       }
       return startProfileGeneration({ platformAccountId, loggerFor, getRepository, getStore,
         getClient, acquire, jobs, update, generationRuntime: options.generationRuntime,
@@ -90,24 +143,31 @@ function createProfileFillerService(options: any = {}) {
         if (!sameHash(stored.planHash, hash)) {
           throw codedError('profile_plan_hash_mismatch', 'Profile plan hash does not match.')
         }
-        if (stored.plan.issues.some((item: import('./input-types.ts').ValidationIssue) =>
-          item.level === 'fatal')) {
+        if (hasBlockingIssues(stored.plan)) {
           throw codedError('profile_preview_has_blocking_issues',
             'Profile preview contains blocking issues.')
         }
+        assertDistinctPlanTargets(stored.plan)
         return stored
       })
       const plan = job.plan!
       const release = await logAction(logger, 'operation_gate', () =>
         acquire('profile_fill', jobId, job.platformAccountId))
+      try {
+        const fresh = await resolveProfileAccount(getRepository(), getClient(), job.platformAccountId, approvedSections(plan))
+        if (fresh.account.accountId !== plan.account.accountId || fresh.account.providerId !== plan.account.providerId) {
+          throw codedError('profile_preview_stale', 'Account identity changed; rebuild Preview.')
+        }
+        assertApprovedState(plan, fresh.profile)
+      } catch (error) { release(); throw error }
       const now = new Date().toISOString()
+      // The first durable write intent also saves running; no LinkedIn PATCH may precede it.
       update(job, { status: 'running', phase: 'starting', updatedAt: now })
-      try { await logAction(logger, 'job_start_persist', () => getStore().update(jobId,
-        { status: 'running', phase: 'starting', updatedAt: now })) }
-      catch (error) { release(); throw error }
       jobs.set(jobId, job)
+      verificationStarts.add(jobId)
       runMutation({ client: getClient(), store: getStore(), job, update: patch => update(job, patch),
-        release, executorOptions: { ...options.executorOptions, logger } })
+        release, executorOptions: { ...options.executorOptions, logger,
+          onSettled: () => verificationStarts.delete(jobId) } })
       logger.event('apply_request', 'succeeded', { stepCount: plan.steps.length })
       return publicProfileJob(job)
     } catch (error) {
@@ -119,9 +179,12 @@ function createProfileFillerService(options: any = {}) {
     return await startRollback({ sourceJobId, jobs, store: getStore(), client: getClient(),
       repository: getRepository(), acquire, executorOptions: options.executorOptions })
   }
-  return { apply,
-    get: (jobId: string) => getPublicJob(getStore(), jobs, jobId),
-    list: () => listPublicJobs(getStore(), jobs),
+  return { apply, recoverPending: recovery.start,
+    editField: (jobId: string, hash: string, change: import('./field-change.ts').FieldChange) =>
+      editProfileField({ jobId, hash, change, jobs, store: getStore(), client: getClient(), acquire, logger: loggerFor(jobId) }),
+    stopGeneration: (jobId: string) => stopProfileGeneration({ jobId, jobs, store: getStore() }),
+    get: getJob,
+    list: listJobs,
     resume, rollback, searchParameters,
     startGeneration,
     startPreview

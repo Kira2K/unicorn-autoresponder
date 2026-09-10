@@ -62,7 +62,7 @@ async function startRollback(options: any) {
     if (!original || original.status !== 'succeeded') {
       throw codedError('profile_rollback_not_available', 'Only a successful job can be rolled back.')
     }
-    const prior = (await logAction(logger, 'rollback_history_read', () => store.list()))
+    const prior = (await logAction(logger, 'rollback_history_read', () => store.list(original.platformAccountId)))
       .find((job: ProfileJob) => job.plan?.rollbackOf === sourceJobId &&
         ['running', 'succeeded'].includes(job.status))
     if (prior) throw codedError('profile_already_rolled_back', 'This job was already rolled back.')

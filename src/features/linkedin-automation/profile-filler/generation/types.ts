@@ -1,4 +1,5 @@
 export type CvExperienceFact = {
+  fact_id?: string
   company: string
   job_title: string
   start_date: string | null
@@ -12,6 +13,7 @@ export type CvExperienceFact = {
 }
 
 export type CvEducationFact = {
+  fact_id?: string
   school: string
   degree: string | null
   field_of_study: string | null
@@ -48,6 +50,8 @@ export type GenerationCheckpoint = {
   profile: import('../input-types.ts').ProfileInput
   issues: import('../input-types.ts').ValidationIssue[]
   generation: GenerationMetadata
+  catalogParameters?: import('../parameter-search.ts').ParameterSearchCache
+  pendingPreview?: { plan: import('../plan-types.ts').ProfilePlan; planHash: string; nextRetryAt?: string }
   retry?: { provider: 'unipile'; attempt: number; nextRetryAt?: string }
 }
 

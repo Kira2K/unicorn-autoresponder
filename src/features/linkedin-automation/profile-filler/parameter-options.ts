@@ -24,8 +24,10 @@ export async function findParameterOptions(options: {
   if (!TYPES.has(type) || keywords.length < 2 || keywords.length > 80) {
     throw codedError('profile_parameter_search_invalid', 'Invalid parameter search.')
   }
-  const rows = await logAction(logger, 'parameter_account_list', () => repository.listAccounts())
-  const row = rows.find((item: any) => Number(item.platformAccountId) === platformAccountId)
+  const row = await logAction(logger, 'parameter_account_read', () => repository.getAccount
+    ? repository.getAccount(platformAccountId)
+    : repository.listAccounts().then((rows: Array<{ platformAccountId: number }>) =>
+      rows.find(item => Number(item.platformAccountId) === platformAccountId)))
   if (!row) throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
   if (!row.unipileAccountId || row.unipileAccountStatus !== 'running' || !row.lastVerifiedAt) {
     throw codedError('profile_filler_auth_required', 'Verify or reconnect LinkedIn first.')

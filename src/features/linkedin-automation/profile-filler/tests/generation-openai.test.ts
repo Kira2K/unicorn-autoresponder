@@ -47,6 +47,10 @@ async function run() {
   assert.match(responseBodies[2].input[0].content[0].text, /role-1/)
   assert.equal(responseBodies[2].max_output_tokens, 1_200)
   assert(responseBodies[1].text.format.schema.properties.profile.properties.about_blocks)
+  const generatedSchema = responseBodies[1].text.format.schema.properties.profile.properties
+  assert(generatedSchema.experience.items.properties.fact_id)
+  assert.equal(generatedSchema.experience.items.properties.data, undefined)
+  assert.equal(generatedSchema.skills.properties.add.minItems, 100)
   assert(responseBodies[3].text.format.schema.properties.profile.properties.about_blocks)
   assert.equal(responseBodies[3].text.format.schema.properties.profile.properties.headline, undefined)
   assert.equal(repaired.profile.about, 'One\n\nTwo\n\nThree\n\nFour')

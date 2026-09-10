@@ -1,8 +1,29 @@
 import type { ProfileFillerService } from './profile-filler-types.ts'
+import { validateProfileFile } from '../../linkedin-automation/profile-filler/validator.ts'
+import { changeProfileField } from '../../linkedin-automation/profile-filler/field-change.ts'
+import { profileDocument } from '../../linkedin-automation/profile-filler/profile-document.ts'
+import { selectField } from '../../linkedin-automation/profile-filler/field-selection.ts'
 
 export function createMockProfileFillerService(): ProfileFillerService {
   const jobs = new Map<string, any>()
   return {
+    async editField(jobId, hash, change) {
+      const job = jobs.get(jobId)
+      if (!job || job.status !== 'preview_ready') throw Object.assign(new Error('Not ready'), { code: 'profile_job_not_ready' })
+      if (job.planHash !== hash) throw Object.assign(new Error('Stale'), { code: 'profile_plan_hash_mismatch' })
+      const input = validateProfileFile(job.preview.document).value!
+      const result = 'value' in change ? changeProfileField(input, change) : undefined
+      if ('enabled' in change) job.preview.disabledFields = selectField(input,
+        job.preview.disabledFields ?? [], change.path, change.enabled).disabled
+      if (result) job.preview.document = profileDocument(result.input)
+      job.planHash = `mock-edit-${Date.now()}`
+      job.preview.planHash = job.planHash
+      if (result) job.preview.editedFields = [...new Set([...(job.preview.editedFields || []), change.path])]
+      for (const step of job.preview.steps) {
+        if (result && step.section === result.section && ['headline', 'about'].includes(result.section)) step.after = result.value
+      }
+      return structuredClone(job)
+    },
     async startGeneration(platformAccountId) {
       const now = new Date().toISOString()
       const job: any = { jobId: `generation-${Date.now()}`, platformAccountId,
@@ -10,6 +31,7 @@ export function createMockProfileFillerService(): ProfileFillerService {
         createdAt: now, updatedAt: now }
       jobs.set(job.jobId, job)
       setTimeout(() => {
+        if (job.phase === 'generation_stopped') return
         job.status = 'preview_ready'; job.phase = 'preview_ready'; job.planHash = 'mock-generated-hash'
         job.updatedAt = new Date().toISOString()
         job.preview = { planHash: job.planHash, issues: [], document: { schema_version: 1,
@@ -18,6 +40,17 @@ export function createMockProfileFillerService(): ProfileFillerService {
           cvRevision: 'mock-cv', generatedAt: new Date().toISOString()
         } }
       }, 25)
+      return structuredClone(job)
+    },
+    async stopGeneration(jobId) {
+      const job = jobs.get(jobId)
+      if (!job) throw Object.assign(new Error('Not found'), { code: 'profile_job_not_found' })
+      if (job.phase === 'generation_stopped') return structuredClone(job)
+      if (!['generating_cv', 'generating_profile', 'validating', 'previewing', 'retrying', 'waiting_retry'].includes(job.status)) {
+        throw Object.assign(new Error('Preparation is not active'), { code: 'profile_generation_stop_unavailable' })
+      }
+      Object.assign(job, { status: 'failed', phase: 'generation_stopped',
+        errorCode: 'profile_generation_stopped', finishedAt: new Date().toISOString() })
       return structuredClone(job)
     },
     async searchParameters(_platformAccountId, type, keywords) {
@@ -77,10 +110,13 @@ export function createMockProfileFillerService(): ProfileFillerService {
       const job = jobs.get(jobId)
       if (!job) throw Object.assign(new Error('Not found'), { code: 'profile_job_not_found' })
       job.status = 'retrying'; job.phase = 'resuming_job_titles'; job.errorCode = undefined
-      setTimeout(() => { job.status = 'preview_ready'; job.phase = 'preview_ready' }, 25)
+      setTimeout(() => {
+        if (job.phase !== 'generation_stopped') { job.status = 'preview_ready'; job.phase = 'preview_ready' }
+      }, 25)
       return structuredClone(job)
     },
     async get(jobId) { const job = jobs.get(jobId); return job && structuredClone(job) },
-    async list() { return [...jobs.values()].reverse().map(value => structuredClone(value)) }
+    async list(id?: number) { return [...jobs.values()].reverse()
+      .filter(value => id === undefined || value.platformAccountId === id).map(value => structuredClone(value)) }
   }
 }

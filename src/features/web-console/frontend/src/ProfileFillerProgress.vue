@@ -1,93 +1,51 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { overallTime, stepTimer } from './profile-timers'
-
+import { progressGroups, progressSteps, stepLabels } from './profile-progress-view.js'
+import { profileSection } from './profile-workflow-view.js'
 const props = defineProps({
-  result: { type: Object, required: true },
-  previewSteps: { type: Array, default: () => [] }
+  result: { type: Object, required: true }, previewSteps: { type: Array, default: () => [] }
 })
-
-const names = computed(() => new Map(props.previewSteps.map(step => [step.id, step.summary])))
-const steps = computed(() => {
-  if (!props.previewSteps.length) return props.result.steps
-  const saved = new Map(props.result.steps.map(step => [step.stepId, step]))
-  return props.previewSteps.map(step => saved.get(step.id) || {
-    stepId: step.id, section: step.section, status: 'pending', message: 'Waiting to start.'
-  })
-})
-const complete = computed(() => steps.value.filter(step => step.status === 'verified').length)
-const summary = computed(() => `${complete.value} of ${steps.value.length} completed`)
-const failed = computed(() => steps.value.find(step => step.status === 'failed'))
-const delayed = computed(() => steps.value.filter(step => step.status === 'verification_delayed'))
-const pendingRetry = computed(() => steps.value.filter(step => step.status === 'pending_retry'))
+const groups = computed(() => progressGroups(props.result, props.previewSteps))
+const steps = computed(() => progressSteps(props.result, props.previewSteps))
+const complete = computed(() => groups.value.filter(group => group.confirmed).length)
+const current = computed(() => steps.value.find(step =>
+  ['writing', 'write_accepted', 'verifying', 'waiting', 'verification_delayed'].includes(step.status)))
 const now = ref(Date.now())
+const nextRead = computed(() => props.result.verification?.nextReadBackAt)
 let timer
 onMounted(() => { timer = window.setInterval(() => { now.value = Date.now() }, 1000) })
 onUnmounted(() => window.clearInterval(timer))
-
-function label(step) {
-  const labels = {
-    pending: 'Waiting', waiting: 'Waiting before write', writing: 'Sending',
-    write_accepted: 'Accepted by Unipile', verifying: 'Checking LinkedIn',
-    verification_delayed: 'Accepted · verification delayed',
-    pending_retry: 'Waiting for a safe retry',
-    verified: 'Completed', failed: 'Stopped'
-  }
-  return labels[step.status] || step.status
-}
-
-function failureText(kind, code) {
-  if (code === 'unipile_api_invalid_parameters') {
-    return 'Profile Filler sent parameters that do not match the Unipile API contract.'
-  }
-  if (kind === 'write_rejected') return 'Unipile rejected the write request.'
-  if (kind === 'write_uncertain') return 'The write response was lost or timed out; the result is uncertain.'
-  if (kind === 'prewrite_blocked') {
-    return 'The write was blocked because an existing profile entry could not be edited safely.'
-  }
-  if (kind === 'write_accepted_not_visible') {
-    return 'The write was accepted, but LinkedIn did not return it before the verification timeout.'
-  }
-  if (kind === 'value_mismatch') return 'LinkedIn returned a value different from the requested value.'
-  return 'The step could not be verified.'
+function readTimer() {
+  return stepTimer({ status: 'verifying', nextActionAt: nextRead.value }, props.result.status, now.value)
 }
 </script>
-
 <template>
   <section class="profile-progress" data-testid="profile-progress">
-    <header><strong>Progress</strong><span>{{ summary }}
-      <small v-if="overallTime(result, now)" data-testid="profile-overall-timer">
-        Elapsed {{ overallTime(result, now) }}</small>
-    </span></header>
+    <header><strong>Подтверждено разделов: {{ complete }} из {{ groups.length }}</strong>
+      <small v-if="overallTime(result, now)" data-testid="profile-overall-timer">Прошло {{ overallTime(result, now) }}</small>
+    </header>
+    <progress :value="complete" :max="groups.length || 1" aria-label="Подтверждённые разделы" />
+    <div v-if="current" class="profile-current-operation" aria-live="polite">
+      <strong>{{ profileSection(current.section) }} · {{ stepLabels[current.status] }}</strong>
+      <p v-if="nextRead" class="profile-step-timer">{{ readTimer() }}</p>
+      <p v-else-if="stepTimer(current, result.status, now)" class="profile-step-timer">
+        {{ stepTimer(current, result.status, now) }}</p>
+      <p class="profile-muted">LinkedIn может возвращать изменения с задержкой. Принятый запрос ещё не означает подтверждение.</p>
+    </div>
     <ol>
-      <li v-for="step in steps" :key="step.stepId" :class="`profile-step-${step.status}`">
-        <i :class="step.status === 'verified' ? 'pi pi-check-circle' :
-          step.status === 'failed' ? 'pi pi-times-circle' :
-            ['waiting', 'writing', 'write_accepted', 'verifying'].includes(step.status)
-              ? 'pi pi-spin pi-spinner' : 'pi pi-circle'" />
-        <div>
-          <strong>{{ names.get(step.stepId) || step.section }}</strong>
-          <small>{{ label(step) }}<template v-if="step.attempt"> · {{ step.attempt }}/{{ step.maxAttempts }}</template></small>
-          <small>{{ step.message }}</small>
-          <small v-if="stepTimer(step, result.status, now)" class="profile-step-timer">
-            <i class="pi pi-clock" /> {{ stepTimer(step, result.status, now) }}</small>
-        </div>
+      <li v-for="group in groups" :key="group.section" :class="`profile-step-${group.status}`">
+        <i :class="group.confirmed ? 'pi pi-check-circle' : group.status === 'failed' ? 'pi pi-exclamation-circle' : 'pi pi-clock'" />
+        <div><strong>{{ group.name }}</strong><small>{{ group.label }}</small></div>
       </li>
     </ol>
-    <Message v-if="failed" severity="error" :closable="false">
-      {{ failureText(failed.failureKind, failed.errorCode) }}
-      <template v-if="failed.errorCode"> Code: {{ failed.errorCode }}.</template>
-      <template v-if="failed.errorCode === 'unipile_api_invalid_parameters'">
-        The operation stopped before LinkedIn was changed. Contact the administrator before retrying.
-      </template>
-      <template v-else>Build a fresh preview to recheck what remains.</template>
-    </Message>
-    <Message v-else-if="delayed.length" severity="warn" :closable="false">
-      {{ delayed.length }} change(s) were accepted but LinkedIn verification is delayed.
-      Other steps continued. Build a fresh preview later to confirm them.
-    </Message>
-    <Message v-if="pendingRetry.length" severity="warn" :closable="false">
-      {{ pendingRetry.length }} field(s) remain pending. Other fields continued normally.
-    </Message>
+    <details><summary>Технические операции · {{ steps.length }}</summary>
+      <ol><li v-for="step in steps" :key="step.stepId">
+        <div><strong>{{ profileSection(step.section) }} · {{ stepLabels[step.status] || 'Нет данных' }}</strong>
+          <small>{{ step.message }}</small><code v-if="step.errorCode">{{ step.errorCode }}</code>
+          <small v-if="step.attempt">Проверка {{ step.attempt }} / {{ step.maxAttempts ?? '—' }}</small>
+        </div>
+      </li></ol>
+    </details>
   </section>
 </template>

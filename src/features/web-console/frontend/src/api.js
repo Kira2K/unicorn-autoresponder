@@ -109,6 +109,16 @@ export const api = {
       method: 'POST', body: JSON.stringify(profile)
     })
   },
+  editAdminProfileField(jobId, planHash, path, value) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/fields`, {
+      method: 'POST', body: JSON.stringify({ planHash, path, value })
+    })
+  },
+  selectAdminProfileField(jobId, planHash, path, enabled) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/fields`, {
+      method: 'POST', body: JSON.stringify({ planHash, path, enabled })
+    })
+  },
   startAdminProfileGeneration(platformAccountId, file) {
     return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/profile-generations`, {
       method: 'POST', ...(file ? { body: file, headers: { 'Content-Type': cvMime(file) } } : {})
@@ -121,8 +131,9 @@ export const api = {
   adminProfileJob(jobId) {
     return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}`)
   },
-  adminProfileJobs() {
-    return request('/api/admin/linkedin/profile-jobs')
+  adminProfileJobs(platformAccountId) {
+    const query = platformAccountId === undefined ? '' : `?platformAccountId=${encodeURIComponent(platformAccountId)}`
+    return request(`/api/admin/linkedin/profile-jobs${query}`)
   },
   adminCommentMonitors() {
     return request('/api/admin/linkedin/comment-monitors')
@@ -135,6 +146,34 @@ export const api = {
   resumeAdminCommentMonitor(jobId) {
     return request(`/api/admin/linkedin/comment-monitors/${encodeURIComponent(jobId)}/resume`, {
       method: 'POST'
+    })
+  },
+  adminConnectionRuns() {
+    return request('/api/admin/linkedin/connection-runs')
+  },
+  adminConnectionSettings() {
+    return request('/api/admin/linkedin/connection-settings')
+  },
+  adminConnectionRun(runId) {
+    return request(`/api/admin/linkedin/connection-runs/${encodeURIComponent(runId)}`)
+  },
+  adminConnectionStacks() {
+    return request('/api/admin/linkedin/connection-stacks')
+  },
+  adminConnectionReadiness(platformAccountId) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-readiness`)
+  },
+  adminConnectionHistory(platformAccountId) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-history`)
+  },
+  saveAdminConnectionStack(platformAccountId, stackId) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-stack`, {
+      method: 'PUT', body: JSON.stringify({ stackId })
+    })
+  },
+  startAdminConnectionRun(platformAccountId, safeRecruiterOnly = false) {
+    return request(`/api/admin/linkedin/accounts/${encodeURIComponent(platformAccountId)}/connection-runs`, {
+      method: 'POST', body: JSON.stringify({ safeRecruiterOnly })
     })
   },
   analyzeAdminProfile(profile) {
@@ -151,6 +190,9 @@ export const api = {
     return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/resume`, {
       method: 'POST'
     })
+  },
+  stopAdminProfileGeneration(jobId) {
+    return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/stop-generation`, { method: 'POST' })
   },
   rollbackAdminProfileJob(jobId) {
     return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}/rollback`, {

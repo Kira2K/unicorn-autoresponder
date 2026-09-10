@@ -6,23 +6,35 @@ const { assertAccountOperational, verifiedIdentity } = require('../account-conne
 type JsonObject = import('./input-types.ts').JsonObject
 type ProfileAccount = import('./plan-types.ts').ProfileAccount
 type ProfileClient = import('./plan-types.ts').ProfileClient
+type AccountRow = import('../account-connection/types.ts').LinkedInAuthAccountRow
+export type ProfileAccountReader = typeof readProfileAccount
+
+async function readProfileAccount(repository: any, id: number, fresh = false): Promise<AccountRow> {
+  const row = repository.getAccount ? await repository.getAccount(id, { fresh }) :
+    (await repository.listAccounts()).find((item: AccountRow) => Number(item.platformAccountId) === id)
+  if (!row || Number(row.platformAccountId) !== id) {
+    throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
+  }
+  return row
+}
 
 function codedError(code: string, message: string) {
   return Object.assign(new Error(message), { code })
 }
 
 async function resolveProfileAccount(
-  repository: any, client: ProfileClient, platformAccountId: number, sections: string[]
+  repository: any, client: ProfileClient, platformAccountId: number, sections: string[], supplied?: AccountRow
 ): Promise<{ account: ProfileAccount; profile: JsonObject }> {
-  const row = (await repository.listAccounts()).find((item: any) =>
-    Number(item.platformAccountId) === platformAccountId)
-  if (!row) throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
+  const row = supplied ?? await readProfileAccount(repository, platformAccountId, true)
+  if (Number(row.platformAccountId) !== platformAccountId) {
+    throw codedError('linkedin_account_not_found', 'LinkedIn account does not match the job.')
+  }
   if (!row.unipileAccountId || row.unipileAccountStatus !== 'running' || !row.lastVerifiedAt) {
     throw codedError('profile_filler_auth_required', 'Verify or reconnect LinkedIn first.')
   }
   const remoteAccount = await client.getAccount(row.unipileAccountId)
   assertAccountOperational(remoteAccount)
-  const profile = await client.getOwnProfile(row.unipileAccountId, sections)
+  const profile = await client.getOwnProfile(row.unipileAccountId, sections, { fresh: true })
   const identity = verifiedIdentity(remoteAccount, profile, {
     expectedLinkedInUrl: row.linkedinUrl,
     verifiedProviderId: row.verifiedProviderId
@@ -44,4 +56,4 @@ function requestedSections(profile: import('./input-types.ts').ProfileInput) {
   return result
 }
 
-module.exports = { requestedSections, resolveProfileAccount }
+module.exports = { requestedSections, resolveProfileAccount, readProfileAccount }

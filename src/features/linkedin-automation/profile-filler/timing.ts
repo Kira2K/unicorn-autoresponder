@@ -8,12 +8,14 @@ export type TimingPolicy = {
   readBack: DelayRange
   finalReadBack: DelayRange
   skillsBatch: DelayRange
+  verificationScheduleSeconds?: number[]
 }
 
 export const DEFAULT_TIMING: TimingPolicy = {
   firstWrite: { min: 10, max: 30 }, ordinaryWrite: { min: 25, max: 70 },
-  readBack: { min: 15, max: 30 }, finalReadBack: { min: 55, max: 65 },
-  skillsBatch: { min: 60, max: 150 }
+  readBack: { min: 120, max: 180 }, finalReadBack: { min: 300, max: 300 },
+  skillsBatch: { min: 60, max: 120 },
+  verificationScheduleSeconds: [300, 900, 1800, 3600]
 }
 
 export function delayMilliseconds(

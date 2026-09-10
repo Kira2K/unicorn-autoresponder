@@ -1,0 +1,4 @@
+interface:
+  display_name: "LinkedIn Dev"
+  short_description: "Develop Unicorn LinkedIn automation safely"
+  default_prompt: "Use $linkedin-dev to inspect or update LinkedIn automation in Unicorn."
