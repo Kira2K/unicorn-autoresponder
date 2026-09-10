@@ -81,6 +81,7 @@ export function createMockProfileFillerService(): ProfileFillerService {
       return structuredClone(job)
     },
     async get(jobId) { const job = jobs.get(jobId); return job && structuredClone(job) },
-    async list() { return [...jobs.values()].reverse().map(value => structuredClone(value)) }
+    async list(id?: number) { return [...jobs.values()].reverse()
+      .filter(value => id === undefined || value.platformAccountId === id).map(value => structuredClone(value)) }
   }
 }

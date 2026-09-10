@@ -4,9 +4,11 @@ import { desktopProfileJob } from './profile-desktop-fixture.ts'
 
 export async function checkProfileRunning(page: Page, job: ReturnType<typeof desktopProfileJob>, readCount: () => number) {
   await page.getByTestId('profile-filler-apply').click()
+  assert.equal(await page.getByTestId('profile-filler-minimize').isDisabled(), true,
+    'confirmation must be resolved before minimizing')
   await page.getByTestId('profile-confirm-submit').click()
   await page.getByTestId('profile-progress').waitFor()
-  await page.getByTestId('profile-filler-close').click()
+  await page.getByTestId('profile-filler-minimize').click()
   await page.locator('.profile-filler-dialog').waitFor({ state: 'hidden' })
   await page.getByTestId('profile-filler-203').getByText('Открыть прогресс').waitFor()
   await page.getByTestId('profile-filler-203').click()

@@ -14,6 +14,12 @@ async function settled(service: any, jobId: string, expected: string) {
 }
 
 async function run() {
+  await require('./noco-reads.test.ts').testNocoReads()
+  await require('./noco-http-budget.test.ts').testNocoHttpBudget()
+  await require('./apply-boundary.test.ts').testApplyBoundary()
+  await require('./progress-budget.test.ts').testProgressBudget()
+  await require('./progress-budget.test.ts').testStoredRetryTimer()
+  await require('./parallel-accounts.test.ts').testParallelAccounts()
   await require('./read-only-history.test.ts').testReadOnlyHistory()
   await require('./entry-claims.test.ts').testEntryClaims()
   await require('./repair-entry-contract.test.ts').testRepairEntryContract()
@@ -23,6 +29,7 @@ async function run() {
   await require('./stability-skills.test.ts').testSkillCompletion()
   require('./stability-dates.test.ts').testDatePrecision()
   await require('./stability-recovery.test.ts').testPersistedRecovery()
+  await require('./stability-recovery.test.ts').testRetryAfterPersistFailure()
   assert.equal(profileErrorCode({ response: { status: 429 } }), 'noco_rate_limited')
   const records = new Map<string, any>()
   const releases: string[] = []

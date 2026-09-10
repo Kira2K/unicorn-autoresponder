@@ -1,11 +1,10 @@
 import { ref } from 'vue'
-import { api } from './api'
-import { readProfileFile } from './profile-file'
-import { applyProfileFixes } from './profile-fixes'
+import { readProfileFile } from './profile-file.js'
+import { applyProfileFixes } from './profile-fixes.js'
 
 const clone = value => value ? JSON.parse(JSON.stringify(value)) : null
 
-export function useProfileDraft() {
+export function useProfileDraft(api) {
   const document = ref(null)
   const dirty = ref(false)
   const issues = ref([])

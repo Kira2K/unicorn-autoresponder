@@ -22,9 +22,17 @@ export function runMutation(options: {
       logger.event('stage_change', 'succeeded', { operation: phase })
       executorOptions.onStage?.(phase)
     },
-    onProgress: async result => {
-      await persistMutation(context, result, readOnly)
-      await executorOptions.onProgress?.(result)
+    onProgress: async (result, persistence = 'checkpoint') => {
+      if (persistence === 'memory') update({ result, updatedAt: new Date().toISOString() })
+      else {
+        try { await persistMutation(context, result, readOnly) }
+        catch (error) {
+          // Recovery may only read, and must still respect the response's cooldown.
+          if (result.steps.some(step => step.status === 'verifying' && step.writeIntent)) update({ result })
+          throw error
+        }
+      }
+      await executorOptions.onProgress?.(result, persistence)
     }
   })
   const execute = async () => {

@@ -7,22 +7,26 @@ const turn = () => new Promise(resolve => setImmediate(resolve))
 
 async function run() {
   const records = new Map<string, any>(); const events: any[] = []; const releases: string[] = []
-  let contextReads = 0; let cvDownloads = 0; const extractedMimes: string[] = []
+  let contextReads = 0; let cvDownloads = 0; let accountReads = 0; let saves = 0
+  const extractedMimes: string[] = []
   const account = { platformAccountId: 7, clientId: 8, clientName: 'Student',
     linkedinUrl: 'https://www.linkedin.com/in/student/', dolphinProfileId: 9,
     unipileAccountId: 'acc-1', unipileAccountStatus: 'running',
     verifiedProviderId: 'provider-1', lastVerifiedAt: '2026-08-21T00:00:00.000Z' }
   const store = {
-    async create(job: any) { records.set(job.jobId, structuredClone(job)) },
+    async create(job: any) { saves += 1; records.set(job.jobId, structuredClone(job)) },
     async update(id: string, patch: any) {
+      saves += 1
       const record = records.get(id)
       assert(record, `missing record ${id}`); Object.assign(record, structuredClone(patch))
     },
     async get(id: string) { return records.get(id) }, async list() { return [...records.values()] }
   }
   const service = createProfileFillerService({
-    repository: { async listAccounts() { return [account] } },
-    generationRepository: { async getGenerationContext() { contextReads += 1
+    repository: { async getAccount() { accountReads += 1; return account },
+      async listAccounts() { throw new Error('Do not read all accounts') } },
+    generationRepository: { async getGenerationContext(id: number, supplied: unknown) {
+      assert.equal(id, 7); assert.equal(supplied, account); contextReads += 1
       return { account, cvUrl: 'secret-drive-url', cvRevision: 'cv-1' }
     } },
     client: { async getAccount() { return { provider: 'linkedin', status: 'running',
@@ -50,6 +54,8 @@ async function run() {
     await turn()
   }
   assert.equal(result.status, 'preview_ready', JSON.stringify({ result, events }))
+  assert.equal(saves, 3, 'create + generated checkpoint + Preview; no stage-only PATCH')
+  assert.equal(accountReads, 1, 'the initial account is reused for generation and Preview')
   assert.equal(result.preview.generation.model, 'mock-model')
   assert.equal(result.preview.generation.proxyCountry, 'Poland')
   assert.equal(JSON.stringify([...records.values()]).includes('secret-drive-url'), false)
@@ -65,6 +71,8 @@ async function run() {
   assert.equal(result.status, 'preview_ready')
   assert.match(result.preview.generation.cvRevision, /^upload:[a-f0-9]{64}$/)
   assert.equal(contextReads, 1); assert.equal(cvDownloads, 1)
+  assert.equal(accountReads, 2, 'a new manual run fetches its own account once')
+  assert.equal(saves, 6)
   assert.deepEqual(extractedMimes, ['application/pdf', 'application/pdf'])
   assert.equal(JSON.stringify([...records.values()]).includes('private-cv'), false)
   assert(events.some(event => event[0] === 'cv_upload_validate'))

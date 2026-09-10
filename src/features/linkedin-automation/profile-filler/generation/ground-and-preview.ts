@@ -11,8 +11,8 @@ async function groundAndPreview(options: any, checkpoint: GenerationCheckpoint) 
   const { job, store, update, release, logger } = options
   checkpoint.catalogParameters ??= {}
   try {
-    await logAction(logger, 'generation_stage_persist', () =>
-      persistStage({ job, store, update }, 'validating', 'resolving_job_titles'),
+    await logAction(logger, 'generation_stage', () =>
+      persistStage({ job, store, update }, 'validating', 'resolving_job_titles', 'memory'),
       { operation: 'resolving_job_titles' })
     const grounded = await logAction(logger, 'job_title_catalog_prepare', () =>
       groundJobTitles({ client: options.client, accountId: job.accountId,
@@ -27,12 +27,12 @@ async function groundAndPreview(options: any, checkpoint: GenerationCheckpoint) 
             checkpoint, updatedAt: now })
         } } }))
     checkpoint.retry = undefined
-    await logAction(logger, 'generation_stage_persist', () =>
-      persistStage({ job, store, update }, 'previewing', 'building_preview'),
+    await logAction(logger, 'generation_stage', () =>
+      persistStage({ job, store, update }, 'previewing', 'building_preview', 'memory'),
       { operation: 'building_preview' })
     runPreview({ client: options.client, repository: options.repository, store, job,
       input: grounded.input, issues: grounded.issues, update, release, logger,
-      generation: checkpoint.generation, catalogRetry: options.catalogRetry,
+      generation: checkpoint.generation, account: options.account, catalogRetry: options.catalogRetry,
       catalogParameters: checkpoint.catalogParameters })
     return true
   } catch (error: any) {

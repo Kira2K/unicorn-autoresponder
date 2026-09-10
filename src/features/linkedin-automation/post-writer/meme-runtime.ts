@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createMemeAssets } from './meme-assets.ts'
 import { createMemeImageRenderer } from './meme-openai-image.ts'
+import { memeConfig } from './meme-config.ts'
 import { memeSchema } from './meme-schema.ts'
 import type { JsonFiles } from './json-files.ts'
 import type { MemeServices } from './meme-types.ts'
@@ -12,8 +13,7 @@ export function createMemeServices(files: JsonFiles,
   const document = readFileSync(resolve('src/features/linkedin-automation/post-writer/MEME_POLICY.md'), 'utf8')
   const policy = document.split('<!-- meme-prompt:start -->')[1]?.split('<!-- meme-prompt:end -->')[0]?.trim()
   if (!policy) throw new Error('meme_policy_missing')
-  const config = { enabled: env.LINKEDIN_POST_MEMES_ENABLED === 'true',
-    apiKey: env.OPENAI_LINKEDIN_MEME_API_KEY ?? '', model: env.OPENAI_LINKEDIN_MEME_IMAGE_MODEL ?? '' }
+  const config = memeConfig(env)
   const enabled = config.enabled && Boolean(config.apiKey) && config.model === 'gpt-image-2'
   return { enabled, policy, assets: createMemeAssets(files), render: createMemeImageRenderer(config, log),
     async plan(input) {

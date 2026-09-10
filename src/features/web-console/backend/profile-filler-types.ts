@@ -7,7 +7,7 @@ export type ProfileFillerService = {
   rollback(jobId: string): Promise<Record<string, unknown>>
   resume(jobId: string): Promise<Record<string, unknown>>
   get(jobId: string): Promise<Record<string, unknown> | undefined>
-  list(): Promise<Record<string, unknown>[]>
+  list(platformAccountId?: number): Promise<Record<string, unknown>[]>
   searchParameters(platformAccountId: number, type: string, keywords: string):
     Promise<Record<string, unknown>>
 }

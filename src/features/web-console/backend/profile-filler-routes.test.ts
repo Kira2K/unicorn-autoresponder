@@ -30,6 +30,7 @@ async function run() {
   assert.equal(failure({ code: 'profile_state_persist_failed' }).status, 503)
   const calls: any[] = []
   let recoveryStarts = 0
+  const historyAccounts: Array<number | undefined> = []
   const job = { jobId: 'job-1', status: 'preview_ready', planHash: 'safe-hash' }
   const app = createWebConsoleApp({
     useMockData: true,
@@ -50,7 +51,7 @@ async function run() {
       async resume(id: string) { calls.push(['resume', id]); return job },
       async rollback(id: string) { calls.push(['rollback', id]); return job },
       async get(id: string) { return id === job.jobId ? job : undefined },
-      async list() { return [job] }
+      async list(id?: number) { historyAccounts.push(id); return [job] }
     }
   })
   assert.equal(recoveryStarts, 0, 'Constructing the app must not start live recovery')
@@ -98,6 +99,14 @@ async function run() {
     assert.equal(unsupported.status, 415)
     assert.equal((await unsupported.json()).error, 'profile_cv_format_unsupported')
     assert.equal((await fetch(`${base}/api/admin/linkedin/profile-jobs`, { headers })).status, 200)
+    const historyUrl = `${base}/api/admin/linkedin/profile-jobs?platformAccountId=7`
+    assert.equal((await fetch(historyUrl)).status, 401)
+    assert.equal((await fetch(historyUrl, { headers: { Cookie: provider } })).status, 403)
+    assert.equal((await fetch(historyUrl, { headers })).status, 200)
+    for (const id of ['0', '-1', 'abc', '1.5', '7&platformAccountId=8']) {
+      assert.equal((await fetch(`${base}/api/admin/linkedin/profile-jobs?platformAccountId=${id}`, { headers })).status, 400)
+    }
+    assert.deepEqual(historyAccounts, [undefined, 7])
     assert.equal((await fetch(`${base}/api/admin/linkedin/profile-jobs/job-1`, { headers })).status, 200)
     const parameters = await fetch(parametersUrl, { headers })
     assert.equal(parameters.status, 200)

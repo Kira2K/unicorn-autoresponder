@@ -83,5 +83,6 @@ const nocoWait = computed(() => Math.max(1, Math.ceil(Number(auth.nocoQueue.valu
         :busy="busy" @action="auth.historyAction" />
     </template>
   </Card>
-  <ProfileFillerDialog :filler="filler" />
+  <ProfileFillerDialog v-if="filler.selected.value" :key="filler.selected.value.account.value?.platformAccountId"
+    :filler="filler.selected.value" />
 </template>

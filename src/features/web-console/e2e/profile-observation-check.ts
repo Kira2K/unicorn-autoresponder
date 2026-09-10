@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
+import { profileJobsRoute } from './profile-desktop-fixture.ts'
 
 export async function checkProfileObservation(page: Page) {
   let status = 'verifying'
@@ -14,7 +15,7 @@ export async function checkProfileObservation(page: Page) {
       section: 'headline', status: status === 'verifying' ? 'verifying' : 'verified',
       message: 'Read-only fixture', attempt: 1, maxAttempts: 4,
       nextActionAt: new Date(Date.now() + 60000).toISOString() }] } })
-  await page.route(prefix, route => route.fulfill({ json: { jobs: [job()] } }))
+  await page.route(profileJobsRoute, route => route.fulfill({ json: { jobs: [job()] } }))
   await page.route(`${prefix}/observation-fixture`, route => {
     detailReads += 1
     return detailReads === 1 ? route.fulfill({ status: 503, json: { error: 'temporary read failure' } })
@@ -40,5 +41,5 @@ export async function checkProfileObservation(page: Page) {
   await page.getByTestId('profile-partially-completed').waitFor()
   assert.equal(await page.getByTestId('profile-result-title').count(), 0)
   await page.unroute(`${prefix}/observation-fixture`)
-  await page.unroute(prefix)
+  await page.unroute(profileJobsRoute)
 }

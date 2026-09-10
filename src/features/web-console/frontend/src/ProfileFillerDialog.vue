@@ -21,9 +21,15 @@ const stages = ['CV', 'Проверка изменений', 'Заполнени
   <Dialog :visible="filler.visible.value" modal header="Заполнение LinkedIn"
     class="profile-filler-dialog" :close-on-escape="!filler.confirmation.value"
     @update:visible="v => !v && !filler.confirmation.value && filler.close()">
-    <template #header><div class="profile-dialog-heading"><strong>Заполнение LinkedIn</strong>
-      <span>{{ filler.account.value?.clientName }}<a v-if="link" :href="link" target="_blank" rel="noreferrer">
-        Открыть LinkedIn <i class="pi pi-external-link" /></a></span>
+    <template #header><div class="profile-dialog-header">
+      <div class="profile-dialog-heading"><strong>Заполнение LinkedIn</strong>
+        <span>{{ filler.account.value?.clientName }}<a v-if="link" :href="link" target="_blank" rel="noreferrer">
+          Открыть LinkedIn <i class="pi pi-external-link" /></a></span>
+      </div>
+      <Button label="Свернуть" icon="pi pi-minus" size="small" severity="secondary" outlined
+        :disabled="Boolean(filler.confirmation.value)" data-testid="profile-filler-minimize"
+        title="Скрыть окно. Данные сохранятся, начатая работа продолжится."
+        @click="filler.close" />
     </div></template>
     <div class="profile-workspace">
       <aside class="profile-sidebar"><ol aria-label="Этапы заполнения">

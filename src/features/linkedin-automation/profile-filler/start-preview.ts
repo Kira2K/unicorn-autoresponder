@@ -6,6 +6,9 @@ const { runPreview } = require('./preview-run.ts') as { runPreview(options: any)
 const { validateProfileFile } = require('./validator.ts') as typeof import('./validator.ts')
 const { logValidationFields } = require('./validation-logging.ts') as
   typeof import('./validation-logging.ts')
+const { readProfileAccount } = require('./profile-account.ts') as {
+  readProfileAccount: import('./profile-account.ts').ProfileAccountReader
+}
 type ProfileJob = import('./job-types.ts').ProfileJob
 type ProfileLogger = import('./profile-logger.ts').ProfileLogger
 
@@ -26,9 +29,8 @@ async function startProfilePreview(options: any) {
     if (!validation.value || validation.issues.some(item => item.level === 'fatal')) {
       throw codedError('profile_validation_failed', 'Profile JSON is invalid.', validation.issues)
     }
-    const rows = await logAction(logger, 'noco_account_list', () => getRepository().listAccounts())
-    const row = rows.find((item: any) => Number(item.platformAccountId) === platformAccountId)
-    if (!row) throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
+    const row = await logAction(logger, 'noco_account_read', () =>
+      readProfileAccount(getRepository(), platformAccountId))
     const now = new Date().toISOString()
     const job: ProfileJob = {
       jobId, platformAccountId, accountId: row.unipileAccountId, clientName: row.clientName,
@@ -40,7 +42,7 @@ async function startProfilePreview(options: any) {
     catch (error) { release(); throw error }
     jobs.set(jobId, job)
     runPreview({ client: getClient(), repository: getRepository(), store: getStore(), job,
-      input: validation.value, issues: validation.issues,
+      input: validation.value, issues: validation.issues, account: row,
       update: (patch: Partial<ProfileJob>) => update(job, patch), release, logger })
     logger.event('preview_request', 'succeeded')
     return publicProfileJob(job)

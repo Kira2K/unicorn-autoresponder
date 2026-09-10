@@ -15,6 +15,7 @@ export function useProfileSession(api, draft) {
   const loading = ref(false)
   const error = ref('')
   const active = computed(() => isProfileActive(trackedJob.value))
+  let disposed = false
   let version = 0
   let historyRequest = Promise.resolve()
   const observer = createProfileJobObserver({
@@ -29,14 +30,13 @@ export function useProfileSession(api, draft) {
       history.value = [value, ...history.value.filter(item => item.jobId !== value.jobId)]
       error.value = ''
     },
-    onTerminal: () => loadHistory(),
     onError: caught => { error.value = profileRequestError(caught,
       'Не удалось обновить статус. Повторяем чтение; задание не остановлено.') }
   })
   async function loadHistory() {
     const token = version
     try {
-      const response = await api.adminProfileJobs()
+      const response = await api.adminProfileJobs(account.value?.platformAccountId)
       if (token !== version) return
       history.value = response.jobs.filter(item => item.platformAccountId === account.value?.platformAccountId)
     } catch (caught) {
@@ -44,6 +44,7 @@ export function useProfileSession(api, draft) {
     }
   }
   function observe(value) {
+    if (disposed) return
     trackedJob.value = value
     job.value = value
     draft.syncPreview(value.preview)
@@ -57,6 +58,7 @@ export function useProfileSession(api, draft) {
     observe(value)
   }
   async function open(selected) {
+    if (disposed) return
     if (account.value?.platformAccountId === selected.platformAccountId) {
       visible.value = true
       if (trackedJob.value && job.value?.jobId !== trackedJob.value.jobId) {
@@ -95,5 +97,5 @@ export function useProfileSession(api, draft) {
   }
   return { visible, account, job, trackedJob, history, loading, error, active, open, observe,
     showHistory, reset, ready: () => historyRequest, close: () => { visible.value = false },
-    dispose: () => { version += 1; observer.stop() } }
+    dispose: () => { disposed = true; version += 1; observer.stop() } }
 }

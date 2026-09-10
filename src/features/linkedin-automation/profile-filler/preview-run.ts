@@ -4,7 +4,8 @@ const { logAction } = require('./log-action.ts') as typeof import('./log-action.
 const { requestedSections, resolveProfileAccount } = require('./profile-account.ts') as {
   requestedSections(profile: import('./input-types.ts').ProfileInput): string[]
   resolveProfileAccount(repository: any, client: ProfileClient, platformAccountId: number,
-    sections: string[]): Promise<{ account: import('./plan-types.ts').ProfileAccount;
+    sections: string[], supplied?: import('../account-connection/types.ts').LinkedInAuthAccountRow):
+    Promise<{ account: import('./plan-types.ts').ProfileAccount;
       profile: import('./input-types.ts').JsonObject }>
 }
 const { profileErrorCode, profileErrorDetails } = require('./errors.ts') as typeof import('./errors.ts')
@@ -29,6 +30,7 @@ function runPreview(options: {
   release(): void
   logger: ProfileLogger
   generation?: import('./generation/types.ts').GenerationMetadata
+  account?: import('../account-connection/types.ts').LinkedInAuthAccountRow
   catalogParameters?: import('./parameter-search.ts').ParameterSearchCache
   catalogRetry?: {
     sleep?: (milliseconds: number) => Promise<void>
@@ -51,7 +53,7 @@ function runPreview(options: {
   logger.event('preview', 'started', { issueCount: issues.length,
     fatalCount: issues.filter(item => item.level === 'fatal').length })
   logger.event('account_profile_read', 'started')
-  void resolveProfileAccount(repository, client, job.platformAccountId, requestedSections(input))
+  void resolveProfileAccount(repository, client, job.platformAccountId, requestedSections(input), options.account)
     .then(async ({ account, profile }) => {
       logger.event('account_profile_read', 'succeeded')
       update({ accountId: account.accountId, phase: 'building_preview' })

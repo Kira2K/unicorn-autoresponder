@@ -10,6 +10,9 @@ const { createNocoGenerationRepository } = require('./generation/noco-generation
 }
 const { normalizeUploadedCv } = require('./generation/uploaded-cv.ts') as
   typeof import('./generation/uploaded-cv.ts')
+const { readProfileAccount } = require('./profile-account.ts') as {
+  readProfileAccount: import('./profile-account.ts').ProfileAccountReader
+}
 type ProfileJob = import('./job-types.ts').ProfileJob
 const generationRepositories = new WeakMap<object, any>()
 
@@ -30,9 +33,8 @@ async function startProfileGeneration(options: any) {
   const logger = loggerFor(jobId)
   logger.event('generation_request', 'started')
   try {
-    const rows = await logAction(logger, 'noco_account_list', () => getRepository().listAccounts())
-    const row = rows.find((item: any) => Number(item.platformAccountId) === platformAccountId)
-    if (!row) throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
+    const row = await logAction(logger, 'noco_account_read', () =>
+      readProfileAccount(getRepository(), platformAccountId))
     if (!row.unipileAccountId || row.unipileAccountStatus !== 'running' || !row.lastVerifiedAt) {
       throw codedError('profile_filler_auth_required', 'Verify or reconnect LinkedIn first.')
     }
