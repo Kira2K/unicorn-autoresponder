@@ -121,8 +121,9 @@ export const api = {
   adminProfileJob(jobId) {
     return request(`/api/admin/linkedin/profile-jobs/${encodeURIComponent(jobId)}`)
   },
-  adminProfileJobs() {
-    return request('/api/admin/linkedin/profile-jobs')
+  adminProfileJobs(platformAccountId) {
+    const query = platformAccountId === undefined ? '' : `?platformAccountId=${encodeURIComponent(platformAccountId)}`
+    return request(`/api/admin/linkedin/profile-jobs${query}`)
   },
   adminCommentMonitors() {
     return request('/api/admin/linkedin/comment-monitors')

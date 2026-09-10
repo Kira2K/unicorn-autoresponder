@@ -9,21 +9,23 @@ const { linkedInNocoError } = require('../../account-connection/noco-error.ts') 
 }
 const { buildGenerationContext } = require('./generation-context.ts') as
   typeof import('./generation-context.ts')
+const { readProfileAccount } = require('../profile-account.ts') as {
+  readProfileAccount: import('../profile-account.ts').ProfileAccountReader
+}
+type AccountRow = import('../../account-connection/types.ts').LinkedInAuthAccountRow
 
 function createNocoGenerationRepository(authRepository: any,
   client = createNocoClient({ pageDelayMs: 300, retryDelaysMs: [0, 30_000, 30_000] })) {
-  let cache: { expiresAt: number; value: any[] } | undefined
-  async function cvRows() {
-    if (cache && cache.expiresAt > Date.now()) return cache.value
+  return { async getGenerationContext(platformAccountId: number, supplied?: AccountRow) {
+    const account = supplied ?? await readProfileAccount(authRepository, platformAccountId)
+    if (account.platformAccountId !== platformAccountId || !Number.isSafeInteger(account.clientId) || account.clientId <= 0) {
+      throw new Error('Invalid account for CV selection')
+    }
     try {
-      const value = await client.fetchRecords(TABLES.cvProcessing.id, 1000)
-      cache = { value, expiresAt: Date.now() + 120_000 }
-      return value
+      const cvRows = await client.fetchRecords(TABLES.cvProcessing.id, 100,
+        { where: `(clients_id,eq,${account.clientId})` }, { fresh: true })
+      return buildGenerationContext({ accounts: [account], cvRows, platformAccountId })
     } catch (error) { throw linkedInNocoError(error) }
-  }
-  return { async getGenerationContext(platformAccountId: number) {
-    return buildGenerationContext({ accounts: await authRepository.listAccounts(),
-      cvRows: await cvRows(), platformAccountId })
   } }
 }
 

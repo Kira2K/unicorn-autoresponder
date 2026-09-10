@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict'
 import { ref } from 'vue'
 import { useProfileSession } from './use-profile-session.js'
+import './profile-parallel.test.js'
 const settle = () => new Promise(resolve => setImmediate(resolve))
 const account = { platformAccountId: 203, clientName: 'Fixture' }
 const running = { jobId: 'active', platformAccountId: 203, status: 'verifying' }
 const old = { jobId: 'old', platformAccountId: 203, status: 'succeeded' }
 let reads = 0
+let historyReads = 0
 let resolveRead
-const api = { adminProfileJobs: async () => ({ jobs: [running, old] }),
+const api = { adminProfileJobs: async id => {
+  assert.equal(id, account.platformAccountId)
+  historyReads += 1
+  return { jobs: [running, old] }
+},
   adminProfileJob: () => { reads += 1; return new Promise(resolve => { resolveRead = resolve }) } }
 const draft = { dirty: ref(false), reset() {}, syncPreview() {} }
 const session = useProfileSession(api, draft)
@@ -24,6 +30,7 @@ try {
   resolveRead({ ...running, status: 'succeeded' })
   await settle()
   assert.equal(session.trackedJob.value.status, 'succeeded')
+  assert.equal(historyReads, 1, 'the terminal snapshot already contains the result; do not reload history')
   assert.equal(session.job.value.jobId, 'old', 'background update does not replace history selection')
   assert.equal(session.active.value, false)
   session.close()
@@ -33,4 +40,8 @@ try {
   session.reset()
   assert.equal(session.job.value, null)
 } finally { session.dispose() }
+const readsBeforeLateResponse = reads
+session.observe(running)
+await session.open(account)
+assert.equal(reads, readsBeforeLateResponse, 'late response after leaving the tab cannot restart an observer')
 console.log('profile session observation tests passed')

@@ -23,26 +23,26 @@ async function runGeneration(options: any) {
       createGenerationRuntime(options.runtime, logger))
     const context = options.cv ? { account: options.account } :
       await logAction(logger, 'generation_context_read', () =>
-        generationRepository.getGenerationContext(job.platformAccountId))
+        generationRepository.getGenerationContext(job.platformAccountId, options.account))
     const profile = await logAction(logger, 'dolphin_proxy_read', () =>
       runtime.loadProfile(context.account.dolphinProfileId))
     const country = await logAction(logger, 'proxy_country_resolve', () =>
       runtime.resolveCountry(profile?.proxy))
     const cv = options.cv ?? await logAction(logger, 'cv_download', () => runtime.loadCv(context.cvUrl))
     if (options.cv) logger.event('cv_upload_select', 'succeeded')
-    await logAction(logger, 'generation_stage_persist', () =>
-      persistStage({ job, store, update }, 'generating_cv', 'extracting_cv_facts'),
+    await logAction(logger, 'generation_stage', () =>
+      persistStage({ job, store, update }, 'generating_cv', 'extracting_cv_facts', 'memory'),
       { operation: 'extracting_cv_facts' })
     const facts = assignFactIds(await logAction(logger, 'cv_fact_extraction', () =>
       runtime.generator.extractFacts(cv)))
     logger.event('cv_metric_index', 'succeeded', { stepCount: metricFactCount(facts) })
-    await logAction(logger, 'generation_stage_persist', () =>
-      persistStage({ job, store, update }, 'generating_profile', 'generating_profile'),
+    await logAction(logger, 'generation_stage', () =>
+      persistStage({ job, store, update }, 'generating_profile', 'generating_profile', 'memory'),
       { operation: 'generating_profile' })
     const generated = await logAction(logger, 'profile_generation', () =>
       runtime.generator.generateProfile(facts, country))
-    await logAction(logger, 'generation_stage_persist', () =>
-      persistStage({ job, store, update }, 'validating', 'validating_profile'),
+    await logAction(logger, 'generation_stage', () =>
+      persistStage({ job, store, update }, 'validating', 'validating_profile', 'memory'),
       { operation: 'validating_profile' })
     const validated = await validateWithRepair({ generated, facts, country,
       generator: runtime.generator, logger })
@@ -58,10 +58,11 @@ async function runGeneration(options: any) {
     const checkpoint = { version: 1 as const, stage: 'resolving_job_titles' as const,
       profile: validated.value, issues: validated.issues, generation, catalogParameters: {} }
     await logAction(logger, 'generation_checkpoint_persist', async () => {
-      update({ checkpoint })
-      await store.update(job.jobId, { checkpoint, updatedAt: new Date().toISOString() })
+      const patch = { checkpoint, status: 'validating', phase: 'resolving_job_titles', updatedAt: new Date().toISOString() }
+      await store.update(job.jobId, patch)
+      update(patch)
     })
-    handedToPreview = await groundAndPreview({ ...options, generator: runtime.generator,
+    handedToPreview = await groundAndPreview({ ...options, account: context.account, generator: runtime.generator,
       catalogRetry: options.runtime?.catalogRetry }, checkpoint)
   } catch (error) {
     const now = new Date().toISOString()

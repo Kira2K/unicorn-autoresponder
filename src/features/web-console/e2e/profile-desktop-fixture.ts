@@ -30,4 +30,4 @@ export function desktopProfileJob() {
       stepId: string; section: string; status: string; nextActionAt?: string; message: string }> }
   }
 }
-export const profileJobsRoute = '**/api/admin/linkedin/profile-jobs'
+export const profileJobsRoute = /\/api\/admin\/linkedin\/profile-jobs(?:\?[^/]*)?$/

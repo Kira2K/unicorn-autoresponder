@@ -79,11 +79,13 @@ function createProfileFillerService(options: any = {}) {
     if (!job) return undefined
     return publicProfileJob(profileReadView(job, Boolean(active)))
   }
-  async function listJobs() {
-    return await Promise.all((await getStore().list()).map(async (stored: ProfileJob) => {
-      const active = jobs.get(stored.jobId)
-      return publicProfileJob(profileReadView(active ?? stored, Boolean(active)))
-    }))
+  async function listJobs(platformAccountId?: number) {
+    return (await getStore().list(platformAccountId))
+      .filter((stored: ProfileJob) => platformAccountId === undefined || stored.platformAccountId === platformAccountId)
+      .map((stored: ProfileJob) => {
+        const active = jobs.get(stored.jobId)
+        return publicProfileJob(profileReadView(active ?? stored, Boolean(active)))
+      })
   }
   async function startPreview(platformAccountId: number, profileFile: unknown) {
     return startProfilePreview({ platformAccountId, profileFile, loggerFor, getRepository, getStore,
@@ -97,7 +99,9 @@ function createProfileFillerService(options: any = {}) {
         ['generating_cv', 'generating_profile', 'validating', 'previewing', 'retrying',
           'waiting_retry', 'running', 'verifying'].includes(job.status))
       if (local) return publicProfileJob(local)
-      const saved = (await getStore().list()).find((job: ProfileJob) =>
+      const store = getStore()
+      const candidates = await (store.listActive ? store.listActive(platformAccountId) : store.list(platformAccountId))
+      const saved = candidates.find((job: ProfileJob) =>
         job.platformAccountId === platformAccountId && (['waiting_retry', 'running', 'verifying']
           .includes(job.status) ||
           (job.checkpoint && ['validating', 'previewing', 'retrying'].includes(job.status))))
@@ -155,9 +159,7 @@ function createProfileFillerService(options: any = {}) {
         assertApprovedState(plan, fresh.profile)
       } catch (error) { release(); throw error }
       const now = new Date().toISOString()
-      try { await logAction(logger, 'job_start_persist', () => getStore().update(jobId,
-        { status: 'running', phase: 'starting', updatedAt: now })) }
-      catch (error) { release(); throw error }
+      // The first durable write intent also saves running; no LinkedIn PATCH may precede it.
       update(job, { status: 'running', phase: 'starting', updatedAt: now })
       jobs.set(jobId, job)
       verificationStarts.add(jobId)

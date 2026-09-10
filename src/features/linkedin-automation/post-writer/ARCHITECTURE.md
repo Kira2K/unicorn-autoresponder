@@ -174,8 +174,10 @@ Node 24.20.0: linkedin:posts:test, linkedin:posts:e2e, typecheck, web:build и �
 адаптеры модели/изображений/файлов. Сам `writePost` по-прежнему пишет только текст.
 Единственный редакционный промпт находится в [MEME_POLICY.md](./MEME_POLICY.md).
 
-- Включение: `LINKEDIN_POST_MEMES_ENABLED=true`, отдельный ключ и явная модель
+- Включение: `LINKEDIN_POST_MEMES_ENABLED=true` и явная модель
   `OPENAI_LINKEDIN_MEME_IMAGE_MODEL=gpt-image-2`; дополнительно включается настройка автора.
+  Ключ: `OPENAI_LINKEDIN_MEME_API_KEY`, иначе `OPENAI_LINKEDIN_POST_API_KEY`, иначе
+  `OPENAI_LINKEDIN_PROFILE_API_KEY`. Подстановка ключа не включает генерацию автоматически.
 - Один запрос текстовой модели готовит концепцию, затем один Image API вызов создаёт PNG.
   Намерения и счётчики сохраняются до вызовов. Ошибка или неизвестный результат блокируют
   задание: ни скрытых повторов, ни публикации одного текста вместо заказанного мема.

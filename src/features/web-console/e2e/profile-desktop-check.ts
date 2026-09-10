@@ -15,9 +15,10 @@ export async function checkProfileDesktop(page: Page) {
   const onError = (error: Error) => browserErrors.push(error.message)
   page.on('pageerror', onError)
   const generationRoute = '**/api/admin/linkedin/accounts/203/profile-generations'
-  await page.route(profileJobsRoute, route => route.fulfill({ json: { jobs: generated ? [job, old] : [] } }))
-  await page.route(`${profileJobsRoute}/desktop-ui`, route => { reads += 1; return route.fulfill({ json: job }) })
-  await page.route(`${profileJobsRoute}/desktop-old`, route => route.fulfill({ json: old }))
+  await page.route(profileJobsRoute, route => route.fulfill({ json: { jobs: generated ? [job, old] : [old] } }))
+  const jobPrefix = '**/api/admin/linkedin/profile-jobs'
+  await page.route(`${jobPrefix}/desktop-ui`, route => { reads += 1; return route.fulfill({ json: job }) })
+  await page.route(`${jobPrefix}/desktop-old`, route => route.fulfill({ json: old }))
   await page.route(generationRoute, async route => {
     generations += 1
     assert.equal(route.request().headers()['content-type'], 'application/pdf')
@@ -26,7 +27,7 @@ export async function checkProfileDesktop(page: Page) {
     generated = true
     await route.fulfill({ json: job })
   })
-  await page.route(`${profileJobsRoute}/desktop-ui/apply`, async route => {
+  await page.route(`${jobPrefix}/desktop-ui/apply`, async route => {
     applies += 1
     assert.equal(route.request().postDataJSON().planHash, 'desktop-approved-plan')
     job.status = 'verifying'
@@ -44,6 +45,11 @@ export async function checkProfileDesktop(page: Page) {
     await page.getByTestId('profile-filler-cv-file').setInputFiles({ name: 'approved-en-cv.pdf',
       mimeType: 'application/pdf', buffer: Buffer.from('%PDF mock fixture') })
     assert.equal(generations, 0, 'file selection cannot generate')
+    await page.getByTestId('profile-filler-minimize').click()
+    await page.locator('.profile-filler-dialog').waitFor({ state: 'hidden' })
+    await page.getByTestId('profile-filler-203').click()
+    assert.match(await page.getByTestId('profile-cv-selected').innerText(), /approved-en-cv.pdf/)
+    assert.equal(generations, 0, 'minimizing and reopening preserves CV without generating')
     const generate = page.getByTestId('profile-filler-generate')
     await generate.evaluate(element => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click() })
     await page.getByTestId('profile-ui-error').waitFor()
@@ -61,7 +67,8 @@ export async function checkProfileDesktop(page: Page) {
     assert.deepEqual(browserErrors, [])
   } finally {
     page.off('pageerror', onError)
-    for (const suffix of ['', '/desktop-ui', '/desktop-old', '/desktop-ui/apply']) await page.unroute(`${profileJobsRoute}${suffix}`)
+    await page.unroute(profileJobsRoute)
+    for (const suffix of ['/desktop-ui', '/desktop-old', '/desktop-ui/apply']) await page.unroute(`${jobPrefix}${suffix}`)
     await page.unroute(generationRoute)
   }
 }

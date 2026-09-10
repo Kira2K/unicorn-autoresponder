@@ -57,8 +57,12 @@ function registerProfileFillerRoutes(options: {
     try { res.json(runProfileAnalysis(req.body)) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
   })
-  app.get('/api/admin/linkedin/profile-jobs', requireAdmin, async (_req, res) => {
-    try { res.json({ jobs: await service.list() }) }
+  app.get('/api/admin/linkedin/profile-jobs', requireAdmin, async (req, res) => {
+    const id = req.query.platformAccountId === undefined ? undefined : Number(req.query.platformAccountId)
+    if (id !== undefined && (!Number.isSafeInteger(id) || id <= 0 || typeof req.query.platformAccountId !== 'string')) {
+      res.status(400).json({ error: 'profile_validation_failed' }); return
+    }
+    try { res.json({ jobs: await service.list(id) }) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }
   })
   app.get('/api/admin/linkedin/profile-jobs/:jobId', requireAdmin, async (req, res) => {

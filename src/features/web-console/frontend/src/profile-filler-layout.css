@@ -2,6 +2,8 @@
 .profile-filler-dialog .p-dialog-header { padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
 .profile-filler-dialog .p-dialog-content { padding: 0; display: flex; min-height: 0; overflow: hidden; flex: 1; }
 .profile-filler-dialog .p-dialog-footer { padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; flex-shrink: 0; }
+.profile-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex: 1; margin-right: .75rem; }
+.profile-dialog-header > button { flex-shrink: 0; }
 .profile-dialog-heading { display: flex; flex-direction: column; gap: .45rem; }
 .profile-dialog-heading > strong { font-size: 1.25rem; }
 .profile-dialog-heading > span { display: flex; align-items: center; gap: 1.25rem; font-size: .9rem; }

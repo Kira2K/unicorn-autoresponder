@@ -42,7 +42,7 @@ export async function verifyFinal(options: {
   range: DelayRange
   scheduleSeconds?: number[]
   wait(milliseconds: number): Promise<void>
-  progress(updates: Update[]): Promise<void>
+  progress(updates: Update[], persistence?: 'memory' | 'checkpoint'): Promise<void>
   logger: ProfileLogger
   clock(): number
   random?: (minimum: number, maximumExclusive: number) => number
@@ -108,7 +108,7 @@ export async function verifyFinal(options: {
         status: 'verified', failureKind: undefined, errorCode: undefined,
         message: 'Verified in LinkedIn.'
       } } : { index, patch: failurePatch(result.steps[index], observation, final) }
-    }))
+    }), observations.every(observation => observation === 'matched') ? 'memory' : 'checkpoint')
     position += 1
   }
   return result.steps.filter(step => step.status !== 'verified').length
