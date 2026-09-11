@@ -1949,7 +1949,7 @@ onUnmounted(() => {
               input-class="password-input"
             />
           </label>
-          <Message v-if="error" severity="error" :closable="false" :text="error" />
+          <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
           <Button type="submit" label="Sign in" icon="pi pi-sign-in" :loading="loading" data-testid="login-button" />
         </form>
       </template>
@@ -1981,7 +1981,7 @@ onUnmounted(() => {
         <Button label="LinkedIn" :severity="adminSection === 'linkedin' ? 'primary' : 'secondary'" :outlined="adminSection !== 'linkedin'" data-testid="admin-linkedin-tab" @click="adminSection = 'linkedin'" />
       </nav>
 
-      <Message v-if="error" severity="error" :closable="false" :text="error" />
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
       <Message v-if="dolphinLeaseError" severity="error" :closable="false" data-testid="dolphin-lease-error">
         {{ dolphinLeaseError }}
       </Message>
