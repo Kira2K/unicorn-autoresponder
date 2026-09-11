@@ -1241,11 +1241,17 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
   return {
     async findClientByCalendarEmail(email: string): Promise<WebClient | null> {
       const normalized = normalizeEmail(email)
+      if (!normalized) return null
       const clients = await nocoClient.fetchRecords(TABLES.clients.id, 100, {
-        where: `(calendar_email,eq,${normalized})`
+        fields: 'Id,calendar_email',
+        sort: 'Id'
       }) as NocoRecord[]
-      const match = clients.find(client => normalizeEmail(client.calendar_email) === normalized)
-      return match ? toClient(match) : null
+      const matchingIds = [...new Set(clients
+        .filter(client => normalizeEmail(client.calendar_email) === normalized)
+        .map(client => Number(client.Id)))]
+      if (matchingIds.length !== 1) return null
+      const match = await fetchClientById(matchingIds[0])
+      return match && normalizeEmail(match.calendar_email) === normalized ? toClient(match) : null
     },
 
     async getAllDolphinProfileIds(): Promise<number[]> {

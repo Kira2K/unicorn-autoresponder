@@ -19,6 +19,9 @@ const {
 const { createWebConsoleRepository } = require('./repository.ts') as {
   createWebConsoleRepository(options?: any): any
 }
+const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
+  createNocoClient(options: { requester: (request: { method: string; url: string }) => Promise<any> }): any
+}
 const {
   buildAccountPatch,
   buildChangedClientPatch,
@@ -539,7 +542,7 @@ function createFixtureNocoClient() {
       }
       return record[field]
     }
-    return records.filter(record => String(valueFor(record) ?? '').trim() === expected)
+    return records.filter(record => String(valueFor(record) ?? '') === expected)
   }
 
   return {
@@ -669,7 +672,93 @@ async function request(baseUrl: string, path: string, options: any = {}, cookie 
   return { response, body, cookie: setCookie.split(';')[0] }
 }
 
+async function testStudentEmailLookup(): Promise<void> {
+  type ClientRow = Record<string, unknown> & { Id: number }
+  let rows: ClientRow[] = []
+  let beforeDetailRead: (() => void) | undefined
+  const reads: URL[] = []
+  const lookup = async (email: string) => {
+    reads.length = 0
+    const nocoClient = createNocoClient({
+      requester: async ({ method, url }) => {
+        assert.equal(method, 'get', 'sign-in must not write student data')
+        const parsed = new URL(url)
+        assert.equal(parsed.pathname, '/api/v2/tables/mxza381054ldlza/records')
+        reads.push(parsed)
+        const fields = parsed.searchParams.get('fields')
+        if (!fields) beforeDetailRead?.()
+        const where = parsed.searchParams.get('where')
+        const condition = where ? /^\(([^,]+),eq,(.*)\)$/.exec(where) : null
+        let matching = condition
+          ? rows.filter(row => String(row[condition[1]] ?? '') === condition[2])
+          : rows
+        if (fields) {
+          matching = matching.map(row => Object.fromEntries(
+            fields.split(',').map(field => [field, row[field]])
+          ) as ClientRow)
+        }
+        const offset = Number(parsed.searchParams.get('offset'))
+        const limit = Number(parsed.searchParams.get('limit'))
+        return { data: {
+          list: matching.slice(offset, offset + limit),
+          pageInfo: { isLastPage: offset + limit >= matching.length }
+        } }
+      }
+    })
+    return createWebConsoleRepository({ nocoClient }).findClientByCalendarEmail(email)
+  }
+
+  for (const stored of ['Client@Example.COM', 'client@example.com', ' client@example.com',
+    'client@example.com ', '\t Client@Example.COM \n']) {
+    rows = [{ Id: 145, calendar_email: stored, client_name: 'Expected Student' }]
+    for (const submitted of ['client@example.com', ' CLIENT@EXAMPLE.COM ']) {
+      const client = await lookup(submitted)
+      assert.equal(client?.id, 145, `stored email ${JSON.stringify(stored)} must resolve`)
+      assert.equal(client.clientName, 'Expected Student', 'return the full student record')
+      assert.deepEqual(reads.map(url => ({
+        fields: url.searchParams.get('fields'), where: url.searchParams.get('where')
+      })), [
+        { fields: 'Id,calendar_email', where: null },
+        { fields: null, where: '(Id,eq,145)' }
+      ])
+      assert.equal(rows[0].calendar_email, stored, 'stored email must remain unchanged')
+    }
+  }
+
+  rows = [{ Id: 1, calendar_email: null }, { Id: 2, calendar_email: ' ' }]
+  for (const email of ['', ' \t\n']) {
+    assert.equal(await lookup(email), null)
+    assert.equal(reads.length, 0, 'blank login needs no database read')
+  }
+  assert.equal(await lookup('missing@example.com'), null)
+  assert.equal(reads.length, 1, 'unknown email needs no full-record read')
+
+  rows = Array.from({ length: 100 }, (_, index) => ({
+    Id: index + 1, calendar_email: `other-${index}@example.com`
+  }))
+  rows.push({ Id: 101, calendar_email: ' Client@Example.COM ', client_name: 'Later Page' })
+  assert.equal((await lookup('client@example.com'))?.clientName, 'Later Page')
+  assert.deepEqual(reads.map(url => url.searchParams.get('offset')), ['0', '100', '0'])
+  assert.equal(reads.slice(0, 2).every(url =>
+    url.searchParams.get('fields') === 'Id,calendar_email' && !url.searchParams.has('where')
+  ), true, 'every candidate page must request only identity and email')
+
+  rows[0].calendar_email = 'client@example.com'
+  assert.equal(await lookup('client@example.com'), null, 'a duplicate on another page must reject login')
+  assert.equal(reads.length, 2, 'ambiguous email must not fetch either full student record')
+  rows = [{ Id: 1, calendar_email: 'client@example.com' }, { Id: 1, calendar_email: 'Client@example.com' }]
+  assert.equal((await lookup('client@example.com'))?.id, 1, 'repeated rows for one ID are not different students')
+
+  rows = [{ Id: 1, calendar_email: 'client@example.com' }]
+  beforeDetailRead = () => { rows[0].calendar_email = 'changed@example.com' }
+  assert.equal(await lookup('client@example.com'), null, 'recheck email on the full record')
+  rows = [{ Id: 1, calendar_email: 'client@example.com' }]
+  beforeDetailRead = () => { rows = [] }
+  assert.equal(await lookup('client@example.com'), null, 'a removed student cannot sign in')
+}
+
 async function runTests(): Promise<void> {
+  await testStudentEmailLookup()
   const normalizedCredential = resolveClientDolphinCredentials({ id: 28, calendarEmail: 'NPotokin@gmail.com' })
   assert.deepEqual(normalizedCredential, {
     username: DEFAULT_DOLPHIN_SHARED_USER_EMAIL,
@@ -926,10 +1015,10 @@ async function runTests(): Promise<void> {
   const repository = createWebConsoleRepository({ nocoClient: noco })
   noco.fetchCalls.length = 0
   assert.equal((await repository.findClientByCalendarEmail('CLIENT@example.com'))?.id, 1)
-  assert.deepEqual(noco.fetchCalls, [{
-    tableId: 'mxza381054ldlza',
-    where: '(calendar_email,eq,client@example.com)'
-  }])
+  assert.deepEqual(noco.fetchCalls, [
+    { tableId: 'mxza381054ldlza', where: '' },
+    { tableId: 'mxza381054ldlza', where: '(Id,eq,1)' }
+  ])
 
   noco.fetchCalls.length = 0
   await repository.getProviderResumeTasks()
@@ -1185,6 +1274,43 @@ async function runTests(): Promise<void> {
       body: JSON.stringify({ email: 'client@example.com', password: 'bad' })
     })
     assert.equal(result.response.status, 401)
+
+    const originalEmails = (await noco.fetchRecords('mxza381054ldlza'))
+      .filter((row: any) => row.Id === 1 || row.Id === 2)
+      .map((row: any) => ({ Id: row.Id, calendar_email: row.calendar_email }))
+    try {
+      for (const stored of ['Client@Example.COM', ' client@example.com', 'client@example.com ',
+        '\t Client@Example.COM \n']) {
+        await noco.patchRecord('mxza381054ldlza', 1, { calendar_email: stored })
+        const login = await request(server.baseUrl, '/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: ' CLIENT@EXAMPLE.COM ', password: '1234' })
+        })
+        assert.equal(login.response.status, 200, `stored email ${JSON.stringify(stored)}`)
+        assert.equal(login.body.role, 'client')
+        assert.equal(login.body.clientId, 1)
+        const dashboard = await request(server.baseUrl, '/api/client/me', {}, login.cookie)
+        assert.equal(dashboard.response.status, 200)
+        assert.equal(dashboard.body.client.id, 1)
+        await request(server.baseUrl, '/api/auth/logout', { method: 'POST' }, login.cookie)
+      }
+      await noco.patchRecord('mxza381054ldlza', 2, { calendar_email: 'client@example.com' })
+      for (const email of ['client@example.com', '', ' \t', 'missing@example.com']) {
+        const rejected = await request(server.baseUrl, '/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: '1234' })
+        })
+        assert.equal(rejected.response.status, 401)
+        assert.equal(rejected.body.error, 'invalid_credentials')
+        assert.equal(rejected.cookie, '', 'rejected login must not create a session')
+      }
+    } finally {
+      for (const original of originalEmails) {
+        await noco.patchRecord('mxza381054ldlza', original.Id, { calendar_email: original.calendar_email })
+      }
+    }
 
     const normalFetchRecords = noco.fetchRecords
     try {

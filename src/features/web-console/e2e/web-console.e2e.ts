@@ -98,6 +98,18 @@ async function runTests(): Promise<void> {
     await page.getByTestId('login-page').waitFor()
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '01-login.png'), fullPage: true })
 
+    await page.getByTestId('email-input').fill('client@example.com')
+    await page.locator('input[type="password"]').fill('wrong-password')
+    const [rejectedLogin] = await Promise.all([
+      page.waitForResponse((response: any) => response.url().endsWith('/api/auth/login')),
+      page.getByTestId('login-button').click()
+    ])
+    assert.equal(rejectedLogin.status(), 401)
+    const loginError = page.getByTestId('login-page').getByRole('alert')
+    await loginError.getByText('invalid_credentials', { exact: true }).waitFor()
+    assert.equal(await page.getByTestId('client-dashboard').count(), 0)
+    await page.screenshot({ path: path.join(ARTIFACT_DIR, '01-login-error.png'), fullPage: true, animations: 'disabled' })
+
     let initialClientStatusSeen = false
     let initialClientStatusPending = false
     let releaseInitialClientStatus!: () => void
@@ -114,7 +126,7 @@ async function runTests(): Promise<void> {
       await route.continue()
     }
     await page.route('**/api/telegram/status?*', slowInitialClientStatus)
-    await page.getByTestId('email-input').fill('client@example.com')
+    await page.getByTestId('email-input').fill(' CLIENT@EXAMPLE.COM ')
     await page.locator('input[type="password"]').fill('1234')
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
@@ -126,6 +138,15 @@ async function runTests(): Promise<void> {
     while (initialClientStatusPending) await wait(10)
     await page.unroute('**/api/telegram/status?*', slowInitialClientStatus)
     await assertText(page, 'Test')
+
+    const [restoredSession] = await Promise.all([
+      page.waitForResponse((response: any) => response.url().endsWith('/api/auth/me')),
+      page.reload()
+    ])
+    assert.equal(restoredSession.status(), 200)
+    assert.equal((await restoredSession.json()).clientId, 1)
+    await page.getByTestId('client-dashboard').waitFor()
+    await page.getByTestId('open-profile-editor-button').waitFor()
     assert.equal(await page.getByTestId('profile-form').isVisible(), false)
     await page.getByTestId('profile-details-accordion-header').waitFor()
     await page.getByTestId('open-profile-editor-button').click()
@@ -387,6 +408,12 @@ async function runTests(): Promise<void> {
     await page.getByTestId('logout-button').click()
     await page.getByTestId('login-page').waitFor()
     assert.equal(await page.getByTestId('client-dashboard').count(), 0)
+    const [loggedOutSession] = await Promise.all([
+      page.waitForResponse((response: any) => response.url().endsWith('/api/auth/me')),
+      page.reload()
+    ])
+    assert.equal(loggedOutSession.status(), 401)
+    await page.getByTestId('login-page').waitFor()
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '03-client-logout.png'), fullPage: true })
 
     await page.getByTestId('email-input').fill('latest@example.com')
