@@ -21,7 +21,7 @@ export function runProfileBuilderTests() {
       sourceText: 'Backend: Java, Spring' }],
     skills: ['Java', 'Spring'],
     experience: [{ company: 'Employer', title: 'Engineer', current: true,
-      description: 'Built systems.', technologies: ['Java'],
+      description: 'Built systems.', technologies: ['Java', 'PostgreSQL'],
       namedOrganizations: ['Vendor', 'Product Brand'] }],
     education: [], languages: [{ name: 'English', level: 'B2' }],
     namedOrganizations: ['Partner']
@@ -30,6 +30,7 @@ export function runProfileBuilderTests() {
   assert.equal(prepared.cv.location, 'Tbilisi, Georgia')
   assert.equal(prepared.cv.contacts.email, 'cv@example.com')
   assert.equal(prepared.cv.contacts.phone, '+111')
+  assert.deepEqual(prepared.cv.skills, ['Java', 'Spring', 'PostgreSQL'])
   assert.match(prepared.about, /^Contacts\n/)
   assert.match(prepared.about, /\n\nSummary\nSummary text\.\n\nSkills\nBackend: Java, Spring$/)
   assert.deepEqual(prepared.employerCandidates.map(item => item.name),

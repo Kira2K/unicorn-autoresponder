@@ -22,7 +22,17 @@ Do not infer salary, citizenship, relocation, commute time, dates, employers, ed
 - Fill all source-supported personal, experience, education, language and skill fields.
 - About order is Contacts, Summary/About, Skills, in the CV language.
 - Preserve CV wording and skill categories.
-- En location is always `Tbilisi, Georgia`; En permits are exactly Georgia, Serbia, Armenia.
+- In the initial HH wizard always enter and select the Russian profession `Программист, разработчик`,
+  regardless of stack or market. Never enter the mapped English title there. After HH assigns the draft ID,
+  set the market/stack title from `stack-titles.ts` through the safe partial profession editor.
+- Before changing a field, read its current value. Skip exact scalar matches and exact complete sets. Correct
+  mismatches only from the final CV or allowed Noco fallback. If an already populated field has no approved
+  source value, leave it unchanged. Do not duplicate matching experience, education, language, or skill rows.
+- En location is always `Tbilisi, Georgia`; En permits are selected by Russian UI labels and are exactly
+  `Грузия`, `Сербия`, `Армения`, `Казахстан`.
+- For permits, batch-read only checked options and compare the complete selected set. Never traverse every
+  country through individual browser calls; click only selected extras and missing required countries. If the
+  four-country set already matches, do not change or save the field.
 - Business trips are Ready. Work formats are On-site, Remote and Hybrid.
 - Add source-supported HH skill tags up to the UI limit and set each to Advanced.
 
@@ -34,5 +44,6 @@ Do not infer salary, citizenship, relocation, commute time, dates, employers, ed
 - Save ordinary builds as drafts. HH may publish a native duplicate when its profession is confirmed;
   permit that only for a verified missing title variant copied from the filled baseline.
 - Visibility is everyone except selected employers.
-- Stop-list candidates come from CV experience/context and every exact `Самопрезентация` file.
+- Stop-list candidates come from CV experience/context and supported files inside the exact
+  `Самопрезентация` subfolder whose filename contains `Описание опыта`.
 - Search every employer, owner, brand/product, vendor, customer and partner. Add only one unambiguous official card; skip missing or ambiguous matches and include the reason in the report.

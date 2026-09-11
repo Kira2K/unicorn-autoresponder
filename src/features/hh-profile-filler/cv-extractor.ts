@@ -61,7 +61,7 @@ const CV_SCHEMA = strictObject({
 })
 
 const EXTRACTION_INSTRUCTIONS = `Extract an HH resume profile from the attached final CV and optional
-documents named Самопрезентация. Preserve the CV language, wording, dates, metrics, responsibilities,
+documents from the Самопрезентация folder whose filenames contain Описание опыта. Preserve the CV language, wording, dates, metrics, responsibilities,
 skills and contacts. Never invent or improve facts. The summary must contain only the CV's about/summary
 text, without contacts or the skills block. Preserve skill categories and their source wording.
 Collect every explicitly named employer, brand owner, product organization, vendor, customer and partner
@@ -154,7 +154,8 @@ export function createCvExtractor(options: {
       const content: any[] = uploaded.map(fileId => ({ type: 'input_file', file_id: fileId }))
       content.push({ type: 'input_text', text:
         `Extract the ${market === 'Ru' ? 'Russian' : 'English'} HH profile. ` +
-        'Documents after the first one are Самопрезентация sources used for organization extraction.' })
+        'Documents after the first one come from the Самопрезентация folder, have Описание опыта in ' +
+        'their filenames, and are used for organization extraction.' })
       const value = await client.respond([{ role: 'user', content }],
         'hh_profile_cv', CV_SCHEMA, EXTRACTION_INSTRUCTIONS)
       return assertProfile(value, market)

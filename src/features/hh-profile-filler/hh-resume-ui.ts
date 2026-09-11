@@ -2,11 +2,26 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Locator, Page } from 'playwright'
 import { profileFillerError } from './errors.ts'
-import { normalizeStack } from './stack-titles.ts'
 import type { CvEducation, CvExperience, CvLanguage, PreparedProfile } from './types.ts'
 
-const HH_RESUMES_URL = 'https://hh.ru/applicant/resumes'
+// /applicant/resumes opens the unfinished wizard when no published resume
+// remains. The profile page is the stable list for published and draft cards.
+const HH_RESUMES_URL = 'https://hh.ru/applicant/profile/me'
 const HH_NEW_RESUME_URL = 'https://hh.ru/applicant/resumes/new'
+export const INITIAL_HH_PROFESSION = 'Программист, разработчик'
+
+export async function captureArtifactScreenshot(page: Page, file: string): Promise<boolean> {
+  try {
+    // Full-page capture on HH can wait indefinitely while the profile page
+    // keeps relaying out. A viewport capture is sufficient evidence and must
+    // never turn an otherwise safe run into a production failure.
+    await page.screenshot({ path: file, fullPage: false, timeout: 15_000,
+      animations: 'disabled' })
+    return true
+  } catch {
+    return false
+  }
+}
 
 export type ResumeSnapshot = {
   id: string
@@ -14,6 +29,39 @@ export type ResumeSnapshot = {
   href: string
   statusText?: string
   isDraft: boolean
+}
+
+type ProfessionState = {
+  stage: string
+  url: string
+  screen?: string | null
+  controls: Array<Record<string, string | boolean | null>>
+}
+
+async function professionState(page: Page, stage: string): Promise<ProfessionState> {
+  const controls = await page.locator(
+    'button:visible, input[type="radio"], [role="radio"]:visible').evaluateAll(elements =>
+    elements.slice(0, 80).map(element => {
+      const input = element instanceof HTMLInputElement ? element : undefined
+      return {
+        tag: element.tagName,
+        text: String(element.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 200),
+        type: input?.type ?? '',
+        name: input?.name ?? '',
+        value: input?.value ?? '',
+        checked: input?.checked ?? element.getAttribute('aria-checked') === 'true',
+        disabled: input?.disabled ?? element.getAttribute('aria-disabled') === 'true',
+        qa: element.getAttribute('data-qa'),
+        role: element.getAttribute('role')
+      }
+    })).catch(() => [])
+  return {
+    stage,
+    url: page.url(),
+    screen: await page.locator('[data-qa*="resume-profile-screen"]:visible').first()
+      .getAttribute('data-qa').catch(() => undefined),
+    controls
+  }
 }
 
 async function firstVisible(locators: Locator[]): Promise<Locator | undefined> {
@@ -34,7 +82,7 @@ async function closeBottomSheets(page: Page, retain = 0): Promise<void> {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await page.waitForTimeout(250)
     const count = await page.locator('[data-qa="bottom-sheet-css-variables"]:visible').count()
-    if (retain === 0 || count > retain) {
+    if (count > retain) {
       await page.keyboard.press('Escape').catch(() => undefined)
     }
   }
@@ -62,6 +110,8 @@ async function fill(page: Page, value: string | undefined, names: string[],
       `Required HH field was not found: ${names[0]}.`, 'fill_resume')
     return false
   }
+  const current = String(await locator.inputValue().catch(() => '')).trim()
+  if (current.replace(/\r\n/g, '\n') === value.trim().replace(/\r\n/g, '\n')) return true
   await locator.fill(value)
   return true
 }
@@ -79,6 +129,7 @@ export async function openProfessionEditor(page: Page): Promise<Locator> {
   if (input) return input
 
   const entryLocators = [page.locator('[data-qa="resume-profile-card-select-job"]'),
+    page.locator('body *').filter({ hasText: /^\s*Укажу\s+профессию\s*$/i }),
     page.getByText(/Укажу\s+профессию/i),
     page.getByText(/^(?:specify|choose|select).*(?:profession|job role)$/i)]
   let entry: Locator | undefined
@@ -91,6 +142,26 @@ export async function openProfessionEditor(page: Page): Promise<Locator> {
     for (let attempt = 0; attempt < 20 && !input; attempt += 1) {
       input = await field(page, PROFESSION_FIELD_NAMES, PROFESSION_FIELD_SELECTORS)
       if (!input) await page.waitForTimeout(250)
+    }
+  }
+  // Some HH builds render the choice as a clickable card without a stable
+  // role/data-qa. Its nested text is visible but Playwright's text locator can
+  // transiently miss it while the React tree is being hydrated. A DOM click on
+  // the exact text node still bubbles through the card's regular click handler.
+  if (!input) {
+    const clicked = await page.evaluate(() => {
+      const normalize = (value: string | null) => String(value ?? '').replace(/\s+/g, ' ').trim()
+      const target = [...document.querySelectorAll<HTMLElement>('body *')]
+        .find(element => normalize(element.textContent) === 'Укажу профессию')
+      if (!target) return false
+      target.click()
+      return true
+    }).catch(() => false)
+    if (clicked) {
+      for (let attempt = 0; attempt < 40 && !input; attempt += 1) {
+        input = await field(page, PROFESSION_FIELD_NAMES, PROFESSION_FIELD_SELECTORS)
+        if (!input) await page.waitForTimeout(250)
+      }
     }
   }
   if (!input) {
@@ -130,6 +201,113 @@ async function setCheckboxNearText(page: Page, pattern: RegExp, checked: boolean
   return true
 }
 
+async function setExactWorkPermits(page: Page, verifyOnly = false): Promise<boolean> {
+  const permits = [
+    { source: 'Грузия', ui: /^Грузия$/i },
+    { source: 'Сербия', ui: /^Сербия$/i },
+    { source: 'Армения', ui: /^Армения$/i },
+    { source: 'Казахстан', ui: /^Казахстан$/i }
+  ]
+  const activator = await firstVisible([
+    page.locator('[role="combobox"]:visible')
+      .filter({ hasText: /разрешени\S*\s+на\s+работу/i }),
+    page.locator('[data-qa="magritte-select-activator"]:visible')
+      .filter({ hasText: /разрешени\S*\s+на\s+работу/i })
+  ])
+  if (!activator) throw profileFillerError('profile_hh_control_missing',
+    'Required HH work-permit select was not found.', 'fill_resume')
+  await activator.click()
+  await page.waitForTimeout(400)
+  const editor = await firstVisible([
+    page.locator('[data-qa="bottom-sheet-css-variables"]:visible')
+      .filter({ hasText: /Грузия/i }).last(),
+    page.locator('[role="dialog"]:visible').filter({ hasText: /Грузия/i }).last(),
+    page.locator('[data-qa="magritte-select-option-list"]:visible')
+      .filter({ hasText: /Грузия/i }).last()
+  ])
+  if (!editor) throw profileFillerError('profile_hh_work_permit_editor_missing',
+    'HH work-permit editor did not open.', 'fill_resume')
+
+  // Read only checked options in one browser-side batch. Iterating every
+  // country through Playwright is both unnecessary and extremely slow.
+  const selectedNames = async () => await editor
+    .locator('label:has(input[type="checkbox"]:checked)')
+    .evaluateAll(elements => elements.map(element => String(element.textContent ?? '')
+      .replace(/\s+/g, ' ').trim()).filter(Boolean))
+  const wantedNames = permits.map(permit => permit.source)
+  const exactSet = (names: string[]) => names.length === wantedNames.length &&
+    wantedNames.every(name => names.some(current => current.localeCompare(name, 'ru', {
+      sensitivity: 'base'
+    }) === 0))
+  const currentNames = await selectedNames()
+  if (exactSet(currentNames)) {
+    await page.keyboard.press('Escape').catch(() => undefined)
+    return false
+  }
+  if (verifyOnly) throw profileFillerError('profile_hh_work_permit_not_persisted',
+    `HH persisted a different work-permit set: ${currentNames.join(', ') || 'none'}.`,
+    'verify_draft')
+
+  for (const current of currentNames) {
+    if (wantedNames.some(name => name.localeCompare(current, 'ru', {
+      sensitivity: 'base'
+    }) === 0)) continue
+    const escaped = current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const text = editor.getByText(new RegExp(`^${escaped}$`, 'i')).last()
+    if (!(await text.isVisible().catch(() => false))) throw profileFillerError(
+      'profile_hh_work_permit_missing',
+      `HH selected work-permit control was not found: ${current}.`, 'fill_resume')
+    await text.click()
+  }
+  for (const permit of permits.filter(permit => !currentNames.some(current =>
+    current.localeCompare(permit.source, 'ru', { sensitivity: 'base' }) === 0))) {
+    const text = editor.getByText(permit.ui).last()
+    const label = text.locator('xpath=ancestor::label[1]')
+    const checkbox = label.locator('input[type="checkbox"]').first()
+    if (!(await text.isVisible().catch(() => false)) || !(await checkbox.count())) {
+      throw profileFillerError('profile_hh_work_permit_missing',
+        `HH work permit control was not found: ${permit.source}.`, 'fill_resume')
+    }
+    if (!(await checkbox.isChecked().catch(() => false))) await text.click()
+    if (!(await checkbox.isChecked().catch(() => false))) {
+      throw profileFillerError('profile_hh_work_permit_not_selected',
+      `HH did not select work permit: ${permit.source}.`, 'fill_resume')
+    }
+  }
+  const resultingNames = await selectedNames()
+  if (!exactSet(resultingNames)) throw profileFillerError(
+    'profile_hh_work_permit_not_selected',
+    `HH did not retain the exact work-permit set: ${resultingNames.join(', ') || 'none'}.`,
+    'fill_resume')
+  const save = await firstVisible([
+    editor.getByRole('button', {
+      name: /^(?:Выбрать|Сохранить|Готово|Применить|Choose|Select|Save|Done|Apply)$/i
+    }),
+    editor.getByText(
+      /^(?:Выбрать|Сохранить|Готово|Применить|Choose|Select|Save|Done|Apply)$/i),
+    page.getByRole('button', {
+      name: /^(?:Выбрать|Сохранить|Готово|Применить|Choose|Select|Save|Done|Apply)$/i
+    }).last()
+  ])
+  if (!save) throw profileFillerError('profile_hh_work_permit_confirm_missing',
+    'HH work-permit confirmation control was not found.', 'fill_resume')
+  await save.click()
+  return true
+}
+
+async function updateAndVerifyWorkPermits(page: Page): Promise<void> {
+  await page.goto('https://hh.ru/profile/edit/common', {
+    waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  const changed = await setExactWorkPermits(page)
+  if (!changed) return
+  await saveChangesWithoutPublishing(page)
+  await page.goto('https://hh.ru/profile/edit/common', {
+    waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  await setExactWorkPermits(page, true)
+}
+
 function resumeId(href: string): string {
   try {
     const url = new URL(href, HH_RESUMES_URL)
@@ -143,21 +321,46 @@ function resumeId(href: string): string {
 }
 
 export async function listResumes(page: Page): Promise<ResumeSnapshot[]> {
-  await page.goto(HH_RESUMES_URL, { waitUntil: 'domcontentloaded', timeout: 120_000 })
-  await page.waitForTimeout(1500)
+  let activePage = page
+  let freshPage: Page | undefined
+  let ready = false
+  for (let attempt = 0; attempt < 3 && !ready; attempt += 1) {
+    if (attempt === 2) {
+      freshPage = await page.context().newPage()
+      activePage = freshPage
+    }
+    try {
+      await activePage.goto(HH_RESUMES_URL, {
+        waitUntil: 'domcontentloaded', timeout: attempt === 0 ? 120_000 : 60_000
+      })
+      ready = await activePage.locator('body').evaluate(element =>
+        Boolean(element.textContent?.trim().length)).catch(() => false)
+    } catch {
+      await activePage.evaluate(() => window.stop()).catch(() => undefined)
+    }
+    if (!ready) await activePage.waitForTimeout(1000)
+  }
+  if (!ready) {
+    await freshPage?.close().catch(() => undefined)
+    throw profileFillerError('profile_hh_navigation_failed',
+      'HH resume list did not load after three bounded attempts.', 'list_resumes')
+  }
+  await activePage.waitForTimeout(1500)
   // The current applicant profile hides incomplete resumes in the compact list
   // until any resume action menu is opened. Expanding it is read-only and lets
   // replacement/duplication verification see drafts as well as published cards.
   const compactTrigger = await firstVisible([
-    page.locator('[data-qa="resume-list-action-more"]')
+    activePage.locator('[data-qa="resume-list-action-more"]')
   ])
   if (compactTrigger) {
     await compactTrigger.click()
-    await page.waitForTimeout(200)
+    await activePage.waitForTimeout(200)
   }
-  const anchors = page.locator([
+  const anchors = activePage.locator([
     'a[data-qa^="resume-title-link"]',
     'a[data-qa^="resume-card-link-"]',
+    'a[data-qa="resume-button-edit-resume"]',
+    'a[href*="/profile/resume?resume="]',
     'a[href*="/applicant/resumes/"]'
   ].join(','))
   const result = new Map<string, ResumeSnapshot>()
@@ -166,10 +369,16 @@ export async function listResumes(page: Page): Promise<ResumeSnapshot[]> {
     const href = String(await anchor.getAttribute('href') ?? '')
     const id = resumeId(href)
     if (!id) continue
+    const draftCard = anchor.locator('xpath=ancestor::*[@data-qa="resume"][1]')
+    const card = await draftCard.count()
+      ? draftCard.first()
+      : anchor.locator('xpath=ancestor::*[self::div or self::article][1]')
     const rawTitle = String(await anchor.innerText().catch(() => '')).trim()
-    const title = rawTitle.split(/\r?\n/).map(line => line.trim()).find(line =>
+    const titleSource = /^дополнить|continue filling$/i.test(rawTitle)
+      ? String(await card.innerText().catch(() => rawTitle)).trim()
+      : rawTitle
+    const title = titleSource.split(/\r?\n/).map(line => line.trim()).find(line =>
       line && !/^(?:постоянная работа|частичная занятость|стажировка|проектная работа|full[- ]?time|part[- ]?time|internship|не\s*опубликовано|draft|уровень дохода|salary|\d+\s+ваканс)/i.test(line)) ?? rawTitle
-    const card = anchor.locator('xpath=ancestor::*[self::div or self::article][1]')
     const statusText = String(await card.innerText().catch(() => '')).trim()
     const absoluteHref = new URL(href, HH_RESUMES_URL).toString()
     if (result.has(id)) continue
@@ -177,6 +386,7 @@ export async function listResumes(page: Page): Promise<ResumeSnapshot[]> {
       statusText, isDraft: /черновик|draft|не\s*опубликовано|заполните резюме|continue filling/i.test(statusText) ||
         /\/profile\/resume\//i.test(new URL(absoluteHref).pathname) })
   }
+  await freshPage?.close().catch(() => undefined)
   return [...result.values()]
 }
 
@@ -187,7 +397,7 @@ export async function inspectHH(page: Page, artifactDir: string) {
     page.locator('a[href*="/applicant/resumes/new"]'),
     page.getByText(/создать резюме|create resume/i)
   ])
-  await page.screenshot({ path: path.join(artifactDir, 'dry-run-resumes.png'), fullPage: true })
+  await captureArtifactScreenshot(page, path.join(artifactDir, 'dry-run-resumes.png'))
   if (!createControl) {
     throw profileFillerError('profile_hh_create_unavailable',
       'HH resume creation control is unavailable.', 'dry_run_hh')
@@ -195,7 +405,7 @@ export async function inspectHH(page: Page, artifactDir: string) {
   await page.goto(HH_NEW_RESUME_URL, { waitUntil: 'domcontentloaded', timeout: 120_000 })
   const professionInput = await openProfessionEditor(page)
   const professionControlVisible = await professionInput.isVisible().catch(() => false)
-  await page.screenshot({ path: path.join(artifactDir, 'dry-run-profession.png'), fullPage: true })
+  await captureArtifactScreenshot(page, path.join(artifactDir, 'dry-run-profession.png'))
   const snapshot = { url: page.url(), title: await page.title(), resumes,
     createControlVisible: true, professionControlVisible, inspectedAt: new Date().toISOString() }
   const file = path.join(artifactDir, 'dry-run-hh-snapshot.json')
@@ -210,6 +420,12 @@ export async function inspectHH(page: Page, artifactDir: string) {
 
 async function setArea(page: Page, value?: string) {
   if (!value) return
+  const existing = await field(page, ['Город', 'City', 'Location'], [
+    '[data-qa="profile-common-edit-area"]',
+    '[data-qa="resume-block-personal-information-area"] input',
+    'input[name="area"]'
+  ])
+  if (existing && String(await existing.inputValue().catch(() => '')).trim() === value.trim()) return
   const changed = await fill(page, value, ['Город', 'City', 'Location'], [
     '[data-qa="profile-common-edit-area"]',
     '[data-qa="resume-block-personal-information-area"] input',
@@ -227,8 +443,11 @@ async function setArea(page: Page, value?: string) {
 }
 
 async function addPublishedExperience(page: Page, item: CvExperience): Promise<boolean> {
-  const add = page.getByRole('button', { name: /^Добавить$|^Add$/i })
-  if (!(await add.isVisible().catch(() => false))) throw profileFillerError(
+  const add = await firstVisible([
+    page.getByRole('button', { name: /^Добавить$|^Add$/i }),
+    page.getByText(/^Добавить$|^Add$/i).last()
+  ])
+  if (!add) throw profileFillerError(
     'profile_hh_published_experience_add_missing', 'Published experience Add control is missing.', 'fill_resume')
   await add.click()
   await page.waitForURL(url => /\/profile\/edit\/experience/i.test(url.pathname), {
@@ -338,45 +557,92 @@ async function addPublishedExperience(page: Page, item: CvExperience): Promise<b
   return true
 }
 
-async function addExperience(page: Page, item: CvExperience) {
+async function addExperience(page: Page, item: CvExperience, currentResumeId?: string,
+  artifactDir?: string) {
+  const trace = (stage: string, details: Record<string, unknown> = {}) => {
+    if (!artifactDir) return
+    fs.appendFileSync(path.join(artifactDir, 'experience-state.ndjson'), `${JSON.stringify({
+      at: new Date().toISOString(), stage, company: item.company,
+      path: new URL(page.url()).pathname, ...details
+    })}\n`, { mode: 0o600 })
+  }
   const wizard = page.locator('[data-qa*="resume-profile-screen_experience"]:visible')
   const publishedEditor = /\/resume\/[a-z0-9]+\/experience/i.test(new URL(page.url()).pathname)
   if (publishedEditor) return await addPublishedExperience(page, item)
   if (await wizard.isVisible().catch(() => false) || publishedEditor) {
-    let company = page.locator(
-      '[data-qa*="resume-profile-experience-specific-company-input"]:visible').first()
-    let itemSheet = false
+    let itemSheet = await page.locator('[data-qa="modal-edit-list-item-save"]:visible')
+      .isVisible().catch(() => false)
+    let company = itemSheet
+      ? page.locator('[data-qa*="resume-profile-experience-specific-company-input"]:visible').last()
+      : page.locator('[data-qa*="resume-profile-experience-specific-company-input"]:visible').first()
     const activeCompanyIsFilled = await company.isVisible().catch(() => false) &&
       Boolean(String(await company.inputValue().catch(() => '')).trim())
-    if (!(await company.isVisible().catch(() => false)) || activeCompanyIsFilled) {
+    trace('entry', { itemSheet, companyVisible: await company.isVisible().catch(() => false),
+      activeCompanyIsFilled })
+    if (!(await company.isVisible().catch(() => false)) || (!itemSheet && activeCompanyIsFilled)) {
       // The list action is rendered next to the screen portal, not inside the
       // screen subtree itself.
-      const add = await firstVisible([
+      let add = await firstVisible([
         page.locator('button[data-qa="list-add"]:visible').filter({ hasText: /^Добавить$|^Add$/i }),
         page.getByRole('button', { name: /^Добавить$|^Add$/i })
       ])
-      if (!add) return false
-      await add.click()
-      itemSheet = true
+      if (!add) throw profileFillerError('profile_hh_experience_add_missing',
+        'HH experience Add control was not found.', 'fill_resume')
+      trace('add-found', { enabled: await add.isEnabled().catch(() => false) })
+      for (let attempt = 0; attempt < 2 && !itemSheet; attempt += 1) {
+        for (let ready = 0; ready < 60 &&
+          !(await add.isEnabled().catch(() => false)); ready += 1) await page.waitForTimeout(250)
+        if (!(await add.isEnabled().catch(() => false)) && currentResumeId) {
+          trace('add-disabled-refresh')
+          await page.goto(`https://hh.ru/profile/resume/experience?resume=${currentResumeId}`, {
+            waitUntil: 'domcontentloaded', timeout: 120_000
+          })
+          await page.waitForTimeout(1500)
+          add = await firstVisible([
+            page.locator('button[data-qa="list-add"]:visible')
+              .filter({ hasText: /^Добавить$|^Add$/i }),
+            page.getByRole('button', { name: /^Добавить$|^Add$/i })
+          ])
+          for (let ready = 0; add && ready < 60 &&
+            !(await add.isEnabled().catch(() => false)); ready += 1) await page.waitForTimeout(250)
+          trace('add-after-refresh', { enabled: await add?.isEnabled().catch(() => false) })
+        }
+        if (!add) throw profileFillerError('profile_hh_experience_add_missing',
+          'HH experience Add control disappeared after refreshing the step.', 'fill_resume')
+        if (!(await add.isEnabled().catch(() => false))) throw profileFillerError(
+          'profile_hh_experience_add_disabled',
+          'HH experience Add control remained disabled.', 'fill_resume')
+        await add.click()
+        for (let settle = 0; settle < 20 && !itemSheet; settle += 1) {
+          itemSheet = await page.locator('[data-qa="modal-edit-list-item-save"]:visible')
+            .isVisible().catch(() => false)
+          if (!itemSheet) await page.waitForTimeout(250)
+        }
+      }
+      if (!itemSheet) throw profileFillerError('profile_hh_experience_editor_missing',
+        'HH ignored the experience Add action after one retry.', 'fill_resume')
+      trace('editor-opened')
       company = page.locator(
-        '[data-qa*="resume-profile-experience-specific-company-input"]:visible').first()
-      await company.waitFor({ state: 'visible', timeout: 5000 }).catch(() => undefined)
+        '[data-qa*="resume-profile-experience-specific-company-input"]:visible').last()
     }
-    if (!(await company.isVisible().catch(() => false))) return false
-    const companyQa = String(await company.getAttribute('data-qa') ?? '')
-    const index = Number(companyQa.match(/company-input-(\d+)/)?.[1] ?? -1)
-    if (index < 0) return false
+    if (!(await company.isVisible().catch(() => false))) throw profileFillerError(
+      'profile_hh_experience_company_missing', 'HH experience company field was not found.',
+      'fill_resume')
     const retainedSheets = itemSheet
       ? await page.locator('[data-qa="bottom-sheet-css-variables"]:visible').count()
       : 0
-    const position = page.locator(`[data-qa="resume-profile-experience-specific-position-input-${index}"]:visible`).first()
-    const responsibilities = page.locator(
-      `[data-qa="resume-profile-experience-specific-responsibilities-input-${index}"]`)
+    const currentField = (token: string) => itemSheet
+      ? page.locator(`[data-qa*="${token}"]:visible`).last()
+      : wizard.locator(`[data-qa*="${token}"]:visible`).first()
+    let position = currentField('resume-profile-experience-specific-position-input')
+    let responsibilities = currentField('resume-profile-experience-specific-responsibilities-input')
     if (!(await company.isVisible().catch(() => false)) ||
         !(await position.isVisible().catch(() => false)) ||
-        !(await responsibilities.isVisible().catch(() => false))) return false
+        !(await responsibilities.isVisible().catch(() => false))) throw profileFillerError(
+      'profile_hh_experience_fields_missing',
+      'HH experience position or responsibilities field was not found.', 'fill_resume')
 
-    const targetResumeId = resumeId(page.url())
+    const targetResumeId = resumeId(page.url()) || currentResumeId
     const propagation = await page.locator('input[type="checkbox"][name]:checked')
       .evaluateAll(inputs => inputs.map(input => input.getAttribute('name')).filter(Boolean) as string[])
     for (const name of propagation.filter(name => name !== targetResumeId)) {
@@ -396,12 +662,14 @@ async function addExperience(page: Page, item: CvExperience) {
       if (await companyEditor.isVisible().catch(() => false)) await companyEditor.press('Enter')
     }
     await closeBottomSheets(page, retainedSheets)
+    position = currentField('resume-profile-experience-specific-position-input')
     await position.fill(item.title)
     const positionEditor = page.locator('[data-qa="bottom-sheet-container"]:visible input:visible').first()
     if (await positionEditor.isVisible().catch(() => false)) {
       await positionEditor.press('Enter').catch(() => undefined)
     }
     await closeBottomSheets(page, retainedSheets)
+    responsibilities = currentField('resume-profile-experience-specific-responsibilities-input')
     await responsibilities.fill(item.description)
     const responsibilitiesSave = page.locator('[data-qa="bottom-sheet-container"]:visible button:visible')
       .filter({ hasText: /^Сохранить$|^Save$/i }).last()
@@ -411,8 +679,7 @@ async function addExperience(page: Page, item: CvExperience) {
     await closeBottomSheets(page, retainedSheets)
 
     const setMonth = async (kind: 'datestart' | 'dateend', month: string) => {
-      const control = page.locator(
-        `[data-qa="resume-profile-experience-specific-${kind}-month-input-${index}"]`)
+      const control = currentField(`resume-profile-experience-specific-${kind}-month-input`)
       await control.click()
       const option = page.locator(`[data-qa="magritte-select-option-${month}"]:visible`)
       await option.waitFor({ state: 'visible', timeout: 5000 })
@@ -422,8 +689,8 @@ async function addExperience(page: Page, item: CvExperience) {
     const [startMonth, startYear] = (item.startDate ?? '').split('/')
     if (startMonth && startYear) {
       await setMonth('datestart', startMonth.padStart(2, '0'))
-      const startYearControl = page.locator(
-        `[data-qa="resume-profile-experience-specific-datestart-year-input-${index}"]`)
+      const startYearControl = currentField(
+        'resume-profile-experience-specific-datestart-year-input')
       await startYearControl.fill(startYear)
       await startYearControl.press('Tab')
       await page.waitForTimeout(300)
@@ -445,8 +712,8 @@ async function addExperience(page: Page, item: CvExperience) {
       const [endMonth, endYear] = item.endDate.split('/')
       if (endMonth && endYear) {
         await setMonth('dateend', endMonth.padStart(2, '0'))
-        const endYearControl = page.locator(
-          `[data-qa="resume-profile-experience-specific-dateend-year-input-${index}"]`)
+        const endYearControl = currentField(
+          'resume-profile-experience-specific-dateend-year-input')
         await endYearControl.fill(endYear)
         await endYearControl.press('Tab')
         await page.waitForTimeout(300)
@@ -454,9 +721,46 @@ async function addExperience(page: Page, item: CvExperience) {
     }
     if (itemSheet) {
       const saveItem = page.locator('[data-qa="modal-edit-list-item-save"]:visible')
-      if (!(await saveItem.isEnabled().catch(() => false))) return false
-      await saveItem.click()
-      await page.waitForTimeout(500)
+      if (!(await saveItem.isEnabled().catch(() => false))) throw profileFillerError(
+        'profile_hh_experience_save_disabled',
+        'HH experience Save control remained disabled after filling.', 'fill_resume')
+      let closed = false
+      for (let attempt = 0; attempt < 2 && !closed; attempt += 1) {
+        await saveItem.click()
+        for (let settle = 0; settle < 20 && !closed; settle += 1) {
+          closed = !(await saveItem.isVisible().catch(() => false))
+          if (!closed) await page.waitForTimeout(250)
+        }
+      }
+      if (!closed) throw profileFillerError('profile_hh_experience_save_not_applied',
+        'HH kept the experience editor open after one Save retry.', 'fill_resume')
+      trace('editor-closed')
+      if (currentResumeId) {
+        await page.goto(`https://hh.ru/profile/resume/experience?resume=${currentResumeId}`, {
+          waitUntil: 'domcontentloaded', timeout: 120_000
+        })
+        await page.waitForTimeout(1500)
+      }
+      if (!(await page.getByText(item.company, { exact: false }).isVisible().catch(() => false))) {
+        throw profileFillerError('profile_hh_experience_save_not_applied',
+          `HH did not persist the experience entry for "${item.company}".`, 'fill_resume')
+      }
+      trace('entry-persisted')
+    } else {
+      const controls = await wizard.locator('input:visible, textarea:visible, button[data-qa="list-add"]:visible')
+        .evaluateAll(elements => elements.map(element => {
+          const input = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+            ? element : undefined
+          const button = element instanceof HTMLButtonElement ? element : undefined
+          return {
+            qa: element.getAttribute('data-qa'), type: input?.type ?? '',
+            filled: Boolean(input?.value.trim()), length: input?.value.length ?? 0,
+            checked: input instanceof HTMLInputElement ? input.checked : undefined,
+            disabled: input?.disabled ?? button?.disabled ?? false,
+            dataValue: element.getAttribute('data-value')
+          }
+        }))
+      trace('inline-filled', { controls })
     }
     return true
   }
@@ -475,14 +779,13 @@ async function addExperience(page: Page, item: CvExperience) {
   return true
 }
 
-async function addEducation(page: Page, item: CvEducation) {
+async function addEducation(page: Page, item: CvEducation, currentResumeId?: string) {
   const wizard = page.locator('[data-qa*="resume-profile-screen_educations"]:visible')
   if (await wizard.isVisible().catch(() => false)) {
     const level = await firstVisible([
       wizard.locator('[data-qa="magritte-select-activator"]')
     ])
     if (item.degree && level) {
-      await level.click()
       const normalizedDegree = item.degree.trim().toLowerCase()
       const levelCode = normalizedDegree.includes('магистр') || normalizedDegree.includes('master')
         ? 'master'
@@ -499,29 +802,41 @@ async function addEducation(page: Page, item: CvEducation) {
                   : normalizedDegree.includes('среднее') || normalizedDegree.includes('secondary')
                     ? 'secondary'
                     : 'higher'
-      const degree = await firstVisible([
-        page.locator(`[data-qa="magritte-select-option-${levelCode}"]:visible`),
-        page.locator('[role="option"]:visible').filter({ hasText: item.degree })
-      ])
-      if (!degree) throw profileFillerError('profile_hh_education_level_missing',
-        `HH education level was not found for "${item.degree}".`, 'fill_resume')
-      await degree.click()
-      const educationSheet = page.locator('[data-qa="bottom-sheet-overlay"]:visible')
-      if (await educationSheet.isVisible().catch(() => false)) {
-        const close = await firstVisible([
-          page.locator('[data-qa="select-bottom-sheet-navigation-close"]:visible')
-        ])
-        await close?.click({ force: true })
+      const currentLevel = String(await level.getAttribute('data-value').catch(() => '') ||
+        await level.innerText().catch(() => '')).trim().toLowerCase()
+      const levelPatterns: Record<string, RegExp> = {
+        master: /магистр|master/i, bachelor: /бакалавр|bachelor/i,
+        candidate: /кандидат|candidate/i, doctor: /доктор|doctor/i,
+        unfinished_higher: /неокончен|unfinished/i,
+        special_secondary: /среднее специаль|vocational/i,
+        secondary: /среднее|secondary/i, higher: /высшее|higher/i
       }
-      await page.keyboard.press('Escape').catch(() => undefined)
-      await page.waitForTimeout(300)
+      if (!levelPatterns[levelCode].test(currentLevel)) {
+        await level.click()
+        const degree = await firstVisible([
+          page.locator(`[data-qa="magritte-select-option-${levelCode}"]:visible`),
+          page.locator('[role="option"]:visible').filter({ hasText: item.degree })
+        ])
+        if (!degree) throw profileFillerError('profile_hh_education_level_missing',
+          `HH education level was not found for "${item.degree}".`, 'fill_resume')
+        await degree.click()
+        const educationSheet = page.locator('[data-qa="bottom-sheet-overlay"]:visible')
+        if (await educationSheet.isVisible().catch(() => false)) {
+          const close = await firstVisible([
+            page.locator('[data-qa="select-bottom-sheet-navigation-close"]:visible')
+          ])
+          await close?.click({ force: true })
+        }
+        await page.keyboard.press('Escape').catch(() => undefined)
+        await page.waitForTimeout(300)
+      }
     }
     // HH checks other resumes by default. Disable propagation before opening the
     // university and specialty suggestion sheets; those sheets can otherwise
     // absorb checkbox clicks after text entry.
     const propagateNames = await wizard.locator('input[type="checkbox"][name]:checked')
       .evaluateAll(inputs => inputs.map(input => input.getAttribute('name')).filter(Boolean) as string[])
-    for (const name of propagateNames) {
+    for (const name of propagateNames.filter(name => name !== currentResumeId)) {
       const currentCheckbox = () => wizard.locator(`input[type="checkbox"][name="${name}"]`)
       const isChecked = async () => {
         const checkbox = currentCheckbox()
@@ -540,28 +855,59 @@ async function addEducation(page: Page, item: CvEducation) {
           `HH did not disable education propagation to resume ${name}.`, 'fill_resume')
       }
     }
-    const textareas = wizard.locator('textarea:visible')
-    if (await textareas.count() < 1) return false
-    await textareas.nth(0).click()
-    const universityInput = page.locator('[data-qa="profile-education-university-input"]:visible')
-    await universityInput.waitFor({ state: 'visible', timeout: 5000 })
-    await universityInput.fill(item.institution)
-    await page.waitForTimeout(700)
-    const escapedInstitution = item.institution.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const universityOption = await firstVisible([
-      page.locator('[data-qa="suggest-item-cell"]:visible')
-        .filter({ hasText: new RegExp(escapedInstitution, 'i') })
+    const directUniversity = await firstVisible([
+      wizard.locator('[data-qa="profile-education-university-input"]'),
+      wizard.getByPlaceholder(/^Название$/i),
+      wizard.getByLabel(/Учебное заведение|University|Institution/i)
     ])
-    if (!universityOption) throw profileFillerError('profile_hh_education_institution_missing',
-      `HH did not offer the institution "${item.institution}".`, 'fill_resume')
-    await universityOption.click()
-    await page.waitForTimeout(300)
-    if (item.specialization && await textareas.count() >= 3) {
-      await textareas.nth(2).click()
-      const specialtyInput = page.locator('[data-qa="profile-education-specialty-input"]:visible')
-      await specialtyInput.waitFor({ state: 'visible', timeout: 5000 })
-      await specialtyInput.fill(item.specialization)
+    const textareas = wizard.locator('textarea:visible')
+    let universityInput = directUniversity
+    if (!universityInput && await textareas.count() >= 1) {
+      await textareas.nth(0).click()
+      universityInput = await firstVisible([
+        page.locator('[data-qa="profile-education-university-input"]:visible')
+      ])
+    }
+    if (!universityInput) return false
+    const currentInstitution = String(await universityInput.inputValue().catch(() => '')).trim()
+    if (currentInstitution !== item.institution.trim()) {
+      await universityInput.fill(item.institution)
       await page.waitForTimeout(700)
+    }
+    const escapedInstitution = item.institution.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (currentInstitution !== item.institution.trim()) {
+      const universityOption = await firstVisible([
+        page.locator('[data-qa="suggest-item-cell"]:visible')
+          .filter({ hasText: new RegExp(escapedInstitution, 'i') }),
+        page.getByText(item.institution, { exact: true }).last()
+      ])
+      // Some foreign institutions have no HH directory card under either the
+      // source-language name or their Russian abbreviation. Preserve the exact
+      // CV value as free text instead of selecting an unrelated suggestion.
+      if (universityOption) {
+        await universityOption.click()
+        await page.waitForTimeout(300)
+      }
+    }
+    if (item.specialization) {
+      let specialtyInput = await firstVisible([
+        wizard.locator('[data-qa="profile-education-specialty-input"]'),
+        wizard.getByPlaceholder(/^Специализация$/i),
+        wizard.getByLabel(/Специализация|Field of study|Specialization/i)
+      ])
+      if (!specialtyInput && await textareas.count() >= 3) {
+        await textareas.nth(2).click()
+        specialtyInput = await firstVisible([
+          page.locator('[data-qa="profile-education-specialty-input"]:visible')
+        ])
+      }
+      if (!specialtyInput) throw profileFillerError('profile_hh_education_specialty_missing',
+        'HH education specialization field was not found.', 'fill_resume')
+      const currentSpecialization = String(await specialtyInput.inputValue().catch(() => '')).trim()
+      if (currentSpecialization !== item.specialization.trim()) {
+        await specialtyInput.fill(item.specialization)
+        await page.waitForTimeout(700)
+      }
       const escapedSpecialization = item.specialization.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const specialtyOptions = page.locator('[data-qa="suggest-item-cell"]:visible')
         .filter({ hasText: new RegExp(escapedSpecialization, 'i') })
@@ -569,14 +915,21 @@ async function addEducation(page: Page, item: CvEducation) {
       const specialtyOption = prefersMaster
         ? await firstVisible([specialtyOptions.filter({ hasText: /магистр|master/i }), specialtyOptions])
         : await firstVisible([specialtyOptions])
-      if (!specialtyOption) throw profileFillerError('profile_hh_education_specialty_missing',
-        `HH did not offer the specialization "${item.specialization}".`, 'fill_resume')
-      await specialtyOption.click()
-      await page.waitForTimeout(300)
+      if (specialtyOption) {
+        await specialtyOption.click()
+        await page.waitForTimeout(300)
+      }
     }
-    const year = wizard.locator('input:visible:not([type="checkbox"]):not([type="radio"])').first()
-    if (item.graduationYear && await year.isVisible().catch(() => false)) {
-      await year.fill(String(item.graduationYear))
+    const year = await firstVisible([
+      wizard.locator('[data-qa="primary-education-form-year-input"]'),
+      wizard.getByPlaceholder(/Год окончания|Graduation year/i),
+      wizard.getByLabel(/Год окончания|Graduation year/i)
+    ])
+    if (item.graduationYear && year && await year.isVisible().catch(() => false)) {
+      const expectedYear = String(item.graduationYear)
+      if (String(await year.inputValue().catch(() => '')).trim() !== expectedYear) {
+        await year.fill(expectedYear)
+      }
     }
     return true
   }
@@ -594,7 +947,12 @@ async function addEducation(page: Page, item: CvEducation) {
 }
 
 async function addLanguage(page: Page, item: CvLanguage) {
-  const clicked = await clickText(page, [/добавить язык/i, /add language/i])
+  const add = await firstVisible([
+    page.locator('[data-qa="profile-language-add"]:visible'),
+    page.getByText(/добавить язык/i).last(), page.getByText(/add language/i).last()
+  ])
+  const clicked = Boolean(add)
+  if (add) await add.click()
   if (!clicked) return false
   await fill(page, item.name, ['Язык', 'Language'], ['input[name*="language"]'], true)
   await page.waitForTimeout(400)
@@ -603,6 +961,33 @@ async function addLanguage(page: Page, item: CvLanguage) {
   await clickText(page, [new RegExp(item.level, 'i')])
   await clickText(page, [/^сохранить$/i, /^save$/i], true)
   return true
+}
+
+function profileLanguagePatterns(item: CvLanguage): { name: RegExp; level: RegExp } {
+  const normalizedName = item.name.trim().toLocaleLowerCase('en-US')
+  const normalizedLevel = item.level.trim().toLocaleLowerCase('en-US')
+  const name = /^(?:english|английский)$/.test(normalizedName)
+    ? /английск|english/i
+    : /^(?:russian|русский)$/.test(normalizedName)
+      ? /русск|russian/i
+      : new RegExp(item.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+  const cefr = normalizedLevel.match(/\b([abc][12])\b/i)?.[1]
+  const level = /native|родной/.test(normalizedLevel)
+    ? /родной|native/i
+    : cefr
+      ? new RegExp(`\\b${cefr}\\b`, 'i')
+      : new RegExp(item.level.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+  return { name, level }
+}
+
+async function hasProfileLanguage(page: Page, item: CvLanguage): Promise<boolean> {
+  const { name, level } = profileLanguagePatterns(item)
+  const rows = page.locator('[data-qa^="profile-language-card-row-"]:visible')
+  for (let index = 0; index < await rows.count(); index += 1) {
+    const text = String(await rows.nth(index).innerText().catch(() => '')).trim()
+    if (name.test(text) && level.test(text)) return true
+  }
+  return false
 }
 
 async function addSkills(page: Page, skills: string[]) {
@@ -697,26 +1082,157 @@ async function setAllSkillsAdvanced(page: Page, skills: string[]) {
   }
 }
 
-async function setWorkPreferences(page: Page, market: 'Ru' | 'En') {
-  const travel = await clickText(page, market === 'Ru'
-    ? [/могу.*командиров/i, /готов.*командиров/i]
-    : [/ready.*business trip/i, /business trips.*ready/i])
-  if (!travel) throw profileFillerError('profile_hh_travel_control_missing',
-    'HH business trips control was not found.', 'fill_resume')
-  const formats = market === 'Ru'
-    ? [/на месте работодателя/i, /удален/i, /гибрид/i]
-    : [/on.?site/i, /remote/i, /hybrid/i]
-  for (const pattern of formats) {
-    if (!(await setCheckboxNearText(page, pattern, true))) {
-      throw profileFillerError('profile_hh_work_format_missing',
-      `HH work format control was not found: ${pattern}.`, 'fill_resume')
+async function setWorkPreferences(page: Page, _market: 'Ru' | 'En') {
+  const selected = async (option: Locator) =>
+    (await option.getAttribute('aria-selected').catch(() => null)) === 'true' ||
+    await option.locator('input[type="checkbox"], input[type="radio"]').first()
+      .isChecked().catch(() => false)
+  const ensureOptionsOpen = async (activator: Locator, optionQa: string) => {
+    const option = page.locator(`[data-qa="${optionQa}"]:visible`)
+    if (!(await option.isVisible().catch(() => false))) {
+      await activator.click()
+      await option.waitFor({ state: 'visible', timeout: 5000 }).catch(() => undefined)
     }
+    return option
+  }
+
+  const formatActivator = await firstVisible([
+    page.locator('[role="combobox"]:visible').filter({ hasText: /Формат работы/i }),
+    page.locator('[data-qa="magritte-select-activator"]:visible')
+      .filter({ hasText: /Формат работы/i })
+  ])
+  if (!formatActivator) throw profileFillerError('profile_hh_work_format_missing',
+    'HH work format select was not found.', 'fill_resume')
+  const formats = [
+    { qa: 'magritte-select-option-ON_SITE', wanted: true },
+    { qa: 'magritte-select-option-REMOTE', wanted: true },
+    { qa: 'magritte-select-option-HYBRID', wanted: true },
+    { qa: 'magritte-select-option-FIELD_WORK', wanted: false },
+    { qa: 'magritte-select-option-FLY_IN_FLY_OUT', wanted: false }
+  ]
+  for (const format of formats) {
+    const option = await ensureOptionsOpen(formatActivator, format.qa)
+    if (!(await option.isVisible().catch(() => false))) throw profileFillerError(
+      'profile_hh_work_format_missing', `HH work format option was not found: ${format.qa}.`,
+      'fill_resume')
+    if (await selected(option) !== format.wanted) {
+      await option.click()
+      await page.waitForTimeout(200)
+    }
+  }
+  for (const format of formats) {
+    const option = page.locator(`[data-qa="${format.qa}"]:visible`)
+    if (!(await option.isVisible().catch(() => false)) ||
+        await selected(option) !== format.wanted) {
+      throw profileFillerError('profile_hh_work_format_not_selected',
+        `HH did not retain work format state: ${format.qa}.`, 'fill_resume')
+    }
+  }
+  const chooseFormats = await firstVisible([
+    page.getByRole('button', { name: /^(?:Выбрать|Choose|Select)$/i }).last(),
+    page.getByText(/^(?:Выбрать|Choose|Select)$/i).last()
+  ])
+  if (!chooseFormats) throw profileFillerError('profile_hh_work_format_confirm_missing',
+    'HH work format confirmation control was not found.', 'fill_resume')
+  await chooseFormats.click()
+  await page.waitForTimeout(250)
+
+  const travelActivator = await firstVisible([
+    page.locator('[role="combobox"]:visible').filter({ hasText: /Командировки/i }),
+    page.locator('[data-qa="magritte-select-activator"]:visible')
+      .filter({ hasText: /Командировки/i })
+  ])
+  if (!travelActivator) throw profileFillerError('profile_hh_travel_control_missing',
+    'HH business trips select was not found.', 'fill_resume')
+  const ready = await ensureOptionsOpen(travelActivator, 'magritte-select-option-ready')
+  if (!(await ready.isVisible().catch(() => false))) throw profileFillerError(
+    'profile_hh_travel_control_missing', 'HH business trips Ready option was not found.',
+    'fill_resume')
+  if (!(await selected(ready))) await ready.click()
+  if (await ready.isVisible().catch(() => false)) {
+    if (!(await selected(ready))) throw profileFillerError('profile_hh_travel_not_selected',
+      'HH did not retain Ready business-trip state.', 'fill_resume')
+    await page.keyboard.press('Escape').catch(() => undefined)
   }
 }
 
+async function verifyWorkPreferences(page: Page): Promise<void> {
+  const selected = async (option: Locator) =>
+    (await option.getAttribute('aria-selected').catch(() => null)) === 'true' ||
+    await option.locator('input[type="checkbox"], input[type="radio"]').first()
+      .isChecked().catch(() => false)
+  const formatActivator = await firstVisible([
+    page.locator('[data-qa="resume-edit-work-formats"]:visible'),
+    page.locator('[role="combobox"]:visible').filter({ hasText: /Формат работы/i })
+  ])
+  if (!formatActivator) throw profileFillerError('profile_hh_work_format_missing',
+    'HH work format select was not found during verification.', 'verify_draft')
+  await formatActivator.click()
+  const requiredFormats = ['ON_SITE', 'REMOTE', 'HYBRID']
+  const forbiddenFormats = ['FIELD_WORK', 'FLY_IN_FLY_OUT']
+  for (const code of requiredFormats) {
+    const option = page.locator(`[data-qa="magritte-select-option-${code}"]:visible`)
+    await option.waitFor({ state: 'visible', timeout: 5000 }).catch(() => undefined)
+    if (!(await option.isVisible().catch(() => false)) || !(await selected(option))) {
+      throw profileFillerError('profile_hh_work_format_not_persisted',
+        `HH did not persist required work format: ${code}.`, 'verify_draft')
+    }
+  }
+  for (const code of forbiddenFormats) {
+    const option = page.locator(`[data-qa="magritte-select-option-${code}"]:visible`)
+    if (await option.isVisible().catch(() => false) && await selected(option)) {
+      throw profileFillerError('profile_hh_work_format_not_persisted',
+        `HH persisted an unwanted work format: ${code}.`, 'verify_draft')
+    }
+  }
+  await page.keyboard.press('Escape').catch(() => undefined)
+  const travelActivator = await firstVisible([
+    page.locator('[data-qa="resume-edit-business-trip-readiness"]:visible'),
+    page.locator('[role="combobox"]:visible').filter({ hasText: /Командировки/i })
+  ])
+  if (!travelActivator) throw profileFillerError('profile_hh_travel_control_missing',
+    'HH business trips select was not found during verification.', 'verify_draft')
+  await travelActivator.click()
+  const ready = page.locator('[data-qa="magritte-select-option-ready"]:visible')
+  await ready.waitFor({ state: 'visible', timeout: 5000 }).catch(() => undefined)
+  if (!(await ready.isVisible().catch(() => false)) || !(await selected(ready))) {
+    throw profileFillerError('profile_hh_travel_not_persisted',
+      'HH did not persist Ready business-trip state.', 'verify_draft')
+  }
+  await page.keyboard.press('Escape').catch(() => undefined)
+}
+
 async function setPreferredEmail(page: Page) {
-  await clickText(page, [/предпочтительный способ связи/i, /preferred contact/i], true)
-  await clickText(page, [/электронн.*почт/i, /^email$/i], true)
+  const direct = page.locator('[data-qa="resume-editor-preferred-contact-email-checked"]')
+  if (await direct.count()) {
+    if (!(await direct.isChecked().catch(() => false))) {
+      await direct.locator('xpath=ancestor::label[1]').click()
+    }
+    if (!(await direct.isChecked().catch(() => false))) throw profileFillerError(
+      'profile_hh_preferred_email_not_selected',
+      'HH did not select email as the preferred contact.', 'fill_resume')
+    return
+  }
+  // The current Russian HH contacts editor renders one inline radio beside
+  // every contact and spells the label "Предпочитаемый способ связи". Older
+  // versions opened a separate chooser. The email option is the last matching
+  // inline label because the phone block is rendered first.
+  const emailOption = await firstVisible([
+    page.getByText(/предпочитаем(?:ый|ая)\s+способ\s+связи/i).last(),
+    page.getByText(/предпочтительн(?:ый|ая)\s+способ\s+связи/i).last(),
+    page.getByText(/preferred contact/i).last()
+  ])
+  if (!emailOption) throw profileFillerError('profile_hh_control_missing',
+    'Required HH preferred email control was not found.', 'fill_resume')
+  const input = emailOption.locator('xpath=ancestor::label[1]')
+    .locator('input[type="radio"], input[type="checkbox"]').first()
+  const roleControl = emailOption.locator('xpath=ancestor::*[@role="radio" or @role="checkbox"][1]')
+  const checked = await input.count()
+    ? await input.isChecked().catch(() => false)
+    : await roleControl.count()
+      ? (await roleControl.getAttribute('aria-checked').catch(() => null)) === 'true'
+      : false
+  if (!checked) await emailOption.click()
 }
 
 export const SAVE_AND_CONTINUE_PATTERNS = [
@@ -724,29 +1240,59 @@ export const SAVE_AND_CONTINUE_PATTERNS = [
   /save\s+and\s+continue/i
 ]
 
-async function nextWizardStep(page: Page, stage: string) {
+const SPECIALIZATION_HEADING =
+  /^(?:Уточните специальность|Refine (?:the )?speciali[sz]ation)$/i
+
+function specializationHeading(page: Page): Locator {
+  return page.getByText(SPECIALIZATION_HEADING).last()
+}
+
+function specializationContainer(page: Page): Locator {
+  return specializationHeading(page)
+    .locator('xpath=ancestor::*[.//*[@data-qa="tree-selector-search-input"] and ' +
+      './/*[contains(normalize-space(.), "Сохранить") or contains(normalize-space(.), "Save")]][1]')
+}
+
+async function waitForWizardTransition(page: Page, previousUrl: string,
+  previousScreen?: string | null): Promise<boolean> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const currentScreen = await page.locator('[data-qa*="resume-profile-screen"]:visible').first()
+      .getAttribute('data-qa').catch(() => undefined)
+    if (page.url() !== previousUrl ||
+        (previousScreen && currentScreen && currentScreen !== previousScreen)) return true
+    await page.waitForTimeout(500)
+  }
+  return false
+}
+
+function wizardValidation(bodyText: string): string | undefined {
+  return bodyText.split(/\r?\n/).map(line => line.trim()).find(line =>
+    /^(?:укажите|выберите|заполните|добавьте|enter|select|specify|required)/i.test(line) &&
+    !/^(?:заполните основную информацию|fill in (?:the )?basic information|выберите или укажите профессию|(?:choose|select|specify).*(?:profession|job role))$/i.test(line))
+}
+
+export async function nextWizardStep(page: Page, stage: string) {
   const previousUrl = page.url()
   const previousScreen = await page.locator('[data-qa*="resume-profile-screen"]:visible').first()
     .getAttribute('data-qa').catch(() => undefined)
-  await clickText(page, SAVE_AND_CONTINUE_PATTERNS, true)
-  await page.waitForLoadState('domcontentloaded', { timeout: 60_000 }).catch(() => undefined)
-  await page.waitForTimeout(1000)
-  const bodyText = await page.locator('body').innerText()
-  if (/код.*подтверждени|verification code|confirm.*phone/i.test(bodyText)) {
-    throw profileFillerError('profile_hh_phone_verification_required',
-      'HH requires interactive phone verification.', 'create_resume')
+  for (let submitAttempt = 0; submitAttempt < 2; submitAttempt += 1) {
+    await clickText(page, SAVE_AND_CONTINUE_PATTERNS, true)
+    await page.waitForLoadState('domcontentloaded', { timeout: 60_000 }).catch(() => undefined)
+    if (await waitForWizardTransition(page, previousUrl, previousScreen)) return
+
+    const bodyText = await page.locator('body').innerText()
+    if (/код.*подтверждени|verification code|confirm.*phone/i.test(bodyText)) {
+      throw profileFillerError('profile_hh_phone_verification_required',
+        'HH requires interactive phone verification.', 'create_resume')
+    }
+    const validation = wizardValidation(bodyText)
+    if (validation) {
+      throw profileFillerError('profile_hh_wizard_validation_failed',
+        `HH did not advance from the ${stage} step: ${validation}`, 'fill_resume')
+    }
   }
-  const currentScreen = await page.locator('[data-qa*="resume-profile-screen"]:visible').first()
-    .getAttribute('data-qa').catch(() => undefined)
-  const urlUnchanged = page.url() === previousUrl
-  const screenUnchanged = !previousScreen || currentScreen === previousScreen
-  if (urlUnchanged && screenUnchanged) {
-    const validation = bodyText.split(/\r?\n/).map(line => line.trim()).find(line =>
-      /^(?:укажите|выберите|заполните|добавьте|enter|select|specify|required)/i.test(line))
-    throw profileFillerError('profile_hh_wizard_validation_failed',
-      `HH did not advance from the ${stage} step${validation ? `: ${validation}` : '.'}`,
-      'fill_resume')
-  }
+  throw profileFillerError('profile_hh_wizard_validation_failed',
+    `HH did not advance from the ${stage} step after retrying the completed form.`, 'fill_resume')
 }
 
 async function saveChangesWithoutPublishing(page: Page) {
@@ -764,8 +1310,13 @@ async function saveChangesWithoutPublishing(page: Page) {
     throw profileFillerError('profile_hh_publish_control_blocked',
       'Refused to click an HH control that could publish the resume.', 'save_draft')
   }
+  const previousUrl = page.url()
   await button.click()
-  await page.waitForTimeout(500)
+  const navigated = await page.waitForURL(url => url.toString() !== previousUrl, {
+    timeout: 20_000
+  }).then(() => true).catch(() => false)
+  if (!navigated) await page.waitForTimeout(3_000)
+  else await page.waitForTimeout(800)
   return true
 }
 
@@ -773,9 +1324,6 @@ export async function chooseFirstSuggestion(page: Page, value: string): Promise<
   let option: Locator | undefined
   for (let attempt = 0; attempt < 20 && !option; attempt += 1) {
     option = await firstVisible([
-      page.locator('[role="option"]').filter({ hasText: value }),
-      page.locator('[role="option"]').first(),
-      page.locator('[data-qa*="suggest"] li').first(),
       page.locator('[data-qa="bottom-sheet-css-variables"]:visible')
         .getByText(value, { exact: true }).last(),
       page.getByText(value, { exact: true }).last()
@@ -784,28 +1332,18 @@ export async function chooseFirstSuggestion(page: Page, value: string): Promise<
   }
   if (!option) return false
   await option.click()
-  const specialization = page.locator('[data-qa="tree-selector-search-input"]:visible')
   // HH replaces the profession sheet with the specialization sheet asynchronously.
-  // Closing the first sheet during that transition clears the selected profession.
-  await specialization.waitFor({ state: 'visible', timeout: 5000 }).catch(() => undefined)
+  // The profession sheet also contains a tree-selector search input, and HH no
+  // longer guarantees a data-qa on the specialization submit button. Its
+  // heading is the stable discriminator between the two mounted sheets.
+  await specializationHeading(page)
+    .waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
   return true
 }
 
-export function specializationForStack(stack: string, market: 'Ru' | 'En') {
-  const normalized = normalizeStack(stack)
-  if (normalized === 'devops') {
-    return market === 'Ru'
-      ? { query: 'DevOps', label: 'DevOps-инженер' }
-      : { query: 'DevOps', label: 'DevOps engineer' }
-  }
-  if (normalized === 'manualqa' || normalized === 'aqapython' || normalized === 'aqajava') {
-    return market === 'Ru'
-      ? { query: 'тестировщик', label: 'Тестировщик' }
-      : { query: 'tester', label: 'Tester' }
-  }
-  return market === 'Ru'
-    ? { query: 'разработчик', label: 'Программист, разработчик' }
-    : { query: 'developer', label: 'Programmer, developer' }
+export function specializationForStack(stack: string, _market: 'Ru' | 'En') {
+  void stack
+  return { query: 'разработчик', label: INITIAL_HH_PROFESSION }
 }
 
 export function professionForTitle(title: string, market: 'Ru' | 'En'): string {
@@ -848,55 +1386,73 @@ async function existingConfirmedBirthDate(page: Page,
 
 export async function selectRequiredSpecialization(page: Page, stack: string,
   market: 'Ru' | 'En'): Promise<boolean> {
-  const searchControl = page.locator('[data-qa="tree-selector-search-input"]')
-  await searchControl.first().waitFor({ state: 'visible', timeout: 10_000 })
-    .catch(() => undefined)
+  const sheet = specializationContainer(page)
+  await sheet.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
   const search = await firstVisible([
-    searchControl
+    sheet.locator('[data-qa="tree-selector-search-input"]')
   ])
   if (!search) return false
   const specialization = specializationForStack(stack, market)
   await search.fill(specialization.query)
   await page.waitForTimeout(500)
+  const exactText = page.getByText(specialization.label, { exact: true }).last()
+  const rowFromText = exactText.locator(
+    'xpath=ancestor::*[.//input[@type="checkbox" or @type="radio"] or .//*[@role="checkbox"]][1]'
+  )
   const option = await firstVisible([
-    page.locator('[data-qa^="tree-selector-item"]').filter({ hasText: specialization.label }),
-    page.getByText(specialization.label, { exact: true })
+    sheet.locator('[data-qa^="tree-selector-item"]').filter({ hasText: specialization.label }),
+    sheet.getByText(specialization.label, { exact: true }),
+    rowFromText,
+    exactText
   ])
   if (!option) {
     throw profileFillerError('profile_hh_specialization_missing',
       `HH did not offer the required specialization "${specialization.label}".`, 'fill_resume')
   }
   await option.click()
-  const selected = await firstVisible([
-    page.locator('[data-qa^="tree-selector-input"]:checked')
-  ])
+  // HH visually hides the native checkbox. isVisible() therefore produces a
+  // false negative even when React has checked it; inspect its state instead.
+  let selected = false
+  const nativeInput = rowFromText.locator(
+    '[data-qa^="tree-selector-input"], input[type="checkbox"], input[type="radio"]'
+  ).first()
+  for (let attempt = 0; attempt < 20 && !selected; attempt += 1) {
+    selected = await nativeInput.isChecked().catch(() => false) ||
+      (await option.getAttribute('aria-checked').catch(() => null)) === 'true' ||
+      (await nativeInput.getAttribute('aria-checked').catch(() => null)) === 'true'
+    if (!selected) await page.waitForTimeout(100)
+  }
   if (!selected) {
     throw profileFillerError('profile_hh_specialization_not_selected',
       `HH did not select the specialization "${specialization.label}".`, 'fill_resume')
   }
   const submit = await firstVisible([
-    page.locator('[data-qa="category-modal-submit"]')
+    sheet.locator('[data-qa="category-modal-submit"]'),
+    sheet.getByText(SAVE_AND_CONTINUE_PATTERNS[0]).last(),
+    sheet.getByText(SAVE_AND_CONTINUE_PATTERNS[1]).last(),
+    page.getByText(SAVE_AND_CONTINUE_PATTERNS[0]).last(),
+    page.getByText(SAVE_AND_CONTINUE_PATTERNS[1]).last()
   ])
   if (!submit) {
     throw profileFillerError('profile_hh_specialization_submit_missing',
       'HH specialization confirmation control was not found.', 'fill_resume')
   }
   await submit.click()
-  await page.locator('[data-qa="bottom-sheet-overlay"]:visible')
-    .waitFor({ state: 'hidden', timeout: 5000 }).catch(() => undefined)
+  await sheet.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined)
   return true
 }
 
 async function openSpecializationPicker(page: Page): Promise<void> {
-  const searchControl = page.locator('[data-qa="tree-selector-search-input"]:visible')
-  if (!(await searchControl.isVisible().catch(() => false))) {
+  const heading = specializationHeading(page)
+  if (!(await heading.isVisible().catch(() => false))) {
     const next = await firstVisible([page.locator('[data-qa="resume-profile-next-screen"]')])
     if (!next) throw profileFillerError('profile_hh_control_missing',
       'Required HH profession continue control was not found.', 'create_resume')
     await next.click()
-    await searchControl.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
+    await heading.waitFor({ state: 'visible', timeout: 10_000 })
+      .catch(() => undefined)
   }
-  if (!(await firstVisible([page.locator('[data-qa="tree-selector-search-input"]')]))) {
+  if (!(await heading.isVisible().catch(() => false))) {
     const bodyText = await page.locator('body').innerText()
     const duplicate = /у вас уже существует резюме с такой должностью|resume with this position already exists/i
       .test(bodyText)
@@ -905,6 +1461,102 @@ async function openSpecializationPicker(page: Page): Promise<void> {
       ? 'HH already has an incomplete resume with this profession.'
       : 'HH did not open the required specialization picker.', 'create_resume')
   }
+}
+
+const MONTH_NAMES_RU = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+]
+
+const MONTH_NAMES_RU_GENITIVE = [
+  'Января', 'Февраля', 'Марта', 'Апреля', 'Мая', 'Июня',
+  'Июля', 'Августа', 'Сентября', 'Октября', 'Ноября', 'Декабря'
+]
+
+function dateParts(value: string): { day: string; month: number; year: string } | undefined {
+  const dotted = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
+  const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  const day = Number(dotted?.[1] ?? iso?.[3])
+  const month = Number(dotted?.[2] ?? iso?.[2])
+  const year = Number(dotted?.[3] ?? iso?.[1])
+  if (!Number.isInteger(day) || day < 1 || day > 31 ||
+      !Number.isInteger(month) || month < 1 || month > 12 ||
+      !Number.isInteger(year) || year < 1900 || year > new Date().getFullYear()) return undefined
+  return { day: String(day).padStart(2, '0'), month, year: String(year) }
+}
+
+async function selectBirthDatePart(page: Page, control: Locator,
+  optionPatterns: RegExp[]): Promise<boolean> {
+  await control.click()
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const option = await firstVisible(optionPatterns.flatMap(pattern => [
+      page.getByRole('option', { name: pattern }),
+      page.getByText(pattern).last()
+    ]))
+    if (option) {
+      await option.click()
+      return true
+    }
+    await page.waitForTimeout(100)
+  }
+  return false
+}
+
+export async function fillBirthDate(page: Page, value?: string): Promise<boolean> {
+  if (!value) return false
+  const parts = dateParts(value)
+  if (!parts) throw profileFillerError('profile_hh_birth_date_invalid',
+    'HH birth date must use DD.MM.YYYY or YYYY-MM-DD format.', 'fill_resume')
+
+  const day = await firstVisible([
+    page.locator('[data-qa="resume-profile-common-birthday-day-input"]')
+  ])
+  if (!day) {
+    return await fill(page, value, ['Дата рождения', 'Birth date'], [
+      'input[name="birthday"]', 'input[name*="birth"]'
+    ])
+  }
+  const monthName = MONTH_NAMES_RU[parts.month - 1]
+  const monthNameGenitive = MONTH_NAMES_RU_GENITIVE[parts.month - 1]
+  const month = await firstVisible([
+    page.locator('[data-qa="resume-profile-common-birthday-month-select"]'),
+    page.locator('[data-qa="resume-profile-common-birthday-month"]'),
+    page.getByText(new RegExp(`^(?:${monthName}|${monthNameGenitive})$`, 'i')).last(),
+    page.getByText(/^(?:Месяц|Month)$/).last()
+  ])
+  const year = await firstVisible([
+    page.locator('[data-qa="resume-profile-common-birthday-year-select"]'),
+    page.locator('[data-qa="resume-profile-common-birthday-year"]'),
+    page.getByText(new RegExp(`^${parts.year}$`)).last(),
+    page.getByText(/^(?:Год|Year)$/).last()
+  ])
+  if (!month || !year) throw profileFillerError('profile_hh_required_field_missing',
+    'Required HH birth date month or year control was not found.', 'fill_resume')
+
+  const currentDay = String(await day.inputValue().catch(() => '')).trim().padStart(2, '0')
+  const currentMonth = String(await month.getAttribute('data-value').catch(() => '') ||
+    await month.innerText().catch(() => '')).trim()
+  const currentYear = String(await year.getAttribute('data-value').catch(() => '') ||
+    await year.innerText().catch(() => '')).trim()
+  if (currentDay === parts.day &&
+      (currentMonth.toLowerCase() === monthName.toLowerCase() ||
+        currentMonth.toLowerCase() === monthNameGenitive.toLowerCase() ||
+        currentMonth === String(parts.month)) && currentYear === parts.year) return true
+
+  if (currentDay !== parts.day) await day.fill(parts.day)
+  if (currentMonth.toLowerCase() !== monthName.toLowerCase() &&
+      currentMonth.toLowerCase() !== monthNameGenitive.toLowerCase() &&
+      currentMonth !== String(parts.month) && !(await selectBirthDatePart(page, month, [
+    new RegExp(`^${monthName}$`, 'i'), new RegExp(`^${monthNameGenitive}$`, 'i'),
+    new RegExp(`^${parts.month}$`)
+  ]))) throw profileFillerError('profile_hh_birth_date_not_selected',
+    `HH did not select birth month ${parts.month}.`, 'fill_resume')
+  if (currentYear !== parts.year &&
+      !(await selectBirthDatePart(page, year, [new RegExp(`^${parts.year}$`)]))) {
+    throw profileFillerError('profile_hh_birth_date_not_selected',
+      `HH did not select birth year ${parts.year}.`, 'fill_resume')
+  }
+  return true
 }
 
 async function fillSupplemental(page: Page, profile: PreparedProfile, title: string) {
@@ -924,6 +1576,10 @@ async function fillSupplemental(page: Page, profile: PreparedProfile, title: str
     'HH resume title edit control was not found.', 'fill_resume')
   await setWorkPreferences(page, profile.client.market)
   await saveChangesWithoutPublishing(page)
+  await page.goto(`https://hh.ru/resume/edit/${id}/position`, {
+    waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  await verifyWorkPreferences(page)
 
   await page.goto(`https://hh.ru/resume/edit/${id}/contacts`, {
     waitUntil: 'domcontentloaded', timeout: 120_000
@@ -935,6 +1591,16 @@ async function fillSupplemental(page: Page, profile: PreparedProfile, title: str
   ])
   await setPreferredEmail(page)
   await saveChangesWithoutPublishing(page)
+  await page.goto(`https://hh.ru/resume/edit/${id}/contacts`, {
+    waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  const preferredEmail = page.locator(
+    '[data-qa="resume-editor-preferred-contact-email-checked"]')
+  if (!(await preferredEmail.count()) ||
+      !(await preferredEmail.isChecked().catch(() => false))) {
+    throw profileFillerError('profile_hh_preferred_email_not_persisted',
+      'HH did not persist email as the preferred contact.', 'verify_draft')
+  }
 
   await page.goto(`https://hh.ru/resume/edit/${id}/about`, {
     waitUntil: 'domcontentloaded', timeout: 120_000
@@ -944,24 +1610,68 @@ async function fillSupplemental(page: Page, profile: PreparedProfile, title: str
   ], true)
   await saveChangesWithoutPublishing(page)
 
-  await page.goto(`https://hh.ru/resume/${id}`, {
+  await page.goto('https://hh.ru/applicant/profile/me', {
     waitUntil: 'domcontentloaded', timeout: 120_000
   })
   for (const item of profile.cv.languages) {
-    if (!(await page.getByText(item.name, { exact: true }).isVisible().catch(() => false))) {
+    if (!(await hasProfileLanguage(page, item))) {
       if (!(await addLanguage(page, item))) throw profileFillerError(
         'profile_hh_language_control_missing', 'HH add-language control was not found.', 'fill_resume')
+      await page.goto('https://hh.ru/applicant/profile/me', {
+        waitUntil: 'domcontentloaded', timeout: 120_000
+      })
+      if (!(await hasProfileLanguage(page, item))) throw profileFillerError(
+        'profile_hh_language_not_persisted',
+        `HH did not persist language and level: ${item.name} ${item.level}.`, 'verify_draft')
     }
   }
   if (profile.client.market === 'En') {
-    await clickText(page, [/work permits?|разрешени.*на работу/i], true)
-    for (const permit of ['Georgia', 'Serbia', 'Armenia']) {
-      if (!(await setCheckboxNearText(page, new RegExp(`^${permit}$`, 'i'), true))) {
-        throw profileFillerError('profile_hh_work_permit_missing',
-          `HH work permit control was not found: ${permit}.`, 'fill_resume')
-      }
-    }
+    await updateAndVerifyWorkPermits(page)
   }
+}
+
+export async function resumeDraftFromWorkPermits(page: Page, profile: PreparedProfile,
+  title: string, id: string): Promise<ResumeSnapshot> {
+  if (profile.client.market === 'En') await updateAndVerifyWorkPermits(page)
+  const expectedTitle = professionForTitle(title, profile.client.market).trim()
+  const resume = (await listResumes(page)).find(item => item.id === id)
+  if (!resume) throw profileFillerError('profile_hh_resume_not_found',
+    `HH draft ${id} was not found after resuming from work permits.`, 'verify_draft')
+  if (!resume.isDraft) throw profileFillerError('profile_hh_unexpected_publication',
+    `Resume ${id} is not marked as a draft.`, 'verify_draft')
+  if (resume.title.trim() !== expectedTitle) throw profileFillerError(
+    'profile_hh_title_verification_failed',
+    `HH draft title does not match the requested title "${expectedTitle}".`, 'verify_draft')
+  return resume
+}
+
+export async function verifyKnownDraft(page: Page, title: string, id: string,
+  artifactDir: string): Promise<ResumeSnapshot> {
+  const expectedTitle = title.trim()
+  await page.goto(`https://hh.ru/resume/edit/${id}/position`, {
+    waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  const titleInput = await field(page, ['Профессия', 'Position', 'Resume title'], [
+    '[data-qa="resume-edit-title-suggest"]', 'input[name="title"]',
+    '[data-qa="resume-block-title-position"] input', '[data-qa*="title"] input'
+  ])
+  const actualTitle = String(await titleInput?.inputValue().catch(() => '') ?? '').trim()
+  if (!actualTitle || actualTitle !== expectedTitle) throw profileFillerError(
+    'profile_hh_title_verification_failed',
+    `HH resume ${id} does not have the requested title "${expectedTitle}".`, 'verify_draft')
+
+  await page.goto(`https://hh.ru/profile/resume?resume=${encodeURIComponent(id)}`, {
+    waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  const draftScreen = page.locator('[data-qa*="resume-profile-screen"]:visible').first()
+  if (!(await draftScreen.isVisible().catch(() => false)) ||
+      !/\/profile\/resume\//i.test(new URL(page.url()).pathname)) {
+    throw profileFillerError('profile_hh_unexpected_publication',
+      `HH resume ${id} no longer opens as an unfinished draft.`, 'verify_draft')
+  }
+  await captureArtifactScreenshot(page, path.join(artifactDir, `final-draft-${id}.png`))
+  return { id, title: actualTitle, href: `https://hh.ru/resume/${id}`,
+    statusText: 'verified through unfinished HH draft wizard', isDraft: true }
 }
 
 async function fillPublishedResumeCore(page: Page, profile: PreparedProfile,
@@ -1001,7 +1711,8 @@ export async function createResumeDraft(page: Page, profile: PreparedProfile,
   const structuredPhone = profile.cv.contacts.phone || await existingConfirmedPhone(page, before)
   const structuredBirthDate = profile.cv.birthDate ||
     await existingConfirmedBirthDate(page, before)
-  const profession = professionForTitle(title, profile.client.market)
+  const targetTitle = professionForTitle(title, profile.client.market)
+  const profession = INITIAL_HH_PROFESSION
   let resumable: ResumeSnapshot | undefined
   let activeDraftId = existingDraftId
   if (existingDraftId) {
@@ -1017,9 +1728,15 @@ export async function createResumeDraft(page: Page, profile: PreparedProfile,
       throw profileFillerError('profile_hh_existing_draft_unavailable',
         `HH incomplete resume ${existingDraftId} cannot be continued.`, 'create_resume')
     }
-    resumable = { id: existingDraftId, title: profession, href,
+    resumable = { id: existingDraftId, title: targetTitle, href,
       statusText: 'incomplete', isDraft: true }
   } else {
+    const professionStates: ProfessionState[] = []
+    const captureProfessionState = async (stage: string) => {
+      professionStates.push(await professionState(page, stage))
+      fs.writeFileSync(path.join(artifactDir, 'profession-state.json'),
+        `${JSON.stringify(professionStates, null, 2)}\n`, { mode: 0o600 })
+    }
     await page.goto(HH_NEW_RESUME_URL, { waitUntil: 'domcontentloaded', timeout: 120_000 })
     if (/можно создать не более|resume limit|maximum number of resumes/i.test(await page.locator('body').innerText())) {
       throw profileFillerError('profile_hh_resume_limit',
@@ -1027,21 +1744,34 @@ export async function createResumeDraft(page: Page, profile: PreparedProfile,
     }
     const professionInput = await openProfessionEditor(page)
     await professionInput.fill(profession)
+    await captureProfessionState('profession-entered')
     if (!(await chooseFirstSuggestion(page, profession))) {
       throw profileFillerError('profile_hh_profession_suggestion_missing',
         `HH did not offer a profession matching "${profession}".`, 'fill_resume')
     }
+    await captureProfessionState('profession-suggestion-selected')
     await openSpecializationPicker(page)
+    await captureProfessionState('specialization-opened')
     await selectRequiredSpecialization(page, profile.client.stack, profile.client.market)
+    await captureProfessionState('specialization-submitted')
+    // The specialization modal's submit is itself a save-and-continue action.
+    // Give HH time to complete that transition before touching the underlying
+    // profession screen; an early second click can race React state hydration.
+    await page.waitForURL(url => /\/profile\/resume\/common/i.test(url.pathname), {
+      timeout: 15_000
+    }).catch(() => undefined)
     if (!/\/profile\/resume\/common/i.test(new URL(page.url()).pathname)) {
-      const continueButton = await firstVisible([
-        page.locator('[data-qa="resume-profile-next-screen"]')
-      ])
-      if (!continueButton) throw profileFillerError('profile_hh_control_missing',
-        'Required HH profession continue control was not found after specialization.',
-        'create_resume')
-      await continueButton.click()
+      // The first click can land while HH is replacing the specialization sheet
+      // and before the profession screen's React handler is ready. Use the same
+      // bounded transition check and single retry as every other wizard screen.
+      try {
+        await nextWizardStep(page, 'profession')
+      } catch (error) {
+        await captureProfessionState('profession-transition-failed')
+        throw error
+      }
     }
+    await captureProfessionState('profession-transition-complete')
     await page.waitForURL(url => /\/profile\/resume\/common/i.test(url.pathname) &&
       Boolean(url.searchParams.get('resume')), { timeout: 15_000 }).catch(() => undefined)
     activeDraftId = new URL(page.url()).searchParams.get('resume') ??
@@ -1066,8 +1796,7 @@ export async function createResumeDraft(page: Page, profile: PreparedProfile,
       '[data-qa*="last-name"] input'], true)
   await fill(page, profile.cv.middleName, ['Отчество', 'Middle name'], [
     '[data-qa="resume-profile-common-patronymic-input"]', 'input[name="middleName"]'])
-  await fill(page, structuredBirthDate, ['Дата рождения', 'Birth date'], [
-    'input[name="birthday"]', 'input[name*="birth"]'])
+  await fillBirthDate(page, structuredBirthDate)
   // HH's masked birth-date input can restore focus to the surname field while
   // applying the mask. Re-assert identity after the mask settles so date
   // digits cannot be appended to the surname.
@@ -1100,10 +1829,24 @@ export async function createResumeDraft(page: Page, profile: PreparedProfile,
   if (travel) await setWorkPreferences(page, profile.client.market)
   await nextWizardStep(page, 'personal information')
 
+  // HH can replace the temporary profession-step ID with the persisted resume
+  // ID after saving personal information. The education screen exposes the
+  // persisted ID as the name of the resume propagation checkbox.
+  const persistedResumeCheckbox = page.getByLabel(targetTitle, { exact: true })
+  const persistedResumeId = await persistedResumeCheckbox.count()
+    ? String(await persistedResumeCheckbox.first().getAttribute('name', { timeout: 1000 })
+      .catch(() => '') ?? '')
+    : ''
+  if (/^[a-z0-9]+$/i.test(persistedResumeId)) {
+    activeDraftId = persistedResumeId
+    if (resumable) resumable = { ...resumable, id: persistedResumeId,
+      href: `https://hh.ru/profile/resume/educations?resume=${persistedResumeId}` }
+  }
+
   for (const item of profile.cv.education) {
     const alreadyPresent = await page.getByText(item.institution, { exact: false })
       .isVisible().catch(() => false)
-    if (!alreadyPresent && !(await addEducation(page, item))) throw profileFillerError(
+    if (!alreadyPresent && !(await addEducation(page, item, activeDraftId))) throw profileFillerError(
       'profile_hh_education_control_missing', 'HH add-education control was not found.', 'fill_resume')
   }
   await nextWizardStep(page, 'education')
@@ -1116,22 +1859,32 @@ export async function createResumeDraft(page: Page, profile: PreparedProfile,
     await nextWizardStep(page, 'skill levels')
   }
 
+  if (!activeDraftId) throw profileFillerError('profile_hh_resume_not_created',
+    'HH draft ID is unavailable before safe experience editing.', 'fill_resume')
+  await page.goto(`https://hh.ru/resume/${activeDraftId}/experience`, {
+      waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  await page.waitForTimeout(1500)
   for (const item of profile.cv.experience) {
     const alreadyPresent = await page.getByText(item.company, { exact: false })
       .isVisible().catch(() => false)
-    if (!alreadyPresent && !(await addExperience(page, item))) throw profileFillerError(
+    if (!alreadyPresent && !(await addPublishedExperience(page, item))) throw profileFillerError(
       'profile_hh_experience_control_missing', 'HH add-experience control was not found.', 'fill_resume')
+    await page.goto(`https://hh.ru/resume/${activeDraftId}/experience`, {
+      waitUntil: 'domcontentloaded', timeout: 120_000
+    })
+    await page.waitForTimeout(700)
   }
   if (process.env.PROFILE_FILLER_INSPECT_FINAL_STEP === '1') {
     const diagnostic = path.join(artifactDir, 'final-wizard-step.png')
-    await page.screenshot({ path: diagnostic, fullPage: true })
+    await captureArtifactScreenshot(page, diagnostic)
     throw profileFillerError('profile_hh_final_step_inspection',
       `HH final wizard step captured at ${diagnostic}.`, 'fill_resume')
   }
   // Do not advance from experience: the current HH wizard publishes immediately.
   // Any later optional sections must be edited through safe partial-edit routes.
-  await page.screenshot({ path: path.join(artifactDir,
-    `created-${title.replace(/[^a-zа-я0-9]+/gi, '-').slice(0, 60)}.png`), fullPage: true })
+  await captureArtifactScreenshot(page, path.join(artifactDir,
+    `created-${title.replace(/[^a-zа-я0-9]+/gi, '-').slice(0, 60)}.png`))
   const after = await listResumes(page)
   const beforeIds = new Set(before.map(item => item.id))
   const knownDraft = activeDraftId ? {
@@ -1165,9 +1918,9 @@ export async function createResumeDraft(page: Page, profile: PreparedProfile,
     title: actualTitle || created.title, statusText, isDraft: created.isDraft }
   if (!updated.isDraft) throw profileFillerError('profile_hh_unexpected_publication',
     `Resume ${created.id} stopped being a draft after editing.`, 'verify_draft')
-  if (updated.title.trim() !== profession.trim()) {
+  if (updated.title.trim() !== targetTitle.trim()) {
     throw profileFillerError('profile_hh_title_verification_failed',
-      `HH draft title does not match the requested profession "${profession}".`, 'verify_draft')
+      `HH draft title does not match the requested title "${targetTitle}".`, 'verify_draft')
   }
   return updated
 }
@@ -1201,7 +1954,8 @@ export async function duplicateResumeVariant(page: Page, source: ResumeSnapshot,
     throw profileFillerError('profile_hh_duplicate_not_created',
       `HH did not create a new resume from baseline ${source.id}.`, 'duplicate_resume')
   }
-  const profession = professionForTitle(title, market)
+  const targetTitle = professionForTitle(title, market)
+  const profession = INITIAL_HH_PROFESSION
   const professionInput = await openProfessionEditor(page)
   await professionInput.fill(profession)
   if (!(await chooseFirstSuggestion(page, profession))) {
@@ -1224,38 +1978,115 @@ export async function duplicateResumeVariant(page: Page, source: ResumeSnapshot,
       `HH already has a resume for profession "${profession}".`, 'duplicate_resume')
   }
 
+  await page.goto(`https://hh.ru/resume/edit/${duplicatedId}/position`, {
+    waitUntil: 'domcontentloaded', timeout: 120_000
+  })
+  await fill(page, targetTitle, ['Профессия', 'Position', 'Resume title'], [
+    '[data-qa="resume-edit-title-suggest"]', 'input[name="title"]',
+    '[data-qa="resume-block-title-position"] input', '[data-qa*="title"] input'
+  ], true)
+  await saveChangesWithoutPublishing(page)
   const listed = (await listResumes(page)).find(item => item.id === duplicatedId)
-  if (!listed || listed.title.trim() !== profession.trim()) {
+  if (!listed || listed.title.trim() !== targetTitle.trim()) {
     throw profileFillerError('profile_hh_title_verification_failed',
-      `HH duplicated resume title does not match profession "${profession}".`, 'verify_draft')
+      `HH duplicated resume title does not match requested title "${targetTitle}".`, 'verify_draft')
   }
   return listed
 }
 
 async function resumeCard(page: Page, id: string): Promise<Locator | undefined> {
-  const link = page.locator(`a[href*="/resume/${id}"]`).first()
+  const link = page.locator([
+    `a[data-qa="resume-card-link-${id}"]`,
+    `a[href*="/resume/${id}"]`,
+    `a[href*="resume=${id}"]`
+  ].join(',')).first()
   if (!(await link.count())) return undefined
-  return link.locator('xpath=ancestor::*[self::div or self::article][1]')
+  const resumeRoot = link.locator('xpath=ancestor::*[@data-qa="resume"][1]')
+  if (await resumeRoot.count()) return resumeRoot.first()
+  const actionRoot = link.locator(
+    'xpath=ancestor::*[.//*[@data-qa="resume-list-action-more"]][1]')
+  return await actionRoot.count() ? actionRoot.first() :
+    link.locator('xpath=ancestor::*[self::div or self::article][1]')
 }
 
 export async function deleteResume(page: Page, resume: ResumeSnapshot): Promise<void> {
   await page.goto(HH_RESUMES_URL, { waitUntil: 'domcontentloaded', timeout: 120_000 })
   const card = await resumeCard(page, resume.id)
   const menu = card ? await firstVisible([
-    card.locator('[data-qa*="menu"]'), card.getByRole('button', { name: /ещё|more|actions/i })
+    card.locator('[data-qa="resume-list-action-more"]'),
+    card.locator('[data-qa*="menu"]'),
+    card.getByRole('button', { name: /ещё|more|actions/i })
   ]) : undefined
-  await menu?.click()
-  const clicked = await clickText(page, [/удалить резюме/i, /delete resume/i])
-  if (!clicked) {
+  if (!menu) throw profileFillerError('profile_hh_delete_unavailable',
+    `Action menu was not found for old resume ${resume.id}.`, 'delete_old_resumes')
+  await menu.click()
+  await page.waitForTimeout(300)
+  let deleteControl = await firstVisible([
+    page.locator('[role="menu"]:visible').getByText(/^(?:Удалить резюме|Удалить|Delete resume|Delete)$/i),
+    page.locator('[data-qa="bottom-sheet-css-variables"]:visible')
+      .getByText(/^(?:Удалить резюме|Удалить|Delete resume|Delete)$/i),
+    page.locator('[role="dialog"]:visible')
+      .getByText(/^(?:Удалить резюме|Удалить|Delete resume|Delete)$/i),
+    page.getByText(/^(?:Удалить резюме|Delete resume)$/i).last()
+  ])
+  if (!deleteControl) {
+    const editControl = await firstVisible([
+      page.locator('[role="menu"]:visible')
+        .getByText(/^(?:Редактировать|Edit)$/i),
+      page.locator('[data-qa="bottom-sheet-css-variables"]:visible')
+        .getByText(/^(?:Редактировать|Edit)$/i),
+      page.getByText(/^(?:Редактировать|Edit)$/i).last()
+    ])
+    if (editControl) {
+      await editControl.click()
+      await page.waitForTimeout(800)
+      deleteControl = await firstVisible([
+        page.locator('[data-qa*="resume-delete"]:visible'),
+        page.getByRole('button', { name: /^(?:Удалить резюме|Delete resume)$/i }),
+        page.getByRole('link', { name: /^(?:Удалить резюме|Delete resume)$/i }),
+        page.getByText(/^(?:Удалить резюме|Delete resume)$/i)
+      ])
+    }
+  }
+  if (!deleteControl) {
     throw profileFillerError('profile_hh_delete_unavailable',
       `Delete control was not found for old resume ${resume.id}.`, 'delete_old_resumes')
   }
-  await clickText(page, [/подтвердить|удалить/i, /confirm|delete/i], true)
+  await deleteControl.click()
+  const confirmation = await firstVisible([
+    page.locator('[role="dialog"]:visible').getByRole('button', {
+      name: /^(?:Удалить навсегда|Удалить|Подтвердить|Delete permanently|Delete|Confirm)$/i
+    }),
+    page.locator('[data-qa="bottom-sheet-css-variables"]:visible').getByRole('button', {
+      name: /^(?:Удалить навсегда|Удалить|Подтвердить|Delete permanently|Delete|Confirm)$/i
+    })
+  ])
+  if (!confirmation) throw profileFillerError('profile_hh_delete_confirmation_missing',
+    `Delete confirmation was not found for old resume ${resume.id}.`, 'delete_old_resumes')
+  await confirmation.click()
+  await page.waitForTimeout(700)
+}
+
+async function openPrivacyEditor(page: Page, resumeIdValue: string): Promise<void> {
+  const url = `https://hh.ru/resume/edit/${resumeIdValue}/visibility`
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+      .catch(() => undefined)
+    const hydrated = await page.waitForFunction(() =>
+      Boolean(document.body?.innerText.trim().length), undefined, { timeout: 15_000 })
+      .then(() => true).catch(() => false)
+    if (hydrated) return
+    await page.waitForTimeout(1_000)
+  }
+  throw profileFillerError('profile_hh_visibility_page_empty',
+    'HH visibility editor stayed empty after three bounded reloads.', 'configure_privacy')
 }
 
 export async function configurePrivacyAndStopList(page: Page, resume: ResumeSnapshot,
   profile: PreparedProfile) {
-  await page.goto(resume.href, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+  // Draft list links reopen the unfinished wizard and do not expose visibility.
+  // Privacy is a safe partial editor and must be addressed directly by resume ID.
+  await openPrivacyEditor(page, resume.id)
   const visibilityCard = await firstVisible([
     page.locator('[data-qa="resume-visibility-card"]'),
     page.getByText(/видимость резюме|resume visibility|изменить видимость/i)
@@ -1374,9 +2205,7 @@ export async function configurePrivacyAndStopList(page: Page, resume: ResumeSnap
     'HH privacy save control was not found.', 'configure_privacy')
   await save.click()
   await page.waitForTimeout(700)
-  await page.goto(`https://hh.ru/resume/edit/${resume.id}/visibility`, {
-    waitUntil: 'domcontentloaded', timeout: 120_000
-  })
+  await openPrivacyEditor(page, resume.id)
   const savedBlacklist = page.locator(
     '[data-qa="resume-visibility-card-access-type-blacklist"] input').first()
   const savedPhone = page.locator(
