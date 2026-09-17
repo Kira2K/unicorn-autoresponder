@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { workflowFixture } from './workflow-fixture.mts';
+import { consoleRecords } from './records.mts';
+import { tableIds as t } from './tables.mts';
+test('a selected client does not load whole tables; FK changes are visible on the next read', async () => {
+  const f = workflowFixture(), calls: string[] = [], find = f.db.findRecords;
+  for (let id = 1000; id < 1500; id++) f.set(t.clients, id, { client_name: 'Unrelated' });
+  f.db.listRecords = async () => { throw Error('unexpected whole table scan'); };
+  f.db.findRecords = async (...args) => { calls.push(args[0] + ':' + args[1]); return find(...args); };
+  const source = consoleRecords(f.db);
+  const first = await source.fetchRecords(t.clients, 100, { where: '(telegram_general_chat_id,eq,-7007)' });
+  assert.deepEqual(first.map(row => row.Id), [7]);
+  assert.equal((first[0].rel_clients_primary_stack as { name: string }).name, 'Go');
+  assert.deepEqual(calls, [t.clients + ':telegram_general_chat_id', t.stacks + ':Id', t.market + ':Id', t.english + ':Id']);
+  f.set(t.stacks, 2, { name: 'Python' }); f.rows.get(t.clients)!.get('7')!.stacks_id = 2;
+  const second = await source.fetchRecords(t.clients, 100, { where: '(Id,eq,7)' });
+  assert.equal((second[0].rel_clients_primary_stack as { name: string }).name, 'Python');
+  assert.deepEqual(await source.fetchRecords(t.clients, 100, { where: '(Id,eq,7)~or(Id,eq,7)' }), second);
+});

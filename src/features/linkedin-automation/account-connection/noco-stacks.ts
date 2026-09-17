@@ -15,7 +15,7 @@ function listPrimaryStacks(rows: any[]) {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-async function updatePrimaryStack(client: any, rows: any, clientId: number, stackId: number) {
+async function updatePrimaryStack(client: any, rows: any, clientId: number, stackId: number, link = linkRecords) {
   const clientRow = rows.clients.find((row: any) => Number(row.Id) === clientId)
   const stack = rows.stacks.find((row: any) => Number(row.Id) === stackId)
   if (!clientRow || !stack) throw new LinkedInAuthError('noco_stack_not_found',
@@ -25,7 +25,7 @@ async function updatePrimaryStack(client: any, rows: any, clientId: number, stac
     column.title === 'rel_clients_primary_stack')
   if (!relation?.id) throw new LinkedInAuthError('noco_stack_relation_missing',
     'The clients primary stack relation is missing.')
-  const linked = await linkRecords(client, TABLES.clients, relation.id, clientId, [stackId])
+  const linked = await link(client, TABLES.clients, relation.id, clientId, [stackId])
   if (!linked.ok) throw new LinkedInAuthError('noco_stack_update_failed',
     'Could not update the client primary stack.')
   return { id: stackId, name: String(stack.name ?? stack.stack ?? stack.stack_name ?? '').trim() }

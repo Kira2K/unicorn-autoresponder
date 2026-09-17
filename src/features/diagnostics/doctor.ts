@@ -75,8 +75,9 @@ type AuthPreflightDependencies = {
 const DEFAULT_AUTH_PREFLIGHT_CLIENT = '\u041a\u0438\u0440\u0430'
 
 function getConfiguredDbBackendLabel(): string {
-  return String(process.env.APP_DB ?? '').trim().toLowerCase() === 'noco'
-    ? 'noco'
+  const mode = String(process.env.APP_DB ?? '').trim().toLowerCase()
+  return ['noco', 'postgres'].includes(mode)
+    ? mode
     : 'google_sheets'
 }
 

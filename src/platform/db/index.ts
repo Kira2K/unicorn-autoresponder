@@ -10,6 +10,11 @@ function createAppDb(): import('./types.ts').AppDb {
     return createNocoDb()
   }
 
+  if (String(process.env.APP_DB ?? '').trim().toLowerCase() === 'postgres') {
+    const { createRuntimePostgresDb } = require('./postgres/runtime.mts') as typeof import('./postgres/runtime.mts')
+    return createRuntimePostgresDb(createGoogleSheetsDb())
+  }
+
   return createGoogleSheetsDb()
 }
 

@@ -85,6 +85,14 @@ Commands:
 - `last_workflow_error`: helper field for stop/failure diagnosis.
 - `workflow_trace`: helper field for transition history.
 
+### Хранение в PostgreSQL
+
+В SQL поля `last_responsible`, `last_workflow_error` и `workflow_trace`
+хранятся отдельно от исходной схемы Noco. Импорт сохраняет их у оставшихся записей.
+`backend/postgres/workflow-schema.mts` проверяет наличие полей; добавление требует
+явного разрешения. При старте приложения схема не меняется. Правила статусов,
+ролей и переходов прежние. Запуск описан в [SQL_START.md](SQL_START.md).
+
 ## Statuses
 
 - `stopped`

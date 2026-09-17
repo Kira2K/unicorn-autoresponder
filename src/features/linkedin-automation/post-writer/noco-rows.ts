@@ -9,6 +9,17 @@ export function validKey(key: string) {
   if (!/^[a-z0-9_-]{1,180}$/i.test(key)) throw new PostError('post_key_invalid')
   return key
 }
+export function decodePostRow<K extends Bucket>(bucket: K, row: Record<string, unknown>) {
+  const key = validKey(String(row.record_key ?? ''))
+  const value = object(JSON.parse(String(row.state_json)))
+  const id = Number(row.Id)
+  if (!Number.isSafeInteger(id) || id <= 0 || !Number.isInteger(value.account) ||
+    value.account !== row.platform_account_id ||
+    (bucket === 'settings' ? String(value.account) : value.id) !== key) {
+    throw new PostError('post_state_invalid')
+  }
+  return { id, value: value as Tables[K] }
+}
 export function createNocoRows(http: NocoTransport) {
   let metadata: Promise<Record<Bucket, string>> | undefined
   const validated = new Set<string>()
@@ -33,21 +44,10 @@ export function createNocoRows(http: NocoTransport) {
     }
     return id
   }
-  function decode<K extends Bucket>(bucket: K, row: Record<string, unknown>) {
-    const key = validKey(String(row.record_key ?? ''))
-    const value = object(JSON.parse(String(row.state_json)))
-    const id = Number(row.Id)
-    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isInteger(value.account) ||
-      value.account !== row.platform_account_id ||
-      (bucket === 'settings' ? String(value.account) : value.id) !== key) {
-      throw new PostError('post_state_invalid')
-    }
-    return { id, value: value as Tables[K] }
-  }
   async function get<K extends Bucket>(bucket: K, key: string) {
     const rows = await http.records(await table(bucket), `(record_key,eq,${validKey(key)})`)
     if (rows.length > 1) throw new PostError('post_duplicate_rows')
-    return rows[0] ? decode(bucket, rows[0]) : undefined
+    return rows[0] ? decodePostRow(bucket, rows[0]) : undefined
   }
   async function list<K extends Bucket>(bucket: K, account?: number) {
     const rows = await http.records(await table(bucket), account === undefined ? undefined :
@@ -56,7 +56,7 @@ export function createNocoRows(http: NocoTransport) {
     return rows.map(row => {
       if (keys.has(row.record_key)) throw new PostError('post_duplicate_rows')
       keys.add(row.record_key)
-      return decode(bucket, row).value
+      return decodePostRow(bucket, row).value
     })
   }
   return { table, get, list }

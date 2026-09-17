@@ -2,10 +2,13 @@ type App = import('express').Express
 type Handler = import('express').RequestHandler
 type Service = import('./connection-inviter-types.ts').ConnectionInviterService
 import { nocoRouteFailure } from './noco-route-failure.ts'
+import { connectionErrorCode } from '../../linkedin-automation/connection-inviter/errors.ts'
 
 function failure(error: any) {
   const nocoFailure = nocoRouteFailure(error)
   if (nocoFailure) return nocoFailure
+  if (connectionErrorCode(error) === 'connection_storage_read_unavailable') return { status: 503,
+    body: { error: 'connection_storage_read_unavailable', message: 'Хранилище временно недоступно. Повторите позже.' } }
   const code = String(error?.code ?? 'connection_inviter_internal_error')
   if (code === 'connection_account_not_allowed') return { status: 403,
     body: { error: code, message: 'Аккаунт не разрешён для этого ручного запуска backend.' } }

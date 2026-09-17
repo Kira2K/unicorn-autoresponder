@@ -8,7 +8,7 @@ $originalLocation = Get-Location
 
 try {
   Set-Location -LiteralPath $AutoresponsesRepo
-  $env:APP_DB = 'noco'
+  if ($env:APP_DB -ne 'postgres') { $env:APP_DB = 'noco' }
   $env:ORCHESTRATOR_SUPERVISED = 'true'
   $env:ORCHESTRATOR_CONCURRENCY = '3'
   $env:ORCHESTRATOR_RESPONSE_LIMIT = '120'
