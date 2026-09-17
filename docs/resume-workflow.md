@@ -18,7 +18,8 @@ Commands:
   final links when they exist.
 - `/resume_reject <comment>`: rejects an approval step back to the producer
   phase. The comment must be at least 30 trimmed characters, except the exact
-  default phrase `оставил комменты в резюме`.
+  Kira phrase `оставь комментарии в резюме` and the legacy phrase
+  `оставил комменты в резюме`.
 - `/resume_reset_test`: resets the linked workflow row only when
   `RESUME_WORKFLOW_TEST_MODE=true`.
 - `/open_my_tasks` or `/tasks`: Kira/Provider private command that lists
@@ -165,8 +166,10 @@ student Telegram account and lets the support bot reply in the common chat.
 Before leaving `collection student's data`, the workflow validates education,
 real age, English level, real/desired location, GitHub, LinkedIn, Telegram RU,
 Telegram EN, root Google folder, and student source folder. If a profile field
-is missing, the bot asks the user to add it in the Console. The Telegram bot
-only accepts the student source-folder link via `/resume <url>`.
+is missing, the bot asks the user to add it in the Console and appends the
+clickable `Ссылка на ЛК` link to `https://very-evil-unicorn.onrender.com/` after
+the missing-field list. The Telegram bot only accepts the student source-folder
+link via `/resume <url>`.
 
 After every successful status change, the backend emits a next-responsible
 notification:
@@ -175,6 +178,44 @@ notification:
 - Kira next: private Kira chat.
 - Main provider next: private Provider chat, usually addressed to Yulia.
 - Russian translator next: private translator chat, usually addressed to Polina.
+
+Every private workflow notification to Yulia or Polina ends with the separate
+line `Открыть все задачи /open_my_tasks`. Kira notifications use the fixed
+templates described below and end with `Все задачи: /open_my_tasks`.
+
+### Kira message template contract
+
+Kira workflow messages are deterministic templates implemented in
+`src/integrations/telegram/resume-kira-message-templates.ts`. Their wording,
+emoji, line order, bold heading, and footer are a product contract. Do not
+generate, paraphrase, or embellish them with an LLM.
+
+The fixed scenarios are:
+
+1. `📌 Ожидается фидбек по резюме` for `collection Kira's comments`.
+2. `✅ Комментарий сохранен` after Kira's feedback is stored.
+3. `🔍 Черновик на проверке` for `Draft in approve by Kira`.
+4. `🇬🇧 Проверка EN-версии` for `English version in approve by Kira`.
+5. `🇷🇺 Проверка RU-версии` for `Russian version in approve by Kira`.
+6. `⚡️ Новая задача: {stage}` when Kira opens a task card.
+7. `📋 Твои задачи по резюме ({from}–{to} из {total}):` for the task list.
+8. `🎉 Все чисто!` when Kira has no active tasks.
+9. `↩️ Возврат на доработку` after Kira presses the reject button.
+10. `🛠 Черновик отправлен на доработку` after a draft rejection.
+11. `🛠 EN-версия отправлена на доработку` after an English-version rejection.
+12. `🛠 RU-версия отправлена на доработку` after a Russian-version rejection.
+13. `ℹ️ Статус задачи обновился` for a stale task action.
+14. `🚫 Задача недоступна` when the selected task is closed or moved.
+15. `ℹ️ Комментарий не нужен` when the task no longer waits for feedback.
+16. `⚠️ Выбери конкретную задачу` when several tasks wait for a comment.
+17. `📤 Резюме ушло на заполнение` for `moved to filling`.
+18. `🎉 Резюме готово!` for `filled`.
+
+Every template ends with `Все задачи: /open_my_tasks`. The new-task card also
+keeps the separate line `👉 Открой /open_my_tasks, чтобы взять в работу.` as
+specified in the approved source document. Dynamic student data, links, and
+comments are HTML-escaped before Telegram delivery. RU-only final messages show
+only the RU link; EN/both messages show EN and RU links.
 
 When test mode moves a workflow to `moved to filling`, the backend also emits
 the HH-summary-channel message:
@@ -313,7 +354,8 @@ unless the run is explicitly meant to exercise those accounts.
 - `resume_required_data_missing`: add the missing Console/profile data, then
   retry `/resume`.
 - `resume_reject_comment_too_short`: use
-  `/resume_reject оставил комменты в резюме` or a custom 30+ character comment.
+  `/resume_reject оставь комментарии в резюме`, the legacy phrase
+  `/resume_reject оставил комменты в резюме`, or a custom 30+ character comment.
 - `This step must be advanced by ...`: use the Telegram account responsible for
   the current status.
 - Private notification cannot be delivered: open `@veu_support_bot` from the

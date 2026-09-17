@@ -100,6 +100,7 @@ function createFixtureNocoClient() {
       market: 'En',
       english_levels_id: 3,
       'English level': { Id: 3, level: 'B1' },
+      ready_for_interview_in_english_in_2_months: 'No',
       client_status: { Id: 1, title: 'studying' }
     },
     {
@@ -710,6 +711,7 @@ async function runTests(): Promise<void> {
     realAge: 29,
     stopListCompany: 'Acme,Globex',
     englishLevelId: 4,
+    readyForInterviewInEnglishIn2Months: 'Yes',
     telegramPersonalChatId: '@new',
     calendarEmail: 'new@example.com',
     client_status: 'forbidden'
@@ -722,6 +724,7 @@ async function runTests(): Promise<void> {
     real_age: 29,
     stop_list_company: 'Acme,Globex',
     english_levels_id: 4,
+    ready_for_interview_in_english_in_2_months: 'Yes',
     telegram_personal_chat_id: '@new',
     calendar_email: 'new@example.com'
   })
@@ -743,6 +746,14 @@ async function runTests(): Promise<void> {
     desired_location: 'Remote',
     real_age: 27
   })
+  assert.deepEqual(buildClientPatch({ readyForInterviewInEnglishIn2Months: 'No' }), {
+    ready_for_interview_in_english_in_2_months: 'No'
+  })
+  assert.deepEqual(buildClientPatch({ readyForInterviewInEnglishIn2Months: '' }), {})
+  assert.throws(
+    () => buildClientPatch({ readyForInterviewInEnglishIn2Months: 'Maybe' }),
+    (error: any) => error?.code === 'invalid_ready_for_interview_in_english_in_2_months'
+  )
   assert.deepEqual(buildAccountPatch({
     platformId: 16,
     platform: 'linkedin',
@@ -1523,16 +1534,31 @@ async function runTests(): Promise<void> {
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.deepEqual(result.body.tasks.map((task: any) => task.clientName), ['Client One'])
       assert.equal(result.body.tasks[0].expectedStatus, 'Draft in approve by Kira')
-      assert.match(result.body.message, /^Задачи Киры по резюме:/)
+      assert.match(result.body.message, /^<b>📋 Твои задачи по резюме \(1–1 из 1\):<\/b>/)
+      assert.equal(result.body.parseMode, 'HTML')
+      assert.match(result.body.message, /\nВсе задачи: \/open_my_tasks$/)
 
       result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}`, {
         headers: kiraHeaders
       })
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Draft in approve by Kira')
+      assert.match(result.body.message, /^<b>⚡️ Новая задача: черновик на проверке у Киры<\/b>/)
+      assert.equal(result.body.parseMode, 'HTML')
       assert.match(result.body.message, /@client_one_tg/)
       assert.match(result.body.message, /\+79990003344/)
       assert.match(result.body.message, /\+79990005566/)
+
+      result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}/advance`, {
+        method: 'POST',
+        headers: kiraHeaders,
+        body: JSON.stringify({ expectedStatus: 'English version in approve by Kira' })
+      })
+      assert.equal(result.response.status, 409, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'resume_workflow_stale_status')
+      assert.equal(result.body.parseMode, 'HTML')
+      assert.match(result.body.message, /^<b>ℹ️ Статус задачи обновился<\/b>/)
+      assert.match(result.body.message, /\nВсе задачи: \/open_my_tasks$/)
 
       result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}/advance`, {
         method: 'POST',
@@ -1593,11 +1619,13 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> moved to filling')
       assert(result.body.notifications.some((notification: any) => notification.kind === 'private_kira'))
       assert(result.body.notifications.some((notification: any) => notification.kind === 'linkedin_ready'))
-      const kiraFillingMessage = telegramBotMessages.find((message: any) => /передано на заполнение/.test(message.text))
+      const kiraFillingMessage = telegramBotMessages.find((message: any) => /Резюме ушло на заполнение/.test(message.text))
       assert(kiraFillingMessage)
       assert.equal(kiraFillingMessage.chatId, '343610488')
-      assert.match(kiraFillingMessage.text, /Английская версия: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
-      assert.match(kiraFillingMessage.text, /Русская версия: https:\/\/docs\.google\.com\/document\/d\/test-russian-version/)
+      assert.equal(kiraFillingMessage.parseMode, 'HTML')
+      assert.match(kiraFillingMessage.text, /• EN: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
+      assert.match(kiraFillingMessage.text, /• RU: https:\/\/docs\.google\.com\/document\/d\/test-russian-version/)
+      assert.match(kiraFillingMessage.text, /\nВсе задачи: \/open_my_tasks$/)
       const linkedInReadyMessage = telegramBotMessages.find((message: any) => /@CheMpoKaRokee/.test(message.text))
       assert(linkedInReadyMessage)
       assert.equal(linkedInReadyMessage.chatId, '-1003187558078')
@@ -1728,6 +1756,7 @@ async function runTests(): Promise<void> {
         desiredLocation: 'Remote EN proxy',
         stopListCompany: 'Meta,Google',
         englishLevelId: 4,
+        readyForInterviewInEnglishIn2Months: 'Yes',
         telegramPersonalChatId: '@updated_client',
         calendarEmail: 'updated-client@example.com',
         clientStatus: 'should not write'
@@ -1749,9 +1778,34 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.client.stopListCompany, 'Meta,Google')
     assert.equal(result.body.client.englishLevelId, 4)
     assert.equal(result.body.client.englishLevel, 'B2')
+    assert.equal(result.body.client.readyForInterviewInEnglishIn2Months, 'Yes')
     assert.equal(result.body.client.telegramPersonalChatId, '@updated_client')
     assert.equal(result.body.client.calendarEmail, 'updated-client@example.com')
     assert.equal(result.body.client.clientStatus, 'studying')
+
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readyForInterviewInEnglishIn2Months: '' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.client.readyForInterviewInEnglishIn2Months, 'Yes')
+
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readyForInterviewInEnglishIn2Months: 'No' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.client.readyForInterviewInEnglishIn2Months, 'No')
+
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readyForInterviewInEnglishIn2Months: 'Maybe' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'invalid_ready_for_interview_in_english_in_2_months')
 
     result = await request(server.baseUrl, '/api/client/platform-accounts', {
       method: 'POST',

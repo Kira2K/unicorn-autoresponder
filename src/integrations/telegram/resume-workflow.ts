@@ -1,3 +1,22 @@
+const {
+  KIRA_REJECTION_COMMENT,
+  kiraCommentNotRequiredMessage,
+  kiraCommentsSavedMessage,
+  kiraCompletedMessage,
+  kiraDraftReviewMessage,
+  kiraEnglishReviewMessage,
+  kiraMovedToFillingMessage,
+  kiraMultipleCommentTasksMessage,
+  kiraNeedsCommentsMessage,
+  kiraNewTaskMessage,
+  kiraNoTasksMessage,
+  kiraReworkMessage,
+  kiraRussianReviewMessage,
+  kiraStaleStatusMessage,
+  kiraTaskListMessage,
+  kiraTaskUnavailableMessage
+} = require('./resume-kira-message-templates.ts')
+
 type ResumeStatus =
   | 'stopped'
   | "collection student's data"
@@ -95,6 +114,7 @@ type ResumeWorkflowNotification = {
   messageThreadId?: number
   text: string
   replyMarkup?: unknown
+  parseMode?: string
 }
 
 type ResumeProviderTask = {
@@ -133,6 +153,7 @@ type ResumeWorkflowResult = {
   transitions?: string[]
   notifications?: ResumeWorkflowNotification[]
   message: string
+  parseMode?: string
 }
 
 type ProviderTaskListResult = {
@@ -140,6 +161,7 @@ type ProviderTaskListResult = {
   tasks: ResumeProviderTask[]
   message: string
   replyMarkup?: unknown
+  parseMode?: string
   offset?: number
   total?: number
 }
@@ -200,6 +222,8 @@ const DEFAULT_TEST_CONFIG = {
   russianUrl: 'https://docs.google.com/document/d/test-russian-version',
   kirasComments: 'Looks good for test. Please prepare the draft based on provided source data.'
 }
+
+const CLIENT_CABINET_LINK = '[Ссылка на ЛК](https://very-evil-unicorn.onrender.com/)'
 
 const DEFAULT_KIRA_USER_IDS = ['7586552066']
 const DEFAULT_PROVIDER_USER_IDS = ['8222949251']
@@ -769,11 +793,18 @@ function ensureActorCanAdvance(workflow: ResumeWorkflowRecord, actor: ResumeActo
   }
 }
 
-function ensureExpectedStatus(workflow: ResumeWorkflowRecord, expectedStatus?: string): void {
+function ensureExpectedStatus(workflow: ResumeWorkflowRecord, expectedStatus?: string, actor?: ResumeActor): void {
   const expected = normalizeText(expectedStatus)
   if (!expected) return
   const current = statusText(workflow)
   if (current !== expected) {
+    if (actor?.role === 'kira') {
+      const message = kiraStaleStatusMessage(displayStatus(expected), displayStatus(current))
+      throw Object.assign(
+        new Error(message.text),
+        { code: 'resume_workflow_stale_status', parseMode: message.parseMode }
+      )
+    }
     throw Object.assign(
       new Error(`Статус резюме изменился с «${displayStatus(expected)}» на «${displayStatus(current)}». Обнови задачи и попробуй снова.`),
       { code: 'resume_workflow_stale_status' }
@@ -926,7 +957,11 @@ function normalizeRejectionComment(value: unknown): string {
 }
 
 function isValidRejectionComment(comment: string): boolean {
-  return comment === DEFAULT_REJECTION_COMMENT || comment.length >= MIN_REJECTION_COMMENT_LENGTH
+  return (
+    comment === KIRA_REJECTION_COMMENT ||
+    comment === DEFAULT_REJECTION_COMMENT ||
+    comment.length >= MIN_REJECTION_COMMENT_LENGTH
+  )
 }
 
 function ensureValidRejectionComment(value: unknown): string {
@@ -1030,6 +1065,28 @@ function responsibleMention(record: ResumeWorkflowRecord, responsible: ResumeAct
   return clientMention(record)
 }
 
+const PRIVATE_STAFF_TASKS_FOOTER = 'Открыть все задачи /open_my_tasks'
+
+function privateStaffNotificationText(rows: Array<string | undefined>): string {
+  const body = rows.filter(Boolean).join('\n')
+  return [body, '', PRIVATE_STAFF_TASKS_FOOTER].join('\n')
+}
+
+function kiraStageNotification(record: ResumeWorkflowRecord) {
+  switch (statusText(record)) {
+    case "collection Kira's comments":
+      return kiraNeedsCommentsMessage(record.clientName)
+    case 'Draft in approve by Kira':
+      return kiraDraftReviewMessage(record.clientName)
+    case 'English version in approve by Kira':
+      return kiraEnglishReviewMessage(record.clientName)
+    case 'Russian version in approve by Kira':
+      return kiraRussianReviewMessage(record.clientName)
+    default:
+      return kiraNewTaskMessageForWorkflow(record)
+  }
+}
+
 function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWorkflowNotification | null {
   const status = statusText(record)
   const responsible = statusResponsibility(status)
@@ -1040,23 +1097,25 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWor
   if (status === 'moved to filling') {
     const chatId = defaultKiraNotifyChatId()
     if (!chatId) return null
-    const text = [
-      `Резюме для ${clientMarketLabel(record)} передано на заполнение.`,
-      record.enVersionUrl ? `Английская версия: ${record.enVersionUrl}` : undefined,
-      record.ruVersionUrl ? `Русская версия: ${record.ruVersionUrl}` : undefined
-    ].filter(Boolean).join('\n')
-    return { kind: 'private_kira', chatId, text }
+    const message = kiraMovedToFillingMessage({
+      clientName: record.clientName,
+      ruOnly: isRuOnlyWorkflow(record),
+      enVersionUrl: record.enVersionUrl,
+      ruVersionUrl: record.ruVersionUrl
+    })
+    return { kind: 'private_kira', chatId, ...message }
   }
 
   if (status === 'filled') {
     const chatId = defaultKiraNotifyChatId()
     if (!chatId) return null
-    const text = [
-      `Резюме для ${clientMarketLabel(record)} заполнено.`,
-      record.enVersionUrl ? `Английская версия: ${record.enVersionUrl}` : undefined,
-      record.ruVersionUrl ? `Русская версия: ${record.ruVersionUrl}` : undefined
-    ].filter(Boolean).join('\n')
-    return { kind: 'private_kira', chatId, text }
+    const message = kiraCompletedMessage({
+      clientName: record.clientName,
+      ruOnly: isRuOnlyWorkflow(record),
+      enVersionUrl: record.enVersionUrl,
+      ruVersionUrl: record.ruVersionUrl
+    })
+    return { kind: 'private_kira', chatId, ...message }
   }
 
   if (responsible === 'student') {
@@ -1068,27 +1127,16 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWor
   if (responsible === 'kira') {
     const chatId = defaultKiraNotifyChatId()
     if (!chatId) return null
-    const text = [
-      intro,
-      action,
-      '',
-      'Открой /open_my_tasks, чтобы обработать эту задачу.',
-      '',
-      providerTaskMessage(record)
-    ].filter(Boolean).join('\n')
-    return { kind: 'private_kira', chatId, text }
+    return { kind: 'private_kira', chatId, ...kiraStageNotification(record) }
   }
   if (responsible === 'provider') {
     const chatIds = providerNotifyChatIdsForWorkflow(record)
     if (!chatIds.length) return null
-    const text = [
+    const text = privateStaffNotificationText([
       intro,
       action,
-      '',
-      'Открой /open_my_tasks, чтобы обработать эту задачу.',
-      '',
       providerTaskMessage(record)
-    ].filter(Boolean).join('\n')
+    ])
     return { kind: 'private_provider', chatId: chatIds[0], chatIds, text }
   }
 
@@ -1215,6 +1263,39 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
   return rows.join('\n')
 }
 
+function kiraNewTaskMessageForWorkflow(workflow: ResumeWorkflowRecord) {
+  const status = statusText(workflow)
+  const missing = missingAdvanceFields(workflow)
+  const explicitSourceFolder = normalizeText(workflow.studentDataFolderUrl)
+  const rootGoogleFolder = normalizeText(workflow.clientGoogleFolder)
+  const studentData = studentInfoMessage(workflow)
+  const inputHint = status === "collection Kira's comments"
+    ? 'Следующее сообщение с комментарием сохраню именно в эту задачу.'
+    : ''
+  const requiredAction = [
+    missing.length ? missingActionInstruction(missing) : nextActionForStatus(status),
+    inputHint
+  ].filter(Boolean).join('\n')
+  const linkAndCommentRows = [
+    rootGoogleFolder ? `Корневая Google-папка: ${rootGoogleFolder}` : undefined,
+    explicitSourceFolder && explicitSourceFolder !== rootGoogleFolder ? `Папка с исходными данными: ${explicitSourceFolder}` : undefined,
+    workflow.kirasComments ? `Комментарии Киры: ${workflow.kirasComments}` : undefined,
+    workflow.lastRejectionComment ? `Комментарий возврата: ${workflow.lastRejectionComment}` : undefined,
+    workflow.cvDraftUrl ? `Черновик: ${workflow.cvDraftUrl}` : undefined,
+    workflow.enVersionUrl ? `EN: ${workflow.enVersionUrl}` : undefined,
+    workflow.ruVersionUrl ? `RU: ${workflow.ruVersionUrl}` : undefined
+  ].filter((row): row is string => Boolean(row))
+
+  return kiraNewTaskMessage({
+    stageName: displayStatus(status),
+    clientName: workflow.clientName,
+    market: normalizeText(workflow.clientMarket) || 'рынок не указан',
+    requiredAction,
+    studentDataRows: studentData ? studentData.split('\n') : [],
+    linkAndCommentRows
+  })
+}
+
 function missingDataInstruction(workflow: ResumeWorkflowRecord): string {
   const missing = missingAdvanceFields(workflow)
   if (statusText(workflow) === "collection student's data" && missing.includes('root_google_folder')) {
@@ -1224,7 +1305,7 @@ function missingDataInstruction(workflow: ResumeWorkflowRecord): string {
     const requiredIssues = requiredClientDataIssues(workflow)
     if (requiredIssues.length) {
       return [
-        `Дальше: сначала заполни недостающие данные в ЛК: ${requiredIssues.map(displayMissingField).join(', ')}.`,
+        `Дальше: сначала заполни недостающие данные в ЛК: ${requiredIssues.map(displayMissingField).join(', ')}. ${CLIENT_CABINET_LINK}`,
         'После этого бот попросит добавить самопрезентацию и исходные материалы.'
       ].join('\n')
     }
@@ -1415,7 +1496,7 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
   const testMode = resumeWorkflowTestMode()
   const actor = resolveActorForWorkflow(options.actor, workflow)
   const before = statusText(workflow)
-  ensureExpectedStatus(workflow, options.expectedStatus)
+  ensureExpectedStatus(workflow, options.expectedStatus, actor)
   ensureActorCanAdvance(workflow, actor)
 
   const rawStudentDataFolderUrl = before === "collection student's data" && actor.role === 'student'
@@ -1474,7 +1555,7 @@ async function rejectWorkflow(workflow: ResumeWorkflowRecord, repository: Resume
   const testMode = resumeWorkflowTestMode()
   const actor = resolveActorForWorkflow(options.actor, workflow)
   const before = statusText(workflow)
-  ensureExpectedStatus(workflow, options.expectedStatus)
+  ensureExpectedStatus(workflow, options.expectedStatus, actor)
   ensureActorCanReject(workflow, actor)
   const comment = ensureValidRejectionComment(options.rejectionComment)
   const patch = rejectionTargetPatch(workflow, actor, comment)
@@ -1484,6 +1565,17 @@ async function rejectWorkflow(workflow: ResumeWorkflowRecord, repository: Resume
     lastWorkflowError: '',
     workflowTrace: appendTrace(workflow, `${before} -> ${after} rejected`, actor)
   })
+  const kiraMessage = actor.role === 'kira'
+    ? kiraReworkMessage(
+        before === 'Draft in approve by Kira'
+          ? 'draft'
+          : before === 'English version in approve by Kira'
+            ? 'en'
+            : 'ru',
+        workflow.clientName,
+        comment
+      )
+    : undefined
 
   return {
     found: true,
@@ -1496,12 +1588,13 @@ async function rejectWorkflow(workflow: ResumeWorkflowRecord, repository: Resume
     actor,
     transitions: [`${before} -> ${after}`],
     notifications: buildTransitionNotifications(workflow, testMode),
-    message: [
+    message: kiraMessage?.text ?? [
       `Резюме для ${workflow.clientName} возвращено на доработку.`,
       `Комментарий: ${comment}`,
       '',
       statusInstruction(workflow)
-    ].join('\n')
+    ].join('\n'),
+    parseMode: kiraMessage?.parseMode
   }
 }
 
@@ -1650,15 +1743,31 @@ async function getProviderTasks(
   const title = taskActorTitle(actor)
   const page = taskListMessage(title, workflows, options.offset)
   const tasks = page.visibleWorkflows.map(providerTaskFromWorkflow)
+  const kiraMessage = actor.role === 'kira'
+    ? tasks.length
+      ? kiraTaskListMessage({
+          from: page.offset + 1,
+          to: page.offset + page.visibleWorkflows.length,
+          total: workflows.length,
+          tasks: page.visibleWorkflows.map(workflow => ({
+            clientName: workflow.clientName,
+            market: normalizeText(workflow.clientMarket) || 'рынок не указан',
+            status: displayStatus(statusText(workflow)),
+            action: compactTaskAction(workflow)
+          }))
+        })
+      : kiraNoTasksMessage()
+    : undefined
 
   return {
     actor,
     tasks,
     offset: page.offset,
     total: workflows.length,
-    message: tasks.length
+    message: kiraMessage?.text ?? (tasks.length
       ? page.message
-      : `Сейчас нет ожидающих задач ${title} по резюме.`,
+      : `Сейчас нет ожидающих задач ${title} по резюме.`),
+    parseMode: kiraMessage?.parseMode,
     replyMarkup: tasks.length ? taskListReplyMarkup(tasks, page.offset, workflows.length) : undefined
   }
 }
@@ -1671,18 +1780,23 @@ async function getProviderTaskById(workflowId: number, repository: ResumeWorkflo
   }
   const workflow = await repository.getResumeWorkflowById(workflowId)
   if (!workflow || !actorCanAccessTaskWorkflow(workflow, actor)) {
+    const kiraMessage = actor.role === 'kira' ? kiraTaskUnavailableMessage() : undefined
     return {
       actor,
       tasks: [],
-      message: 'Эта задача по резюме больше недоступна. Обнови список задач.'
+      message: kiraMessage?.text ?? 'Эта задача по резюме больше недоступна. Обнови список задач.',
+      parseMode: kiraMessage?.parseMode
     }
   }
+
+  const kiraMessage = actor.role === 'kira' ? kiraNewTaskMessageForWorkflow(workflow) : undefined
 
   return {
     actor,
     workflow,
     tasks: [providerTaskFromWorkflow(workflow)],
-    message: providerTaskMessage(workflow),
+    message: kiraMessage?.text ?? providerTaskMessage(workflow),
+    parseMode: kiraMessage?.parseMode,
     replyMarkup: taskReplyMarkup(workflow)
   }
 }
@@ -1713,31 +1827,37 @@ async function saveKiraCommentsFromChat(
     }
     const workflow = await repository.getResumeWorkflowById(options.workflowId)
     if (!workflow || !actorCanAccessTaskWorkflow(workflow, actor)) {
+      const message = kiraTaskUnavailableMessage()
       return {
         actor,
         tasks: [],
         clearActiveTask: true,
-        message: 'Эта задача по резюме больше недоступна. Обнови список задач и открой нужную задачу снова.'
+        message: message.text,
+        parseMode: message.parseMode
       }
     }
     const currentStatus = statusText(workflow)
     const expectedStatus = normalizeText(options.expectedStatus)
     if (expectedStatus && currentStatus !== expectedStatus) {
+      const message = kiraStaleStatusMessage(displayStatus(expectedStatus), displayStatus(currentStatus))
       return {
         actor,
         workflow,
         tasks: [providerTaskFromWorkflow(workflow)],
         clearActiveTask: true,
-        message: `Статус резюме изменился с «${displayStatus(expectedStatus)}» на «${displayStatus(currentStatus)}». Обнови задачи и открой нужную задачу снова.`
+        message: message.text,
+        parseMode: message.parseMode
       }
     }
     if (currentStatus !== "collection Kira's comments") {
+      const message = kiraCommentNotRequiredMessage()
       return {
         actor,
         workflow,
         tasks: [providerTaskFromWorkflow(workflow)],
         clearActiveTask: true,
-        message: 'Эта задача больше не ожидает комментарий Киры. Обнови задачи и открой нужную задачу снова.'
+        message: message.text,
+        parseMode: message.parseMode
       }
     }
     const updated = await repository.patchResumeWorkflow(workflow.id, {
@@ -1745,16 +1865,13 @@ async function saveKiraCommentsFromChat(
       lastWorkflowError: '',
       workflowTrace: appendTrace(workflow, 'Kira comments saved from Telegram chat', actor)
     })
+    const message = kiraCommentsSavedMessage(updated.clientName)
     return {
       actor,
       workflow: updated,
       tasks: [providerTaskFromWorkflow(updated)],
-      message: [
-        `Комментарии Киры для ${updated.clientName} сохранены.`,
-        'Комментарий сохранен в задаче. Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу».',
-        '',
-        providerTaskMessage(updated)
-      ].join('\n'),
+      message: message.text,
+      parseMode: message.parseMode,
       replyMarkup: taskReplyMarkup(updated)
     }
   }
@@ -1764,18 +1881,22 @@ async function saveKiraCommentsFromChat(
     .filter(workflow => statusText(workflow) === "collection Kira's comments")
 
   if (!commentTasks.length) {
+    const message = kiraCommentNotRequiredMessage()
     return {
       actor,
       tasks: [],
-      message: 'Сейчас нет задачи Киры, которая ожидает комментарий.'
+      message: message.text,
+      parseMode: message.parseMode
     }
   }
 
   if (commentTasks.length > 1) {
+    const message = kiraMultipleCommentTasksMessage()
     return {
       actor,
       tasks: commentTasks.map(providerTaskFromWorkflow),
-      message: 'Сейчас несколько задач Киры ожидают комментарий. Сначала открой конкретную задачу.',
+      message: message.text,
+      parseMode: message.parseMode,
       replyMarkup: taskListReplyMarkup(commentTasks.map(providerTaskFromWorkflow))
     }
   }
@@ -1787,15 +1908,13 @@ async function saveKiraCommentsFromChat(
     workflowTrace: appendTrace(workflow, 'Kira comments saved from Telegram chat', actor)
   })
 
+  const message = kiraCommentsSavedMessage(updated.clientName)
   return {
     actor,
     workflow: updated,
     tasks: [providerTaskFromWorkflow(updated)],
-    message: [
-      `Комментарии Киры для ${updated.clientName} сохранены.`,
-      '',
-      providerTaskMessage(updated)
-    ].join('\n'),
+    message: message.text,
+    parseMode: message.parseMode,
     replyMarkup: taskReplyMarkup(updated)
   }
 }

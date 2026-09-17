@@ -1044,7 +1044,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
     const kiraFillingNotification = findObservedBotSend({
       sends: observed.sends,
       chatId: config.kiraUserId,
-      expected: /передано на заполнение/i,
+      expected: /Резюме ушло на заполнение/i,
       afterIndex: 0
     })
     if (!kiraFillingNotification) {

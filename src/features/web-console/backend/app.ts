@@ -757,7 +757,8 @@ function createWebConsoleApp(options: {
               chatId,
               ...(notification.messageThreadId ? { messageThreadId: notification.messageThreadId } : {}),
               text: notification.text,
-              replyMarkup: notification.replyMarkup
+              replyMarkup: notification.replyMarkup,
+              parseMode: notification.parseMode
             }),
             notification
           )
@@ -1771,7 +1772,11 @@ function createWebConsoleApp(options: {
       })
       return
     }
-    if ((error as any)?.code === 'invalid_google_folder' || (error as any)?.code === 'telegram_message_too_long') {
+    if (
+      (error as any)?.code === 'invalid_google_folder' ||
+      (error as any)?.code === 'invalid_ready_for_interview_in_english_in_2_months' ||
+      (error as any)?.code === 'telegram_message_too_long'
+    ) {
       res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return
     }
@@ -1817,7 +1822,11 @@ function createWebConsoleApp(options: {
       (error as any)?.code === 'resume_workflow_stopped' ||
       (error as any)?.code === 'resume_reject_not_allowed'
     ) {
-      res.status(409).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
+      res.status(409).json({
+        error: (error as any).code,
+        message: error instanceof Error ? error.message : String(error),
+        ...((error as any)?.parseMode ? { parseMode: (error as any).parseMode } : {})
+      })
       return
     }
     if ((error as any)?.code === 'resume_workflow_failed') {
