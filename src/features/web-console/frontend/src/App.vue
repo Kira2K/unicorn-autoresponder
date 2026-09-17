@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
+import FieldInfoLabel from './FieldInfoLabel.vue'
 import LinkedInAuthTab from './LinkedInAuthTab.vue'
 import {
   normalizePlatformAccountLabel,
@@ -28,6 +29,7 @@ const emptyProfileForm = {
   desiredLocation: '',
   stopListCompany: '',
   englishLevelId: '',
+  readyForInterviewInEnglishIn2Months: '',
   telegramPersonalChatId: '',
   calendarEmail: ''
 }
@@ -185,6 +187,7 @@ const selectedAccountPlatform = computed(() =>
 )
 const selectedAccountPolicy = computed(() => platformAccountPolicy(selectedAccountPlatform.value))
 const accountDisplayLabel = computed(() => selectedAccountPlatform.value || accountForm.value.accountLabel)
+const accountUrlInfoVisible = computed(() => ['github', 'linkedin'].includes(selectedAccountPlatform.value))
 
 function accountFieldEnabled(field) {
   return selectedAccountPolicy.value?.fields.includes(field) ?? false
@@ -1105,6 +1108,7 @@ function resetProfileForm() {
     desiredLocation: client.desiredLocation || '',
     stopListCompany: client.stopListCompany || '',
     englishLevelId: client.englishLevelId ? String(client.englishLevelId) : '',
+    readyForInterviewInEnglishIn2Months: client.readyForInterviewInEnglishIn2Months || '',
     telegramPersonalChatId: client.telegramPersonalChatId || '',
     calendarEmail: client.calendarEmail || ''
   }
@@ -1963,7 +1967,7 @@ onUnmounted(() => {
       <Toolbar class="topbar">
         <template #start>
           <div>
-            <h1>{{ isAdmin ? 'Admin console' : isProvider ? 'Provider console' : 'Client console' }}</h1>
+            <h1>{{ isAdmin ? 'Admin console' : isProvider ? 'Provider console' : 'Личный кабинет ученика' }}</h1>
             <p>{{ session.email }}</p>
           </div>
         </template>
@@ -2454,25 +2458,25 @@ onUnmounted(() => {
                 <AccordionHeader data-testid="profile-details-accordion-header">
                   <span class="accordion-title">
                     <i :class="profileEditing ? 'pi pi-user-edit' : 'pi pi-id-card'" aria-hidden="true"></i>
-                    {{ profileEditing ? 'Editable personal details' : 'Personal data' }}
+                    {{ profileEditing ? 'Редактировать данные' : 'Личные данные' }}
                   </span>
                 </AccordionHeader>
                 <AccordionContent>
                   <form v-if="profileEditing" class="profile-form" data-testid="profile-form" @submit.prevent="saveProfile">
                     <label class="field">
-                      <span>First name</span>
+                      <span>Имя</span>
                       <InputText v-model="profileForm.firstName" data-testid="profile-first-name" />
                     </label>
                     <label class="field">
-                      <span>Last name</span>
+                      <span>Фамилия</span>
                       <InputText v-model="profileForm.lastName" data-testid="profile-last-name" />
                     </label>
                     <label class="field wide-field">
-                      <span>Full legal name</span>
+                      <span>ФИО полностью</span>
                       <InputText v-model="profileForm.fio" data-testid="profile-fio" />
                     </label>
                     <label class="field">
-                      <span>Birth date</span>
+                      <span>Дата рождения</span>
                       <InputText v-model="profileForm.birthDate" type="date" data-testid="profile-birth-date" />
                     </label>
                     <label class="field">
@@ -2484,40 +2488,48 @@ onUnmounted(() => {
                         </option>
                       </select>
                     </label>
+                    <label class="field">
+                      <span>Ready for interview in English in 2 months</span>
+                      <select v-model="profileForm.readyForInterviewInEnglishIn2Months" class="native-select" data-testid="profile-ready-for-interview-in-english-in-2-months">
+                        <option value="" disabled>Not selected</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                      </select>
+                    </label>
                     <div class="field wide-field education-editor">
-                      <span>Education</span>
+                      <span>Образование</span>
                       <div v-for="(entry, index) in profileForm.educationEntries" :key="index" class="education-row">
-                        <InputText v-model="entry.uni" :data-testid="`profile-education-uni-${index}`" placeholder="University" />
-                        <InputText v-model="entry.faculty" :data-testid="`profile-education-faculty-${index}`" placeholder="Faculty" />
-                        <InputText v-model="entry.grade" :data-testid="`profile-education-grade-${index}`" placeholder="Grade" />
-                        <InputText v-model="entry.yearOfEnd" :data-testid="`profile-education-year-${index}`" placeholder="Year of end" />
+                        <InputText v-model="entry.uni" :data-testid="`profile-education-uni-${index}`" placeholder="Университет" />
+                        <InputText v-model="entry.faculty" :data-testid="`profile-education-faculty-${index}`" placeholder="Факультет" />
+                        <InputText v-model="entry.grade" :data-testid="`profile-education-grade-${index}`" placeholder="Квалификация" />
+                        <InputText v-model="entry.yearOfEnd" :data-testid="`profile-education-year-${index}`" placeholder="Год окончания" />
                         <Button type="button" icon="pi pi-trash" aria-label="Remove education" severity="secondary" :disabled="profileForm.educationEntries.length <= 1" @click="removeEducationEntry(index)" />
                       </div>
-                      <Button type="button" label="Add education" icon="pi pi-plus" severity="secondary" data-testid="add-education-button" @click="addEducationEntry" />
+                      <Button type="button" label="Добавить образование" icon="pi pi-plus" severity="secondary" data-testid="add-education-button" @click="addEducationEntry" />
                     </div>
                     <label class="field">
-                      <span>Real age</span>
+                      <span>Возраст</span>
                       <InputText v-model="profileForm.realAge" type="number" min="0" step="1" data-testid="profile-real-age" />
                     </label>
                     <label class="field">
-                      <span>Real location</span>
+                      <span>Реальная локация</span>
                       <InputText v-model="profileForm.realLocation" data-testid="profile-real-location" />
                     </label>
                     <label class="field">
-                      <span>Desired location</span>
+                      <span>Желаемая локация</span>
                       <InputText v-model="profileForm.desiredLocation" data-testid="profile-desired-location" />
                     </label>
                     <label class="field wide-field">
-                      <span>Company stop list</span>
+                      <span>Стоп-лист компаний</span>
                       <InputText v-model="profileForm.stopListCompany" data-testid="profile-stop-list-company" />
-                      <small>Use "," as delimiter, without spaces.</small>
+                      <small>Используй "," как разделитель, без пробелов</small>
                     </label>
                     <label class="field">
-                      <span>Calendar email</span>
+                      <span>Личный email</span>
                       <InputText v-model="profileForm.calendarEmail" type="email" data-testid="profile-calendar-email" />
                     </label>
                     <label class="field">
-                      <span>Personal Telegram</span>
+                      <span>Личный Telegram @username</span>
                       <InputText v-model="profileForm.telegramPersonalChatId" data-testid="profile-telegram" />
                     </label>
                     <div class="form-actions wide-field">
@@ -2527,35 +2539,35 @@ onUnmounted(() => {
                   </form>
                   <dl v-else class="info-list compact-info">
                     <div>
-                      <dt>First name</dt>
+                      <dt>Имя</dt>
                       <dd>{{ dashboard.client.firstName || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>Last name</dt>
+                      <dt>Фамилия</dt>
                       <dd>{{ dashboard.client.lastName || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>Education</dt>
+                      <dt>Образование</dt>
                       <dd>{{ formatEducationEntries(dashboard.client.educationEntries, dashboard.client.education) }}</dd>
                     </div>
                     <div>
-                      <dt>Real age</dt>
+                      <dt>Возраст</dt>
                       <dd>{{ dashboard.client.realAge ?? 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>Real location</dt>
+                      <dt>Реальная локация</dt>
                       <dd>{{ dashboard.client.realLocation || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>Desired location</dt>
+                      <dt>Желаемая локация</dt>
                       <dd>{{ dashboard.client.desiredLocation || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>GitHub</dt>
+                      <dt><FieldInfoLabel label="GitHub" tooltip="ссылка без https://" test-id="profile-github-info" /></dt>
                       <dd>{{ githubUrl || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>LinkedIn</dt>
+                      <dt><FieldInfoLabel label="LinkedIn" tooltip="ссылка без https://" test-id="profile-linkedin-info" /></dt>
                       <dd>{{ linkedInProfileUrl || 'empty' }}</dd>
                     </div>
                     <div>
@@ -2567,7 +2579,7 @@ onUnmounted(() => {
                       <dd>{{ telegramEnContact || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>Company stop list</dt>
+                      <dt>Стоп-лист компаний</dt>
                       <dd>{{ dashboard.client.stopListCompany || 'empty' }}</dd>
                     </div>
                     <div>
@@ -2575,19 +2587,23 @@ onUnmounted(() => {
                       <dd>{{ dashboard.client.englishLevel || 'empty' }}</dd>
                     </div>
                     <div>
+                      <dt>Ready for interview in English in 2 months</dt>
+                      <dd data-testid="profile-ready-for-interview-in-english-in-2-months-value">{{ dashboard.client.readyForInterviewInEnglishIn2Months || 'empty' }}</dd>
+                    </div>
+                    <div>
                       <dt>Client Id</dt>
                       <dd>{{ dashboard.client.id }}</dd>
                     </div>
                     <div>
-                      <dt>Stack</dt>
+                      <dt>Стэк</dt>
                       <dd>{{ dashboard.client.primaryStack || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>Market</dt>
+                      <dt>Рынок</dt>
                       <dd>{{ dashboard.client.market || 'empty' }}</dd>
                     </div>
                     <div>
-                      <dt>Status</dt>
+                      <dt>Статус</dt>
                       <dd>{{ dashboard.client.clientStatus || 'empty' }}</dd>
                     </div>
                     <div>
@@ -2613,35 +2629,35 @@ onUnmounted(() => {
             <span v-if="profileMessage" class="success-text profile-status" data-testid="profile-save-message">{{ profileMessage }}</span>
             <dl v-if="!isClient" class="info-list compact-info">
               <div>
-                <dt>First name</dt>
+                <dt>Имя</dt>
                 <dd>{{ dashboard.client.firstName || 'empty' }}</dd>
               </div>
               <div>
-                <dt>Last name</dt>
+                <dt>Фамилия</dt>
                 <dd>{{ dashboard.client.lastName || 'empty' }}</dd>
               </div>
               <div>
-                <dt>Education</dt>
+                <dt>Образование</dt>
                 <dd>{{ formatEducationEntries(dashboard.client.educationEntries, dashboard.client.education) }}</dd>
               </div>
               <div>
-                <dt>Real age</dt>
+                <dt>Возраст</dt>
                 <dd>{{ dashboard.client.realAge ?? 'empty' }}</dd>
               </div>
               <div>
-                <dt>Real location</dt>
+                <dt>Реальная локация</dt>
                 <dd>{{ dashboard.client.realLocation || 'empty' }}</dd>
               </div>
               <div>
-                <dt>Desired location</dt>
+                <dt>Желаемая локация</dt>
                 <dd>{{ dashboard.client.desiredLocation || 'empty' }}</dd>
               </div>
               <div>
-                <dt>GitHub</dt>
+                <dt><FieldInfoLabel label="GitHub" tooltip="ссылка без https://" test-id="profile-github-info" /></dt>
                 <dd>{{ githubUrl || 'empty' }}</dd>
               </div>
               <div>
-                <dt>LinkedIn</dt>
+                <dt><FieldInfoLabel label="LinkedIn" tooltip="ссылка без https://" test-id="profile-linkedin-info" /></dt>
                 <dd>{{ linkedInProfileUrl || 'empty' }}</dd>
               </div>
               <div>
@@ -2653,7 +2669,7 @@ onUnmounted(() => {
                 <dd>{{ telegramEnContact || 'empty' }}</dd>
               </div>
               <div>
-                <dt>Company stop list</dt>
+                <dt>Стоп-лист компаний</dt>
                 <dd>{{ dashboard.client.stopListCompany || 'empty' }}</dd>
               </div>
               <div>
@@ -2661,19 +2677,23 @@ onUnmounted(() => {
                 <dd>{{ dashboard.client.englishLevel || 'empty' }}</dd>
               </div>
               <div>
+                <dt>Ready for interview in English in 2 months</dt>
+                <dd data-testid="profile-ready-for-interview-in-english-in-2-months-value">{{ dashboard.client.readyForInterviewInEnglishIn2Months || 'empty' }}</dd>
+              </div>
+              <div>
                 <dt>Client Id</dt>
                 <dd>{{ dashboard.client.id }}</dd>
               </div>
               <div>
-                <dt>Stack</dt>
+                <dt>Стэк</dt>
                 <dd>{{ dashboard.client.primaryStack || 'empty' }}</dd>
               </div>
               <div>
-                <dt>Market</dt>
+                <dt>Рынок</dt>
                 <dd>{{ dashboard.client.market || 'empty' }}</dd>
               </div>
               <div>
-                <dt>Status</dt>
+                <dt>Статус</dt>
                 <dd>{{ dashboard.client.clientStatus || 'empty' }}</dd>
               </div>
               <div>
@@ -3001,7 +3021,10 @@ onUnmounted(() => {
                 <InputText v-model="accountForm.nickname" :disabled="!accountFieldEnabled('nickname')" :required="accountFieldRequired('nickname')" data-testid="account-nickname" />
               </label>
               <label class="field wide-field">
-                <span>URL</span>
+                <span>
+                  <FieldInfoLabel v-if="accountUrlInfoVisible" label="URL" tooltip="ссылка без https://" test-id="account-url-info" />
+                  <template v-else>URL</template>
+                </span>
                 <InputText v-model="accountForm.linkedInUrl" :disabled="!accountFieldEnabled('linkedInUrl')" :required="accountFieldRequired('linkedInUrl')" data-testid="account-linkedin-url" />
               </label>
               <label class="field">

@@ -19,13 +19,14 @@ const mockClients = [
     real_location: 'Tbilisi, Georgia',
     desired_location: 'Remote RU',
     google_folder: 'https://drive.google.com/drive/folders/mock-client',
-    calendar_email: 'client@example.com',
+    calendar_email: 'alexeevalydia@gmail.com',
     telegram_personal_chat_id: '@test_client',
     telegram_general_chat_id: '5216637594',
     rel_clients_primary_stack: { Id: 10, name: 'FRONTEND' },
     market: 'Ru',
     english_levels_id: 3,
     'English level': { Id: 3, level: 'B1' },
+    ready_for_interview_in_english_in_2_months: 'No',
     client_status: { Id: 1, title: 'studying' }
   },
   {
@@ -39,6 +40,7 @@ const mockClients = [
     telegram_general_chat_id: '-100200300',
     rel_clients_primary_stack: { Id: 11, name: 'PYTHON' },
     market: 'En',
+    ready_for_interview_in_english_in_2_months: 'No',
     client_status: 'on en market'
   },
   {

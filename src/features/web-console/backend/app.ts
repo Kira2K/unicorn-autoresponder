@@ -1771,7 +1771,11 @@ function createWebConsoleApp(options: {
       })
       return
     }
-    if ((error as any)?.code === 'invalid_google_folder' || (error as any)?.code === 'telegram_message_too_long') {
+    if (
+      (error as any)?.code === 'invalid_google_folder' ||
+      (error as any)?.code === 'invalid_ready_for_interview_in_english_in_2_months' ||
+      (error as any)?.code === 'telegram_message_too_long'
+    ) {
       res.status(400).json({ error: (error as any).code, message: error instanceof Error ? error.message : String(error) })
       return
     }

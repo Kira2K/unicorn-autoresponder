@@ -1,7 +1,17 @@
+const READY_FOR_INTERVIEW_IN_ENGLISH_IN_2_MONTHS_OPTIONS = [
+  { title: 'Yes', color: '#16a34a' },
+  { title: 'No', color: '#64748b' }
+] as const
+
 const RESUME_CLIENT_COLUMNS = [
   { title: 'education_entries', uidt: 'LongText' },
   { title: 'real_location', uidt: 'SingleLineText' },
-  { title: 'desired_location', uidt: 'SingleLineText' }
+  { title: 'desired_location', uidt: 'SingleLineText' },
+  {
+    title: 'ready_for_interview_in_english_in_2_months',
+    uidt: 'SingleSelect',
+    colOptions: { options: READY_FOR_INTERVIEW_IN_ENGLISH_IN_2_MONTHS_OPTIONS }
+  }
 ] as const
 
 const RESUME_CV_PROCESSING_COLUMNS = [
@@ -20,6 +30,14 @@ type SchemaClient = {
   request<T>(method: 'post', endpoint: string, body: unknown): Promise<T>
 }
 
+type ColumnSpec = {
+  title: string
+  uidt: string
+  colOptions?: {
+    options: ReadonlyArray<{ title: string; color?: string }>
+  }
+}
+
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim()
 }
@@ -32,16 +50,29 @@ function columnTitle(column: any): string {
   return normalizeText(column?.title ?? column?.column_name)
 }
 
-function inspectColumns(meta: any, expectedColumns: ReadonlyArray<{ title: string; uidt: string }>) {
-  const existing = new Set((meta?.columns ?? []).map(columnTitle))
+function optionTitles(options: unknown): string[] {
+  if (!Array.isArray(options)) return []
+  return options.map(option => normalizeText(option?.title)).filter(Boolean)
+}
+
+function inspectColumns(meta: any, expectedColumns: ReadonlyArray<ColumnSpec>) {
+  const existing = new Map<string, any>(
+    (meta?.columns ?? []).map((column: any) => [columnTitle(column), column])
+  )
   const columns = expectedColumns.map(column => ({
     ...column,
-    exists: existing.has(column.title)
+    exists: existing.has(column.title),
+    compatible: existing.has(column.title) &&
+      normalizeText(existing.get(column.title)?.uidt) === column.uidt &&
+      (!column.colOptions ||
+        JSON.stringify(optionTitles(existing.get(column.title)?.colOptions?.options)) ===
+          JSON.stringify(optionTitles(column.colOptions.options)))
   }))
   return {
-    ok: columns.every(column => column.exists),
+    ok: columns.every(column => column.compatible),
     columns,
-    missing: columns.filter(column => !column.exists).map(column => column.title)
+    missing: columns.filter(column => !column.exists).map(column => column.title),
+    incompatible: columns.filter(column => column.exists && !column.compatible).map(column => column.title)
   }
 }
 
@@ -65,14 +96,15 @@ function inspectPlatforms(records: any[]) {
 async function createMissingColumns(
   client: SchemaClient,
   tableId: string,
-  columns: ReadonlyArray<{ title: string; uidt: string; exists: boolean }>
+  columns: ReadonlyArray<ColumnSpec & { exists: boolean }>
 ): Promise<string[]> {
   const created: string[] = []
   for (const column of columns.filter(item => !item.exists)) {
     await client.request('post', `/api/v2/meta/tables/${tableId}/columns`, {
       title: column.title,
       column_name: column.title,
-      uidt: column.uidt
+      uidt: column.uidt,
+      ...(column.colOptions ? { colOptions: column.colOptions } : {})
     })
     created.push(column.title)
   }
@@ -114,7 +146,9 @@ async function ensureResumeWorkflowSchema(
 
   const missingAfter = [
     ...afterClients.missing.map(field => `clients.${field}`),
+    ...afterClients.incompatible.map(field => `clients.${field}:incompatible`),
     ...afterCvProcessing.missing.map(field => `CV processing.${field}`),
+    ...afterCvProcessing.incompatible.map(field => `CV processing.${field}:incompatible`),
     ...afterPlatforms.missing.map(field => `platforms:${field}`)
   ]
   if (apply && missingAfter.length) {
@@ -129,16 +163,25 @@ async function ensureResumeWorkflowSchema(
       cvProcessing: beforeCvProcessing.missing,
       platforms: beforePlatforms.missing
     },
+    incompatibleBefore: {
+      clients: beforeClients.incompatible,
+      cvProcessing: beforeCvProcessing.incompatible
+    },
     missingAfter: {
       clients: afterClients.missing,
       cvProcessing: afterCvProcessing.missing,
       platforms: afterPlatforms.missing
+    },
+    incompatibleAfter: {
+      clients: afterClients.incompatible,
+      cvProcessing: afterCvProcessing.incompatible
     },
     ok: !missingAfter.length
   }
 }
 
 module.exports = {
+  READY_FOR_INTERVIEW_IN_ENGLISH_IN_2_MONTHS_OPTIONS,
   RESUME_CLIENT_COLUMNS,
   RESUME_CV_PROCESSING_COLUMNS,
   RESUME_PLATFORM_ROWS,
