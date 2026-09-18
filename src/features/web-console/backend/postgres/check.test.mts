@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { checkSqlStorage } from './check.mts';
+import { runtimeFixture } from './runtime-fixture.mts';
+import { cvLocalColumns } from './workflow-fields.mts';
+import { tableIds } from './tables.mts';
+function fixture() {
+  const f = runtimeFixture();
+  const connect = f.pool.connect;
+  f.pool.connect = async () => {
+    const session = await connect(); const query = session.query;
+    session.query = async (text, values) => {
+      const result = await query(text, values);
+      if (text.includes('copy_meta.inventory')) for (const row of result.rows) {
+        const d = row.definition as any;
+        if (d.id === tableIds.cv) for (const name of cvLocalColumns) {
+          d.columns.push({ id: name, title: name, uidt: 'LongText' });
+          d.mapping.push({ id: name, title: name, sqlName: name, sqlType: 'text' });
+        }
+      }
+      return result;
+    };
+    return session;
+  };
+  return f;
+}
+test('SQL check reads tables and IDs without writes, migrations or services', async () => {
+  const f = fixture();
+  const result = await checkSqlStorage(f.env, () => f.pool);
+  assert.equal(result.writes, false); assert.equal(result.backgroundJobs, false);
+  assert.equal(result.idTables, 11); assert.equal(f.state.ends, 1);
+  assert.ok(f.calls.some(c => c.includes('LIMIT')));
+  assert.ok(!f.calls.some(c => /nextval|\b(ALTER|INSERT|UPDATE|DELETE)\b/.test(c)));
+});
+test('invalid mode, missing columns, IDs and read errors fail closed', async () => {
+  let opens = 0;
+  await assert.rejects(checkSqlStorage({}, () => { opens++; throw Error('must_not_open'); }), /sql_check_requires_postgres/);
+  assert.equal(opens, 0);
+  const missing = runtimeFixture();
+  await assert.rejects(checkSqlStorage(missing.env, () => missing.pool), /sql_check_cv_columns_required/);
+  assert.equal(missing.state.ends, 1);
+  const ids = fixture(); ids.state.ready = false;
+  await assert.rejects(checkSqlStorage(ids.env, () => ids.pool), /postgres_id_allocator_required/);
+  assert.equal(ids.state.ends, 1);
+  const failed = fixture(), connect = failed.pool.connect;
+  failed.pool.connect = async () => { const s = await connect(), query = s.query; s.query = async (text, values) => {
+    if (text.includes('LIMIT')) throw Error('offline'); return query(text, values);
+  }; return s; };
+  await assert.rejects(checkSqlStorage(failed.env, () => failed.pool)); assert.equal(failed.state.ends, 1);
+});

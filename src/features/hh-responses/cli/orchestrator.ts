@@ -4,6 +4,8 @@ const fs = require('node:fs')
 const {
   createAppDb
 } = require('../../../platform/db/index.ts')
+const { hhReadinessOptions } = require('../../../platform/db/postgres/hh-readiness.mts') as
+  typeof import('../../../platform/db/postgres/hh-readiness.mts')
 const {
   assertDolphinAppRunning,
   assertPreexistingDolphinProfileLimit,
@@ -55,6 +57,8 @@ const {
   loadReadinessResults(options?: {
     market?: 'Ru' | 'En'
     clientNames?: string[]
+    db?: import('../../../platform/db/types.ts').AppDb
+    nocoClient?: { fetchRecords(tableId: string): Promise<Array<Record<string, unknown> & { Id: number }>> }
   }): Promise<TargetReadiness[]>
 }
 const {
@@ -1078,7 +1082,8 @@ async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
   const db = createAppDb()
   const readiness = splitPrelaunchReadinessTargets(
     await loadReadinessResults({
-      market: ORCHESTRATOR_WORK_WITH_MARKET
+      market: ORCHESTRATOR_WORK_WITH_MARKET,
+      ...hhReadinessOptions(process.env.APP_DB, db)
     })
   )
   await sendPrelaunchReadinessLogWithTimeout({

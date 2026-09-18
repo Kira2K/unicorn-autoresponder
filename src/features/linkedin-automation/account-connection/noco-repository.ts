@@ -26,14 +26,17 @@ const { linkedInNocoError } = require('./noco-error.ts') as {
 }
 const { listPrimaryStacks, updatePrimaryStack } = require('./noco-stacks.ts') as {
   listPrimaryStacks(rows: any[]): Array<{ id: number; name: string }>
-  updatePrimaryStack(client: any, rows: any, clientId: number, stackId: number): Promise<{ id: number; name: string }>
+  updatePrimaryStack(client: any, rows: any, clientId: number, stackId: number, link?: StackLink): Promise<{ id: number; name: string }>
 }
 const { assertLinkedInAuthNocoSchema } = require('./noco-schema-check.ts') as {
   assertLinkedInAuthNocoSchema(client: any): Promise<void>
 }
+type StackLink = (client: unknown, table: { id: string }, field: string, source: number,
+  targets: number[]) => Promise<{ ok: boolean }>
 function createLinkedInAuthNocoRepository(
   client?: any,
-  failureClient?: any
+  failureClient?: any,
+  link?: StackLink
 ) {
   const injectedClient = client
   client ??= createNocoClient({ pageDelayMs: 300, retryDelaysMs: [0, 30_000, 30_000] })
@@ -125,7 +128,7 @@ function createLinkedInAuthNocoRepository(
     async listStacks() { return listPrimaryStacks(await loadStacks()) },
     async updatePrimaryStack(clientId: number, stackId: number) {
       const [rows, stacks] = await Promise.all([loadRows(), loadStacks()])
-      const result = await updatePrimaryStack(client, { ...rows, stacks }, clientId, stackId)
+      const result = await updatePrimaryStack(client, { ...rows, stacks }, clientId, stackId, link)
       rowsCache = undefined
       return result
     },

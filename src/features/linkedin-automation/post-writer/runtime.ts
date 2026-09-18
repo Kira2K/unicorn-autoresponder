@@ -13,7 +13,7 @@ import * as httpModule from '../../../integrations/unipile/http-client.ts'
 import { acquirePostWriterLease } from './writer-lease.ts'
 import { registerWriterShutdown } from './shutdown-signals.ts'
 import { PostError, errorCode } from './errors.ts'
-import type { Gate } from './types.ts'
+import type { Gate, PostStore } from './types.ts'
 import type { LinkedInAuthAccountRow } from '../account-connection/types.ts'
 import { createJsonFiles } from './json-files.ts'
 import { createCvFiles } from './cv-files.ts'
@@ -25,9 +25,10 @@ const { TABLES } = commonJsExports<{
   TABLES: { cvProcessing: { id: string } }
 }>(schemaModule)
 const { createUnipileHttpClient } = commonJsExports<{ createUnipileHttpClient(): PostHttp }>(httpModule)
+export type PostWriterStorage = { store: PostStore; cvRows(): Promise<Record<string, unknown>[]> }
 
 export function createLivePostWriter(repository: { listAccounts(): Promise<LinkedInAuthAccountRow[]> },
-  gate: Gate, control: { env?: NodeJS.ProcessEnv } = {}): PostWriterService {
+  gate: Gate, control: { env?: NodeJS.ProcessEnv; storage?: PostWriterStorage } = {}): PostWriterService {
   const env = control.env ?? process.env
   const log = createPostLogger()
   let service: Promise<PostWriterService> | undefined
@@ -42,7 +43,10 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
       release = await acquirePostWriterLease(writerId)
       removeSignals = registerWriterShutdown(close, log)
     }
-    const http = createPostNocoTransport(log)
+    const storage = control.storage ?? (() => {
+      const http = createPostNocoTransport(log)
+      return { store: createPostNocoStore(http), cvRows: () => http.records(TABLES.cvProcessing.id) }
+    })()
     const model = createPostOpenAi(log, env)
     let unipileClient: PostHttp | undefined
     // Preserve lazy configuration: read-only work must not require a publishing client.
@@ -55,9 +59,9 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
     const scheduler = createUnipileRequestScheduler()
     const files = createJsonFiles(resolve(env.LINKEDIN_POST_DATA_DIR || 'storage/post-writer'))
     const uploads = createCvFiles(files, createFactsExtractor(model.respond))
-    return createPostWriterService({ store: createPostNocoStore(http),
+    return createPostWriterService({ store: storage.store,
       source: { ...uploads, ...createPostSource({ accounts: () => repository.listAccounts(),
-        cvRows: () => http.records(TABLES.cvProcessing.id), selectCv: selectFinalEnglishCv,
+        cvRows: storage.cvRows, selectCv: selectFinalEnglishCv,
         loadCv: loadDriveCv, extractFacts: createFactsExtractor(model.respond) }) },
       generator: model, memes: createMemeServices(files, model.respond, log, env),
       adapter: createPostAdapter(log, unipile, scheduler), gate, writable,

@@ -452,6 +452,7 @@ function createMockCvTailoringService(): CvTailoringService {
 
 function createWebConsoleApp(options: {
   repository?: WebConsoleRepository
+  linkedinStorage?: import('./storage-options.ts').LinkedInStorageOptions
   dolphinLeaseService?: DolphinLeaseService
   dolphinProfileProvisioner?: DolphinProfileProvisioner
   dolphinProvisioningApi?: any
@@ -479,6 +480,15 @@ function createWebConsoleApp(options: {
   useMockData?: boolean
 } = {}) {
   const useMockData = options.useMockData ?? process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
+  const storage = options.linkedinStorage
+  const completeStorage = storage && [storage.repository, storage.history, storage.profile,
+    storage.generation, storage.comments, storage.inviter, storage.posts?.store, storage.posts?.cvRows].every(Boolean)
+  if (!useMockData && process.env.APP_DB === 'postgres' && (!options.repository || (!completeStorage &&
+    [options.linkedinAuthRuns, options.profileFiller, options.commentMonitor, options.connectionInviter, options.postWriter].some(value => !value)))) {
+    throw Object.assign(new Error('SQL-хранилища консоли не подключены. Запуск через Noco запрещён.'), {
+      code: 'sql_console_dependencies_required'
+    })
+  }
   const repository =
     options.repository ??
     createWebConsoleRepository({
@@ -488,7 +498,7 @@ function createWebConsoleApp(options: {
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
   const linkedinOperationGate = options.linkedinOperationGate ?? createLinkedInOperationGate()
-  let linkedinRepository: any
+  let linkedinRepository: any = storage?.repository
   const getLinkedInRepository = () => linkedinRepository ??= createLinkedInAuthNocoRepository()
   const lazyLinkedInRepository = new Proxy({}, {
     get(_target, property) {
@@ -499,13 +509,15 @@ function createWebConsoleApp(options: {
   })
   const linkedinAuthRuns = options.linkedinAuthRuns ?? (useMockData
     ? createMockLinkedInAuthRunService()
-    : createLinkedInAuthRunService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository }))
+    : createLinkedInAuthRunService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository, history: storage?.history }))
   const profileFiller = options.profileFiller ?? (useMockData
     ? createMockProfileFillerService()
-    : createProfileFillerService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository }))
+    : createProfileFillerService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository,
+      store: storage?.profile, generationRepository: storage?.generation }))
   let liveCommentMonitor: import('./comment-monitor-types.ts').CommentMonitorService | undefined
   const getLiveCommentMonitor = () => liveCommentMonitor ??= createCommentMonitorService({
     gate: linkedinOperationGate,
+    store: storage?.comments,
     repository: lazyLinkedInRepository
   })
   const lazyCommentMonitor = new Proxy({}, {
@@ -521,6 +533,7 @@ function createWebConsoleApp(options: {
   let liveConnectionInviter: import('./connection-inviter-types.ts').ConnectionInviterService | undefined
   const getLiveConnectionInviter = () => liveConnectionInviter ??= createConnectionInviterService({
     gate: linkedinOperationGate,
+    store: storage?.inviter,
     repository: lazyLinkedInRepository
   })
   const lazyConnectionInviter = new Proxy({}, {
@@ -539,7 +552,7 @@ function createWebConsoleApp(options: {
   const postWriter = options.postWriter ?? (useMockData
     ? createMockPostWriter(linkedinOperationGate)
     : createLivePostWriter(lazyLinkedInRepository as { listAccounts(): Promise<import('../../linkedin-automation/account-connection/types.ts').LinkedInAuthAccountRow[]> },
-      linkedinOperationGate))
+      linkedinOperationGate, { storage: storage?.posts }))
   const textRuntime = createTextRuntime(useMockData)
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
@@ -1869,6 +1882,7 @@ function createWebConsoleApp(options: {
   return app
 }
 
+export type WebConsoleAppOptions = Parameters<typeof createWebConsoleApp>[0]
 module.exports = {
   ADMIN_EMAIL,
   ADMIN_PASSWORD,

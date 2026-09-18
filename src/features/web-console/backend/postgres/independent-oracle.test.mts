@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { workflowFixture } from './workflow-fixture.mts';
+import { linkedInFixture } from './linkedin-fixture.mts';
+import { legacyFixtureRows } from './legacy-query-fixture.mts';
+import { createSqlLinkedInStorage } from './linkedin-repository.mts';
+import { PostgresReadError } from '../../../../integrations/postgres/contracts.mts';
+test('legacy fixture has its own equality/OR oracle, preserving raw order and values', () => {
+  const rows = [{ Id: 8, status: 'Готово', value: null }, { Id: 7, status: '', value: '' }];
+  assert.deepEqual(legacyFixtureRows(rows, '(status,eq,)~or(Id,eq,8)'), rows);
+  assert.deepEqual(legacyFixtureRows(rows, '(Id,eq,7)'), [rows[1]]);
+  assert.deepEqual(legacyFixtureRows(rows, '(status,eq,нет)'), []);
+  assert.throws(() => legacyFixtureRows(rows, '(Id,gt,1)'), /unsupported/);
+  const result = legacyFixtureRows(rows); result[0].value = 'changed';
+  assert.equal(rows[0].value, null);
+});
+test('faulty SQL reads cannot change the old console or LinkedIn oracle; shared outages are explicit', async () => {
+  const f = workflowFixture();
+  f.db.findRecords = async () => ({ records: [], nextKey: null });
+  f.db.listRecords = async () => ({ records: [], nextKey: null });
+  assert.equal((await f.legacy.findClientByCalendarEmail('sql-fixture@example.invalid'))?.id, 7);
+  assert.equal(await f.sql.findClientByCalendarEmail('sql-fixture@example.invalid'), null);
+  const g = linkedInFixture(), sql = createSqlLinkedInStorage(g.db).repository;
+  const expected = await g.legacy.repository.listAccounts(); assert.equal(expected.length, 1);
+  g.db.listRecords = async () => ({ records: [], nextKey: null });
+  assert.deepEqual(await g.legacy.repository.listAccounts(), expected);
+  assert.deepEqual(await sql.listAccounts(), []);
+  g.failRead(true, new PostgresReadError('postgres_read_unavailable'));
+  await assert.rejects(g.legacy.repository.getAccount(21, { fresh: true }), { code: 'postgres_read_unavailable' });
+  g.failRead(false);
+  assert.equal((await g.legacy.repository.getAccount(21, { fresh: true }))?.platformAccountId, 21);
+});

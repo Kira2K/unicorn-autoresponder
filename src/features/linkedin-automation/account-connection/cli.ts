@@ -15,18 +15,23 @@ const { parseLinkedInAuthArgs, USAGE } = require('./cli-args.ts') as {
   USAGE: string
 }
 
-async function main(args = process.argv.slice(2)): Promise<void> {
+async function main(args = process.argv.slice(2), supplied?: import('./types.ts').LinkedInAuthDependencies,
+  output: (text: string) => void = console.log): Promise<void> {
   const options = parseLinkedInAuthArgs(args)
   if (options.help) {
-    console.log(USAGE)
+    output(USAGE)
     return
   }
 
-  const logger = createLinkedInAuthLogger()
-  const result = await runLinkedInAuth(
-    options, createLinkedInAuthDependencies({ apply: options.apply, logger })
-  )
-  console.log(JSON.stringify(result, null, 2))
+  const logger = supplied ? supplied.logger : createLinkedInAuthLogger()
+  const sql = !supplied && process.env.APP_DB === 'postgres'
+    ? await (await import('./postgres-runtime.mts')).openSqlAuth({ apply: options.apply, logger }) : undefined
+  try {
+    const result = await runLinkedInAuth(
+      options, supplied ?? sql?.dependencies ?? createLinkedInAuthDependencies({ apply: options.apply, logger })
+    )
+    output(JSON.stringify(result, null, 2))
+  } finally { await sql?.close() }
 }
 
 if (require.main === module) {

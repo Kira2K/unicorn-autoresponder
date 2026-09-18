@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createProfileFillerNocoRepository } from './noco-repository.ts'
+import { createProfileFillerRepository } from './repository.ts'
 import { createDriveSourceLoader } from './drive-source.ts'
 import { createCvExtractor } from './cv-extractor.ts'
 import { buildPreparedProfile } from './profile-builder.ts'
@@ -53,7 +53,7 @@ function sanitizedPlan(profile: PreparedProfile) {
 }
 
 export function createProfileFillerService(options: {
-  repository?: ReturnType<typeof createProfileFillerNocoRepository>
+  repository?: ReturnType<typeof createProfileFillerRepository>
   drive?: ReturnType<typeof createDriveSourceLoader>
   extractor?: ReturnType<typeof createCvExtractor>
   withPage?: typeof withAuthorizedHHPage
@@ -66,7 +66,7 @@ export function createProfileFillerService(options: {
     listResumes: typeof listResumes
   }
 } = {}) {
-  const repository = options.repository ?? createProfileFillerNocoRepository()
+  const repository = options.repository ?? createProfileFillerRepository()
   const drive = options.drive ?? createDriveSourceLoader()
   let extractor = options.extractor
   const withPage = options.withPage ?? withAuthorizedHHPage
