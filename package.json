@@ -80,8 +80,6 @@
     "noco:full-backup:dry-run": "node src/integrations/noco/full-backup/index.ts --dry-run",
     "noco:full-backup:apply": "node src/integrations/noco/full-backup/index.ts --apply",
     "noco:full-backup:test": "node src/integrations/noco/full-backup/index.ts --test",
-    "noco:copy": "node src/integrations/noco/full-backup/postgres-copy/cli.mts",
-    "noco:copy:test": "node --test src/integrations/noco/full-backup/postgres-copy/*.test.mts",
     "postgres:test": "node --test src/integrations/postgres/*.test.mts",
     "sql:check": "node scripts/check-sql.mts",
     "noco:contract-check": "node src/integrations/noco/contract-check/index.ts",

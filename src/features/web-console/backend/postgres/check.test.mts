@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkSqlStorage } from './check.mts';
 import { runtimeFixture } from './runtime-fixture.mts';
-import { cvLocalColumns } from './workflow-schema.mts';
+import { cvLocalColumns } from './workflow-fields.mts';
 import { tableIds } from './tables.mts';
 function fixture() {
   const f = runtimeFixture();

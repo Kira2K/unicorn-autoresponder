@@ -36,9 +36,3 @@ Limits:
 - Attachment binary files are not downloaded; attachment metadata is preserved as returned in records.
 - Some admin settings, API tokens, plugins, shared settings, or visibility rules may be blocked by Noco Cloud/API-token permissions.
 
-## Разовая копия в PostgreSQL
-
-Отдельный инструмент: [postgres-copy/README.md](postgres-copy/README.md).
-Он не переключает приложения, не меняет Noco и не использует каталог `logs/` для данных.
-Проверяет исходные ID, скрытые таблицы связей и значения строк; готовит SQL
-для загрузки и сверки. Применение SQL и проверка восстановления дампа — отдельные шаги.

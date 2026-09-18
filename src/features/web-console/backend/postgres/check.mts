@@ -4,7 +4,7 @@ import { assertGeneratedIds } from '../../../../integrations/postgres/identity-p
 import { PostgresReadError } from '../../../../integrations/postgres/contracts.mts';
 import { readPostgresAppDbConfig } from '../../../../platform/db/postgres/config.mts';
 import { runtimeCreateTables } from './runtime-tables.mts';
-import { cvLocalColumns } from './workflow-schema.mts';
+import { cvLocalColumns } from './workflow-fields.mts';
 import { tableIds } from './tables.mts';
 
 // Check the existing database only. No app, provider, migration or background job is created.

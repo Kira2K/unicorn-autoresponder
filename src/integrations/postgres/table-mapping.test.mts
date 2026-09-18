@@ -2,11 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCatalog } from './catalog.mts';
 import { createPostgresClient } from './working-client.mts';
-import { createPostgresReadClient } from './client.mts';
 import { generatedIdColumn, assignGeneratedId } from './generated-ids.mts';
 import { createWorkingCatalog } from './working-catalog.mts';
 import { workingFake, metadata } from './working-fixture.mts';
-import { fakePool } from './fixture.mts';
 
 test('mapped physical table preserves IDs, working reads, patches, joins and ID allocation', async () => {
   const { pool, state } = workingFake();
@@ -27,12 +25,13 @@ test('mapped physical table preserves IDs, working reads, patches, joins and ID 
   } }, table, data);
   assert.equal(data.Id, '2');
 });
-test('archive reader follows the same physical mapping, without modifying source names', async () => {
-  const { pool, state } = fakePool();
-  Object.assign(state.metadata[0], { sqlName: 'CV processing', sqlTable: 'noco.CV processing' });
-  const client = await createPostgresReadClient(pool, 'unicorn_noco_copy');
+test('working reader handles spaces in physical names without modifying source names', async () => {
+  const { pool, state } = workingFake();
+  Object.assign(state.definitions[0], { sqlName: 'CV processing', sqlTable: 'noco.CV processing' });
+  state.rows = [{ record_key: '["1"]', source_json: '{"Id":1}' }];
+  const client = await createPostgresClient(pool, 'unicorn_noco_copy_restore');
   assert.equal((await client.getRecord('mpeople', ['1']))?.key[0], '1');
-  await client.listRelated('mpeople', 'cfriends', ['1']);
+  await client.listRelated('mteams', 'cpeople', ['1']);
   assert.ok(state.calls.some(c => c.text.includes('FROM noco."CV processing"')));
   assert.ok(state.calls.some(c => c.text.includes('JOIN noco."CV processing"')));
   assert.equal(client.listTables()[0].table_name, 'clients');
