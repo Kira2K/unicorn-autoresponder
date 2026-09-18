@@ -7,6 +7,7 @@ const { createTelegramBotApi } = require('./bot-api.ts') as {
     answerCallbackQuery(input: { callbackQueryId: string; text?: string }): Promise<unknown>
   }
 }
+const { kiraRejectPromptMessage } = require('./resume-kira-message-templates.ts')
 
 type SupportBotActor = {
   userId: string
@@ -28,13 +29,13 @@ type SupportBotApiClient = {
   resume(chatId: string, actor?: SupportBotActor, options?: { studentDataFolderUrl?: string }): Promise<{ found: boolean; message: string }>
   resumeStatus(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
   resumeResetTest(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
-  providerTasks(actor?: SupportBotActor, offset?: number): Promise<{ message: string; replyMarkup?: unknown }>
-  providerTask(workflowId: number, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown; workflow?: { id?: number; status?: string } }>
-  advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; workflow?: { status?: string } }>
-  rejectWorkflow(workflowId: number, expectedStatus: string, comment: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; workflow?: { status?: string } }>
-  rejectResume(chatId: string, comment: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; workflow?: { status?: string } }>
-  saveKiraComments(comments: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown }>
-  saveResumeTaskInput(text: string, actor?: SupportBotActor, options?: { workflowId?: number; expectedStatus?: string }): Promise<{ message: string; replyMarkup?: unknown; workflow?: { id?: number; status?: string }; clearActiveTask?: boolean }>
+  providerTasks(actor?: SupportBotActor, offset?: number): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string }>
+  providerTask(workflowId: number, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string; workflow?: { id?: number; status?: string } }>
+  advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
+  rejectWorkflow(workflowId: number, expectedStatus: string, comment: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
+  rejectResume(chatId: string, comment: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
+  saveKiraComments(comments: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string }>
+  saveResumeTaskInput(text: string, actor?: SupportBotActor, options?: { workflowId?: number; expectedStatus?: string }): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string; workflow?: { id?: number; status?: string }; clearActiveTask?: boolean }>
 }
 
 const BACKEND_UNAVAILABLE_MESSAGE = 'Бэкенд сейчас недоступен. Попробуй позже.'
@@ -178,6 +179,54 @@ function decodeCallbackStatus(value: string | undefined): string {
 
 function responseText(response: SupportBotResponse): string {
   return typeof response === 'string' ? response : response.text
+}
+
+function apiMessageResponse(result: { message: string; replyMarkup?: unknown; parseMode?: string }): SupportBotResponse {
+  if (!result.replyMarkup && !result.parseMode) return result.message
+  return {
+    text: result.message,
+    replyMarkup: result.replyMarkup,
+    parseMode: result.parseMode
+  }
+}
+
+function plainResponseText(response: SupportBotResponse): string {
+  return responseText(response)
+    .replace(/<[^>]+>/g, '')
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&')
+}
+
+const MARKDOWN_LINK_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g
+
+function escapeTelegramHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function renderSupportBotLinks(response: SupportBotResponse): SupportBotResponse {
+  if (typeof response !== 'string' && response.parseMode?.toUpperCase() === 'HTML') return response
+  const text = responseText(response)
+  const matches = [...text.matchAll(MARKDOWN_LINK_PATTERN)]
+  if (!matches.length) return response
+
+  let cursor = 0
+  const parts: string[] = []
+  for (const match of matches) {
+    const index = match.index ?? cursor
+    parts.push(escapeTelegramHtml(text.slice(cursor, index)))
+    parts.push(`<a href="${escapeTelegramHtml(match[2])}">${escapeTelegramHtml(match[1])}</a>`)
+    cursor = index + match[0].length
+  }
+  parts.push(escapeTelegramHtml(text.slice(cursor)))
+
+  const formatted = { text: parts.join(''), parseMode: 'HTML' }
+  return typeof response === 'string' ? formatted : { ...response, ...formatted }
 }
 
 function backendUnavailableError(cause: unknown): Error & { code: string; cause?: unknown } {
@@ -473,10 +522,7 @@ async function handleOpenTasks(actor: SupportBotActor, api: SupportBotApiClient)
 
   return await withBackendStatusMessage(async () => {
     const result = await api.providerTasks(actor)
-    return {
-      text: result.message,
-      replyMarkup: result.replyMarkup
-    }
+    return apiMessageResponse(result)
   })
 }
 
@@ -507,7 +553,7 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
           actor
         )
         clearActiveRejectContext(actor)
-        return result.message
+        return apiMessageResponse(result)
       })
     }
     if (actor.chatType !== 'private') {
@@ -525,10 +571,7 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
       if (result.workflow || result.clearActiveTask) {
         clearActiveTaskContext(actor)
       }
-      return {
-        text: result.message,
-        replyMarkup: result.replyMarkup
-      }
+      return apiMessageResponse(result)
     })
   }
 
@@ -604,7 +647,7 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
           actor
         )
         clearActiveRejectContext(actor)
-        return result.message
+        return apiMessageResponse(result)
       }
       if (actor.chatType === 'private') {
         return `Сначала открой конкретную задачу через /open_my_tasks и нажми «Вернуть с комментарием». ${rejectInstruction()}`
@@ -643,7 +686,7 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
     const offset = Number(parts[2])
     return await withBackendStatusMessage(async () => {
       const result = await api.providerTasks(actor, Number.isFinite(offset) && offset > 0 ? offset : 0)
-      return { text: result.message, replyMarkup: result.replyMarkup }
+      return apiMessageResponse(result)
     })
   }
 
@@ -661,7 +704,7 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
       } else {
         clearActiveTaskContext(actor)
       }
-      return { text: result.message, replyMarkup: result.replyMarkup }
+      return apiMessageResponse(result)
     })
   }
 
@@ -670,13 +713,16 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
     const expectedStatus = decodeCallbackStatus(parts[3])
     return await withBackendStatusMessage(async () => {
       const result = await api.advanceWorkflow(workflowId, expectedStatus, actor)
-      return result.message
+      return apiMessageResponse(result)
     })
   }
 
   if (parts[1] === 'reject') {
     const expectedStatus = decodeCallbackStatus(parts[3])
     rememberActiveRejectContext(actor, workflowId, expectedStatus)
+    if (expectedStatus.includes('approve by Kira')) {
+      return kiraRejectPromptMessage()
+    }
     return [
       rejectInstruction(),
       '',
@@ -728,15 +774,16 @@ async function sendBotResponse(
   chatId: string,
   response: SupportBotResponse
 ): Promise<void> {
-  if (typeof response === 'string') {
-    await botApi.sendMessage({ chatId, text: response })
+  const renderedResponse = renderSupportBotLinks(response)
+  if (typeof renderedResponse === 'string') {
+    await botApi.sendMessage({ chatId, text: renderedResponse })
     return
   }
   await botApi.sendMessage({
     chatId,
-    text: response.text,
-    replyMarkup: response.replyMarkup,
-    parseMode: response.parseMode
+    text: renderedResponse.text,
+    replyMarkup: renderedResponse.replyMarkup,
+    parseMode: renderedResponse.parseMode
   })
 }
 
@@ -786,10 +833,12 @@ function isTransientTelegramPollingError(error: any): boolean {
   )
 }
 
-function userFacingErrorMessage(error: any): string {
+function userFacingErrorResponse(error: any): SupportBotResponse {
   if (isBackendOverloadedError(error)) return BACKEND_OVERLOADED_MESSAGE
   if (isBackendUnavailableError(error)) return BACKEND_UNAVAILABLE_MESSAGE
-  return String(error?.message ?? '').trim() || GENERIC_BOT_ERROR_MESSAGE
+  const text = String(error?.message ?? '').trim() || GENERIC_BOT_ERROR_MESSAGE
+  const parseMode = String(error?.parseMode ?? error?.body?.parseMode ?? '').trim()
+  return parseMode ? { text, parseMode } : text
 }
 
 async function runSupportBot(options: {
@@ -848,7 +897,8 @@ async function runSupportBot(options: {
       } catch (error: any) {
         console.error(error instanceof Error ? error.stack || error.message : String(error))
         const chatId = String(chatMemberUpdate?.chat?.id ?? callbackQuery?.message?.chat?.id ?? callbackQuery?.from?.id ?? message?.chat?.id ?? '').trim()
-        const errorText = userFacingErrorMessage(error)
+        const errorResponse = userFacingErrorResponse(error)
+        const errorText = plainResponseText(errorResponse)
         if (callbackQuery?.id) {
           await answerCallbackQueryQuietly(botApi, {
             callbackQueryId: String(callbackQuery.id),
@@ -856,7 +906,7 @@ async function runSupportBot(options: {
           }).catch(() => undefined)
         }
         if (chatId) {
-          await sendBotResponseQuietly(botApi, chatId, errorText)
+          await sendBotResponseQuietly(botApi, chatId, errorResponse)
         }
       }
     }

@@ -1660,16 +1660,31 @@ async function runTests(): Promise<void> {
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.deepEqual(result.body.tasks.map((task: any) => task.clientName), ['Client One'])
       assert.equal(result.body.tasks[0].expectedStatus, 'Draft in approve by Kira')
-      assert.match(result.body.message, /^Задачи Киры по резюме:/)
+      assert.match(result.body.message, /^<b>📋 Твои задачи по резюме \(1–1 из 1\):<\/b>/)
+      assert.equal(result.body.parseMode, 'HTML')
+      assert.match(result.body.message, /\nВсе задачи: \/open_my_tasks$/)
 
       result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}`, {
         headers: kiraHeaders
       })
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.equal(result.body.workflow.status, 'Draft in approve by Kira')
+      assert.match(result.body.message, /^<b>⚡️ Новая задача: черновик на проверке у Киры<\/b>/)
+      assert.equal(result.body.parseMode, 'HTML')
       assert.match(result.body.message, /@client_one_tg/)
       assert.match(result.body.message, /\+79990003344/)
       assert.match(result.body.message, /\+79990005566/)
+
+      result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}/advance`, {
+        method: 'POST',
+        headers: kiraHeaders,
+        body: JSON.stringify({ expectedStatus: 'English version in approve by Kira' })
+      })
+      assert.equal(result.response.status, 409, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'resume_workflow_stale_status')
+      assert.equal(result.body.parseMode, 'HTML')
+      assert.match(result.body.message, /^<b>ℹ️ Статус задачи обновился<\/b>/)
+      assert.match(result.body.message, /\nВсе задачи: \/open_my_tasks$/)
 
       result = await request(server.baseUrl, `/api/bot/telegram/resume/workflows/${workflowId}/advance`, {
         method: 'POST',
@@ -1730,11 +1745,13 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> moved to filling')
       assert(result.body.notifications.some((notification: any) => notification.kind === 'private_kira'))
       assert(result.body.notifications.some((notification: any) => notification.kind === 'linkedin_ready'))
-      const kiraFillingMessage = telegramBotMessages.find((message: any) => /передано на заполнение/.test(message.text))
+      const kiraFillingMessage = telegramBotMessages.find((message: any) => /Резюме ушло на заполнение/.test(message.text))
       assert(kiraFillingMessage)
       assert.equal(kiraFillingMessage.chatId, '343610488')
-      assert.match(kiraFillingMessage.text, /Английская версия: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
-      assert.match(kiraFillingMessage.text, /Русская версия: https:\/\/docs\.google\.com\/document\/d\/test-russian-version/)
+      assert.equal(kiraFillingMessage.parseMode, 'HTML')
+      assert.match(kiraFillingMessage.text, /• EN: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
+      assert.match(kiraFillingMessage.text, /• RU: https:\/\/docs\.google\.com\/document\/d\/test-russian-version/)
+      assert.match(kiraFillingMessage.text, /\nВсе задачи: \/open_my_tasks$/)
       const linkedInReadyMessage = telegramBotMessages.find((message: any) => /@CheMpoKaRokee/.test(message.text))
       assert(linkedInReadyMessage)
       assert.equal(linkedInReadyMessage.chatId, '-1003187558078')

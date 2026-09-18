@@ -63,6 +63,7 @@ const {
   saveKiraCommentsFromChat(repository: any, actor?: any, comments?: string, options?: any): Promise<any>
   saveProviderLinkFromChat(repository: any, actor?: any, link?: string, options?: any): Promise<any>
 }
+const kiraTemplates = require('./resume-kira-message-templates.ts') as Record<string, (...args: any[]) => any>
 
 const studentActor = {
   userId: '100',
@@ -87,6 +88,188 @@ const ruTranslatorActor = {
   username: 'polinats',
   chatId: '490903294',
   chatType: 'private'
+}
+
+const PRIVATE_STAFF_TASKS_FOOTER = 'Открыть все задачи /open_my_tasks'
+const KIRA_TASKS_FOOTER = 'Все задачи: /open_my_tasks'
+
+function assertPrivateStaffTasksFooter(text: string): void {
+  assert.equal(text.endsWith(`\n${PRIVATE_STAFF_TASKS_FOOTER}`), true)
+  assert.equal(text.split(PRIVATE_STAFF_TASKS_FOOTER).length - 1, 1)
+}
+
+function assertKiraTasksFooter(text: string, expectedOccurrences = 1): void {
+  assert.equal(text.endsWith(`\n${KIRA_TASKS_FOOTER}`), true)
+  assert.equal(text.split(KIRA_TASKS_FOOTER).length - 1, expectedOccurrences)
+}
+
+function assertKiraTemplate(actual: any, expectedText: string): void {
+  assert.deepEqual(actual, { text: expectedText, parseMode: 'HTML' })
+}
+
+function testKiraMessageTemplateContract(): void {
+  const footer = KIRA_TASKS_FOOTER
+  assertKiraTemplate(kiraTemplates.kiraNeedsCommentsMessage('Анна'), [
+    '<b>📌 Ожидается фидбек по резюме</b>',
+    'Студент: Анна',
+    'Кира, добавь комментарии для подрядчика в следующем сообщении.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraCommentsSavedMessage('Анна'), [
+    '<b>✅ Комментарий сохранен</b>',
+    'Фидбек по резюме (Анна) записан. Чтобы передать задачу дальше, нажми «Перейти к следующему шагу».',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraDraftReviewMessage('Анна'), [
+    '<b>🔍 Черновик на проверке</b>',
+    'Студент: Анна',
+    'Кира, проверь черновик и оставь комментарии.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraEnglishReviewMessage('Анна'), [
+    '<b>🇬🇧 Проверка EN-версии</b>',
+    'Студент: Анна',
+    'Английская версия готова, ждет твоей проверки.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraRussianReviewMessage('Анна'), [
+    '<b>🇷🇺 Проверка RU-версии</b>',
+    'Студент: Анна',
+    'Русская версия готова, ждет твоей проверки.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraNewTaskMessage({
+    stageName: 'черновик <тест>',
+    clientName: 'Анна & Ко',
+    market: 'EN',
+    requiredAction: 'Проверь <файл>.',
+    studentDataRows: ['Данные ученика:', 'Возраст: 30 & опыт'],
+    linkAndCommentRows: ['Черновик: https://example.com/?a=1&b=2']
+  }), [
+    '<b>⚡️ Новая задача: черновик &lt;тест&gt;</b>',
+    'Ученик: Анна &amp; Ко [EN]',
+    'Проверь &lt;файл&gt;.',
+    '',
+    'Данные ученика:',
+    'Возраст: 30 &amp; опыт',
+    'Черновик: https://example.com/?a=1&amp;b=2',
+    '',
+    '👉 Открой /open_my_tasks, чтобы взять в работу.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraTaskListMessage({
+    from: 1,
+    to: 2,
+    total: 2,
+    tasks: [
+      { clientName: 'Анна', market: 'EN', status: 'черновик на проверке', action: 'готово к следующему шагу' },
+      { clientName: 'Борис', market: 'Ru', status: 'сбор комментариев Киры', action: 'добавь комментарий Киры' }
+    ]
+  }), [
+    '<b>📋 Твои задачи по резюме (1–2 из 2):</b>',
+    'Анна [EN] — черновик на проверке (готово к следующему шагу)',
+    'Борис [Ru] — сбор комментариев Киры (добавь комментарий Киры)',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraNoTasksMessage(), [
+    '<b>🎉 Все чисто!</b>',
+    'Сейчас нет активных задач по резюме.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraRejectPromptMessage(), [
+    '<b>↩️ Возврат на доработку</b>',
+    'Напиши /resume_reject оставь комментарии в резюме или отправь свой комментарий следующим сообщением — передам его подрядчику.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraReworkMessage('draft', 'Анна', 'Исправить опыт'), [
+    '<b>🛠 Черновик отправлен на доработку</b>',
+    'Студент: Анна',
+    'Комментарий: Исправить опыт',
+    'Ответственный: подрядчик',
+    'Ждем новую ссылку на черновик следующим сообщением.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraReworkMessage('en', 'Анна', 'Исправить опыт'), [
+    '<b>🛠 EN-версия отправлена на доработку</b>',
+    'Студент: Анна',
+    'Комментарий: Исправить опыт',
+    'Ответственный: подрядчик',
+    'Отправь обновленную ссылку на EN-версию следующим сообщением.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraReworkMessage('ru', 'Анна', 'Исправить опыт'), [
+    '<b>🛠 RU-версия отправлена на доработку</b>',
+    'Студент: Анна',
+    'Комментарий: Исправить опыт',
+    'Ответственный: подрядчик',
+    'Отправь обновленную ссылку на RU-версию следующим сообщением.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraStaleStatusMessage('старый', 'новый'), [
+    '<b>ℹ️ Статус задачи обновился</b>',
+    'Был: «старый» ➔ Стал: «новый».',
+    'Обнови список и открой задачу заново.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraTaskUnavailableMessage(), [
+    '<b>🚫 Задача недоступна</b>',
+    'Эта задача по резюме уже закрыта или перенесена. Обнови список задач.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraCommentNotRequiredMessage(), [
+    '<b>ℹ️ Комментарий не нужен</b>',
+    'Эта задача больше не ждет фидбека. Обнови список задач.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraMultipleCommentTasksMessage(), [
+    '<b>⚠️ Выбери конкретную задачу</b>',
+    'У тебя несколько задач ждут комментарий. Открой нужную задачу из списка, чтобы оставить фидбек.',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraMovedToFillingMessage({
+    clientName: 'Анна',
+    ruOnly: false,
+    enVersionUrl: 'https://example.com/en',
+    ruVersionUrl: 'https://example.com/ru'
+  }), [
+    '<b>📤 Резюме ушло на заполнение</b>',
+    'Студент: Анна',
+    '• EN: https://example.com/en',
+    '• RU: https://example.com/ru',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraMovedToFillingMessage({
+    clientName: 'Анна',
+    ruOnly: true,
+    ruVersionUrl: 'https://example.com/ru'
+  }), [
+    '<b>📤 Резюме ушло на заполнение</b>',
+    'Студент: Анна',
+    '• RU: https://example.com/ru',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraCompletedMessage({
+    clientName: 'Анна',
+    ruOnly: false,
+    enVersionUrl: 'https://example.com/en',
+    ruVersionUrl: 'https://example.com/ru'
+  }), [
+    '<b>🎉 Резюме готово!</b>',
+    'Студент: Анна',
+    '• EN: https://example.com/en',
+    '• RU: https://example.com/ru',
+    footer
+  ].join('\n'))
+  assertKiraTemplate(kiraTemplates.kiraCompletedMessage({
+    clientName: 'Анна',
+    ruOnly: true,
+    ruVersionUrl: 'https://example.com/ru'
+  }), [
+    '<b>🎉 Резюме готово!</b>',
+    'Студент: Анна',
+    '• RU: https://example.com/ru',
+    footer
+  ].join('\n'))
 }
 
 function makeWorkflow(overrides: Record<string, any> = {}) {
@@ -183,6 +366,7 @@ function makeWorkflowListRepository(workflowRecords: any[]) {
 }
 
 async function runTests() {
+  testKiraMessageTemplateContract()
   clearActiveTaskContextsForTest()
   assert.equal(commandName('/student@veu_support_bot hello'), '/student')
   assert.equal(commandArgument('/change_google_folder https://drive.google.com/drive/folders/abc'), 'https://drive.google.com/drive/folders/abc')
@@ -432,6 +616,16 @@ async function runTests() {
   assert.equal(lastRejectWorkflowInput.expectedStatus, 'Draft in approve by student')
   assert.equal(lastRejectWorkflowInput.comment, 'оставил комменты в резюме')
 
+  const kiraRejectCallbackResponse = await handleSupportBotCallback({
+    data: callbackData('reject', 99, 'English version in approve by Kira'),
+    message: { chat: { id: 343610488, type: 'private' } },
+    from: { id: 343610488, username: 'Kira_arbeitet' }
+  }, foundApi)
+  assert.match(responseText(kiraRejectCallbackResponse), /^<b>↩️ Возврат на доработку<\/b>/)
+  assert.match(responseText(kiraRejectCallbackResponse), /\/resume_reject оставь комментарии в резюме/)
+  assert.equal(kiraRejectCallbackResponse.parseMode, 'HTML')
+  assertKiraTasksFooter(responseText(kiraRejectCallbackResponse))
+
   const rejectCommandResponse = await handleSupportBotMessage({
     text: '/resume_reject оставил комменты в резюме',
     chat: { id: -5216637594, type: 'supergroup' },
@@ -661,12 +855,96 @@ async function runTests() {
     'Статус резюме для Client One: черновик в работе'
   ].join('\n'))
 
+  const linkRunnerStop = new AbortController()
+  const linkRunnerSentMessages: any[] = []
+  await runSupportBot({
+    apiClient: {
+      ...foundApi,
+      async resume(chatId: string) {
+        return {
+          found: true,
+          chatId,
+          message: 'Статус резюме для Client <One> & Team: сбор данных\nДальше: заполни данные. [Ссылка на ЛК](https://very-evil-unicorn.onrender.com/)'
+        }
+      }
+    },
+    stopSignal: linkRunnerStop.signal,
+    botApi: {
+      async getUpdates() {
+        return [{
+          update_id: 2,
+          message: {
+            text: '/resume',
+            chat: { id: -5216637594, type: 'supergroup' },
+            from: { id: 100, username: 'student_user' }
+          }
+        }]
+      },
+      async sendMessage(input: any) {
+        linkRunnerSentMessages.push(input)
+        linkRunnerStop.abort()
+        return { ok: true }
+      },
+      async answerCallbackQuery() {
+        return { ok: true }
+      }
+    }
+  })
+  assert.equal(linkRunnerSentMessages.at(-1).parseMode, 'HTML')
+  assert.equal(
+    linkRunnerSentMessages.at(-1).text,
+    'Статус резюме для Client &lt;One&gt; &amp; Team: сбор данных\nДальше: заполни данные. <a href="https://very-evil-unicorn.onrender.com/">Ссылка на ЛК</a>'
+  )
+
   const expectedConsoleErrors: string[] = []
   const realConsoleError = console.error
   console.error = (...args: any[]) => {
     expectedConsoleErrors.push(args.map(String).join(' '))
   }
   try {
+  const staleStatusStop = new AbortController()
+  const staleStatusSentMessages: any[] = []
+  const staleStatusCallbackAnswers: any[] = []
+  const staleMessage = kiraTemplates.kiraStaleStatusMessage('черновик на проверке', 'проверка EN-версии')
+  await runSupportBot({
+    apiClient: {
+      ...foundApi,
+      async advanceWorkflow() {
+        throw Object.assign(new Error(staleMessage.text), {
+          code: 'resume_workflow_stale_status',
+          body: { parseMode: 'HTML' }
+        })
+      }
+    },
+    stopSignal: staleStatusStop.signal,
+    pollTimeout: 0,
+    botApi: {
+      async getUpdates() {
+        return [{
+          update_id: 3,
+          callback_query: {
+            id: 'stale-status-callback',
+            data: callbackData('advance', 98, 'Draft in approve by Kira'),
+            message: { chat: { id: 343610488, type: 'private' } },
+            from: { id: 343610488, username: 'Kira_arbeitet' }
+          }
+        }]
+      },
+      async sendMessage(input: any) {
+        staleStatusSentMessages.push(input)
+        staleStatusStop.abort()
+        return { ok: true }
+      },
+      async answerCallbackQuery(input: any) {
+        staleStatusCallbackAnswers.push(input)
+        return { ok: true }
+      }
+    }
+  })
+  assert.equal(staleStatusSentMessages.at(-1).parseMode, 'HTML')
+  assert.equal(staleStatusSentMessages.at(-1).text, staleMessage.text)
+  assert.doesNotMatch(staleStatusCallbackAnswers.at(-1).text, /<b>/)
+
   const retryPollingStop = new AbortController()
   const retryPollingSentMessages: any[] = []
   let retryPollingCalls = 0
@@ -961,6 +1239,10 @@ async function runTests() {
     assert.match(missingRequiredStatusResult.message, /аккаунт LinkedIn/)
     assert.match(missingRequiredStatusResult.message, /Telegram RU/)
     assert.match(missingRequiredStatusResult.message, /Telegram EN/)
+    assert.match(
+      missingRequiredStatusResult.message,
+      /Telegram EN\. \[Ссылка на ЛК\]\(https:\/\/very-evil-unicorn\.onrender\.com\/\)\nПосле этого бот попросит/
+    )
     assert.doesNotMatch(missingRequiredStatusResult.message, /\/resume </)
 
     const missingRequiredResumeResult = await resumeWorkflow('-5216637594', missingRequiredClientDataRepository, {
@@ -1040,7 +1322,10 @@ async function runTests() {
       'Please prepare the first draft.'
     )
     assert.equal(missingKiraCommentRepository.workflowRecord.kirasComments, 'Please prepare the first draft.')
-    assert.match(savedKiraCommentsResult.message, /Комментарии Киры для Test сохранены/)
+    assert.match(savedKiraCommentsResult.message, /<b>✅ Комментарий сохранен<\/b>/)
+    assert.match(savedKiraCommentsResult.message, /Фидбек по резюме \(Test\) записан/)
+    assert.equal(savedKiraCommentsResult.parseMode, 'HTML')
+    assertKiraTasksFooter(savedKiraCommentsResult.message)
     assert.deepEqual(
       savedKiraCommentsResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Перейти к следующему шагу', 'Назад к задачам']
@@ -1197,7 +1482,7 @@ async function runTests() {
     const wrongStatusKiraRepository = makeWorkflowListRepository([
       makeWorkflow({
         id: 501,
-        status: 'Draft in process',
+        status: 'Draft in approve by Kira',
         studentDataFolderUrl: 'https://drive.google.com/drive/folders/source'
       })
     ])
@@ -1209,6 +1494,10 @@ async function runTests() {
     )
     assert.equal(wrongStatusKiraRepository.workflowRecords[0].kirasComments, '')
     assert.equal(wrongStatusKiraResult.clearActiveTask, true)
+    assert.match(wrongStatusKiraResult.message, /^<b>ℹ️ Статус задачи обновился<\/b>/)
+    assert.match(wrongStatusKiraResult.message, /Был: «сбор комментариев Киры» ➔ Стал: «черновик на проверке у Киры»\./)
+    assert.equal(wrongStatusKiraResult.parseMode, 'HTML')
+    assertKiraTasksFooter(wrongStatusKiraResult.message)
 
     const sparseDraftRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Draft in process',
@@ -1384,6 +1673,22 @@ async function runTests() {
     assert.equal(kiraRejectResult.workflow.status, 'English version in progress')
     assert.equal(kiraRejectRepository.workflowRecord.enVersionUrl, '')
     assert.equal(kiraRejectRepository.workflowRecord.lastRejectionComment, longComment)
+    assert.match(kiraRejectResult.message, /^<b>🛠 EN-версия отправлена на доработку<\/b>/)
+    assert.equal(kiraRejectResult.parseMode, 'HTML')
+    assertKiraTasksFooter(kiraRejectResult.message)
+
+    const standardKiraRejectRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in approve by Kira',
+      cvDraftUrl: 'https://docs.google.com/document/d/test-draft'
+    }))
+    const standardKiraRejectResult = await rejectResumeWorkflowById(98, standardKiraRejectRepository, {
+      actor: manualKiraActor,
+      expectedStatus: 'Draft in approve by Kira',
+      rejectionComment: 'оставь комментарии в резюме'
+    })
+    assert.equal(standardKiraRejectResult.workflow.status, 'Draft in process')
+    assert.equal(standardKiraRejectRepository.workflowRecord.lastRejectionComment, 'оставь комментарии в резюме')
+    assert.match(standardKiraRejectResult.message, /^<b>🛠 Черновик отправлен на доработку<\/b>/)
 
     await assert.rejects(
       () => rejectResumeWorkflowById(98, makeWorkflowRepository(makeWorkflow({
@@ -1431,8 +1736,17 @@ async function runTests() {
         assert.equal(lastResult.notifications.some((item: any) => item.kind === step.notification), true)
         if (step.notification === 'private_kira' || step.notification === 'private_provider') {
           const notification = lastResult.notifications.find((item: any) => item.kind === step.notification)
-          if (step.notification === 'private_kira' && step.after !== 'moved to filling') {
-            assert.match(notification.text, /^Кира, резюме/)
+          if (step.notification === 'private_kira') {
+            assert.equal(notification.parseMode, 'HTML')
+            assertKiraTasksFooter(notification.text)
+            const expectedHeading = {
+              "collection Kira's comments": '📌 Ожидается фидбек по резюме',
+              'Draft in approve by Kira': '🔍 Черновик на проверке',
+              'English version in approve by Kira': '🇬🇧 Проверка EN-версии',
+              'Russian version in approve by Kira': '🇷🇺 Проверка RU-версии',
+              'moved to filling': '📤 Резюме ушло на заполнение'
+            }[step.after]
+            assert.match(notification.text, new RegExp(`^<b>${expectedHeading}</b>`))
           }
           if (step.notification === 'private_provider') {
             if (step.after === 'Russian version in process') {
@@ -1440,10 +1754,7 @@ async function runTests() {
             } else {
               assert.match(notification.text, /^Юля, резюме/)
             }
-          }
-          assert.doesNotMatch(notification.text, /^@student_user, резюме/)
-          if (step.after !== 'moved to filling') {
-            assert.match(notification.text, /Открой \/open_my_tasks, чтобы обработать эту задачу/)
+            assertPrivateStaffTasksFooter(notification.text)
             assert.match(notification.text, /Ученик: Test/)
             assert.match(notification.text, /Данные ученика:/)
             assert.match(notification.text, /Рынок ученика: EN/)
@@ -1460,6 +1771,7 @@ async function runTests() {
             assert.match(notification.text, /Английский: B1/)
             assert.match(notification.text, /Образование: University/)
           }
+          assert.doesNotMatch(notification.text, /^@student_user, резюме/)
           if (step.notification === 'private_provider') {
             assert.deepEqual(
               notification.chatIds,
@@ -1469,6 +1781,7 @@ async function runTests() {
         }
         if (step.after === 'Draft in approve by student') {
           const notification = lastResult.notifications.find((item: any) => item.kind === 'common_chat')
+          assert.equal(notification.text.includes(PRIVATE_STAFF_TASKS_FOOTER), false)
           assert.match(notification.text, /^@student_user, резюме/)
           assert.match(notification.text, /Черновик CV: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
           assert.match(notification.text, /Чтобы согласовать, нажми кнопку «Согласовать» или отправь \/resume I approve/)
@@ -1477,18 +1790,41 @@ async function runTests() {
         }
         if (step.after === 'moved to filling') {
           const kiraNotification = lastResult.notifications.find((item: any) => item.kind === 'private_kira')
-          assert.match(kiraNotification.text, /Резюме для Test EN передано на заполнение/)
-          assert.match(kiraNotification.text, /Английская версия:/)
-          assert.match(kiraNotification.text, /Русская версия:/)
+          assert.match(kiraNotification.text, /Студент: Test/)
+          assert.match(kiraNotification.text, /• EN:/)
+          assert.match(kiraNotification.text, /• RU:/)
 
           const linkedInNotification = lastResult.notifications.find((item: any) => item.kind === 'linkedin_ready')
           assert.equal(linkedInNotification.chatId, '-1003187558078')
           assert.equal(linkedInNotification.messageThreadId, 777)
+          assert.equal(linkedInNotification.text.includes(PRIVATE_STAFF_TASKS_FOOTER), false)
           assert.match(linkedInNotification.text, /^@CheMpoKaRokee, резюме Test, Python, EN, готово к заполнению на LinkedIn\./)
           assert.match(linkedInNotification.text, /Ссылка на резюме: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
+
+          const summaryNotification = lastResult.notifications.find((item: any) => item.kind === 'hh_summary')
+          assert.equal(summaryNotification.text.includes(PRIVATE_STAFF_TASKS_FOOTER), false)
         }
       }
     }
+
+    const filledNotificationRepository = makeWorkflowRepository(makeWorkflow({
+      status: 'Russian version in approve by student',
+      enVersionUrl: 'https://docs.google.com/document/d/test-english-version',
+      ruVersionUrl: 'https://docs.google.com/document/d/test-russian-version'
+    }))
+    const patchFilledNotificationWorkflow = filledNotificationRepository.patchResumeWorkflow.bind(filledNotificationRepository)
+    filledNotificationRepository.patchResumeWorkflow = async (recordId: number, patch: any) => {
+      const workflow = await patchFilledNotificationWorkflow(recordId, patch)
+      workflow.status = 'filled'
+      workflow.lastResponsible = 'done'
+      return workflow
+    }
+    const filledNotificationResult = await resumeWorkflow('-5216637594', filledNotificationRepository, { actor: studentActor })
+    const filledNotification = filledNotificationResult.notifications.find((item: any) => item.kind === 'private_kira')
+    assert.match(filledNotification.text, /^<b>🎉 Резюме готово!<\/b>/)
+    assert.match(filledNotification.text, /Студент: Test/)
+    assertKiraTasksFooter(filledNotification.text)
+    assert.equal(filledNotification.parseMode, 'HTML')
 
     assert.equal(lastResult.completed, false)
     assert.equal(repository.workflowRecord.studentDataFolderUrl, 'https://drive.google.com/drive/folders/manual-source')
@@ -1597,16 +1933,21 @@ async function runTests() {
       }
     }
     const kiraTasks = await getProviderTasks(kiraTaskRepository, manualKiraActor)
-    assert.match(kiraTasks.message, /1-2/)
-    assert.match(kiraTasks.message, /1\. Test/)
-    assert.match(kiraTasks.message, /2\. Other Kira Client/)
+    assert.match(kiraTasks.message, /^<b>📋 Твои задачи по резюме \(1–2 из 2\):<\/b>/)
+    assert.match(kiraTasks.message, /Test \[EN\] — черновик на проверке у Киры/)
+    assert.match(kiraTasks.message, /Other Kira Client \[EN\] — английская версия на проверке у Киры/)
+    assert.equal(kiraTasks.parseMode, 'HTML')
+    assertKiraTasksFooter(kiraTasks.message)
     assert.deepEqual(kiraTasks.tasks.map((task: any) => task.clientName), ['Test', 'Other Kira Client'])
     const unavailableProviderTaskForKira = await getProviderTaskById(100, kiraTaskRepository, manualKiraActor)
     assert.equal(unavailableProviderTaskForKira.workflow, undefined)
-    assert.match(unavailableProviderTaskForKira.message, /больше недоступна/)
+    assert.match(unavailableProviderTaskForKira.message, /^<b>🚫 Задача недоступна<\/b>/)
+    assertKiraTasksFooter(unavailableProviderTaskForKira.message)
     const openedKiraTask = await getProviderTaskById(98, kiraTaskRepository, manualKiraActor)
     assert.equal(openedKiraTask.workflow.status, 'Draft in approve by Kira')
-    assert.match(openedKiraTask.message, /Статус: черновик на проверке у Киры/)
+    assert.match(openedKiraTask.message, /^<b>⚡️ Новая задача: черновик на проверке у Киры<\/b>/)
+    assert.match(openedKiraTask.message, /Ученик: Test \[EN\]/)
+    assertKiraTasksFooter(openedKiraTask.message)
     const kiraAdvanceRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Draft in approve by Kira',
       cvDraftUrl: 'https://docs.google.com/document/d/test-draft'
