@@ -24,6 +24,7 @@ const {
 type ClientDashboard = import('./types.ts').ClientDashboard
 type ClientProfilePatch = import('./types.ts').ClientProfilePatch
 type EducationEntry = import('./types.ts').EducationEntry
+type ReadyForInterviewInEnglishIn2Months = import('./types.ts').ReadyForInterviewInEnglishIn2Months
 type PlatformAccountInput = import('./types.ts').PlatformAccountInput
 type WebClient = import('./types.ts').WebClient
 type WebConsoleRepository = import('./types.ts').WebConsoleRepository
@@ -39,6 +40,8 @@ const LINKEDIN_PLATFORM_ID = 16
 const HH_PLATFORM_IDS = { Ru: 11, En: 10 } as const
 const PHONE_EN_PLATFORM_ID = 28
 const GITHUB_PLATFORM_LABEL = 'github'
+const READY_FOR_INTERVIEW_IN_ENGLISH_IN_2_MONTHS_VALUES =
+  new Set<ReadyForInterviewInEnglishIn2Months>(['Yes', 'No'])
 const RESUME_ACTIVE_TASK_STATUSES = [
   "collection Kira's comments",
   'Draft in process',
@@ -166,6 +169,17 @@ function displayText(value: unknown): string {
     return optionTitle(linkedRecords(value)[0] ?? {})
   }
   return normalizeText(value)
+}
+
+function parseReadyForInterviewInEnglishIn2Months(
+  value: unknown
+): ReadyForInterviewInEnglishIn2Months | undefined {
+  const normalized = displayText(value)
+  return READY_FOR_INTERVIEW_IN_ENGLISH_IN_2_MONTHS_VALUES.has(
+    normalized as ReadyForInterviewInEnglishIn2Months
+  )
+    ? normalized as ReadyForInterviewInEnglishIn2Months
+    : undefined
 }
 
 function optionId(value: unknown): string {
@@ -313,6 +327,9 @@ function toClient(record: NocoRecord): WebClient {
     linkedInStatus: normalizeText(record.linkedin_status) || undefined,
     englishLevelId: (linkedId(record['English level']) ?? Number(record.english_levels_id)) || undefined,
     englishLevel: linkedName(record['English level']) || undefined,
+    readyForInterviewInEnglishIn2Months: parseReadyForInterviewInEnglishIn2Months(
+      record.ready_for_interview_in_english_in_2_months
+    ),
     mentors: linkedNames(record.Mentors)
   }
 }
@@ -804,6 +821,21 @@ function cleanNullableNumber(value: unknown): number | null | undefined {
   return Number.isFinite(numberValue) ? numberValue : undefined
 }
 
+function cleanReadyForInterviewInEnglishIn2Months(
+  value: unknown
+): ReadyForInterviewInEnglishIn2Months | undefined {
+  const normalized = normalizeText(value)
+  if (!normalized) return undefined
+  if (READY_FOR_INTERVIEW_IN_ENGLISH_IN_2_MONTHS_VALUES.has(
+    normalized as ReadyForInterviewInEnglishIn2Months
+  )) {
+    return normalized as ReadyForInterviewInEnglishIn2Months
+  }
+  throw Object.assign(new Error('Ready for interview in English in 2 months must be Yes or No.'), {
+    code: 'invalid_ready_for_interview_in_english_in_2_months'
+  })
+}
+
 function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
   const textFields: Array<[keyof ClientProfilePatch, string]> = [
@@ -829,6 +861,12 @@ function buildClientPatch(input: ClientProfilePatch): Record<string, unknown> {
   }
   const englishLevelId = cleanNullableId(input.englishLevelId)
   if (englishLevelId !== undefined) patch.english_levels_id = englishLevelId
+  const readyForInterviewInEnglishIn2Months = cleanReadyForInterviewInEnglishIn2Months(
+    input.readyForInterviewInEnglishIn2Months
+  )
+  if (readyForInterviewInEnglishIn2Months !== undefined) {
+    patch.ready_for_interview_in_english_in_2_months = readyForInterviewInEnglishIn2Months
+  }
   const realAge = cleanNullableNumber(input.realAge)
   if (realAge !== undefined) patch.real_age = realAge
   return patch
@@ -849,7 +887,8 @@ function buildChangedClientPatch(current: WebClient, input: ClientProfilePatch):
     stop_list_company: current.stopListCompany,
     telegram_personal_chat_id: current.telegramPersonalChatId,
     calendar_email: current.calendarEmail,
-    english_levels_id: current.englishLevelId ?? null
+    english_levels_id: current.englishLevelId ?? null,
+    ready_for_interview_in_english_in_2_months: current.readyForInterviewInEnglishIn2Months ?? ''
   }
 
   for (const [field, value] of Object.entries(patch)) {

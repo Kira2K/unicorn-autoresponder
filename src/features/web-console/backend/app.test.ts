@@ -103,6 +103,7 @@ function createFixtureNocoClient() {
       market: 'En',
       english_levels_id: 3,
       'English level': { Id: 3, level: 'B1' },
+      ready_for_interview_in_english_in_2_months: 'No',
       client_status: { Id: 1, title: 'studying' }
     },
     {
@@ -799,6 +800,7 @@ async function runTests(): Promise<void> {
     realAge: 29,
     stopListCompany: 'Acme,Globex',
     englishLevelId: 4,
+    readyForInterviewInEnglishIn2Months: 'Yes',
     telegramPersonalChatId: '@new',
     calendarEmail: 'new@example.com',
     client_status: 'forbidden'
@@ -811,6 +813,7 @@ async function runTests(): Promise<void> {
     real_age: 29,
     stop_list_company: 'Acme,Globex',
     english_levels_id: 4,
+    ready_for_interview_in_english_in_2_months: 'Yes',
     telegram_personal_chat_id: '@new',
     calendar_email: 'new@example.com'
   })
@@ -832,6 +835,14 @@ async function runTests(): Promise<void> {
     desired_location: 'Remote',
     real_age: 27
   })
+  assert.deepEqual(buildClientPatch({ readyForInterviewInEnglishIn2Months: 'No' }), {
+    ready_for_interview_in_english_in_2_months: 'No'
+  })
+  assert.deepEqual(buildClientPatch({ readyForInterviewInEnglishIn2Months: '' }), {})
+  assert.throws(
+    () => buildClientPatch({ readyForInterviewInEnglishIn2Months: 'Maybe' }),
+    (error: any) => error?.code === 'invalid_ready_for_interview_in_english_in_2_months'
+  )
   assert.deepEqual(buildAccountPatch({
     platformId: 16,
     platform: 'linkedin',
@@ -1854,6 +1865,7 @@ async function runTests(): Promise<void> {
         desiredLocation: 'Remote EN proxy',
         stopListCompany: 'Meta,Google',
         englishLevelId: 4,
+        readyForInterviewInEnglishIn2Months: 'Yes',
         telegramPersonalChatId: '@updated_client',
         calendarEmail: 'updated-client@example.com',
         clientStatus: 'should not write'
@@ -1875,9 +1887,34 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.client.stopListCompany, 'Meta,Google')
     assert.equal(result.body.client.englishLevelId, 4)
     assert.equal(result.body.client.englishLevel, 'B2')
+    assert.equal(result.body.client.readyForInterviewInEnglishIn2Months, 'Yes')
     assert.equal(result.body.client.telegramPersonalChatId, '@updated_client')
     assert.equal(result.body.client.calendarEmail, 'updated-client@example.com')
     assert.equal(result.body.client.clientStatus, 'studying')
+
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readyForInterviewInEnglishIn2Months: '' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.client.readyForInterviewInEnglishIn2Months, 'Yes')
+
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readyForInterviewInEnglishIn2Months: 'No' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.client.readyForInterviewInEnglishIn2Months, 'No')
+
+    result = await request(server.baseUrl, '/api/client/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readyForInterviewInEnglishIn2Months: 'Maybe' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400, JSON.stringify(result.body))
+    assert.equal(result.body.error, 'invalid_ready_for_interview_in_english_in_2_months')
 
     result = await request(server.baseUrl, '/api/client/platform-accounts', {
       method: 'POST',

@@ -14,6 +14,8 @@ export type EducationEntry = {
   yearOfEnd: string
 }
 
+export type ReadyForInterviewInEnglishIn2Months = 'Yes' | 'No'
+
 export type WebClient = {
   id: number
   clientName: string
@@ -39,6 +41,7 @@ export type WebClient = {
   linkedInStatus?: string
   englishLevelId?: number
   englishLevel?: string
+  readyForInterviewInEnglishIn2Months?: ReadyForInterviewInEnglishIn2Months
   mentors?: string[]
 }
 
@@ -81,6 +84,7 @@ export type ClientProfilePatch = {
   desiredLocation?: string
   stopListCompany?: string
   englishLevelId?: number | null
+  readyForInterviewInEnglishIn2Months?: ReadyForInterviewInEnglishIn2Months | '' | null
   telegramPersonalChatId?: string
   calendarEmail?: string
 }

@@ -61,6 +61,32 @@ async function stopProcess(child: ReturnType<typeof spawnProcess>): Promise<void
   await wait(500)
 }
 
+async function assertInfoTooltip(page: any, testId: string): Promise<void> {
+  const trigger = page.getByTestId(testId)
+  await trigger.waitFor()
+  const tooltip = trigger.locator('[role="tooltip"]')
+  assert.equal(await tooltip.isVisible(), false)
+  assert.equal(await tooltip.textContent(), 'ссылка без https://')
+  const dimensions = await trigger.evaluate((element: HTMLElement) => {
+    const image = element.querySelector('img')
+    return {
+      iconWidth: image?.getBoundingClientRect().width ?? 0,
+      iconHeight: image?.getBoundingClientRect().height ?? 0,
+      labelFontSize: Number.parseFloat(getComputedStyle(element).fontSize)
+    }
+  })
+  assert(Math.abs(dimensions.iconWidth - dimensions.labelFontSize) <= 1)
+  assert(Math.abs(dimensions.iconHeight - dimensions.labelFontSize) <= 1)
+  await trigger.hover()
+  await tooltip.waitFor({ state: 'visible' })
+  await page.mouse.move(0, 0)
+  await tooltip.waitFor({ state: 'hidden' })
+  await trigger.focus()
+  await tooltip.waitFor({ state: 'visible' })
+  await trigger.evaluate((element: HTMLElement) => element.blur())
+  await tooltip.waitFor({ state: 'hidden' })
+}
+
 async function runTests(): Promise<void> {
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
   const backend = spawnProcess(process.execPath, ['src/features/web-console/backend/index.ts'], {
@@ -126,10 +152,11 @@ async function runTests(): Promise<void> {
       await route.continue()
     }
     await page.route('**/api/telegram/status?*', slowInitialClientStatus)
-    await page.getByTestId('email-input').fill(' CLIENT@EXAMPLE.COM ')
+    await page.getByTestId('email-input').fill('alexeevalydia@gmail.com')
     await page.locator('input[type="password"]').fill('1234')
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
+    await page.getByRole('heading', { name: 'Личный кабинет ученика' }).waitFor()
     const clientStatusRouteDeadline = Date.now() + 2000
     while (!initialClientStatusSeen && Date.now() < clientStatusRouteDeadline) await wait(10)
     assert.equal(initialClientStatusSeen, true)
@@ -149,8 +176,56 @@ async function runTests(): Promise<void> {
     await page.getByTestId('open-profile-editor-button').waitFor()
     assert.equal(await page.getByTestId('profile-form').isVisible(), false)
     await page.getByTestId('profile-details-accordion-header').waitFor()
+    await page.getByTestId('profile-details-accordion-header').getByText('Личные данные', { exact: true }).waitFor()
+    await page.getByTestId('profile-details-accordion-header').click()
+    const profileAccordion = page.getByTestId('profile-accordion')
+    for (const label of [
+      'Имя',
+      'Фамилия',
+      'Образование',
+      'Возраст',
+      'Реальная локация',
+      'Желаемая локация',
+      'Стоп-лист компаний',
+      'Стэк',
+      'Рынок',
+      'Статус',
+      'Ready for interview in English in 2 months'
+    ]) {
+      await profileAccordion.getByText(label, { exact: true }).waitFor()
+    }
+    await assertInfoTooltip(page, 'profile-github-info')
+    await assertInfoTooltip(page, 'profile-linkedin-info')
     await page.getByTestId('open-profile-editor-button').click()
     await page.getByTestId('profile-form').waitFor()
+    await page.getByTestId('profile-details-accordion-header').getByText('Редактировать данные', { exact: true }).waitFor()
+    const profileForm = page.getByTestId('profile-form')
+    for (const label of [
+      'Имя',
+      'Фамилия',
+      'ФИО полностью',
+      'Дата рождения',
+      'Образование',
+      'Добавить образование',
+      'Возраст',
+      'Реальная локация',
+      'Желаемая локация',
+      'Стоп-лист компаний',
+      'Используй "," как разделитель, без пробелов',
+      'Личный email',
+      'Личный Telegram @username',
+      'Ready for interview in English in 2 months'
+    ]) {
+      await profileForm.getByText(label, { exact: true }).waitFor()
+    }
+    assert.equal(await page.getByTestId('profile-education-uni-0').getAttribute('placeholder'), 'Университет')
+    assert.equal(await page.getByTestId('profile-education-faculty-0').getAttribute('placeholder'), 'Факультет')
+    assert.equal(await page.getByTestId('profile-education-grade-0').getAttribute('placeholder'), 'Квалификация')
+    assert.equal(await page.getByTestId('profile-education-year-0').getAttribute('placeholder'), 'Год окончания')
+    assert.deepEqual(
+      await page.getByTestId('profile-ready-for-interview-in-english-in-2-months').locator('option').allTextContents(),
+      ['Not selected', 'Yes', 'No']
+    )
     await page.getByTestId('profile-first-name').fill('Testy')
     await page.getByTestId('profile-last-name').fill('McClient')
     await page.getByTestId('profile-fio').fill('Testy McClient Legal')
@@ -166,9 +241,10 @@ async function runTests(): Promise<void> {
     await page.getByTestId('profile-education-year-1').fill('2023')
     await page.getByTestId('profile-real-location').fill('Tbilisi')
     await page.getByTestId('profile-desired-location').fill('Remote EU')
-    await page.getByTestId('profile-calendar-email').fill('client@example.com')
+    await page.getByTestId('profile-calendar-email').fill('alexeevalydia@gmail.com')
     await page.getByTestId('profile-telegram').fill('@testy_client')
     await page.getByTestId('profile-english-level').selectOption({ label: 'B2' })
+    await page.getByTestId('profile-ready-for-interview-in-english-in-2-months').selectOption('Yes')
     await page.getByTestId('save-profile-button').click()
     await page.getByTestId('profile-save-message').getByText('Profile saved', { exact: false }).waitFor()
     await page.getByTestId('profile-details-accordion-header').click()
@@ -177,6 +253,10 @@ async function runTests(): Promise<void> {
     await assertText(page, 'Remote EU')
     await assertText(page, 'Testy')
     await assertText(page, 'McClient')
+    assert.equal(
+      await page.getByTestId('profile-ready-for-interview-in-english-in-2-months-value').textContent(),
+      'Yes'
+    )
     await page.getByTestId('accounts-table').getByText('hh_ru', { exact: false }).first().waitFor()
     for (const legacyLabel of ['Legacy WhatsApp', 'Legacy Unknown']) {
       const legacyRow = page.getByTestId('accounts-table').locator('tr').filter({ hasText: legacyLabel })
@@ -198,7 +278,9 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByTestId('account-form').count(), 0)
     await page.getByTestId('open-account-editor-button').click()
     await page.getByTestId('account-form').waitFor()
+    assert.equal(await page.getByTestId('account-url-info').count(), 0)
     await page.getByTestId('account-platform').selectOption({ label: 'linkedin' })
+    await assertInfoTooltip(page, 'account-url-info')
     assert.equal(await page.getByTestId('account-label').isDisabled(), true)
     assert.equal(await page.getByTestId('account-phone').isDisabled(), true)
     assert.equal(await page.getByTestId('account-email').isDisabled(), true)
@@ -398,7 +480,7 @@ async function runTests(): Promise<void> {
     await assertText(page, 'Open Dolphin Anty and enter the credentials below.')
     await assertText(page, 'kind.cute.unicorn@gmail.com')
     await assertText(page, 'Client email')
-    await assertText(page, 'client@example.com')
+    await assertText(page, 'alexeevalydia@gmail.com')
     await assertText(page, 'Password')
     await page.getByTestId('dolphin-lease-profiles').getByText('770032142, 770032143', { exact: false }).waitFor()
     await page.getByTestId('get-verification-code-button').click()
@@ -426,6 +508,7 @@ async function runTests(): Promise<void> {
     assert.equal(secondClientOptions.includes('whatsapp'), false)
     assert.equal(secondClientOptions.filter((label: string) => label === 'email_ru').length, 1)
     await page.getByTestId('account-platform').selectOption({ label: 'github' })
+    await assertInfoTooltip(page, 'account-url-info')
     assert.equal(await page.getByTestId('account-label').isDisabled(), true)
     assert.equal(await page.getByTestId('account-login').isDisabled(), true)
     assert.equal(await page.getByTestId('account-phone').isDisabled(), true)
@@ -530,7 +613,7 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByTestId('provider-dashboard').count(), 0)
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '05-provider-logout.png'), fullPage: true })
 
-    await page.getByTestId('email-input').fill('client@example.com')
+    await page.getByTestId('email-input').fill('alexeevalydia@gmail.com')
     await page.locator('input[type="password"]').fill('1234')
     await page.getByTestId('login-button').click()
     await page.getByTestId('client-dashboard').waitFor()
@@ -616,6 +699,8 @@ async function runTests(): Promise<void> {
     await page.unroute('**/api/admin/telegram/senders', slowInitialAdminSenders)
     await page.unroute('**/api/telegram/status?*', slowInitialAdminStatus)
     await page.unroute('**/api/admin/latest-client', addCurrentAdminTelegramAccount)
+    await assertInfoTooltip(page, 'profile-github-info')
+    await assertInfoTooltip(page, 'profile-linkedin-info')
 
     await page.getByTestId('admin-dialog-market').selectOption({ index: 1 })
     await page.getByTestId('admin-dialog-stack').selectOption({ index: 1 })
