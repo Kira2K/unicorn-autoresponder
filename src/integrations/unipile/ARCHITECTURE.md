@@ -30,6 +30,11 @@ flowchart LR
 
 ## Правила
 
+`invitation-withdrawal.ts` читает все отправленные ожидающие приглашения с
+`created_at` и отзывает выбранное через V2 `POST .../relation-requests/:id/cancel`.
+`sent-invitations.ts` проверяет полноту страниц. Неверный или неполный ответ
+блокирует отзыв; POST автоматически не повторяется.
+
 - Для LinkedIn передаются `li_at`, точный user-agent, `products: ["classic"]` и обязательный proxy.
 - Подключение: `POST /v2/auth/intent`; проверка: `GET /v2/accounts/{id}` и `GET /v2/{id}/users/me`.
 - `account_id` передаётся при reconnect; автоматический прокси Unipile запрещён.

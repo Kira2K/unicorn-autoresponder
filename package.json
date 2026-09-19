@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "linkedin:withdrawals:test": "node --test src/features/linkedin-automation/invitation-withdrawal/*.test.ts src/integrations/unipile/invitation-withdrawal.test.ts src/features/web-console/backend/invitation-withdrawal-routes.test.ts",
+    "linkedin:withdrawals:e2e": "node src/features/web-console/e2e/linkedin-invitation-withdrawal.e2e.mts",
     "linkedin:posts:standalone": "node src/features/linkedin-automation/post-writer/standalone-cli.ts",
     "linkedin:posts:test": "node --test src/features/linkedin-automation/post-writer/tests/*.test.ts",
     "linkedin:posts:e2e": "node src/features/web-console/e2e/linkedin-post-writer.e2e.ts",

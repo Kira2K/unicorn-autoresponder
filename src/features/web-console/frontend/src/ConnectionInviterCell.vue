@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
+import InvitationWithdrawal from './InvitationWithdrawal.vue'
 import { connectionAudienceLabel, connectionCountdown, connectionEta, connectionFilterDiagnostics,
   connectionFunnelLabel, connectionProgressPercent, connectionQuotaLabel, connectionRunCanStart,
   connectionRunActive, connectionRunFromPreviousDay, connectionRunLabel } from './connection-inviter-view'
@@ -58,6 +59,7 @@ function loadHistory(event) {
 
 <template>
   <div class="connection-inviter" :data-testid="`connection-inviter-${account.platformAccountId}`">
+    <InvitationWithdrawal :account="account" />
     <div class="connection-inviter-head">
       <Tag :severity="pause ? 'warn' : severity" :value="pause ? 'Paused' : connectionRunLabel(run)" />
       <Button v-if="stack && !isActive" label="Run today" size="small" severity="success"
