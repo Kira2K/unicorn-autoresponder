@@ -9,6 +9,9 @@ import { runPendingRunnerTests } from './pending-runner.test.ts'
 import { runPostgresRepositoryTests } from './postgres-repository.test.mts'
 import { runPostgresWorkflowTests } from './postgres-workflow.test.mts'
 import { runRepositoryRoutingTests } from './repository-routing.test.mts'
+import { runPostgresExecutionTests } from './postgres-execution.test.mts'
+import { runDriveSourceTests } from './drive-source.test.ts'
+import { runHHLiveDomTests } from './hh-live-dom.test.ts'
 
 async function main() {
   runStateStoreTests()
@@ -17,9 +20,12 @@ async function main() {
   await runNocoRepositoryTests()
   await runPostgresRepositoryTests()
   await runPostgresWorkflowTests()
+  await runPostgresExecutionTests()
   runRepositoryRoutingTests()
   await runServiceTests()
   await runHHResumeUiTests()
+  await runHHLiveDomTests()
+  await runDriveSourceTests()
   runPendingRunnerTests()
   runProcessIsolationTests()
   console.log('HH profile filler tests passed.')

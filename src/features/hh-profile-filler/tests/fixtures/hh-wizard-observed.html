@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <style>[hidden] { display: none !important; }</style>
+</head>
+<body>
+  <section id="profession">
+    <div data-qa="bottom-sheet-css-variables">
+      <input data-qa="tree-selector-search-input" value="Программист, разработчик">
+      <button id="profession-option" role="option">Программист, разработчик</button>
+    </div>
+  </section>
+
+  <section id="personal" data-qa="resume-profile-screen resume-profile-screen_common">
+    <label>День <input data-qa="resume-profile-common-birthday-day-input"></label>
+    <button data-qa="resume-profile-common-birthday-month-select">Месяц</button>
+    <button data-qa="resume-profile-common-birthday-year-select">Год</button>
+    <button data-qa="resume-profile-next-screen">Сохранить и&nbsp;продолжить</button>
+  </section>
+
+  <script>
+    const addSpecializationSheet = () => {
+      if (document.querySelector('#specialization')) return
+      const sheet = document.createElement('div')
+      sheet.id = 'specialization'
+      sheet.innerHTML = `
+        <h2>Уточните специальность</h2>
+        <input data-qa="tree-selector-search-input">
+        <label data-qa="tree-selector-item-developer">
+          <input hidden type="checkbox" data-qa="tree-selector-input-developer">
+          <span>Программист, разработчик</span>
+        </label>
+        <button id="specialization-submit">Сохранить и&nbsp;продолжить</button>`
+      const row = sheet.querySelector('[data-qa^="tree-selector-item"]')
+      const checkbox = sheet.querySelector('[data-qa^="tree-selector-input"]')
+      row.addEventListener('click', () => setTimeout(() => { checkbox.checked = true }, 50))
+      sheet.querySelector('#specialization-submit').addEventListener('click', () => sheet.remove())
+      document.body.append(sheet)
+    }
+    document.querySelector('#profession-option').addEventListener('click', () => {
+      setTimeout(addSpecializationSheet, 50)
+    })
+
+    const openOptions = (control, values) => {
+      document.querySelector('#birth-options')?.remove()
+      const popup = document.createElement('div')
+      popup.id = 'birth-options'
+      for (const value of values) {
+        const option = document.createElement('button')
+        option.setAttribute('role', 'option')
+        option.textContent = value
+        option.addEventListener('click', () => {
+          control.textContent = value
+          control.dataset.value = value
+          popup.remove()
+        })
+        popup.append(option)
+      }
+      document.body.append(popup)
+    }
+    const month = document.querySelector('[data-qa="resume-profile-common-birthday-month-select"]')
+    const year = document.querySelector('[data-qa="resume-profile-common-birthday-year-select"]')
+    month.addEventListener('click', () => openOptions(month, ['Января', 'Октября']))
+    year.addEventListener('click', () => openOptions(year, ['1988', '1990']))
+
+    document.querySelector('[data-qa="resume-profile-next-screen"]').addEventListener('click', () => {
+      setTimeout(() => {
+        document.querySelector('#personal').dataset.qa =
+          'resume-profile-screen resume-profile-screen_education'
+      }, 50)
+    })
+  </script>
+</body>
+</html>
