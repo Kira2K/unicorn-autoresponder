@@ -166,6 +166,14 @@ clears that phase link (`cv_draft_url`, `en_version_url`, or `ru_version_url`),
 stores `last_rejection_comment`, appends `rejection_history`, and notifies the
 producer. Producer phases cannot reject themselves.
 
+При возврате ответ бота и уведомление исполнителю содержат ссылку именно на
+возвращённый файл. Ссылка берётся до очистки поля; правила переходов не меняются.
+Если ссылки нет, бот не подставляет другую версию резюме.
+
+В контактах Telegram RU/EN бот и карточка исполнителя показывают `nickname`,
+если он заполнен. Иначе используется прежний вариант — `login` и остальные
+запасные поля. Данные аккаунта и Telegram ID для проверки доступа не меняются.
+
 API-driven tests that call protected backend endpoints do not create visible
 student command history in Telegram. When the common-chat transcript matters,
 use the visible e2e runner; it sends the student-owned commands through the

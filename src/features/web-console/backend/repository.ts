@@ -500,7 +500,11 @@ function cvProcessingClientId(record: NocoRecord): number | null {
   return Number.isFinite(id) && id > 0 ? id : null
 }
 
-function contactValue(account: NocoRecord): string {
+function contactValue(account: NocoRecord, platform: string): string {
+  if (platform === 'telegram_ru' || platform === 'telegram_en') {
+    const nickname = normalizeText(account.nickname)
+    if (nickname) return nickname
+  }
   return normalizeText(
     account.login ||
     account.nickname ||
@@ -517,7 +521,7 @@ function platformContact(platformAccounts: NocoRecord[], labels: string[]): stri
     const label = normalizedPlatformLabel(account.platform || linkedLabel(account.rel_platformAccounts_platform) || linkedName(account.rel_platformAccounts_platform))
     const relationLabel = platformLabelFromRelation(account)
     if (!expected.has(label) && !expected.has(relationLabel)) continue
-    const value = contactValue(account)
+    const value = contactValue(account, expected.has(label) ? label : relationLabel)
     if (value) return value
   }
   return ''

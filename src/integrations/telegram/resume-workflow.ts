@@ -1087,7 +1087,7 @@ function kiraStageNotification(record: ResumeWorkflowRecord) {
   }
 }
 
-function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWorkflowNotification | null {
+function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCvUrl?: string): ResumeWorkflowNotification | null {
   const status = statusText(record)
   const responsible = statusResponsibility(status)
   const mention = responsibleMention(record, responsible)
@@ -1135,6 +1135,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord): ResumeWor
     const text = privateStaffNotificationText([
       intro,
       action,
+      returnedCvUrl ? `Возвращённое резюме: ${returnedCvUrl}` : undefined,
       providerTaskMessage(record)
     ])
     return { kind: 'private_provider', chatId: chatIds[0], chatIds, text }
@@ -1165,9 +1166,9 @@ function linkedInReadyNotification(record: ResumeWorkflowRecord): ResumeWorkflow
   return { kind: 'linkedin_ready', chatId, messageThreadId, text }
 }
 
-function buildTransitionNotifications(record: ResumeWorkflowRecord, testMode: boolean): ResumeWorkflowNotification[] {
+function buildTransitionNotifications(record: ResumeWorkflowRecord, testMode: boolean, returnedCvUrl?: string): ResumeWorkflowNotification[] {
   return [
-    notificationForNextResponsible(record),
+    notificationForNextResponsible(record, returnedCvUrl),
     linkedInReadyNotification(record),
     movedToFillingSummary(record, testMode)
   ].filter((item): item is ResumeWorkflowNotification => Boolean(item))
@@ -1560,6 +1561,9 @@ async function rejectWorkflow(workflow: ResumeWorkflowRecord, repository: Resume
   const comment = ensureValidRejectionComment(options.rejectionComment)
   const patch = rejectionTargetPatch(workflow, actor, comment)
   const after = patch.status ?? before
+  // Rework clears this URL; keep the rejected version for the outgoing messages.
+  const returnedField = providerLinkRequirement({ ...workflow, status: after })?.field
+  const returnedCvUrl = returnedField ? normalizeText(workflow[returnedField]) : ''
   workflow = await repository.patchResumeWorkflow(workflow.id, {
     ...patch,
     lastWorkflowError: '',
@@ -1573,7 +1577,8 @@ async function rejectWorkflow(workflow: ResumeWorkflowRecord, repository: Resume
             ? 'en'
             : 'ru',
         workflow.clientName,
-        comment
+        comment,
+        returnedCvUrl
       )
     : undefined
 
@@ -1587,10 +1592,11 @@ async function rejectWorkflow(workflow: ResumeWorkflowRecord, repository: Resume
     workflow,
     actor,
     transitions: [`${before} -> ${after}`],
-    notifications: buildTransitionNotifications(workflow, testMode),
+    notifications: buildTransitionNotifications(workflow, testMode, returnedCvUrl),
     message: kiraMessage?.text ?? [
       `Резюме для ${workflow.clientName} возвращено на доработку.`,
       `Комментарий: ${comment}`,
+      ...(returnedCvUrl ? [`Возвращённое резюме: ${returnedCvUrl}`] : []),
       '',
       statusInstruction(workflow)
     ].join('\n'),

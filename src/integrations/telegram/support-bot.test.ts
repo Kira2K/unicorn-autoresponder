@@ -205,6 +205,10 @@ function testKiraMessageTemplateContract(): void {
     'Отправь обновленную ссылку на RU-версию следующим сообщением.',
     footer
   ].join('\n'))
+  const reworkWithLink = kiraTemplates.kiraReworkMessage('draft', 'Анна', 'Исправить <опыт>', 'https://example.invalid/cv?a=1&b=2')
+  assert.match(reworkWithLink.text, /Комментарий: Исправить &lt;опыт&gt;/)
+  assert.ok(reworkWithLink.text.includes('Возвращённое резюме: https://example.invalid/cv?a=1&amp;b=2'))
+  assert.equal(reworkWithLink.parseMode, 'HTML')
   assertKiraTemplate(kiraTemplates.kiraStaleStatusMessage('старый', 'новый'), [
     '<b>ℹ️ Статус задачи обновился</b>',
     'Был: «старый» ➔ Стал: «новый».',
@@ -1659,6 +1663,9 @@ async function runTests() {
     assert.match(studentRejectRepository.workflowRecord.rejectionHistory, /Draft in approve by student -> Draft in process/)
     assert.deepEqual(studentRejectResult.transitions, ['Draft in approve by student -> Draft in process'])
     assert.equal(studentRejectResult.notifications.some((notification: any) => notification.kind === 'private_provider'), true)
+    assert.ok(studentRejectResult.message.includes('Возвращённое резюме: https://docs.google.com/document/d/test-draft'))
+    assert.ok(studentRejectResult.notifications.find((n: any) => n.kind === 'private_provider').text
+      .includes('Возвращённое резюме: https://docs.google.com/document/d/test-draft'))
 
     const longComment = 'Нужно исправить формат, опыт и короткое саммари.'
     const kiraRejectRepository = makeWorkflowRepository(makeWorkflow({
@@ -1675,6 +1682,7 @@ async function runTests() {
     assert.equal(kiraRejectRepository.workflowRecord.lastRejectionComment, longComment)
     assert.match(kiraRejectResult.message, /^<b>🛠 EN-версия отправлена на доработку<\/b>/)
     assert.equal(kiraRejectResult.parseMode, 'HTML')
+    assert.ok(kiraRejectResult.message.includes('Возвращённое резюме: https://docs.google.com/document/d/test-en'))
     assertKiraTasksFooter(kiraRejectResult.message)
 
     const standardKiraRejectRepository = makeWorkflowRepository(makeWorkflow({
@@ -1689,6 +1697,7 @@ async function runTests() {
     assert.equal(standardKiraRejectResult.workflow.status, 'Draft in process')
     assert.equal(standardKiraRejectRepository.workflowRecord.lastRejectionComment, 'оставь комментарии в резюме')
     assert.match(standardKiraRejectResult.message, /^<b>🛠 Черновик отправлен на доработку<\/b>/)
+    assert.ok(standardKiraRejectResult.message.includes('Возвращённое резюме: https://docs.google.com/document/d/test-draft'))
 
     await assert.rejects(
       () => rejectResumeWorkflowById(98, makeWorkflowRepository(makeWorkflow({
