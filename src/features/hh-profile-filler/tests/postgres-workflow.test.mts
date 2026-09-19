@@ -19,7 +19,7 @@ export async function runPostgresWorkflowTests() {
       drive: {
         async loadCv(url) { calls[index].push(url); return { bytes: Buffer.from('fake CV'),
           fileName: 'fake.pdf', mimeType: 'application/pdf', revision: 'unchanged', source: 'cv' }; },
-        async loadSelfPresentations(url) { calls[index].push(String(url)); return []; }
+        async loadExperienceDescriptions(url) { calls[index].push(String(url)); return []; }
       },
       extractor: { async extract(documents, language) {
         calls[index].push(documents[0].revision, language);

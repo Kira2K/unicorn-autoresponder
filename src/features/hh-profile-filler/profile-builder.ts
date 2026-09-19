@@ -168,6 +168,13 @@ export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfil
     },
     education: extracted.education.length ? extracted.education :
       nocoEducation(client.fallbacks.education),
+    // Technologies explicitly named in an experience entry are source-backed
+    // skills as well. Keep the CV ordering and add only missing tags so they can
+    // be entered in HH without rewriting the experience description.
+    skills: unique([
+      ...extracted.skills,
+      ...extracted.experience.flatMap(item => item.technologies)
+    ]),
     languages: extracted.languages.some(item => /english|англий/i.test(item.name)) ||
       !client.fallbacks.englishLevel ? extracted.languages : [...extracted.languages, {
         name: extracted.language === 'ru' ? 'Английский' : 'English',
