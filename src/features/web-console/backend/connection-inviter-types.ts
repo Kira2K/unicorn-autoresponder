@@ -1,4 +1,5 @@
 export type ConnectionInviterService = {
+  withdrawals?: import('../../linkedin-automation/invitation-withdrawal/contracts.ts').WithdrawalService
   settings(): { writerEnabled: boolean } | Promise<{ writerEnabled: boolean }>
   list(): Promise<Record<string, unknown>[]>
   get(runId: string): Promise<Record<string, unknown> | undefined>

@@ -20,6 +20,7 @@ import { withConnectionRetry } from './retry-state.ts'
 import { acquireConnectionWriterLock } from './writer-lock.ts'
 import type { ConnectionRunEventType, ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun, ConnectionRunStage } from './types.ts'
+import { composeInvitationWithdrawal } from '../invitation-withdrawal/compose.ts'
 
 type ServiceOptions = Partial<Omit<ConnectionRuntime, 'adapter' | 'emit' | 'stopRequested'>> & {
   repository?: ConnectionRuntime['repository']
@@ -28,6 +29,7 @@ type ServiceOptions = Partial<Omit<ConnectionRuntime, 'adapter' | 'emit' | 'stop
   enforceWriterSingleton?: boolean
   writerLockPath?: string
   allowedAccounts?: readonly number[]
+  withdrawal?: Parameters<typeof composeInvitationWithdrawal>[2]
 }
 
 const activeRunStatus = (run: ConnectionRun) => run.status === 'running' ||
@@ -80,7 +82,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
   let releaseWriterWhenIdle = false
   let recoveryCoordinator: Promise<void> | undefined
   function releaseWriterIfIdle() {
-    if (!releaseWriterWhenIdle || activeRuns.size > 0 || running.size > 0 || recoveryCoordinator) return
+    if (!releaseWriterWhenIdle || activeRuns.size > 0 || running.size > 0 || recoveryCoordinator || withdrawals?.busy()) return
     writerLock?.release(); releaseWriterWhenIdle = false
   }
   const runtime: ConnectionRuntime = {
@@ -98,6 +100,10 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       writerLock?.assertOwned()
     }
   }
+
+  // Injected provider environments must opt in explicitly: never fall back from mocks to live Unipile.
+  const withdrawals = !options.adapter || options.withdrawal
+    ? composeInvitationWithdrawal(runtime, scope.assert, options.withdrawal) : undefined
 
   async function persistRunSnapshot(run: ConnectionRun) {
     const previous = persistQueues.get(run.runId) ?? Promise.resolve()
@@ -324,6 +330,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
   }
 
   const service = {
+    withdrawals,
     async list() { return logged(logger, 'runs_list', {}, async () =>
       (await runtime.store.listRuns(100)).map(publicRun)) },
     async get(runId: string) {
@@ -445,6 +452,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     },
     stop() {
       disposed = true
+      void withdrawals?.close().finally(releaseWriterIfIdle)
       for (const timer of resumeTimers.values()) clearTimeout(timer)
       resumeTimers.clear(); events.clear()
       for (const runId of activeRuns.keys()) stopRequests.add(runId)

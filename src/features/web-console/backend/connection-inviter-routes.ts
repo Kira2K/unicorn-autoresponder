@@ -3,6 +3,7 @@ type Handler = import('express').RequestHandler
 type Service = import('./connection-inviter-types.ts').ConnectionInviterService
 import { nocoRouteFailure } from './noco-route-failure.ts'
 import { connectionErrorCode } from '../../linkedin-automation/connection-inviter/errors.ts'
+import { registerInvitationWithdrawalRoutes } from './invitation-withdrawal-routes.ts'
 
 function failure(error: any) {
   const nocoFailure = nocoRouteFailure(error)
@@ -38,6 +39,7 @@ export function registerConnectionInviterRoutes(options: {
   app: App; requireAdmin: Handler; service: Service
 }) {
   const { app, requireAdmin, service } = options
+  registerInvitationWithdrawalRoutes(app, requireAdmin, () => service.withdrawals)
   app.get('/api/admin/linkedin/connection-settings', requireAdmin, async (_req, res) => {
     try { res.json(await service.settings()) }
     catch (error) { const result = failure(error); res.status(result.status).json(result.body) }

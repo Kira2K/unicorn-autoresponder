@@ -1,4 +1,5 @@
 import type { ConnectionInviterService } from './connection-inviter-types.ts'
+import { createMockWithdrawal } from './invitation-withdrawal-mock.ts'
 
 export function createMockConnectionInviterService(): ConnectionInviterService {
   const runs = new Map<string, any>()
@@ -29,6 +30,7 @@ export function createMockConnectionInviterService(): ConnectionInviterService {
     }, 1_000))
   }
   return {
+    withdrawals: createMockWithdrawal(),
     settings() { return { writerEnabled: true } },
     async list() { return [...runs.values()].map(run => structuredClone(run)) },
     async get(runId) { const run = runs.get(runId); return run && structuredClone(run) },
