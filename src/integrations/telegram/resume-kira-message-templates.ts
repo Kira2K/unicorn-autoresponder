@@ -128,7 +128,8 @@ function kiraRejectPromptMessage(): KiraTelegramMessage {
 function kiraReworkMessage(
   version: 'draft' | 'en' | 'ru',
   clientName: string,
-  comment: string
+  comment: string,
+  returnedCvUrl?: string
 ): KiraTelegramMessage {
   const config = version === 'draft'
     ? { heading: '🛠 Черновик отправлен на доработку', next: 'Ждем новую ссылку на черновик следующим сообщением.' }
@@ -139,6 +140,7 @@ function kiraReworkMessage(
     bold(config.heading),
     `Студент: ${escapeTelegramHtml(clientName)}`,
     `Комментарий: ${escapeTelegramHtml(comment)}`,
+    returnedCvUrl ? `Возвращённое резюме: ${escapeTelegramHtml(returnedCvUrl)}` : undefined,
     'Ответственный: подрядчик',
     config.next
   ])
