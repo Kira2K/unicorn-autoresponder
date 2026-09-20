@@ -4,10 +4,12 @@ const { emptyFacts, generatedDocument } = require('./generation-fixture.ts') as
   typeof import('./generation-fixture.ts')
 
 const turn = () => new Promise(resolve => setImmediate(resolve))
+const dolphinCalls: string[] = []
+let savedCountry = 'PL'
 
 async function run() {
   const records = new Map<string, any>(); const events: any[] = []; const releases: string[] = []
-  let contextReads = 0; let cvDownloads = 0; let accountReads = 0; let saves = 0
+  let contextReads = 0; let cvDownloads = 0; let accountReads = 0; let saves = 0; let generations = 0
   const extractedMimes: string[] = []
   const account = { platformAccountId: 7, clientId: 8, clientName: 'Student',
     linkedinUrl: 'https://www.linkedin.com/in/student/', dolphinProfileId: 9,
@@ -38,12 +40,13 @@ async function run() {
     } },
     store, gate: { acquire(kind: string) { return () => releases.push(kind) } },
     generationRuntime: { config: { model: 'mock-model' },
-      loadProfile: async () => ({ proxy: { ip: '203.0.113.5' } }),
-      resolveCountry: async () => 'Poland', loadCv: async () => { cvDownloads += 1; return {
+      loadCv: async () => { cvDownloads += 1; return {
         bytes: Buffer.from('mock'), fileName: 'cv.pdf', mimeType: 'application/pdf',
         revision: 'drive-1' } },
       generator: { extractFacts: async (cv: any) => { extractedMimes.push(cv.mimeType); return emptyFacts },
-        generateProfile: async () => generatedDocument() } },
+        generateProfile: async (_facts: any, country: string) => {
+          assert.equal(country, 'Poland'); generations += 1; return generatedDocument()
+        } } },
     executorOptions: { logger: { event: (...args: any[]) => events.push(args) } }
   })
   const started = await service.startGeneration(7)
@@ -78,8 +81,48 @@ async function run() {
   assert(events.some(event => event[0] === 'cv_upload_validate'))
   assert(events.some(event => event[0] === 'cv_upload_select'))
   assert.deepEqual(releases, ['profile_generate', 'profile_generate'])
+  assert.deepEqual(dolphinCalls, [
+    '/browser_profiles/9', '/proxy?ids%5B%5D=17',
+    '/browser_profiles/9', '/proxy?ids%5B%5D=17'
+  ])
+  for (const [country, code] of [['', 'profile_proxy_country_unavailable'],
+    ['RU', 'profile_proxy_country_disallowed']]) {
+    savedCountry = country
+    const blocked = await service.startGeneration(7)
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      result = await service.get(blocked.jobId)
+      if (result?.status === 'failed') break
+      await turn()
+    }
+    assert.equal(result.status, 'failed')
+    assert.equal(result.errorCode, code)
+    assert.equal(records.get(blocked.jobId).errorCode, code)
+  }
+  assert.equal(cvDownloads, 1, 'no CV download when Dolphin has no allowed country')
+  assert.equal(generations, 2, 'no paid generation when Dolphin has no allowed country')
 }
 
+const originalFetch = globalThis.fetch
+const originalToken = process.env.dolphin_api_token
+process.env.dolphin_api_token = 'test-dolphin-token'
+globalThis.fetch = async (input: any, init?: RequestInit) => {
+  const url = new URL(String(input))
+  assert.equal(url.origin, 'https://dolphin-anty-api.com', 'no external geolocation or other live network')
+  assert.equal(init?.method, 'GET', 'no proxy check or other Dolphin writes')
+  dolphinCalls.push(url.pathname + url.search)
+  if (url.pathname === '/browser_profiles/9') return new Response(JSON.stringify({ data: {
+    id: 9, proxyId: 17, proxy: { id: 17, host: 'proxy.test', ip: '203.0.113.5' }
+  } }))
+  assert.equal(url.pathname, '/proxy')
+  assert.equal(url.searchParams.get('ids[]'), '17')
+  return new Response(JSON.stringify({ data: [{ id: 17, lastCheck: {
+    country: savedCountry, createdAt: '2020-01-01', ip: '198.51.100.2'
+  } }] }))
+}
 run().then(() => console.log('profile generation flow tests passed')).catch((error: unknown) => {
   console.error(error); process.exitCode = 1
+}).finally(() => {
+  globalThis.fetch = originalFetch
+  if (originalToken === undefined) delete process.env.dolphin_api_token
+  else process.env.dolphin_api_token = originalToken
 })

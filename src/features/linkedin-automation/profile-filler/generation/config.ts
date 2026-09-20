@@ -22,8 +22,6 @@ export function generationConfig(env: NodeJS.ProcessEnv = process.env) {
     credentialsFile,
     openAiTimeoutMs: positiveInt(env.OPENAI_LINKEDIN_PROFILE_TIMEOUT_MS, 120_000),
     maxOutputTokens: positiveInt(env.OPENAI_LINKEDIN_PROFILE_MAX_OUTPUT_TOKENS, 20_000),
-    driveMaxBytes: positiveInt(env.LINKEDIN_PROFILE_CV_MAX_BYTES, 20 * 1024 * 1024),
-    geoBaseUrl: String(env.LINKEDIN_PROFILE_GEO_BASE_URL ?? 'https://ipwho.is').replace(/\/$/, ''),
-    geoTimeoutMs: positiveInt(env.LINKEDIN_PROFILE_GEO_TIMEOUT_MS, 5_000)
+    driveMaxBytes: positiveInt(env.LINKEDIN_PROFILE_CV_MAX_BYTES, 20 * 1024 * 1024)
   }
 }

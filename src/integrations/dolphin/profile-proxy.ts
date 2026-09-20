@@ -29,6 +29,22 @@ async function getDolphinProfileWithProxy(
   return proxy ? { ...profile, proxy } : profile
 }
 
+// Read the saved check only. Do not test, rotate or update the proxy here.
+async function getDolphinProfileWithProxyLastCheck(
+  profileId: number,
+  dependencies = { getProfile: getDolphinProfile, request: requestDolphinCloudApi }
+) {
+  const profile = await dependencies.getProfile(profileId)
+  const proxyId = profile?.proxyId ?? profile?.proxy?.id
+  if (proxyId === undefined || proxyId === null || proxyId === '') return profile
+  const response = await dependencies.request<any>('/proxy', {
+    query: { 'ids[]': String(proxyId) }
+  })
+  const proxies = Array.isArray(response?.data) ? response.data : [response?.data]
+  const proxy = proxies.find((item: any) => String(item?.id ?? '') === String(proxyId))
+  return { ...profile, proxy }
+}
+
 async function createAndAttachDolphinProxy(
   profileId: number,
   proxy: any,
@@ -55,5 +71,6 @@ async function createAndAttachDolphinProxy(
 module.exports = {
   createAndAttachDolphinProxy,
   getDolphinProfileWithProxy,
+  getDolphinProfileWithProxyLastCheck,
   hasProxyConnection
 }

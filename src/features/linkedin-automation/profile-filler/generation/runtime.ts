@@ -1,5 +1,5 @@
-const { getDolphinProfileWithProxy } = require('../../../../integrations/dolphin/profile-proxy.ts') as {
-  getDolphinProfileWithProxy(profileId: number): Promise<any>
+const { getDolphinProfileWithProxyLastCheck } = require('../../../../integrations/dolphin/profile-proxy.ts') as {
+  getDolphinProfileWithProxyLastCheck(profileId: number): Promise<any>
 }
 const { assertDriveCredentials, generationConfig } = require('./config.ts') as
   typeof import('./config.ts')
@@ -33,10 +33,8 @@ function createGenerationRuntime(overrides: any = {}, logger?: any, job?: Job) {
       assertDriveCredentials(config.credentialsFile)
       return loadDriveCv(url, config.driveMaxBytes)
     }),
-    loadProfile: overrides.loadProfile ?? getDolphinProfileWithProxy,
-    resolveCountry: overrides.resolveCountry ?? ((proxy: any) => resolveProxyCountry(proxy, {
-      baseUrl: config.geoBaseUrl, timeoutMs: config.geoTimeoutMs, fetchImpl: overrides.geoFetch
-    })),
+    loadProfile: overrides.loadProfile ?? getDolphinProfileWithProxyLastCheck,
+    resolveCountry: overrides.resolveCountry ?? resolveProxyCountry,
     generator: {
       extractFacts: guard(generator.extractFacts as Generator['extractFacts']),
       generateProfile: guard(generator.generateProfile as Generator['generateProfile']),
