@@ -1,9 +1,10 @@
-import assert from 'node:assert/strict'
-import { createOpenAiHttp } from '../generation/openai-http.ts'
-import { clearProxyCountryCache, resolveProxyCountry } from '../generation/proxy-country.ts'
-import { assertDriveCredentials, generationConfig } from '../generation/config.ts'
-import { responseText } from '../generation/openai-response.ts'
-import { DOCX_MIME, normalizeUploadedCv, PDF_MIME } from '../generation/uploaded-cv.ts'
+const assert: typeof import('node:assert/strict') = require('node:assert/strict')
+const { createOpenAiHttp } = require('../generation/openai-http.ts') as typeof import('../generation/openai-http.ts')
+const { resolveProxyCountry } = require('../generation/proxy-country.ts') as typeof import('../generation/proxy-country.ts')
+const { assertDriveCredentials, generationConfig } = require('../generation/config.ts') as typeof import('../generation/config.ts')
+const { responseText } = require('../generation/openai-response.ts') as typeof import('../generation/openai-response.ts')
+const { DOCX_MIME, normalizeUploadedCv, PDF_MIME } = require('../generation/uploaded-cv.ts') as typeof import('../generation/uploaded-cv.ts')
+const { getDolphinProfileWithProxyLastCheck } = require('../../../../integrations/dolphin/profile-proxy.ts')
 
 async function run() {
   const config = generationConfig({ OPENAI_LINKEDIN_PROFILE_API_KEY: 'profile-key',
@@ -18,24 +19,59 @@ async function run() {
     OPENAI_LINKEDIN_PROFILE_MODEL: 'model' } as any), { code: 'openai_api_key_missing' })
   assert.throws(() => generationConfig({ OPENAI_API_KEY: 'must-not-be-used',
     OPENAI_LINKEDIN_PROFILE_MODEL: 'model' } as any), { code: 'openai_api_key_missing' })
-  clearProxyCountryCache()
-  let geoCalls = 0
-  const country = await resolveProxyCountry({ ip: '203.0.113.8' }, {
-    baseUrl: 'https://geo.test', timeoutMs: 100,
-    fetchImpl: (async () => { geoCalls += 1; return new Response(JSON.stringify({
-      success: true, country: 'Poland', country_code: 'PL'
-    }), { status: 200 }) }) as typeof fetch
-  })
-  assert.equal(country, 'Poland'); assert.equal(geoCalls, 1)
-  await assert.rejects(resolveProxyCountry({ host: 'proxy.test' }, {
-    baseUrl: 'x', timeoutMs: 10
-  }), { code: 'profile_proxy_ip_missing' })
-  clearProxyCountryCache()
-  await assert.rejects(resolveProxyCountry({ ip: '198.51.100.2' }, {
-    baseUrl: 'https://geo.test', timeoutMs: 100,
-    fetchImpl: (async () => new Response(JSON.stringify({ country: 'Russia',
-      country_code: 'RU' }), { status: 200 })) as typeof fetch
-  }), { code: 'profile_proxy_country_disallowed' })
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('Country lookup must not use the network') }
+  try {
+    // Age, status and IP do not trigger another check: another program maintains them.
+    assert.equal(await resolveProxyCountry({ ip: '198.51.100.2', lastCheck: {
+      country: 'GE', createdAt: '2020-01-01', ip: '203.0.113.8', status: 0
+    } }), 'Georgia')
+    assert.equal(await resolveProxyCountry({ lastCheck: { country: ' pl ' } }), 'Poland')
+    assert.equal(await resolveProxyCountry({ lastCheck: { country: 'US' } }), 'United States')
+    for (const country of [undefined, '', 'XX', 'ZZ', '123', 'Georgia']) {
+      await assert.rejects(resolveProxyCountry({ country: 'GE', lastCheck: { country } }),
+        { code: 'profile_proxy_country_unavailable' })
+    }
+    await assert.rejects(resolveProxyCountry(undefined), { code: 'profile_proxy_country_unavailable' })
+    await assert.rejects(resolveProxyCountry({ lastCheck: { country: 'ru' } }),
+      { code: 'profile_proxy_country_disallowed' })
+
+    let calls = 0
+    let savedCountry = 'GE'
+    const request = async (path: string, options: any) => {
+      calls += 1
+      assert.equal(path, '/proxy')
+      assert.deepEqual(options, { query: { 'ids[]': '17' } })
+      return { data: [{ id: 18, lastCheck: { country: 'RU' } },
+        { id: '17', lastCheck: { country: savedCountry, createdAt: '2020-01-01' } }] }
+    }
+    const getProfile = async (id: number) => {
+      assert.equal(id, 9)
+      return { id, proxyId: 17, proxy: { id: 17, host: 'proxy.test', ip: '203.0.113.8' } }
+    }
+    const loaded = await getDolphinProfileWithProxyLastCheck(9, { getProfile, request })
+    assert.equal(await resolveProxyCountry(loaded.proxy), 'Georgia')
+    savedCountry = 'PL'
+    const changed = await getDolphinProfileWithProxyLastCheck(9, {
+      getProfile: async () => ({ proxyId: 17 }), request
+    })
+    assert.equal(await resolveProxyCountry(changed.proxy), 'Poland', 'no local country cache')
+    assert.equal(calls, 2, 'one saved-check read for each preparation')
+    const missing = await getDolphinProfileWithProxyLastCheck(9, {
+      getProfile, request: async () => ({ data: [{ id: 18, lastCheck: { country: 'GE' } }] })
+    })
+    await assert.rejects(resolveProxyCountry(missing.proxy), { code: 'profile_proxy_country_unavailable' })
+    const absent = await getDolphinProfileWithProxyLastCheck(9, {
+      getProfile: async () => ({}), request: async () => { throw new Error('Unexpected request') }
+    })
+    await assert.rejects(resolveProxyCountry(absent.proxy), { code: 'profile_proxy_country_unavailable' })
+    const failure = new Error('Dolphin unavailable')
+    await assert.rejects(getDolphinProfileWithProxyLastCheck(9, {
+      getProfile, request: async () => { throw failure }
+    }), (error: unknown) => error === failure)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 
   let captured: any
   const fetchImpl = (async (_url: string, init: RequestInit) => {

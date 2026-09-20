@@ -12,7 +12,9 @@ proxy-country checks, generation, validation, Preview, and manual Apply are unch
 1. Read the newest `CV processing` row for the LinkedIn account's client.
 2. Accept only `moved to filling` or `filled` with a non-empty `en_version_url`.
 3. Export a Google Doc to PDF or download a PDF through the Drive service account.
-4. Resolve the Dolphin proxy IP to a non-Russian country without persisting the IP.
+4. Read `lastCheck.country` for the profile's proxy from Dolphin and reject `RU`.
+   Use the saved result regardless of its age or IP; another program updates it.
+   Do not run a proxy check or call an external geolocation service. A missing country blocks Preview.
 5. Extract CV facts with an OpenAI strict Structured Output response and assign stable
    `exp_N` and `edu_N` IDs on the backend.
 6. Generate only descriptions and attached Skills for every fact ID, plus Headline, About,
@@ -70,7 +72,8 @@ the job in `waiting_retry`; Resume does not extract the CV or generate the profi
 - `OPENAI_LINKEDIN_PROFILE_API_KEY` is required; generic and legacy keys are not used.
 - `OPENAI_LINKEDIN_PROFILE_MODEL` is required.
 - `GOOGLE_APPLICATION_CREDENTIALS` points to a Drive-readable service account JSON.
-- OpenAI timeouts/output limits and Drive/geo limits are listed in `.env.example`.
+- OpenAI timeouts/output limits and the Drive file limit are listed in `.env.example`.
+- `LINKEDIN_PROFILE_GEO_BASE_URL` and `LINKEDIN_PROFILE_GEO_TIMEOUT_MS` are no longer used.
 
 ## Logging
 
