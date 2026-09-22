@@ -1,6 +1,6 @@
 // Read-only projection of backend state. Never creates, starts or retries a feature job.
 export const automationFeatures = { invitations: 'Приглашения', posts: 'Посты', comments: 'Комментарии', withdrawals: 'Отзыв приглашений' }
-export const automationStates = { planned: 'Ожидает запуска', starting: 'Запускается', running: 'Выполняется', monitoring: 'Монитор включён', completed: 'Завершено', blocked: 'Нужна проверка', cancelled: 'Отменено', missed: 'Пропущено' }
+export const automationStates = { planned: 'Ожидает запуска', starting: 'Запускается', running: 'Выполняется', deferred: 'Проверка отложена', monitoring: 'Монитор включён', completed: 'Завершено', blocked: 'Нужна проверка', cancelled: 'Отменено', missed: 'Пропущено' }
 export const timeMsk = at => at ? new Date(at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : '—'
 export const latestRuns = runs => [...(runs || [])].sort((a, b) => b.updatedAt - a.updatedAt)
 
