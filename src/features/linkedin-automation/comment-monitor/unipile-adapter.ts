@@ -20,7 +20,8 @@ export function createCommentUnipileAdapter(options: {
     const operationId = randomUUID()
     logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt: 1 })
     try {
-      const result = await scheduler.run(async () => {await beforeSend?.();return http.request(method, path, body)})
+      const result = await scheduler.run(async () => {await beforeSend?.();return http.request(method, path, body, {fullRetryAfter:true,
+        onResponse:(details:Record<string,number>)=>logger.event('unipile_rate_limit','succeeded',{operation,...details})})})
       logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId, attempt: 1,
         durationMs: Date.now() - started, httpStatus: method === 'POST' ? 201 : 200 })
       return result

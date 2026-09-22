@@ -13,8 +13,12 @@ export function createFeatureAdapters(deps: {invitations:ConnectionInviterServic
   const withdrawalEstimates=new Map<number,{at:number;value:number}>()
   const invitationState = (run:AutomationRun,value:any):FeatureState => ({id:value.runId,
     owned:value.automationKey === run.key,
-    state:value.status === 'completed' ? 'completed' : value.status === 'stopped' ? 'stopped' :
-      value.status === 'running' ? 'running' : 'blocked',reason:value.errorCode ?? value.stage})
+    ...(Number.isFinite(Date.parse(value.nextActionAt ?? '')) ? {nextActionAt:Date.parse(value.nextActionAt)} : {}),
+    state:['succeeded','completed'].includes(value.status) ? 'completed' : value.status === 'stopped' ? 'stopped' :
+      value.status === 'running' ?
+        (['resolving_uncertain','stop_requested'].includes(value.stage) &&
+          Date.parse(value.nextActionAt ?? '') > deps.now() && (deps.gate.current(String(run.account)) as {id?:string}|undefined)?.id !== value.runId
+          ? 'deferred' : 'running') : 'blocked',reason:value.errorCode ?? value.stage})
   const postState = (run:AutomationRun,value:any):FeatureState => ({id:value.id,
     owned:value.automationKey === run.key || (value.trigger === 'scheduled' && !active(value)),
     ...(value.status==='published' && value.postId && Number.isFinite(value.publishedAt) ?

@@ -25,6 +25,9 @@ export const explanations: Record<string,string> = {
   automation_preview_only:'Включён предварительный просмотр, автоматические отправки запрещены.',
   unipile_timeout:'Unipile не ответил вовремя. Если запрос уже отправлен, сначала проверяется его результат.',
   unipile_service_unavailable:'Unipile временно недоступен.',
+  unipile_api_too_many_requests:'Достигнут лимит запросов Unipile. Следующая проверка отложена до разрешённого времени; отправленный запрос повторно не отправляется.',
+  unipile_provider_too_many_requests:'LinkedIn ограничил запросы аккаунта. Новые запросы приостановлены; проверяется результат уже отправленного действия.',
+  connection_invitation_result_pending:'Приглашение отправлено, но проверка результата отложена из-за недоступности метода Unipile. Повторной отправки не будет.',
   connection_writer_disabled:'Отправка приглашений отключена в настройках backend.',
   stack_required:'Не выбран стек ученика. Укажите его в приглашениях.',
   post_writer_read_only:'Публикация постов отключена в настройках backend.',
@@ -53,6 +56,7 @@ export const explanations: Record<string,string> = {
   starting:'Задание сохранено и передаётся исполнителю.',
   worker_restarted:'Backend запущен заново. Сохранённые задания проверяются перед продолжением.',
   running:'Задание выполняется.', monitoring:'Монитор комментариев включён.',
+  deferred:'Проверка результата отложена до разрешённого времени. Исполнитель освобождён для других фич.',
   planned:'Ожидает сохранённого времени запуска.', completed:'Задание завершено.',
   blocked:'Задание остановлено до выяснения причины.', cancelled:'Задание отменено.', missed:'Запуск пропущен.'
 }
@@ -64,6 +68,6 @@ export async function readAutomationDiagnostics(store: AutomationStore, now: num
   const code = !worker ? 'worker_missing' : !healthy ? worker.code ?? 'worker_stale' : 'ready'
   return { checkedAt:now,healthy,code,description:healthy ? 'Исполнитель отвечает.' : explain(code),worker,
     settings:settings.filter(s => query.account === undefined || s.account === query.account),
-    runs:runs.filter(r => !query.runKey || r.key === query.runKey).map(r => ({...r,description:explain(r.reason ?? r.state)})),
+    runs:runs.filter(r => !query.runKey || r.key === query.runKey).map(r => ({...r,description:explain(r.reason ?? r.state) + (r.state==='deferred' && r.nextActionAt ? ` Следующая проверка: ${new Date(r.nextActionAt).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'})} МСК.` : '')})),
     events:events.map(e => ({...e,description:explain(e.code)})),nextBefore:events.at(-1)?.id }
 }

@@ -1,5 +1,5 @@
 import { connectionErrorCode } from './errors.ts'
-import { listAllPending } from './pending.ts'
+import { readPendingInvitations } from './pending-reader.ts'
 import { withConnectionRetry } from './retry-state.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionRun } from './types.ts'
@@ -26,6 +26,7 @@ export type PendingSnapshotController = {
   invalidate(reasonCode: string): void
   ensureFresh(options?: PendingReadOptions): Promise<ReadonlySet<string>>
   refresh(options?: PendingReadOptions): Promise<ReadonlySet<string>>
+  findFresh(personId: string, options?: PendingReadOptions): Promise<boolean>
   snapshot(): PendingSnapshot
 }
 
@@ -46,26 +47,34 @@ export async function createPendingSnapshotController(runtime: ConnectionRuntime
     })
   }
 
-  const refresh = async (options: PendingReadOptions = {}) => {
+  const read = async (options: PendingReadOptions = {}, targetPersonId?: string) => {
     const operation = options.operation ?? 'pending_invitations_read'
-    const rows = await withConnectionRetry(runtime, run, save, 'unipile', operation,
+    const result = await withConnectionRetry(runtime, run, save, 'unipile', operation,
       async () => {
-        try { return await listAllPending(runtime, run.accountId) }
+        try { return await readPendingInvitations(runtime, run.accountId, targetPersonId) }
         catch (error) { invalidate(connectionErrorCode(error)); throw error }
       }, {
         allowAfterDayClose: options.allowAfterDayClose ?? false,
         ignoreStopRequested: options.ignoreStopRequested,
         onFirstTransientError: options.onFirstTransientError
       })
-    personIds = new Set(rows.map(pendingPersonId).filter(Boolean))
-    refreshedAt = runtime.now().getTime()
-    valid = true
+    const observed = new Set(result.items.map(pendingPersonId).filter(Boolean))
+    if (result.complete) {
+      personIds = observed
+      refreshedAt = runtime.now().getTime()
+      valid = true
+    } else {
+      // A partial positive read must not renew the full snapshot's freshness.
+      for (const id of observed) personIds.add(id)
+    }
     runtime.logger.event('pending_snapshot', 'succeeded', {
       runId: run.runId, platformAccountId: run.platformAccountId,
-      pendingCount: personIds.size, snapshotAgeMs: 0, snapshotFresh: true
+      pendingCount: personIds.size, snapshotAgeMs: Math.max(0, runtime.now().getTime() - refreshedAt),
+      snapshotFresh: result.complete
     })
-    return personIds as ReadonlySet<string>
+    return observed as ReadonlySet<string>
   }
+  const refresh = (options?: PendingReadOptions) => read(options)
 
   const controller: PendingSnapshotController = {
     has(personId) { return valid && personIds.has(personId) },
@@ -84,6 +93,7 @@ export async function createPendingSnapshotController(runtime: ConnectionRuntime
       return personIds
     },
     refresh,
+    async findFresh(personId, options) { return (await read(options, personId)).has(personId) },
     snapshot
   }
   await controller.refresh()

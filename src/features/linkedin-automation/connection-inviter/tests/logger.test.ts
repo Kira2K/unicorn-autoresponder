@@ -28,3 +28,14 @@ assert.equal(failure.hasResponse, false)
 assert.equal(failure.httpStatus, 503)
 assert.equal(failure.errorMessage, undefined)
 console.log('connection inviter logger tests passed')
+logger.event('unipile_request', 'failed', { retryAfterMs: 74730000, retryAfterSeconds: 74730,
+  rateLimitLimit: 100, rateLimitRemaining: 0, rateLimitResetSeconds: 74730,
+  rateLimitResetAt: 1790117825306, requestId: 'req-example', rateLimitSource: 'api', requestSent: 1,
+  response: { token: 'SECRET' }, authorization: 'SECRET' })
+const rateLimit = JSON.parse(lines.at(-1)!)
+assert.equal(rateLimit.retryAfterMs, 74730000)
+assert.equal(rateLimit.retryAfterSeconds, 74730)
+assert.equal(rateLimit.rateLimitRemaining, 0)
+assert.equal(rateLimit.rateLimitSource, 'api')
+assert.equal(rateLimit.requestId, 'req-example')
+assert.doesNotMatch(lines.at(-1)!, /SECRET/)

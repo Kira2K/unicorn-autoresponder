@@ -32,8 +32,8 @@ async function run() {
   assert.equal(result.sentCount, 2)
   assert.equal(postCalls, 2)
   assert.equal(profileCalls, 2)
-  assert.equal(pendingCalls, 5,
-    'Expected one initial scan and one two-page read-back per successful invitation.')
+  assert.equal(pendingCalls, 3,
+    'Expected one initial scan and one positive page per successful invitation.')
 }
 
 run().then(() => console.log('connection publisher efficiency tests passed'))

@@ -3,8 +3,9 @@ import { automationError } from './contracts.ts'
 
 // Never accept provider bodies or arbitrary error messages into the durable journal.
 const numericFields = new Set(['attempt','status','httpStatus','retryAfterMs','durationMs','count','total','completed','remaining','nextActionAt',
-  'delayMs','publishedCount','checkCount','sentCount','eligibleCount','skippedCount','page','queueWaitMs','inputTokens','outputTokens','itemCount','likesConfirmed'])
-const codeFields = new Set(['code','state','status','stage','reason','provider','operation','result','errorCode','reasonCode','causeCode'])
+  'delayMs','publishedCount','checkCount','sentCount','eligibleCount','skippedCount','page','queueWaitMs','inputTokens','outputTokens','itemCount','likesConfirmed',
+  'retryAfterSeconds','rateLimitLimit','rateLimitRemaining','rateLimitResetSeconds','rateLimitResetAt','requestSent'])
+const codeFields = new Set(['code','state','status','stage','reason','provider','operation','result','errorCode','reasonCode','causeCode','rateLimitSource','requestId'])
 export function safeDetails(input: Record<string, unknown> = {}): NonNullable<AuditEvent['details']> {
   const result: NonNullable<AuditEvent['details']> = {}
   for (const [key,value] of Object.entries(input)) {

@@ -7,15 +7,11 @@ const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as
   typeof import('./error-diagnostics.ts')
 
 type FetchLike = (url: string, init: Record<string, unknown>) => Promise<any>
-type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean }
-
-function retryAfterMs(response: any, capMs: number) {
-  const value = String(response?.headers?.get?.('retry-after') ?? '').trim()
-  if (!value) return undefined
-  const seconds = Number(value)
-  const milliseconds = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(value) - Date.now()
-  return Number.isFinite(milliseconds) ? Math.max(0, Math.min(capMs, milliseconds)) : undefined
-}
+const { readRateLimitHeaders, createUnipileRequestBudget, sharedUnipileRequestBudget } =
+  require('./request-budget.ts') as typeof import('./request-budget.ts')
+type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean;
+  requiredReads?: string[];
+  onResponse?: (details: import('./request-budget.ts').RateLimitDetails & { httpStatus: number }) => void }
 
 function unipileApiKey(): string {
   const key = String(process.env.UNIPILE_API_KEY ?? '').trim()
@@ -31,6 +27,7 @@ function createUnipileHttpClient(options: {
   fetchImpl?: FetchLike
   timeoutMs?: number
   retryAfterCapMs?: number
+  requestBudget?: ReturnType<typeof createUnipileRequestBudget>
 } = {}) {
   const apiKey = options.apiKey ?? unipileApiKey()
   const baseUrl = String(
@@ -39,9 +36,15 @@ function createUnipileHttpClient(options: {
   const fetchImpl = options.fetchImpl ?? fetch
   const timeoutMs = options.timeoutMs ?? 60_000
   const retryAfterCapMs = options.retryAfterCapMs ?? 120_000
+  const budget = options.requestBudget ?? (options.fetchImpl ? createUnipileRequestBudget() : sharedUnipileRequestBudget)
 
   async function request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown,
     requestOptions: RequestOptions = {}): Promise<T> {
+    const cooldown = budget.before(baseUrl, path, method) ?? requestOptions.requiredReads
+      ?.map(read => budget.before(baseUrl, read, 'GET')).find(Boolean)
+    if (cooldown) throw new LinkedInAuthError('unipile_api_too_many_requests',
+      'A required Unipile method is in cooldown. No request was sent.',
+      { httpStatus: 429, ...cooldown })
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: any
@@ -67,6 +70,10 @@ function createUnipileHttpClient(options: {
       clearTimeout(timer)
     }
 
+    const rateLimit = readRateLimitHeaders(response)
+    budget.observe(baseUrl, path, response.status, rateLimit, method)
+    requestOptions.onResponse?.({ httpStatus: response.status, ...rateLimit })
+
     let data: any
     try {
       data = text ? JSON.parse(text) : null
@@ -77,13 +84,13 @@ function createUnipileHttpClient(options: {
     if (!response.ok) {
       const remoteCode = safeErrorCode(data?.type ?? data?.code, `http_${response.status}`)
       const requestId = safeErrorCode(data?.req_id, '')
-      const retryDelay = retryAfterMs(response,
+      const retryDelay = rateLimit.retryAfterMs === undefined ? undefined : Math.min(rateLimit.retryAfterMs,
         requestOptions.fullRetryAfter ? Number.POSITIVE_INFINITY : retryAfterCapMs)
       throw new LinkedInAuthError(
         `unipile_${remoteCode}`,
         `Unipile request failed with HTTP ${response.status} (${remoteCode}).` +
         (requestId ? ` Request ID: ${requestId}.` : ''),
-        { ...safeUnipileDiagnostics(response.status, data),
+        { ...safeUnipileDiagnostics(response.status, data), ...rateLimit, requestSent: 1,
           ...(retryDelay !== undefined ? { retryAfterMs: retryDelay } : {}) }
       )
     }

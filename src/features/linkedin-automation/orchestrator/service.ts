@@ -21,17 +21,19 @@ export function createLinkedInOrchestrator(deps: { store: AutomationStore; adapt
   }
   const save = async (run: AutomationRun) => {
     run.updatedAt = now()
-    const checkpoint = `${run.state}:${run.reason ?? ''}:${run.featureRunId ?? ''}:${Boolean(run.stopRequested)}:${run.plannedAt}:${run.publication?.id ?? ''}`
+    const checkpoint = `${run.state}:${run.reason ?? ''}:${run.featureRunId ?? ''}:${Boolean(run.stopRequested)}:${run.plannedAt}:${run.nextActionAt??0}:${run.publication?.id ?? ''}`
     await store.saveRun(run, checkpoints.get(run.key) === checkpoint ? undefined : {
       at:now(),account:run.account,feature:run.feature,runKey:run.key,stage:run.state,
       code:safeCode(run.reason ?? run.state),level:run.state === 'blocked' ? 'error' : run.reason==='task_time_limit'?'warning':'info',
       details:{state:run.state,plannedAt:run.plannedAt,pauseBeforeMs:run.pauseBeforeMs??0,
         ...(run.deadlineAt===undefined?{}:{deadlineAt:run.deadlineAt}),
+        ...(run.nextActionAt===undefined?{}:{nextActionAt:run.nextActionAt}),
         ...(run.publication ? {publishedAt:run.publication.at} : {})} })
     checkpoints.set(run.key,checkpoint)
   }
   async function finish(run: AutomationRun, state: FeatureState) {
     run.featureRunId = state.id
+    run.nextActionAt = state.nextActionAt
     if (!state.owned) { run.state = 'blocked'; run.reason = 'manual_task_active'; run.finishedAt = now() }
     else {
       if (state.publication) run.publication = state.publication
@@ -50,11 +52,11 @@ export function createLinkedInOrchestrator(deps: { store: AutomationStore; adapt
   }
   async function stop(run: AutomationRun, reason: 'disabled_by_admin' | 'task_time_limit' = run.stopReason ?? 'disabled_by_admin') {
     run.stopRequested = true; run.stopReason = reason; run.reason = reason; await save(run)
-    if (['starting', 'running', 'monitoring'].includes(run.state)) {
+    if (['starting', 'running', 'deferred', 'monitoring'].includes(run.state)) {
       await adapters[run.feature].stop(run)
       const status=await adapters[run.feature].status(run)
-      if(status?.owned && status.state==='running') {
-        run.state='running';run.reason=reason==='task_time_limit'?reason:'stop_requested';await save(run);return
+      if(status?.owned && (status.state==='running' || status.state==='deferred')) {
+        run.state=status.state;run.reason=reason==='task_time_limit'?reason:'stop_requested';await save(run);return
       }
       if(status?.owned && status.state==='blocked') {
         run.state='blocked';run.reason=status.reason??'uncertain';run.releasedAt??=now();await save(run);return
@@ -76,7 +78,7 @@ export function createLinkedInOrchestrator(deps: { store: AutomationStore; adapt
     await store.heartbeat({instance,startedAt,at:now(),state:restoring?'recovering':'ready'})
     const configs = await store.settings(), runs = await store.runs()
     if(deps.previewOnly) {await store.heartbeat({instance,startedAt,at:now(),state:'ready',code:'preview_only'});return}
-    for (const run of runs.filter(r => ['planned', 'starting', 'running', 'monitoring'].includes(r.state) ||
+    for (const run of runs.filter(r => ['planned', 'starting', 'running', 'deferred', 'monitoring'].includes(r.state) ||
       (r.feature==='posts' && r.state==='completed' && !r.publication && r.date===localDate(now())))) {
       try {
         const config = configs.find(c => c.account === run.account)
@@ -113,7 +115,7 @@ export function createLinkedInOrchestrator(deps: { store: AutomationStore; adapt
         }
         if (run.state === 'monitoring') await adapters[run.feature].maintain?.(run)
         const status = await adapters[run.feature].status(run)
-        if ((!status || status.state === 'running') && run.deadlineAt !== undefined && now() >= run.deadlineAt) {
+        if ((!status || ['running','deferred'].includes(status.state)) && run.deadlineAt !== undefined && now() >= run.deadlineAt) {
           if(status)run.featureRunId=status.id
           await stop(run,'task_time_limit')
         }
@@ -169,7 +171,7 @@ export function createLinkedInOrchestrator(deps: { store: AutomationStore; adapt
         }
       }
       if (enabledFor(config,'comments') && !runs.some(r=>r.account===config.account && r.feature==='comments' &&
-        ['planned','starting','running','monitoring'].includes(r.state))) {
+        ['planned','starting','running','deferred','monitoring'].includes(r.state))) {
         const key=`${config.account}:comments:continuous:${config.revision}`
         if (!runs.some(r=>r.key===key)) {
           const run=await store.claim({key,account:config.account,feature:'comments',commentMode:'continuous',
@@ -257,7 +259,7 @@ export function createLinkedInOrchestrator(deps: { store: AutomationStore; adapt
         code:config.enabled?'automation_enabled':'disabled_by_admin',details:{revision:config.revision,slotCount:config.slots.length}})
       // Persist the off switch before notifying running services. Write guards read this same value.
       await serial(async()=>{
-        for (const run of await store.runs(account)) if (['planned','starting','running','monitoring'].includes(run.state) &&
+        for (const run of await store.runs(account)) if (['planned','starting','running','deferred','monitoring'].includes(run.state) &&
           !enabledFor(saved, run.feature)) await stop(run)
       })
       return saved
