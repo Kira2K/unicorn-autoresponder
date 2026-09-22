@@ -39,7 +39,7 @@ export function createServiceState(deps: Dependencies) {
         emit(run.account)
         throw new PostError('post_persistence_unavailable')
       }
-      deps.log('run_checkpoint', { runId: run.id, status: run.status,
+      deps.log('run_checkpoint', { runId: run.id, account: run.account, automationKey: run.automationKey ?? '', status: run.status,
         likesConfirmed: run.engagement.items.filter(item => item.status === 'sent').length })
       emit(run.account)
     },

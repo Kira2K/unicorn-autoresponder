@@ -29,6 +29,7 @@ export function publicRun(run: ConnectionRun) {
     queuedCandidateCount: pendingCandidates.length, queuedByAudience
   }
   const safe = {
+    automationKey:run.automationKey,
     runId: run.runId, platformAccountId: run.platformAccountId,
     clientId: run.clientId, clientName: run.clientName,
     stackId: run.stackId, stack: run.stack, safeRecruiterOnly: run.safeRecruiterOnly,

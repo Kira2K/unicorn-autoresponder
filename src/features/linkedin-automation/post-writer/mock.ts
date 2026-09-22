@@ -27,7 +27,8 @@ export function createMockDependencies(gate: Gate): Dependencies {
       }
     }, adapter: {
       async identity() {},
-      async publish(account, text, image) {
+      async publish(account, text, image, beforeSend) {
+        await beforeSend?.()
         const id = `mock-post-${posts.size + 1}`
         const post = { id, text, authorId: account.verifiedProviderId,
           images: image ? [{ id: `${id}-image`, available: true, width: 1024, height: 1280 }] : [],
@@ -38,7 +39,7 @@ export function createMockDependencies(gate: Gate): Dependencies {
       async read(_account, id) { const post = posts.get(id); if (!post) throw new Error('missing'); return post },
       async recent() { return [...posts.values()] },
       async reacted(account, id) { return reactions.has(`${account.verifiedProviderId}:${id}`) },
-      async like(account, id) { reactions.add(`${account.verifiedProviderId}:${id}`) }
+      async like(account, id, beforeSend) { await beforeSend?.(); reactions.add(`${account.verifiedProviderId}:${id}`) }
     } }
 }
 export const createMockPostWriter = (gate: Gate) => createPostWriterService(createMockDependencies(gate))

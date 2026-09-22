@@ -7,9 +7,10 @@ import { withdrawalError } from './policy.ts'
 import type { ConnectionRuntime } from '../connection-inviter/runtime.ts'
 import type { Provider, Store } from './contracts.ts'
 export function composeInvitationWithdrawal(runtime: ConnectionRuntime, assertScope: (id: number) => void,
-  injected?: { provider: Provider; store: Store }) {
+  injected?: { provider?: Provider; store: Store; audit?: (event:string,fields:Record<string,unknown>)=>void }) {
   let provider: Provider | undefined = injected?.provider
   return createInvitationWithdrawal({
+    executionGuard:runtime.executionGuard, audit:injected?.audit,
     provider: () => provider ??= createWithdrawalProvider(),
     store: injected?.store ?? createWithdrawalFileStore(resolve('storage/linkedin-invitation-withdrawal')),
     account: async id => {

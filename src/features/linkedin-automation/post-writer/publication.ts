@@ -39,6 +39,7 @@ export async function reconcilePost(run: PostRun, e: PublicationExecution) {
   run.engagement.status = run.likesEnabled && !run.stop ? 'pending' : 'off'
   await e.save(run)
   unlock(e, run.account)
+  await e.executionGuard?.afterWrite?.(run.account,'posts',run.automationKey,'verified')
 }
 
 export async function publish(run: PostRun, e: PublicationExecution) {
@@ -51,6 +52,7 @@ export async function publish(run: PostRun, e: PublicationExecution) {
   lock(e, run.account, run.id)
   await e.adapter.identity(run.target)
   if (run.stop || e.isClosing?.()) { unlock(e, run.account); return }
+  await e.executionGuard?.beforeWrite(run.account, 'posts', run.automationKey)
   requireCurrentPolicy(run, e)
   const history = runHistory(run, 'sending')
   // Persist recovery before the non-atomic reservation. A crash can only reconcile.
@@ -72,7 +74,13 @@ export async function publish(run: PostRun, e: PublicationExecution) {
   if (run.stop || e.isClosing?.()) { run.status = 'stopped'; await e.save(run); unlock(e, run.account); return }
   // From this point every exception is ambiguous; never return this run to ready.
   requireCurrentPolicy(run, e)
-  const post = await e.adapter.publish(run.target, run.draft.text, image)
+  const beforeSend = async () => {
+    try {await e.executionGuard?.beforeWrite(run.account, 'posts', run.automationKey)}
+    catch(error) {run.attemptedAt=undefined;throw error} // No provider call, including after a scheduler wait.
+  }
+  await beforeSend()
+  if (run.stop || e.isClosing?.()) { run.status = 'stopped'; await e.save(run); unlock(e, run.account); return }
+  const post = await e.adapter.publish(run.target, run.draft.text, image, beforeSend)
   run.postId = post.id
   run.postImageId = run.memeEnabled && post.images?.length === 1 ? post.images[0].id : undefined
   run.status = 'verifying'

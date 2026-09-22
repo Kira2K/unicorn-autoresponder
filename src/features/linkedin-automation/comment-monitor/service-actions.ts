@@ -9,6 +9,7 @@ export function createServiceActions(options: any) {
   }
   return {
     async disable(platformAccountId: number) {
+      await options.assertWrite?.()
       await assertReady(); const audit = loggerFor({ jobId: `disable-${platformAccountId}`,
         platformAccountId }); audit.event('session_disable', 'started')
       const job = [...jobs.values()].find(row => row.platformAccountId === platformAccountId &&
@@ -20,6 +21,7 @@ export function createServiceActions(options: any) {
       audit.event('session_disable', 'succeeded'); return publicMonitorJob(job)
     },
     async resume(jobId: string) {
+      await options.assertWrite?.()
       await assertReady(); const audit = loggerFor({ jobId, platformAccountId: 0 })
       audit.event('session_resume', 'started')
       try {
@@ -36,6 +38,7 @@ export function createServiceActions(options: any) {
         errorCode: String((error as any)?.code ?? 'comment_monitor_internal_error') }); throw error }
     },
     async get(jobId: string) {
+      if(options.readOnly){const value=await store.get(jobId);return value && publicMonitorJob(value)}
       await assertReady(); const audit = loggerFor({ jobId, platformAccountId: 0 })
       audit.event('admin_job_read', 'started', { level: 'debug' })
       const job = jobs.get(jobId) ?? await logged(audit, 'noco_job_read', () => store.get(jobId), {
@@ -44,6 +47,7 @@ export function createServiceActions(options: any) {
       return job && publicMonitorJob(job)
     },
     async list() {
+      if(options.readOnly)return (await store.list()).map(publicMonitorJob)
       await assertReady(); const audit = loggerFor({ jobId: 'comment-monitor-list',
         platformAccountId: 0 }); audit.event('admin_jobs_read', 'started', { level: 'debug' })
       const result = [...jobs.values()].sort((a, b) => Date.parse(b.createdAt) -

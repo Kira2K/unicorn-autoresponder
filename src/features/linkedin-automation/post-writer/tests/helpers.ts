@@ -19,13 +19,13 @@ export function fixture() {
   const publish = deps.adapter.publish
   const like = deps.adapter.like
   const counts = { publish: 0, like: 0 }
-  deps.adapter.publish = async (account, text, image) => {
+  deps.adapter.publish = async (account, text, image, beforeSend) => {
     counts.publish++
-    const post = await publish(account, text, image)
+    const post = await publish(account, text, image, beforeSend)
     post.createdAt = now
     return post
   }
-  deps.adapter.like = async (account, id) => { counts.like++; await like(account, id) }
+  deps.adapter.like = async (account, id, beforeSend) => { counts.like++; await like(account, id, beforeSend) }
   let service = createPostWriterService(deps, false)
   return { deps, counts, held, get service() { return service },
     setNow(value: number) { now = value },

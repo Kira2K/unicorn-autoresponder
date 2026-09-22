@@ -9,6 +9,7 @@ const sleepDefault = (milliseconds: number) => new Promise(resolve => setTimeout
 export async function publishReplies(options: {
   job: MonitorJob; items: MonitorItem[]; adapter: any; logger: CommentLogger
   save: () => Promise<void>; sleep?: (milliseconds: number) => Promise<void>; random?: () => number
+  executionGuard?: import('../orchestrator/contracts.ts').ExecutionGuard
 }) {
   const { job, logger } = options
   const sleep = options.sleep ?? sleepDefault
@@ -27,17 +28,29 @@ export async function publishReplies(options: {
       job.finishedAt = new Date().toISOString(); clearAuthorContext(job, logger)
       await options.save(); break
     }
+    await options.executionGuard?.beforeWrite(job.platformAccountId,'comments',job.state.automationKey)
+    if (!['checking','replying'].includes(job.status)) break
     item.status = 'publishing'; item.updatedAt = new Date().toISOString(); await options.save()
+    try { await options.executionGuard?.beforeWrite(job.platformAccountId,'comments',job.state.automationKey) }
+    catch(error) { item.status='queued';await options.save();throw error }
+    if (!['checking','replying'].includes(job.status)) {item.status='queued';await options.save();break}
     logger.event('reply_publish', 'started', { publishedCount: job.state.published })
+    let prevented=false
     try {
       const response = await options.adapter.reply(job.accountId, item.postId, item.parentId,
-        item.replyText, logger)
+        item.replyText, logger, async()=>{
+          try {await options.executionGuard?.beforeWrite(job.platformAccountId,'comments',job.state.automationKey)}
+          catch(error) {prevented=true;throw error}
+        })
       item.replyId = String(response?.id ?? '') || undefined
       const match = await verifyWithRetry({ ...options, sleep }, item, item.replyId)
       if (!match) throw commentError('comment_reply_uncertain', 'Reply was not verified.')
       markVerified(job, item, match, logger); sent += 1; await options.save()
+      await options.executionGuard?.afterWrite?.(job.platformAccountId,'comments',job.state.automationKey,'verified')
       logger.event('reply_publish', 'succeeded', { publishedCount: job.state.published })
     } catch (error) {
+      if((item.status as string)==='verified') throw error
+      if(prevented) {item.status='queued';await options.save();throw error}
       const code = commentErrorCode(error)
       if (['unipile_timeout', 'unipile_unreachable'].includes(code)) {
         const match = await readVerified(options, item).catch(() => undefined)

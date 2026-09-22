@@ -8,6 +8,7 @@ import { publishReplies } from './reply-publisher.ts'
 import { reconcileUncertain } from './reply-verification.ts'
 import { clearAuthorContext, resolveAuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorJob } from './types.ts'
+import {isAutomationPause} from '../orchestrator/execution-errors.ts'
 function retryAt(error: any, random = Math.random) {
   const supplied = Number(error?.details?.retryAfterMs)
   const delay = Number.isFinite(supplied) ? supplied : randomBetween(5 * 60_000, 10 * 60_000, random)
@@ -22,6 +23,7 @@ function transient(error: any, code: string) {
 export async function pollMonitorJob(options: {
   job: MonitorJob; store: any; adapter: any; openai: any; gate?: any; logger: CommentLogger
   random?: () => number; sleep?: (milliseconds: number) => Promise<void>
+  executionGuard?: import('../orchestrator/contracts.ts').ExecutionGuard
 }) {
   const { job, logger } = options
   let release: undefined | (() => void)
@@ -31,6 +33,9 @@ export async function pollMonitorJob(options: {
     await saveJob(options.store, job, logger); logger.event('session_expire', 'succeeded'); return
   }
   try {
+    // Yield before acquiring the account, including when a scheduled task becomes due between monitor ticks.
+    if (job.state.automationKey)
+      await options.executionGuard?.beforeWrite(job.platformAccountId,'comments',job.state.automationKey)
     const operationId = randomUUID()
     logger.event('operation_gate', 'started', { operationId })
     release = options.gate?.acquire('comment_monitor', job.jobId,
@@ -40,12 +45,16 @@ export async function pollMonitorJob(options: {
     await saveJob(options.store, job, logger)
     await reconcileUncertain({ job, adapter: options.adapter, logger,
       save: () => saveJob(options.store, job, logger) })
+    if((job.status as string)==='disabled') return
+    await options.executionGuard?.beforeWrite(job.platformAccountId,'comments',job.state.automationKey)
     const discovered = await discoverComments({ job, adapter: options.adapter, logger })
     const detected = job.state.items.filter(item => item.status === 'detected')
     await saveJob(options.store, job, logger)
     const generated = await generateReplies({ job, items: detected, openai: options.openai, logger,
+      beforeGenerate:()=>options.executionGuard?.beforeWrite(job.platformAccountId,'comments',job.state.automationKey) ?? Promise.resolve(),
       loadAuthorContext: () => resolveAuthorContext({ job, adapter: options.adapter, logger,
         save: () => saveJob(options.store, job, logger) }) })
+    if((job.status as string)==='disabled') return
     await saveJob(options.store, job, logger)
     const queued = job.state.items.filter(item => item.status === 'queued')
     job.status = queued.length ? 'replying' : 'checking'; job.stage = queued.length
@@ -75,7 +84,10 @@ export async function pollMonitorJob(options: {
         reasonCode: 'comment_monitor_disabled' }); return
     }
     const code = commentErrorCode(error)
-    if (code === 'linkedin_operation_active') {
+    if(isAutomationPause(code)) {
+      job.status='waiting';job.stage=code.startsWith('automation_comments_')?code:'waiting_for_executor'
+      job.nextCheckAt=new Date(Date.now()+60_000).toISOString()
+    } else if (code === 'linkedin_operation_active') {
       job.status = 'waiting'; job.stage = 'waiting_for_account';
       job.nextCheckAt = new Date(Date.now() + randomBetween(60_000, 180_000, options.random)).toISOString()
     } else if (code === 'comment_reply_uncertain') {
@@ -89,8 +101,8 @@ export async function pollMonitorJob(options: {
     }
     job.errorCode = code
     await saveJob(options.store, job, logger).catch(() => undefined)
-    logger.event('monitor_check', 'failed', { ...errorLogDetails(error), level: transient(error, code)
-      ? 'warn' : 'error' })
+    logger.event('monitor_check', 'failed', { ...errorLogDetails(error), level: isAutomationPause(code)
+      ? 'info' : transient(error, code) ? 'warn' : 'error' })
   } finally {
     if (release) {
       logger.event('operation_release', 'started'); release()

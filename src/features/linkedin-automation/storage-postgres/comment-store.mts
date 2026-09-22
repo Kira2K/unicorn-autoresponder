@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import type { MonitorJob } from '../comment-monitor/types.ts';
 import type { FeatureSql, FeatureWrites } from './contracts.mts';
 import { createFeatureRows } from './rows.mts';
+import {retainMonitorEvidence} from '../comment-monitor/retention-policy.ts';
 const require = createRequire(import.meta.url);
 const { monitorJobFromRow, monitorJobRow } = require('../comment-monitor/job-row.ts') as typeof import('../comment-monitor/job-row.ts');
 const { LINKEDIN_COMMENT_MONITOR_COLUMNS } = require('../../../integrations/noco/linkedin-comment-monitor-schema/columns.ts') as
@@ -21,7 +22,7 @@ export function createSqlCommentStore(db: FeatureSql, grant?: FeatureWrites) {
     async purge(before: string) {
       const cutoff = Date.parse(before);
       if (!Number.isFinite(cutoff)) return;
-      for (const job of await list()) if (job.recordId && Date.parse(job.createdAt) < cutoff) await rows.remove(job.recordId);
+      for (const job of await list()) if (job.recordId && !retainMonitorEvidence(job) && Date.parse(job.createdAt) < cutoff) await rows.remove(job.recordId);
     }
   };
 }

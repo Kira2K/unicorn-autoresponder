@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "linkedin:automation:test": "node --test src/features/linkedin-automation/orchestrator/feature-contracts.test.ts src/integrations/postgres/linkedin-automation/store.test.mts src/integrations/unipile/post-writer-adapter.test.ts src/features/web-console/backend/linkedin-operation-gate.test.ts",
     "linkedin:withdrawals:test": "node --test src/features/linkedin-automation/invitation-withdrawal/*.test.ts src/integrations/unipile/invitation-withdrawal.test.ts src/features/web-console/backend/invitation-withdrawal-routes.test.ts",
     "linkedin:withdrawals:e2e": "node src/features/web-console/e2e/linkedin-invitation-withdrawal.e2e.mts",
     "linkedin:posts:standalone": "node src/features/linkedin-automation/post-writer/standalone-cli.ts",

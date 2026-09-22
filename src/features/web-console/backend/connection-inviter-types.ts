@@ -7,7 +7,7 @@ export type ConnectionInviterService = {
   readiness(platformAccountId: number): Promise<Record<string, unknown>>
   stacks(): Promise<Array<{ id: number; name: string }>>
   saveStack(platformAccountId: number, stackId: number): Promise<Record<string, unknown>>
-  start(platformAccountId: number, input?: { safeRecruiterOnly?: boolean }):
+  start(platformAccountId: number, input?: { safeRecruiterOnly?: boolean; automationKey?: string }):
     Promise<Record<string, unknown>>
   stopRun(runId: string): Promise<Record<string, unknown>>
   subscribe?(runId: string, listener: (event: { id: number; type: string; at: string;

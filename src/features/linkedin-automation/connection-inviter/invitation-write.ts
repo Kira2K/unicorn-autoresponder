@@ -60,6 +60,9 @@ export async function sendInvitationSafely(context: InvitationSafetyContext,
     }
     if (await stopOrCloseBeforePost(context, item)) return false
     runtime.assertWriterOwnership?.()
+    try { await runtime.executionGuard?.beforeWrite(run.platformAccountId,'invitations',run.automationKey) }
+    catch(error) {await context.history.release(item,'automation_write_not_started');throw error}
+    if (await stopOrCloseBeforePost(context, item)) return false
     runtime.logger.event('invitation_write', 'started', {
       runId: run.runId, platformAccountId: run.platformAccountId, audience: item.audience
     })

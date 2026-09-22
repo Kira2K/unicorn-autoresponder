@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import type { Preview, Run, Runtime, State, WithdrawalService } from './contracts.ts'
-import { classifyInvitations, withdrawalError, withdrawalNeedsCheck } from './policy.ts'
+import { classifyInvitations, withdrawalDelay, withdrawalError, withdrawalNeedsCheck } from './policy.ts'
 import { executeWithdrawal } from './execution.ts'
 import { recheckWithdrawal } from './recheck.ts'
 export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService {
@@ -19,6 +19,32 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
     return state ?? { accountId, attempted: [] }
   }
   const service: WithdrawalService = {
+    async estimateAutomatic(id) {
+      assertOpen();runtime.assertRead(id)
+      const account=await runtime.account(id),state=await stateFor(id,account.accountId)
+      const count=classifyInvitations(await runtime.provider().list(account.accountId),runtime.now(),state.attempted)
+        .filter(item=>item.eligible).length
+      // Include the maximum pacing pause plus an allowance for request/readback per invitation.
+      return count*(withdrawalDelay(()=>1)+15000)
+    },
+    async startAutomatic(id, key) {
+      assertOpen(); runtime.assertWrite(id)
+      await runtime.executionGuard?.beforeWrite(id,'withdrawals',key)
+      let existing = await service.status(id)
+      let continuation=false
+      if (existing?.automationKey === key) {
+        if(existing.status==='interrupted') existing=await service.recheck(id,existing.id)
+        continuation=Boolean(existing?.status==='stopped' && existing.checkedAt && !existing.stopRequested)
+        if(!continuation) return existing!
+      }
+      if (tasks.has(id)) throw busy()
+      await service.preview(id)
+      const preview = previews.get(id)!
+      const hex = createHash('sha256').update(continuation ? `${key}:${existing!.id}:continue` : key).digest('hex')
+      preview.token = `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`
+      preview.automationKey = key
+      return service.start(id,preview.token)
+    },
     async preview(id) {
       assertOpen(); runtime.assertRead(id)
       if (tasks.has(id)) throw busy()
@@ -46,9 +72,10 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
           JSON.stringify(preview.account) !== JSON.stringify(account)) throw withdrawalError(
           'withdrawal_preview_expired', 'Обновите список перед подтверждением отзыва.')
         const total = preview.items.filter(item => item.eligible).length
-        if (!total) throw withdrawalError('withdrawal_empty', 'Нет приглашений старше 14 дней для отзыва.')
+        if (!total && !preview.automationKey) throw withdrawalError('withdrawal_empty', 'Нет приглашений старше 14 дней для отзыва.')
         const run: Run = { id: token, platformAccountId: id, accountId: account.accountId,
-          status: 'running', total, withdrawn: 0, skipped: 0 }
+          status: 'running', total, withdrawn: 0, skipped: 0,
+          ...(preview.automationKey ? {automationKey:preview.automationKey} : {}) }
         state.run = run
         await runtime.store.save(id, copy(state))
         assertOpen(); runtime.assertWrite(id)

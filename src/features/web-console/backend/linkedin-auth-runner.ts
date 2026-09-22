@@ -24,12 +24,13 @@ async function runLocalLinkedInAuth(
   account: { clientName: string; platformAccountId: number },
   action: Action,
   onEvent: (event: AuthLogRecord) => void,
-  repository?: any
+  repository?: any,
+  authority?: import('../../linkedin-automation/orchestrator/contracts.ts').ExecutionAuthority
 ) {
   const input = authInput(account, action)
   const logger = createLinkedInAuthLogger({ onEvent })
   return await runLinkedInAuth(
-    input, createLinkedInAuthDependencies({ apply: input.apply, logger, repository })
+    input, createLinkedInAuthDependencies({ apply: input.apply, logger, repository, authority })
   )
 }
 

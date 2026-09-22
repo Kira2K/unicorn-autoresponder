@@ -21,11 +21,13 @@ export function parsePost(value: unknown): ProviderPost {
 }
 export function createPostAdapter(log: Log, client: PostHttp,
   scheduler: PostRequestScheduler): PostAdapter {
-  const request = async (method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> => {
+  const request = async (method: 'GET' | 'POST', path: string, body?: unknown, beforeSend?: () => Promise<void>): Promise<unknown> => {
     const start = Date.now()
     log('unipile_request_started', { method, operation: path.includes('reactions') ? 'reaction' : 'post' })
-    try { return await scheduler.run(() => client.request(method, path, body,
-      { fullRetryAfter: true, noCache: method === 'GET' })) }
+    try { return await scheduler.run(async () => {
+      await beforeSend?.()
+      return client.request(method, path, body, { fullRetryAfter: true, noCache: method === 'GET' })
+    }) }
     finally { log('unipile_request_finished', { method, durationMs: Date.now() - start }) }
   }
   const path = (account: Account) => `/${encodeURIComponent(account.unipileAccountId)}`
@@ -37,8 +39,8 @@ export function createPostAdapter(log: Log, client: PostHttp,
       const own = object(await request('GET', `${path(account)}/users/me?variant=linkedin_classic`))
       if (own.id !== account.verifiedProviderId) throw new PostError('post_identity_mismatch')
     },
-    async publish(account, text, image) { return parsePost(await request('POST', `${path(account)}/posts`,
-      { text, can_read: 'anyone', can_comment: 'anyone', ...(image ? { attachments: [image] } : {}) })) },
+    async publish(account, text, image, beforeSend) { return parsePost(await request('POST', `${path(account)}/posts`,
+      { text, can_read: 'anyone', can_comment: 'anyone', ...(image ? { attachments: [image] } : {}) }, beforeSend)) },
     async read(account, id) { return parsePost(await request('GET', `${path(account)}/posts/${encodeURIComponent(id)}`)) },
     async recent(account) {
       const result: ProviderPost[] = []
@@ -59,9 +61,9 @@ export function createPostAdapter(log: Log, client: PostHttp,
       return result
     },
     reacted: (account, id) => reactionPresent(account, id, request),
-    async like(account, id) {
+    async like(account, id, beforeSend) {
       const response = object(await request('POST', `${path(account)}/posts/${encodeURIComponent(id)}/reactions`,
-        { reaction: 'linkedin_like' }))
+        { reaction: 'linkedin_like' }, beforeSend))
       if (response.object !== 'PostReactionAdded') throw new PostError('post_reaction_unconfirmed')
     }
   }

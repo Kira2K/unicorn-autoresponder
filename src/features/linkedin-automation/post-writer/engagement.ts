@@ -63,6 +63,7 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     return
   }
   if (run.stop || e.isClosing?.() || !e.settings(run.account).likes) { unlock(e, item.account.platformAccountId); return }
+  await e.executionGuard?.beforeWrite(run.account, 'posts', run.automationKey)
   item.status = 'sending'
   item.attemptedAt = e.now()
   await e.save(run)
@@ -72,7 +73,13 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     unlock(e, item.account.platformAccountId)
     return
   }
-  await e.adapter.like(item.account, run.postId)
+  const beforeSend = async () => {
+    try {await e.executionGuard?.beforeWrite(run.account, 'posts', run.automationKey)}
+    catch(error) {item.status='cancelled';item.attemptedAt=undefined;throw error}
+  }
+  await beforeSend()
+  if (run.stop) { item.status = 'cancelled'; await e.save(run); unlock(e, item.account.platformAccountId); return }
+  await e.adapter.like(item.account, run.postId, beforeSend)
   run.nextActionAt = e.now() + 5000
   await e.save(run)
 }

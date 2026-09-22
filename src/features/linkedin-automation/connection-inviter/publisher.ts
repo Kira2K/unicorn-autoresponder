@@ -37,6 +37,7 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
           if (runtime.stopRequested(run.runId)) break
           requireConnectionRunDay(runtime, run)
 
+          await runtime.executionGuard?.beforeWrite(run.platformAccountId,'invitations',run.automationKey)
           candidate.status = 'sending'; candidate.reasonCode = 'invitation_claimed'
           candidate.updatedAt = runtime.now().toISOString()
           const item = await safety.claim(candidate)
@@ -51,6 +52,8 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
           runtime.logger.event('invitation_claim', 'succeeded', { ...details, audience })
 
           const sent = await safety.send(item)
+          await runtime.executionGuard?.afterWrite?.(run.platformAccountId,'invitations',run.automationKey,
+            sent?'verified':'not_confirmed')
           processedPersonIds.push(candidate.personId)
           if (sent) {
             sentCount += 1

@@ -19,6 +19,7 @@ export type Like = { account: Account; status: 'pending' | 'sending' | 'uncertai
 export type Engagement = { status: 'off' | 'pending' | 'running' | 'partial' | 'completed' |
   'cancelled' | 'uncertain'; target: number; items: Like[] }
 export type PostRun = {
+  automationKey?: string
   id: string; account: number; trigger: 'scheduled' | 'manual'; mode: ManualMode
   status: PostStatus; createdAt: number; updatedAt: number; executorId: string
   likesEnabled: boolean; target?: Account; context?: Context; topics?: Topic[]; topic?: Topic
@@ -50,15 +51,17 @@ export type ProviderPost = { id: string; text: string; authorId: string; url: st
   images?: ProviderImage[] }
 export interface PostAdapter {
   identity(account: Account): Promise<void>
-  publish(account: Account, text: string, image?: PostMedia): Promise<ProviderPost>
+  publish(account: Account, text: string, image?: PostMedia, beforeSend?: () => Promise<void>): Promise<ProviderPost>
   read(account: Account, id: string): Promise<ProviderPost>
   recent(account: Account): Promise<ProviderPost[]>
   reacted(account: Account, id: string): Promise<boolean>
-  like(account: Account, id: string): Promise<void>
+  like(account: Account, id: string, beforeSend?: () => Promise<void>): Promise<void>
 }
 export type Gate = { acquire(kind: string, id: string, account: string): () => void }
 export type Log = (event: string, fields?: Record<string, string | number | boolean>) => void
 export type Dependencies = { store: PostStore; source: PostSource; generator: WriterModel
+  executionGuard?: import('../orchestrator/contracts.ts').ExecutionGuard
+  schedulingManaged?(account: number): Promise<boolean>
   adapter: PostAdapter; gate: Gate; writerId: string; writable: boolean; now: () => number
   random: () => number; log: Log; mock?: boolean; memes?: MemeServices }
 export const defaults = (account: number): Settings => ({ account, scheduled: false, days: [],

@@ -124,6 +124,7 @@ function queueReply(item: MonitorItem, text: string, logger: CommentLogger) {
 export async function generateReplies(options: {
   job: MonitorJob; items: MonitorItem[]; openai: any; logger: CommentLogger
   loadAuthorContext?: () => Promise<AuthorContext>
+  beforeGenerate?: () => Promise<void>
 }) {
   const { job, openai, logger } = options
   const reserved = replyReservations(job)
@@ -138,6 +139,8 @@ export async function generateReplies(options: {
   const authorContext = candidates.length && options.loadAuthorContext
     ? await options.loadAuthorContext() : {}
   for (const batch of batches(candidates, 5)) {
+    if((job.status as string)==='disabled')break
+    await options.beforeGenerate?.()
     batch.forEach(item => {
       clearReply(item); item.reasonCode = undefined
       item.status = 'generating'; item.updatedAt = new Date().toISOString()
@@ -153,6 +156,8 @@ export async function generateReplies(options: {
       const resolutions = initial.resolutions
       let invalid = initial.invalid
       if (invalid.length) {
+        if((job.status as string)==='disabled')break
+        await options.beforeGenerate?.()
         logger.event('reply_repair', 'started', { attempt: 1, itemCount: invalid.length })
         logger.event('author_context_attach', 'started', { operation: 'repair',
           count: Object.keys(authorContext).length })

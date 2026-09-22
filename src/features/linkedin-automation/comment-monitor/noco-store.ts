@@ -1,4 +1,5 @@
 import type { MonitorJob } from './types.ts'
+const {retainMonitorEvidence} = require('./retention-policy.ts') as typeof import('./retention-policy.ts')
 
 const { monitorJobFromRow, monitorJobRow } = require('./job-row.ts') as typeof import('./job-row.ts')
 
@@ -47,7 +48,7 @@ function createCommentMonitorStore(client = createNocoClient({
     await client.patchRecord(await table(), id, monitorJobRow(job))
   }
   async function purge(beforeIso: string) {
-    for (const job of await list()) if (job.createdAt && job.createdAt < beforeIso && job.recordId) {
+    for (const job of await list()) if (!retainMonitorEvidence(job) && job.createdAt && job.createdAt < beforeIso && job.recordId) {
       await client.deleteRecord(await table(), job.recordId); ids.delete(job.jobId)
     }
   }

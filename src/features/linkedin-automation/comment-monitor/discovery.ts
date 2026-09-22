@@ -63,6 +63,6 @@ export async function discoverComments(options: {
     }
   }
   job.state.items = job.state.items.slice(-100)
-  job.state.knownIds = job.state.knownIds.slice(-1000)
+  if(!job.state.automationKey) job.state.knownIds = job.state.knownIds.slice(-1000)
   return found.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
 }

@@ -9,15 +9,16 @@ export const createdItem = (value: any) =>
   Array.isArray(value) ? value[0] : value?.list?.[0] ?? value?.data?.[0] ?? value
 
 function retryStateRow(run: ConnectionRun) {
-  if (!run.retryState && !run.invitationRetryState) return null
+  if (!run.retryState && !run.invitationRetryState && !run.automationKey) return null
   return JSON.stringify({
+    automationKey:run.automationKey,
     active: run.retryState ?? null,
     invitationWrite: run.invitationRetryState ?? null
   })
 }
 
 function retryStatesFromRow(value: unknown): Pick<ConnectionRun,
-  'retryState' | 'invitationRetryState'> {
+  'retryState' | 'invitationRetryState' | 'automationKey'> {
   const parsed = parse(value, undefined)
   if (!parsed || typeof parsed !== 'object') return {}
   if ('provider' in parsed && 'operation' in parsed) {
@@ -28,6 +29,7 @@ function retryStatesFromRow(value: unknown): Pick<ConnectionRun,
     }
   }
   return {
+    ...(typeof parsed.automationKey === 'string' ? {automationKey:parsed.automationKey} : {}),
     ...(parsed.active ? { retryState: parsed.active } : {}),
     ...(parsed.invitationWrite ? { invitationRetryState: parsed.invitationWrite } : {})
   }

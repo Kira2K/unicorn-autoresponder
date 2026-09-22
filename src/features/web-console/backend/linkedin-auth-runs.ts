@@ -13,7 +13,7 @@ const { publicLinkedInAccount } = require('./linkedin-auth-account-view.ts') as 
 }
 const { runLocalLinkedInAuth } = require('./linkedin-auth-runner.ts') as {
   runLocalLinkedInAuth(
-    account: any, action: any, onEvent: (event: any) => void, repository?: any
+    account: any, action: any, onEvent: (event: any) => void, repository?: any, authority?: any
   ): Promise<any>
 }
 
@@ -30,13 +30,15 @@ function createLinkedInAuthRunService(options: {
   execute?: typeof runLocalLinkedInAuth
   history?: any
   gate?: any
+  executionAuthority?: import('../../linkedin-automation/orchestrator/contracts.ts').ExecutionAuthority
 } = {}): import('./linkedin-auth-types.ts').LinkedInAuthRunService {
   let repository = options.repository
   let history = options.history
   const gate = options.gate
   const getRepository = () => repository ??= createLinkedInAuthNocoRepository()
   const getHistory = () => history ??= createLinkedInAuthHistoryStore()
-  const execute = options.execute ?? runLocalLinkedInAuth
+  const execute = options.execute ?? ((account:any,action:any,onEvent:any,repository:any) =>
+    runLocalLinkedInAuth(account,action,onEvent,repository,options.executionAuthority))
   const runs = new Map<string, Run>()
   const activeRunIds = new Map<number, string>()
 
@@ -52,6 +54,7 @@ function createLinkedInAuthRunService(options: {
   }
   async function listHistory() { return await getHistory().list() }
   async function updateAccount(platformAccountId: number, input: { linkedinUrl: unknown }) {
+    await options.executionAuthority?.check()
     if (activeRunIds.has(platformAccountId) || gate?.current(String(platformAccountId))) {
       throw codedError('linkedin_auth_run_active', 'Another LinkedIn run is active.')
     }

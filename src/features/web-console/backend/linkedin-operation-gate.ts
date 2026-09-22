@@ -1,7 +1,8 @@
-function createLinkedInOperationGate() {
+function createLinkedInOperationGate(options: {assertOwned?:()=>void} = {}) {
   const active = new Map<string, { kind: string; id: string; accountKey?: string }>()
   return {
     acquire(kind: string, id: string, accountKey?: string) {
+      options.assertOwned?.()
       const key = accountKey ? `account:${accountKey}` : '*'
       if (active.has('*') || active.has(key) || (!accountKey && active.size)) {
         throw Object.assign(new Error('Another LinkedIn operation is active.'), {

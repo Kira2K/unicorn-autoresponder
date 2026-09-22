@@ -13,13 +13,13 @@ export type GenerationExecution = Pick<Execution,
     store: Pick<PostStore, 'list'>
   }
 type GateExecution = Pick<Execution, 'release' | 'gate'>
-export type PublicationExecution = GateExecution & Pick<Execution, 'save' | 'now' | 'isClosing'> & {
+export type PublicationExecution = GateExecution & Pick<Execution, 'save' | 'now' | 'isClosing' | 'executionGuard'> & {
   memes?: Pick<NonNullable<Execution['memes']>, 'assets'>
   settings?: Execution['settings']
   store: Pick<PostStore, 'put' | 'claim'>
   adapter: Pick<PostAdapter, 'identity' | 'publish' | 'read' | 'recent'>
 }
-export type EngagementExecution = GateExecution & Pick<Execution, 'save' | 'now' | 'random' | 'settings' | 'isClosing'> & {
+export type EngagementExecution = GateExecution & Pick<Execution, 'save' | 'now' | 'random' | 'settings' | 'isClosing' | 'executionGuard'> & {
   source: Pick<PostSource, 'accounts'>
   adapter: Pick<PostAdapter, 'identity' | 'reacted' | 'like'>
 }

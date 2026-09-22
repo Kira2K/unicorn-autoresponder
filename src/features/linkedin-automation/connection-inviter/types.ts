@@ -120,6 +120,7 @@ export type ConnectionNocoRequestStats = {
 }
 
 export type ConnectionRun = {
+  automationKey?: string
   runId: string
   runKey: string
   platformAccountId: number

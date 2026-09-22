@@ -3,7 +3,7 @@ import { createServiceState } from './service-state.ts'
 import { processRun } from './process-run.ts'
 import { schedulePosts } from './scheduler.ts'
 import { newRun, applyAction, accountActive } from './run-actions.ts'
-import { nextSlot, validateSettings } from './schedule.ts'
+import { nextSlot, validateSettings, scheduledId } from './schedule.ts'
 import { digest } from './content-identity.ts'
 import { active, type Dependencies, type ManualMode } from './types.ts'
 import { createSerialQueue } from './serial.ts'
@@ -35,7 +35,7 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
       await state.hydrate()
       if (state.storageBlocked()) await state.flush()
       if (state.storageBlocked() || work.isClosing()) return
-      for (const value of settings.values()) await serial(value.account,
+      for (const value of settings.values()) if (!await deps.schedulingManaged?.(value.account)) await serial(value.account,
         () => schedulePosts(e.settings(value.account), runs, e))
       for (const run of runs.values()) if (!work.isClosing() && active(run) && !busy.has(run.id)) {
         busy.add(run.id)
@@ -52,7 +52,25 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
   timer?.unref()
   return {
     tick: trackedTick,
-    async get(account: number) { await state.hydrate(); return state.snapshot(account) },
+    startScheduled(account: number, date: string, automationKey: string) { return work.run(() => serial(account, async () => {
+      await writable()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !automationKey) throw new PostError('post_start_invalid')
+      const id = scheduledId(account, date), existing = runs.get(id)
+      if (existing) {
+        if(!existing.automationKey && active(existing)) {
+          existing.automationKey=automationKey;await e.save(existing)
+        }
+        return structuredClone(existing)
+      }
+      if (accountActive(runs.values(), account)) throw new PostError('linkedin_operation_active')
+      await e.executionGuard?.beforeWrite(account, 'posts', automationKey)
+      const run = newRun(id, account, 'scheduled', 'automatic', e.settings(account).likes, e)
+      run.automationKey = automationKey; run.memeEnabled = e.settings(account).memes === true
+      await e.save(run)
+      return structuredClone(run)
+    })) },
+    async get(account: number) { await state.hydrate(); return {...state.snapshot(account),
+      schedulingManaged:Boolean(await deps.schedulingManaged?.(account))} },
     async image(id: string) {
       await state.hydrate()
       const run = runs.get(id)

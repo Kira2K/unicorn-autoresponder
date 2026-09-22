@@ -25,6 +25,8 @@ export type MonitorItem = {
 }
 
 export type MonitorState = {
+  automationKey?: string
+  sessionNumber?: number
   posts: TrackedPost[]
   items: MonitorItem[]
   knownIds: string[]

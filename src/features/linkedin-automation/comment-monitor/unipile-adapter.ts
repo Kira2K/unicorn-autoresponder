@@ -15,12 +15,12 @@ export function createCommentUnipileAdapter(options: {
   const http = options.http ?? createUnipileHttpClient()
   const scheduler = options.scheduler ?? sharedScheduler
   async function request(logger: CommentLogger, operation: string, method: 'GET' | 'POST',
-    path: string, body?: unknown) {
+    path: string, body?: unknown, beforeSend?:()=>Promise<void>) {
     const started = Date.now()
     const operationId = randomUUID()
     logger.event('unipile_request', 'started', { level: 'debug', operation, operationId, attempt: 1 })
     try {
-      const result = await scheduler.run(() => http.request(method, path, body))
+      const result = await scheduler.run(async () => {await beforeSend?.();return http.request(method, path, body)})
       logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId, attempt: 1,
         durationMs: Date.now() - started, httpStatus: method === 'POST' ? 201 : 200 })
       return result
@@ -53,9 +53,9 @@ export function createCommentUnipileAdapter(options: {
         `${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}/replies?${query}`)
     },
     reply: (accountId: string, postId: string, commentId: string, text: string,
-      logger: CommentLogger) => request(logger, 'comment_reply_write', 'POST',
+      logger: CommentLogger, beforeSend?:()=>Promise<void>) => request(logger, 'comment_reply_write', 'POST',
       `/${encodeURIComponent(accountId)}/posts/${encodeURIComponent(postId)}/comments/` +
-      `${encodeURIComponent(commentId)}`, { text })
+      `${encodeURIComponent(commentId)}`, { text }, beforeSend)
   }
 }
 

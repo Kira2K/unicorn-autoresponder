@@ -20,6 +20,13 @@ const dependencies = (failure: any, events: any[]) => ({ store: { async update()
   } } })
 
 async function run() {
+  const paused=job()
+  await pollMonitorJob({job:paused,...dependencies(undefined,[]),executionGuard:{async beforeWrite(){
+    throw Object.assign(Error('stopping'),{code:'automation_worker_stopping'})
+  }}})
+  assert.equal(paused.status,'waiting');assert.equal(paused.stage,'waiting_for_executor')
+  assert.equal(paused.errorCode,'automation_worker_stopping')
+  assert.ok(Date.parse(paused.nextCheckAt)>Date.now())
   const retryEvents: any[] = []; const retryJob = job()
   await pollMonitorJob({ job: retryJob, ...dependencies(
     providerError('unipile_api_internal_error', 500), retryEvents) })

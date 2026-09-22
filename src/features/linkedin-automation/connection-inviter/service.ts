@@ -94,6 +94,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     sleep: options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))),
     stopRequested: runId => stopRequests.has(runId), emit: events.emit,
     logger, writerEnabled, writerId,
+    executionGuard: options.executionGuard,
     assertWriterOwnership() {
       if (disposed) throw connectionError('connection_writer_service_stopped',
         'Connection Inviter writer service has been stopped.')
@@ -377,7 +378,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           ready: true, writerEnabled: runtime.writerEnabled, safeRecruiterOnlyAvailable: false }
       })
     },
-    async start(platformAccountId: number, input: { safeRecruiterOnly?: boolean } = {}) {
+    async start(platformAccountId: number, input: { safeRecruiterOnly?: boolean; automationKey?: string } = {}) {
       scope.assert(platformAccountId)
       if (disposed) throw connectionError('connection_writer_service_stopped',
         'Connection Inviter writer service has been stopped.')
@@ -411,6 +412,8 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           const resume = ready && transientRunCanResume(existing)
           const stackResume = existing.status === 'paused' && existing.stage === 'stack_required' && ready
           if (stackResume || retry || topUp || resume) {
+            if (input.automationKey) existing.automationKey = input.automationKey
+            else delete existing.automationKey
             if (topUp || resume) {
               prepareRunTopUp(existing, context, input.safeRecruiterOnly === true)
               if (topUp) runtime.store.resetNocoBudget(existing.runId)
@@ -425,6 +428,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           return publicRun(existing)
         }
         const run = makeRun(context, runtime.now(), runtime.timeZone, input.safeRecruiterOnly === true)
+        run.automationKey = input.automationKey
         run.executorId = runtime.writerId; run.heartbeatAt = runtime.now().toISOString()
         const created = await runtime.store.createRun(run)
         lastPersistedAt.set(created.run.runId, runtime.now().getTime())
@@ -450,13 +454,15 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       runtime.assertWriterOwnership?.()
       await recover()
     },
-    stop() {
+    async stop() {
       disposed = true
-      void withdrawals?.close().finally(releaseWriterIfIdle)
+      const withdrawalClosed=withdrawals?.close().finally(releaseWriterIfIdle)
       for (const timer of resumeTimers.values()) clearTimeout(timer)
       resumeTimers.clear(); events.clear()
       for (const runId of activeRuns.keys()) stopRequests.add(runId)
       releaseWriterWhenIdle = true; releaseWriterIfIdle()
+      await withdrawalClosed
+      while(activeRuns.size || running.size || recoveryCoordinator)await new Promise(resolve=>setTimeout(resolve,100))
     }
   }
 

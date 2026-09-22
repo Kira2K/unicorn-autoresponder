@@ -1,4 +1,4 @@
-const SAFE_PREFIXES = ['unipile_', 'openai_', 'comment_monitor_', 'linkedin_']
+const SAFE_PREFIXES = ['unipile_', 'openai_', 'comment_monitor_', 'comment_reply_', 'linkedin_', 'automation_']
 
 export function commentError(code: string, message: string, details?: unknown) {
   return Object.assign(new Error(message), { code, details })

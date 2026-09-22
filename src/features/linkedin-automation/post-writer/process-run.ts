@@ -5,6 +5,7 @@ import { errorCode, retryDelay } from './errors.ts'
 import { unlock, type Execution } from './execution-types.ts'
 import type { PostRun } from './types.ts'
 import { policyCurrent } from './run-policy.ts'
+import {isAutomationPause} from '../orchestrator/execution-errors.ts'
 
 export async function processRun(run: PostRun, e: Execution) {
   if (!e.writable || (run.nextActionAt && run.nextActionAt > e.now())) return
@@ -25,7 +26,10 @@ export async function processRun(run: PostRun, e: Execution) {
       run.approvedHash = undefined
       await e.save(run)
     }
-    if (run.status === 'queued' || run.status === 'generating') await generate(run, e)
+    if (run.status === 'queued' || run.status === 'generating') {
+      await e.executionGuard?.beforeWrite(run.account,'posts',run.automationKey)
+      await generate(run, e)
+    }
     if (!run.stop && run.status === 'ready') await publish(run, e)
     if (run.stop && !run.attemptedAt) { run.status = 'stopped'; await e.save(run) }
   } catch (error) {
@@ -42,7 +46,7 @@ export async function processRun(run: PostRun, e: Execution) {
     } else if (run.attemptedAt && run.status !== 'published') {
       run.status = 'uncertain'
       run.nextActionAt = e.now() + (delay ?? 300_000)
-    } else if (delay || code === 'linkedin_operation_active') {
+    } else if (delay || code === 'linkedin_operation_active' || isAutomationPause(code)) {
       run.nextActionAt = e.now() + (delay ?? 15_000)
     } else if (run.status === 'published') {
       run.engagement.status = 'partial'

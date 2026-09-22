@@ -6,6 +6,7 @@ export type ConnectionRunEventType = 'snapshot' | 'stage_changed' | 'progress' |
   'partial' | 'completed' | 'uncertain'
 
 export type ConnectionRuntime = {
+  executionGuard?: import('../orchestrator/contracts.ts').ExecutionGuard
   store: ConnectionInviterStore
   repository: {
     listAccounts(): Promise<any[]>

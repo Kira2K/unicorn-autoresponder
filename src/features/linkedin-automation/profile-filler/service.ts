@@ -40,7 +40,18 @@ function createProfileFillerService(options: any = {}) {
   let client = options.client
   let store = options.store
   const getRepository = () => repository ??= createLinkedInAuthNocoRepository()
-  const getClient = () => client ??= createUnipileProfileAdapter()
+  let guardedClient: any
+  const getClient = () => {
+    client ??= createUnipileProfileAdapter()
+    if (!options.executionAuthority) return client
+    return guardedClient ??= new Proxy(client,{get(target,key) {
+      const value=target[key]
+      if (key === 'updateOwnProfile') return async (...args:any[]) => {
+        await options.executionAuthority.check(); return value.apply(target,args)
+      }
+      return typeof value === 'function' ? value.bind(target) : value
+    }})
+  }
   const getStore = () => store ??= createProfileJobStore()
   const gate = options.gate
   const jobs = new Map<string, ProfileJob>()

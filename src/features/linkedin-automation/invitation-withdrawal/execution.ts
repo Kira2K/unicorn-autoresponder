@@ -30,24 +30,37 @@ export async function executeWithdrawal(runtime: Runtime, preview: Preview, stat
       }
       if (stopped()) break
       runtime.assertWrite(id)
+      await runtime.executionGuard?.beforeWrite(id,'withdrawals',run.automationKey)
       run.current = item.id; state.attempted.push(item.id)
       await save() // Durable intent before the only POST; even a lost response must not be repeated.
       if (stopped()) break
       runtime.assertWrite(id)
+      await runtime.executionGuard?.beforeWrite(id,'withdrawals',run.automationKey)
+      if (stopped()) break
+      runtime.audit?.('withdrawal_request',{platformAccountId:id,runId:run.id,operation:'cancel'})
       inFlight = true; mutations++
       try { await provider.cancel(account.accountId, item.id) }
       catch (error) { await reads.waitAfterRateLimit(error) }
       pending = await readWithdrawalResult(reads, account.accountId, item.id, runtime.sleep)
       run.withdrawn++; run.current = undefined
       await save()
+      runtime.audit?.('withdrawal_verified',{platformAccountId:id,runId:run.id,completed:run.withdrawn,total:run.total})
       inFlight = false
+      await runtime.executionGuard?.afterWrite?.(id,'withdrawals',run.automationKey,'verified')
     }
     run.status = stopped() ? 'stopped' : 'completed'
     await save()
   } catch (error: any) {
+    if(!inFlight && run.current) {
+      state.attempted=state.attempted.filter(id=>id!==run.current);run.current=undefined
+    }
     const retryAt = withdrawalRetryAt(error, runtime.now())
     if (retryAt) state.retryAt = retryAt
     const requestedStop = error?.code === 'withdrawal_stop_requested'
+      || error?.code === 'automation_disabled'
+      || error?.code === 'automation_task_timeout'
+    run.errorCode = /^[a-z0-9_]{1,100}$/.test(error?.code ?? '') ? error.code : 'withdrawal_execution_failed'
+    runtime.audit?.('withdrawal_failed',{platformAccountId:id,runId:run.id,code:run.errorCode})
     run.status = inFlight ? 'uncertain' : requestedStop ? 'stopped' : 'failed'
     run.error = inFlight ? 'Результат отзыва не подтверждён. Очередь остановлена; повторной отправки не будет.' :
       requestedStop ? undefined : 'Не удалось проверить аккаунт, прочитать список или сохранить состояние. Очередь остановлена.'
