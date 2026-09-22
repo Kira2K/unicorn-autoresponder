@@ -118,6 +118,7 @@ function createCommentMonitorService(options: any = {}) {
     await assertReady()
     const job = [...jobs.values()].find(j => j.platformAccountId === platformAccountId && j.state.automationKey === key)
     if (!job) return enable(platformAccountId,key,publication)
+    if(job.stage==='temporary_provider_limit' && Date.parse(job.nextCheckAt ?? '')>Date.now())return publicMonitorJob(job)
     if (running.has(job.jobId)) return publicMonitorJob(job)
     running.add(job.jobId)
     let checkAfter=false
