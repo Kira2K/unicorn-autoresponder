@@ -102,3 +102,18 @@ git diff --check
 
 Все автоматические проверки используют mock-адаптеры. Первый live invitation POST после изменения
 требует отдельного подтверждения администратора.
+
+## Pending-list request economy and long read-back waits
+
+A complete pending-invitation snapshot is reused within a run for five minutes.
+Mandatory post-send read-back always reads fresh pages but stops as soon as the
+recipient is found. Only a fully validated traversal proves absence; a partial
+positive traversal never renews the full snapshot TTL. Confirmed sends update the
+snapshot and durable invitation history. The 33-send regression reduces pending
+page reads from 106 to 61 without assuming provider ordering.
+
+A mandatory Unipile read-back delay longer than 30 minutes is persisted and
+scheduled by the recovery coordinator instead of sleeping inside the account
+lock. The unresolved invitation stays `uncertain`; restart, stop and a date
+boundary cannot resend it or bypass Retry-After. Other features can use their own
+provider methods while this check is deferred.

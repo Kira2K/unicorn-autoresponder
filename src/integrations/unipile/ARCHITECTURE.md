@@ -47,3 +47,17 @@ flowchart LR
 - Потеря ответа после изменения возвращается как `uncertain`.
 - Адаптер возвращает внутренний понятный формат и безопасные ошибки, а не полный
   ответ Unipile.
+
+## Observed method budgets
+
+`request-budget.ts` shares observed cooldowns within the backend by API base,
+account, HTTP method and normalized resource route (pagination does not create
+a new budget). A 429 or a successful response with zero remaining quota prevents
+further HTTP requests to that method until its reset. Different methods/accounts
+remain independent. Invitation POST additionally checks availability of its
+mandatory pending-list read-back. No external writes are automatically replayed.
+
+Only numeric Retry-After/rate-limit headers and safe request IDs enter diagnostics.
+Unipile V2 reset headers are relative seconds; never interpret them as epoch time.
+Cooldowns are process-local; feature retry deadlines and uncertain results remain
+in SQL. This is not a global quota reservation across separate deployments.

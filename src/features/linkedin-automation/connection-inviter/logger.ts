@@ -21,7 +21,9 @@ const SAFE_KEYS = new Set([
   'termFinishReason', 'city', 'locationId', 'locationLabel', 'unresolvedCount',
   'recruiterShortfall', 'technicalShortfall', 'nocoPhysicalAttempts',
   'nocoPhysicalRetries', 'nocoSafetyOverrun', 'snapshotAgeMs', 'snapshotFresh',
-  'requestNumber', 'queueWaitMs', 'willRetry'
+  'requestNumber', 'queueWaitMs', 'willRetry', 'retryAfterMs', 'retryAfterSeconds',
+  'rateLimitSource', 'rateLimitLimit', 'rateLimitRemaining', 'rateLimitResetSeconds',
+  'rateLimitResetAt', 'requestId', 'requestSent'
 ])
 
 const token = (value: unknown, fallback = 'unknown') => {

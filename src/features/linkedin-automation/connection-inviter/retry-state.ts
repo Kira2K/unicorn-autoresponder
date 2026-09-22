@@ -116,6 +116,11 @@ export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: Co
         nextRetryAt: run.retryState.nextRetryAt })
       runtime.emit(run, 'retry_scheduled')
       if (provider === 'unipile') await save(run, 'retry_scheduled', 'critical')
+      // Persist an unresolved write and let the recovery coordinator schedule it.
+      // Do not hold an executor in a non-interruptible sleep for hours.
+      if (provider === 'unipile' && options.ignoreStopRequested && run.retryState.delayMs > MAX_MS) {
+        throw error
+      }
       const continued = options.ignoreStopRequested
         ? (await runtime.sleep(run.retryState.delayMs), true)
         : await waitOrStop(runtime, run.runId, run.retryState.delayMs,

@@ -7,6 +7,7 @@ import type { CommentLogger } from './types.ts'
 const SAFE_KEYS = new Set([
   'operationId', 'operation', 'level', 'durationMs', 'attempt', 'httpStatus', 'requestId', 'retryAfterMs',
   'page', 'count', 'candidateCount', 'inputTokens', 'outputTokens', 'cachedTokens', 'model',
+  'retryAfterSeconds','rateLimitLimit','rateLimitRemaining','rateLimitResetSeconds','rateLimitResetAt','requestSent',
   'delayMs', 'errorCode', 'reasonCode', 'checkCount', 'publishedCount', 'itemCount'
 ])
 

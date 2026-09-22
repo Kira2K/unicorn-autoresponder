@@ -104,7 +104,13 @@ export function createConnectionUnipileAdapter(options: {
           logger.event('unipile_request', 'started', { level: 'debug', operation, operationId,
             attempt, requestNumber: currentRequestNumber, queueWaitMs: started - queuedAt })
           try {
-            const result = await http.request(method, path, body)
+            const result = await http.request(method, path, body, {
+              ...(operation === 'invitation_write' ? { requiredReads: [path] } : {}),
+              onResponse: (details: Record<string, number>) => {
+                if (Object.keys(details).length > 1) logger.event('unipile_rate_limit', 'succeeded', {
+                  operation, operationId, ...details })
+              }
+            })
             logger.event('unipile_request', 'succeeded', { level: 'debug', operation, operationId,
               attempt, requestNumber: currentRequestNumber, durationMs: Date.now() - started,
               httpStatus: successStatus })
@@ -118,7 +124,14 @@ export function createConnectionUnipileAdapter(options: {
               attempt, requestNumber: currentRequestNumber, durationMs: Date.now() - started,
               errorCode: String(error?.code ?? 'unipile_request_failed'), willRetry,
               ...(rateLimitSource ? { rateLimitSource } : {}),
-              ...(Number.isFinite(retryAfterMs) ? { retryAfterMs } : {}) })
+              ...(Number.isFinite(retryAfterMs) ? { retryAfterMs } : {}),
+              httpStatus: error?.details?.httpStatus, requestId: error?.details?.requestId,
+              retryAfterSeconds: error?.details?.retryAfterSeconds,
+              rateLimitLimit: error?.details?.rateLimitLimit,
+              rateLimitRemaining: error?.details?.rateLimitRemaining,
+              rateLimitResetSeconds: error?.details?.rateLimitResetSeconds,
+              rateLimitResetAt: error?.details?.rateLimitResetAt,
+              requestSent: error?.details?.requestSent })
             throw error
           }
         })
