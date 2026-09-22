@@ -29,6 +29,21 @@ test('durable occurrences survive restart; same-account jobs serialize, differen
   await next.tick(); assert.equal(f.started.length,4)
 })
 
+test('deferred verification releases the queue and still observes disable and deadlines', async()=>{
+  const f=fixture(),service=f.make();await service.update(1,f.input,0);await service.tick()
+  const first=(await f.store.runs(1)).find(r=>r.state==='running')!
+  f.states.get(first.key)!.state='deferred'
+  await service.tick()
+  assert.equal((await f.store.runs(1)).find(r=>r.key===first.key)!.state,'deferred')
+  const second=(await f.store.runs(1)).find(r=>r.date===first.date && r.state==='planned')!
+  f.setTime(second.plannedAt);await service.tick()
+  assert.equal(f.started.length,2,'A pending provider read must not block an independent feature.')
+  f.setTime(first.deadlineAt!);await service.tick()
+  assert.ok(f.stopped.includes(first.key))
+  await service.update(1,{...f.input,enabled:false},1)
+  assert.ok(f.stopped.includes(second.key))
+})
+
 test('more than two accounts execute concurrently, still only one task per account', async()=>{
   const f=fixture(), service=f.make()
   for(let account=1;account<=12;account++) await service.update(account,f.input,0)
