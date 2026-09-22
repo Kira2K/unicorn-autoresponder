@@ -229,6 +229,14 @@ export function createLinkedInOrchestrator(deps: { store: AutomationStore; adapt
         const code = String((error as { code?: string }).code ?? 'automation_feature_unavailable')
         if (code.startsWith('automation_writer_') || code.startsWith('postgres_')) throw error
         run.reason = /^[a-z0-9_]{1,100}$/.test(code) ? code : 'automation_feature_unavailable'
+        const retryMs=Number((error as any)?.details?.retryAfterMs)
+        if (run.state==='planned' && code.startsWith('unipile_') && Number.isFinite(retryMs) && retryMs>0) {
+          // A method that cannot run must not repeatedly probe or block background comments.
+          run.nextActionAt=now()+retryMs;run.plannedAt=Math.max(run.plannedAt,run.nextActionAt)
+          if(run.plannedAt+run.reserveMs>run.closesAt) {
+            run.state='missed';run.reason='provider_limit_outside_slot';run.finishedAt=now()
+          }
+        }
         if (run.state === 'starting') {
           if (run.feature==='comments' && code.startsWith('automation_comments_')) run.state='planned'
           else {run.state='blocked';run.finishedAt=now()}

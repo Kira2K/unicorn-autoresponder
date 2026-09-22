@@ -277,3 +277,21 @@ test('off switch reaches durable storage while a feature start is awaiting a pro
   release();await tick;await off
   assert.equal((await f.store.runs(1)).find(r=>r.key===key)!.state,'cancelled')
 })
+
+
+test('a readiness cooldown reschedules durably without starving comments or probing every tick',async()=>{
+  for (const delay of [3600000,24*3600000]) {
+    const f=fixture(),service=f.make();let reads=0
+    f.adapters.invitations.inspect=async()=>{reads++;throw Object.assign(Error('quota'),{
+      code:'unipile_api_too_many_requests',details:{retryAfterMs:delay}})}
+    await service.update(1,{...f.input,slots:[{...f.input.slots[0],features:['invitations','comments']}]},0)
+    await service.tick()
+    const run=(await f.store.runs(1)).find(r=>r.feature==='invitations'&&r.date==='2026-09-21')!
+    assert.equal(run.state,delay===3600000?'planned':'missed')
+    assert.equal(run.nextActionAt,f.now()+delay)
+    assert.ok((await f.store.runs(1)).some(r=>r.feature==='comments'&&r.state==='monitoring'))
+    const before=reads;await service.tick();assert.equal(reads,before)
+    await service.close();const restored=f.make();await restored.tick();assert.equal(reads,before)
+    assert.equal((await f.store.runs(1)).find(r=>r.key===run.key)!.plannedAt,run.plannedAt)
+  }
+})
