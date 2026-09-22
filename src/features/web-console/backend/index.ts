@@ -41,6 +41,19 @@ async function startBackend() {
     }
 
     bound.attach(app)
+    if(process.env.APP_DB==='postgres') {
+      let stopping=false
+      const shutdown=()=>{
+        if(stopping)return;stopping=true
+        // Only this backend exits; provider intents are already checkpointed for recovery.
+        const deadline=setTimeout(()=>process.exit(1),30_000);deadline.unref()
+        void Promise.all([bound.close(),closeStorage?.()]).then(()=>process.exit(0)).catch(()=>{
+          console.error('Web console shutdown incomplete; saved LinkedIn intents will be reconciled on restart.')
+          process.exit(1)
+        })
+      }
+      process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown)
+    }
     console.log(`Web console backend listening at http://${host}:${port}`)
     void app.locals.recoverProfileVerification().catch(() => {
       console.error('Profile verification recovery could not be started; inspect safe Profile Filler logs.')

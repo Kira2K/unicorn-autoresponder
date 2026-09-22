@@ -4,6 +4,15 @@ This project is script-shaped, but the source now has clear feature,
 integration, and platform boundaries. Start from `docs/AGENT_CONTEXT.md` when a
 future session needs the shortest map.
 
+## LinkedIn weekly automation
+
+The injected orchestrator in `src/features/linkedin-automation/orchestrator`
+plans and tracks existing feature services. Its PostgreSQL store, durable audit
+journal and database writer lock live in `src/integrations/postgres/linkedin-automation`.
+SQL backend startup wires the services and resumes scheduling without a browser.
+Manual routes retain their feature contracts and share the account operation gate.
+See [setup, diagnostics and migration rules](LINKEDIN_ORCHESTRATOR.md).
+
 ## Current Layout
 
 | Area | Owns |

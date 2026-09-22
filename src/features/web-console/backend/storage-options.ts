@@ -7,6 +7,9 @@ import type { LinkedInAuthAccountRow } from '../../linkedin-automation/account-c
 
 // Complete storage bundle: never mix an explicitly selected SQL store with a Noco default.
 export interface LinkedInStorageOptions {
+  automation?: import('../../linkedin-automation/orchestrator/runtime.ts').AutomationRuntimeOptions
+  automationUnavailable?: string
+  executionControl?: {authority:import('../../linkedin-automation/orchestrator/contracts.ts').ExecutionAuthority;leader:boolean}
   repository: AuthRepository
   history: AuthHistory
   profile: {

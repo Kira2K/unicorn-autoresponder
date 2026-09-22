@@ -1,4 +1,8 @@
 const crypto = require('node:crypto')
+const { prepareAutomation } = require('../../linkedin-automation/orchestrator/runtime.ts') as typeof import('../../linkedin-automation/orchestrator/runtime.ts')
+const { registerLinkedInAutomationRoutes } = require('./linkedin-automation-routes.ts') as typeof import('./linkedin-automation-routes.ts')
+const { createConnectionLogger } = require('../../linkedin-automation/connection-inviter/logger.ts') as typeof import('../../linkedin-automation/connection-inviter/logger.ts')
+const { createCommentLogger } = require('../../linkedin-automation/comment-monitor/logger.ts') as typeof import('../../linkedin-automation/comment-monitor/logger.ts')
 const { registerPostWriterRoutes } = require('./post-writer-routes.ts') as typeof import('./post-writer-routes.ts')
 const { createLivePostWriter } = require('../../linkedin-automation/post-writer/runtime.ts') as typeof import('../../linkedin-automation/post-writer/runtime.ts')
 const { createMockPostWriter } = require('../../linkedin-automation/post-writer/mock.ts') as typeof import('../../linkedin-automation/post-writer/mock.ts')
@@ -113,7 +117,7 @@ const { registerLinkedInAuthRoutes } = require('./linkedin-auth-routes.ts') as {
   registerLinkedInAuthRoutes(options: any): void
 }
 const { createLinkedInOperationGate } = require('./linkedin-operation-gate.ts') as {
-  createLinkedInOperationGate(): any
+  createLinkedInOperationGate(options?:any): any
 }
 const { createProfileFillerService } = require('../../linkedin-automation/profile-filler/service.ts') as {
   createProfileFillerService(options?: any): import('./profile-filler-types.ts').ProfileFillerService
@@ -477,6 +481,7 @@ function createWebConsoleApp(options: {
   connectionInviter?: import('./connection-inviter-types.ts').ConnectionInviterService
   initializeConnectionInviter?: boolean
   postWriter?: import('../../linkedin-automation/post-writer/service.ts').PostWriterService
+  linkedinAutomation?: import('../../linkedin-automation/orchestrator/service.ts').LinkedInOrchestrator
   useMockData?: boolean
 } = {}) {
   const useMockData = options.useMockData ?? process.env.WEB_CONSOLE_USE_MOCK_DATA === 'true'
@@ -497,7 +502,19 @@ function createWebConsoleApp(options: {
         : undefined
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
-  const linkedinOperationGate = options.linkedinOperationGate ?? createLinkedInOperationGate()
+  const automation = storage?.automation && prepareAutomation(storage.automation)
+  const linkedinControl=automation ?? storage?.executionControl
+  let linkedinClosing=false
+  const baseLinkedinGuard=automation?.guard ?? (linkedinControl ? {async beforeWrite(_account:number,_feature:string,key?:string){
+    await linkedinControl.authority.check()
+    if(key)throw Object.assign(Error('automation_disabled'),{code:'automation_disabled'})
+  }} : undefined)
+  const linkedinGuard=baseLinkedinGuard && {...baseLinkedinGuard,async beforeWrite(...args:Parameters<typeof baseLinkedinGuard.beforeWrite>){
+    if(linkedinClosing)throw Object.assign(Error('automation_worker_stopping'),{code:'automation_worker_stopping'})
+    await baseLinkedinGuard.beforeWrite(...args)
+  }}
+  const linkedinOperationGate = options.linkedinOperationGate ?? createLinkedInOperationGate(linkedinControl ? {
+    assertOwned:()=>linkedinControl.authority.assertOwned()} : undefined)
   let linkedinRepository: any = storage?.repository
   const getLinkedInRepository = () => linkedinRepository ??= createLinkedInAuthNocoRepository()
   const lazyLinkedInRepository = new Proxy({}, {
@@ -509,13 +526,21 @@ function createWebConsoleApp(options: {
   })
   const linkedinAuthRuns = options.linkedinAuthRuns ?? (useMockData
     ? createMockLinkedInAuthRunService()
-    : createLinkedInAuthRunService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository, history: storage?.history }))
+    : createLinkedInAuthRunService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository, history: storage?.history,
+      executionAuthority:linkedinControl?.authority }))
   const profileFiller = options.profileFiller ?? (useMockData
     ? createMockProfileFillerService()
     : createProfileFillerService({ gate: linkedinOperationGate, repository: lazyLinkedInRepository,
-      store: storage?.profile, generationRepository: storage?.generation }))
+      store: storage?.profile, generationRepository: storage?.generation,executionAuthority:linkedinControl?.authority }))
   let liveCommentMonitor: import('./comment-monitor-types.ts').CommentMonitorService | undefined
   const getLiveCommentMonitor = () => liveCommentMonitor ??= createCommentMonitorService({
+    executionGuard:linkedinGuard,
+    ...(linkedinControl ? {autoStart:linkedinControl.leader,readOnly:!linkedinControl.leader,
+      assertWrite:()=>linkedinControl.authority.check()} : {}),
+    ...(automation ? {autoStart:automation.leader,loggerFor:(job:any)=>{
+      const native=createCommentLogger(job),audit=automation.audit.logger('comments');return {event(stage:any,status:any,details:any={}){
+        native.event(stage,status,details);audit(stage,{...details,status,platformAccountId:job.platformAccountId,runId:job.jobId})}}
+    }} : {}),
     gate: linkedinOperationGate,
     store: storage?.comments,
     repository: lazyLinkedInRepository
@@ -532,6 +557,14 @@ function createWebConsoleApp(options: {
     : lazyCommentMonitor)
   let liveConnectionInviter: import('./connection-inviter-types.ts').ConnectionInviterService | undefined
   const getLiveConnectionInviter = () => liveConnectionInviter ??= createConnectionInviterService({
+    executionGuard:linkedinGuard,
+    ...(linkedinControl ? {autoRecover:linkedinControl.leader,...(!linkedinControl.leader?{writerEnabled:false}:{})} : {}),
+    ...(automation ? {autoRecover:automation.leader,
+      ...(!automation.leader ? {writerEnabled:false} : {}),
+      logger:(()=>{const native=createConnectionLogger(),audit=automation.audit.logger('invitations');return {event(stage:any,status:any,details:any={}){
+        native.event(stage,status,details);audit(stage,{...details,status})}}})(),
+      withdrawal:{store:automation.withdrawals,audit:automation.audit.logger('withdrawals')}
+    } : {}),
     gate: linkedinOperationGate,
     store: storage?.inviter,
     repository: lazyLinkedInRepository
@@ -552,7 +585,13 @@ function createWebConsoleApp(options: {
   const postWriter = options.postWriter ?? (useMockData
     ? createMockPostWriter(linkedinOperationGate)
     : createLivePostWriter(lazyLinkedInRepository as { listAccounts(): Promise<import('../../linkedin-automation/account-connection/types.ts').LinkedInAuthAccountRow[]> },
-      linkedinOperationGate, { storage: storage?.posts }))
+      linkedinOperationGate, { storage: storage?.posts,executionGuard:linkedinGuard,manageSignals:!linkedinControl,
+        schedulingManaged:automation?.schedulingManaged,audit:automation?.audit.logger('posts'),
+        ...(linkedinControl && !linkedinControl.leader ? {env:{...process.env,LINKEDIN_POST_WRITER_ENABLED:'false'}} : {}) }))
+  const linkedinAutomation = options.linkedinAutomation ?? automation?.compose({invitations:connectionInviter,posts:postWriter,
+    comments:commentMonitor,gate:linkedinOperationGate,now:Date.now},async id=>
+      (await getLinkedInRepository().listAccounts()).some((a:any)=>a.platformAccountId===id))
+  if(automation?.leader && !useMockData) getLiveCommentMonitor()
   const textRuntime = createTextRuntime(useMockData)
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
@@ -585,7 +624,15 @@ function createWebConsoleApp(options: {
   const sendSummaryTelegramMessage = options.sendSummaryTelegramMessage ?? sendTelegramMessage
   const sessions = createSessionStore()
   const app = express()
-  app.locals.recoverProfileVerification = () => profileFiller.recoverPending?.() ?? Promise.resolve()
+  app.locals.recoverProfileVerification = () => linkedinControl && !linkedinControl.leader ? Promise.resolve() :
+    profileFiller.recoverPending?.() ?? Promise.resolve()
+  app.locals.closeLinkedInAutomation = async () => {
+    if(!linkedinControl) return
+    linkedinClosing=true
+    if(automation?.leader) await linkedinAutomation?.close()
+    await Promise.all([liveCommentMonitor?.stop?.(),liveConnectionInviter?.stop?.(),postWriter.close()])
+    await automation?.audit.flush()
+  }
 
   app.use(express.json({ limit: '25mb' }))
   app.use(cookieParser())
@@ -854,6 +901,8 @@ function createWebConsoleApp(options: {
     service: connectionInviter
   })
   registerPostWriterRoutes(app, requireRole('admin'), postWriter)
+  registerLinkedInAutomationRoutes(app,requireRole('admin'),linkedinAutomation,process.env.LINKEDIN_DIAGNOSTICS_TOKEN,
+    storage?.automationUnavailable)
   registerPostTextRoutes(app, requireRole('admin'), textRuntime)
   app.get('/api/admin/noco-queue', requireRole('admin'), (_req: Request, res: Response) => {
     res.json(sharedNocoRequestLimiter.snapshot())

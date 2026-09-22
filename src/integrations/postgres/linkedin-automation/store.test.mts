@@ -10,6 +10,8 @@ import {COPY_MARKER} from '../contracts.mts';
 import {createPostgresPool} from '../pg-pool.mts';
 import {createAutomationSqlStore} from './store.mts';
 import {acquireLinkedInAuthority} from './authority.mts';
+import {readAutomationDiagnostics} from '../../../features/linkedin-automation/orchestrator/diagnostics.ts';
+import {createAutomationWriteGuard} from '../../../features/linkedin-automation/orchestrator/execution-guard.ts';
 const run=promisify(execFile);
 const {Pool}=createRequire(import.meta.url)('pg');
 test('real PostgreSQL: optimistic writes, idempotency, durable events, competing writers, connection loss and restart',
@@ -55,6 +57,7 @@ test('real PostgreSQL: optimistic writes, idempotency, durable events, competing
     leader=await acquireLinkedInAuthority(pool,config.database);
     await assert.rejects(acquireLinkedInAuthority(second,config.database),{code:'automation_writer_active'});
     assert.deepEqual((await createAutomationSqlStore(second,config.database).store.runs())[0],job);
+    await createAutomationWriteGuard(storage.store,leader,undefined,()=>1).beforeWrite(1,'posts','one');
     const unrelated=new Pool(config);
     try {
       await unrelated.query('BEGIN');
@@ -68,6 +71,7 @@ test('real PostgreSQL: optimistic writes, idempotency, durable events, competing
     const owner=(await admin.query(`SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=$1)`,[config.database])).rows[0].pid;
     await admin.query('SELECT pg_terminate_backend($1)',[owner]);
     await assert.rejects(leader.check(),{code:'automation_writer_unavailable'});
+    await assert.rejects(createAutomationWriteGuard(storage.store,leader).beforeWrite(1,'posts','one'),{code:'automation_writer_unavailable'});
     await leader.close();leader=undefined;
     const next=await acquireLinkedInAuthority(second,config.database);await next.close();
     await pool.end();await second.end();await admin.end();
@@ -75,8 +79,8 @@ test('real PostgreSQL: optimistic writes, idempotency, durable events, competing
     const reopened=createPostgresPool(config);
     try{
       const again=createAutomationSqlStore(reopened,config.database);
-      const events=await again.store.events({account:1});
-      assert.equal((await again.store.heartbeat())?.at,1);assert.ok(events.some(e=>e.code==='unipile_timeout'&&e.stage==='readback'));
+      const dayFour=await readAutomationDiagnostics(again.store,4*86400000);
+      assert.equal(dayFour.healthy,false);assert.ok(dayFour.events.some(e=>e.code==='unipile_timeout'&&e.stage==='readback'));
       assert.equal((await again.store.runs()).length,1);
       console.log('Fresh isolated PostgreSQL cluster verified; production credentials were never loaded.');
     }finally{await reopened.end()}
