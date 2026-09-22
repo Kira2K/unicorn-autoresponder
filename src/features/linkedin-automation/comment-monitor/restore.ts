@@ -25,12 +25,15 @@ export async function restoreMonitorJobs(options: {
       })
       job.status = 'paused'; job.stage = 'reply_outcome_uncertain'; job.nextCheckAt = undefined
       await options.save(job, options.loggerFor(job))
-    } else if (Date.now() >= Date.parse(job.expiresAt)) {
+    } else if (Date.now() >= Date.parse(job.expiresAt) && !(job.stage==='temporary_provider_limit' && Date.parse(job.nextCheckAt ?? '')>Date.now())) {
       job.status = 'completed'; job.stage = 'expired'; job.finishedAt = new Date().toISOString()
       const jobLogger = options.loggerFor(job); clearAuthorContext(job, jobLogger)
       await options.save(job, jobLogger)
     } else if (job.status !== 'paused') {
-      job.status = 'waiting'; job.stage = 'restored'; job.nextCheckAt = new Date().toISOString()
+      const waitingUntil=Date.parse(job.nextCheckAt ?? '')
+      job.status = 'waiting'
+      // A process restart must not bypass a provider cooldown or the saved polling cadence.
+      if (!(waitingUntil>Date.now())) {job.stage = 'restored';job.nextCheckAt = new Date().toISOString()}
       await options.save(job, options.loggerFor(job))
     }
   }

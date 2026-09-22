@@ -57,6 +57,24 @@ async function run() {
   assert.equal(disabled.authorContextStatus, undefined)
   restored.stop()
 
+  // Restart and session renewal keep both ordinary polling pauses and provider Retry-After.
+  for (const stage of ['waiting_next_check','temporary_provider_limit']) for (const expired of [false,true]) {
+    if(expired && stage==='waiting_next_check')continue
+    const nextCheckAt=new Date(Date.now()+3600000).toISOString()
+    const waiting={...current,jobId:`future-${stage}-${expired}`,status:'waiting',stage,nextCheckAt,
+      expiresAt:new Date(Date.now()+(expired?-1:7200000)).toISOString(),
+      state:{...current.state,items:[],automationKey:'auto'}}
+    const pausedStore=memoryStore([waiting])
+    const recovered=createCommentMonitorService({store:pausedStore,loggerFor,repository:{},adapter:{},openai:{}})
+    await wait()
+    await recovered.ensureAutomatic(7,'auto')
+    const preserved=(await recovered.list())[0]
+    assert.equal(preserved.nextCheckAt,nextCheckAt)
+    assert.equal(preserved.stage,stage);assert.equal(preserved.status,'waiting')
+    assert.equal(preserved.state.checks,current.state.checks)
+    await recovered.stop()
+  }
+
   const terminal = { ...publishing, jobId: 'terminal', status: 'completed', stage: 'expired' }
   terminal.state.items = []
   const terminalStore = memoryStore([terminal])
