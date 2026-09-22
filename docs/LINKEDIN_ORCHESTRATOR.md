@@ -1,8 +1,5 @@
 # Автоматизация LinkedIn
 
-Календарь и обновлённый интерфейс из этой инструкции добавляются третьим PR.
-На этом этапе доступны backend, API, миграция и диагностика.
-
 Расписание запускается backend, независимо от открытой консоли. Код оркестратора
 находится в `src/features/linkedin-automation/orchestrator`, SQL — в
 `src/integrations/postgres/linkedin-automation`. Исполнение и проверки результатов

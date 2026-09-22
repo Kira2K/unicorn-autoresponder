@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { fixture } from '../../linkedin-automation/invitation-withdrawal/test-fixture.ts'
@@ -10,6 +11,7 @@ export function recheckFixture() {
 export async function checkWithdrawalRecheck(page: Page, f: ReturnType<typeof recheckFixture>) {
   try {
     await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203, 'invitations')
     await page.getByTestId('withdrawal-open-203').click(); await page.getByTestId('withdrawal-load').click()
     await page.getByText('Всего ожидают: 2. Подходят для отзыва: 2.').waitFor()
     page.once('dialog', dialog => void dialog.accept()); await page.getByTestId('withdrawal-start').click()
@@ -29,8 +31,10 @@ export async function checkWithdrawalRecheck(page: Page, f: ReturnType<typeof re
     assert.match(await page.getByTestId('withdrawal-progress').innerText(), /Подтверждено отзывов: 1 из 2/)
     assert.equal(await page.getByTestId('withdrawal-recheck').count(), 0)
     await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203, 'invitations')
     await page.getByTestId('withdrawal-summary-203').filter({ hasText: 'Отозвано: 1 из 2.' }).waitFor()
     assert.deepEqual(f.calls, ['1'])
+    await openLinkedInManual(page, 203, 'invitations')
     await page.getByTestId('withdrawal-open-203').click()
     await page.screenshot({ path: '.codex-tmp/withdrawal-rechecked.png', fullPage: true })
   } finally { await f.service.close() }

@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { desktopProfileJob, profileJobsRoute } from './profile-desktop-fixture.ts'
@@ -40,6 +41,7 @@ export async function checkProfileDesktop(page: Page) {
     await page.reload()
     await page.getByTestId('admin-dashboard').waitFor()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203)
     await page.getByTestId('profile-filler-203').click()
     await page.getByTestId('profile-source-upload').check()
     await page.getByTestId('profile-filler-cv-file').setInputFiles({ name: 'approved-en-cv.pdf',
@@ -47,6 +49,7 @@ export async function checkProfileDesktop(page: Page) {
     assert.equal(generations, 0, 'file selection cannot generate')
     await page.getByTestId('profile-filler-minimize').click()
     await page.locator('.profile-filler-dialog').waitFor({ state: 'hidden' })
+    await openLinkedInManual(page, 203)
     await page.getByTestId('profile-filler-203').click()
     assert.match(await page.getByTestId('profile-cv-selected').innerText(), /approved-en-cv.pdf/)
     assert.equal(generations, 0, 'minimizing and reopening preserves CV without generating')

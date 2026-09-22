@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { desktopProfileJob } from './profile-desktop-fixture.ts'
@@ -11,6 +12,7 @@ export async function checkProfileRunning(page: Page, job: ReturnType<typeof des
   await page.getByTestId('profile-filler-minimize').click()
   await page.locator('.profile-filler-dialog').waitFor({ state: 'hidden' })
   await page.getByTestId('profile-filler-203').getByText('Открыть прогресс').waitFor()
+  await openLinkedInManual(page, 203)
   await page.getByTestId('profile-filler-203').click()
   await page.getByTestId('profile-filler-history').locator('summary').click()
   await page.locator('.profile-history-button').filter({ hasText: 'Профиль заполнен и проверен' }).click()
@@ -23,6 +25,7 @@ export async function checkProfileRunning(page: Page, job: ReturnType<typeof des
   await page.reload()
   await page.getByTestId('admin-dashboard').waitFor()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page, 203)
   await page.getByTestId('profile-filler-203').click()
   await page.getByTestId('profile-progress').waitFor()
   assert.equal(await page.getByTestId('profile-filler-apply').count(), 0)
@@ -40,6 +43,7 @@ export async function checkProfileRunning(page: Page, job: ReturnType<typeof des
   await page.reload()
   await page.getByTestId('admin-dashboard').waitFor()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page, 203)
   await page.getByTestId('profile-filler-203').click()
   await page.getByTestId('profile-filler-history').locator('summary').click()
   await page.locator('.profile-history-button').filter({ hasText: 'Нужна проверка' }).click()

@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { checkProfileDates } from './profile-dates-check.ts'
@@ -47,6 +48,7 @@ export async function checkProfileInline(page: Page, job: {
     assert.equal(await page.getByRole('button', { name: 'Пересобрать Preview', exact: true }).count(), 0)
     assert.equal(await education.innerText(), originalText, 'editing one field keeps all other information')
     await page.getByTestId('profile-filler-minimize').click()
+    await openLinkedInManual(page, 203)
     await page.getByTestId('profile-filler-203').click()
     await field.getByText('Platform Engineer', { exact: true }).waitFor()
     await reopen()

@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { mkdir } from 'node:fs/promises'
@@ -38,6 +39,7 @@ try {
   await page.locator('input[type="password"]').fill('101010')
   await page.getByTestId('login-button').click()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page, 203, 'invitations')
   await page.getByTestId('withdrawal-open-203').click()
   await page.getByTestId('withdrawal-load').click()
   await page.getByText('Всего ожидают: 4. Подходят для отзыва: 2.').waitFor()
@@ -54,6 +56,7 @@ try {
   await page.getByTestId('withdrawal-stop').click()
   await page.getByText('Остановлено', { exact: true }).waitFor()
   await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page, 203, 'invitations')
   await page.getByTestId('withdrawal-open-203').click()
   await page.getByText('Остановлено', { exact: true }).waitFor()
   await page.getByTestId('withdrawal-load').click()

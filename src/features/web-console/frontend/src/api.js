@@ -20,6 +20,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  linkedinAutomation(account) {return request(`/api/admin/linkedin/automation${account ? `?account=${account}` : ''}`)},
+  linkedinAutomationDiagnostics(query={}) {return request(`/api/admin/linkedin/automation/diagnostics?${new URLSearchParams(query)}`)},
+  linkedinAutomationBulk(items) {return request('/api/admin/linkedin/automation/bulk',{method:'POST',body:JSON.stringify({items})})},
   login(email, password) {
     return request('/api/auth/login', {
       method: 'POST',

@@ -18,9 +18,11 @@ const writer = usePostWriter(props.account)
       <Message v-if="writer.data.value.mock" severity="info" :closable="false">Тестовый режим: NocoDB, OpenAI и LinkedIn не вызываются. Данные исчезнут после остановки mock-сервера.</Message>
       <Message v-if="!writer.data.value.writable" severity="warn" :closable="false">Запись отключена или хранилище недоступно.</Message>
       <p v-if="writer.data.value.storageRetryAt">Повтор сохранения: {{ dateMsk(writer.data.value.storageRetryAt) }}. Stop доступен.</p>
-      <p>Следующий автозапуск: {{ writer.data.value.settings.scheduled && writer.data.value.settings.slot?.state === 'planned' ? dateMsk(writer.data.value.settings.slot.at) : 'Не назначен' }}</p>
+      <p v-if="writer.data.value.schedulingManaged">Расписание этого ученика управляется в разделе «Автоматизация».</p>
+      <p v-else>Следующий автозапуск: {{ writer.data.value.settings.scheduled && writer.data.value.settings.slot?.state === 'planned' ? dateMsk(writer.data.value.settings.slot.at) : 'Не назначен' }}</p>
       <p v-if="writer.data.value.settings.lastMissedSlot">Пропущено: {{ dateMsk(writer.data.value.settings.lastMissedSlot.at) }} — окно завершилось.</p>
       <PostWriterSettings :settings="writer.data.value.settings" :disabled="writer.busy.value || !writer.data.value.writable"
+        :scheduling-managed="writer.data.value.schedulingManaged"
         :memes-available="writer.data.value.memesAvailable"
         @save="writer.save" @start="writer.start" />
       <PostWriterPolicy :disabled="writer.busy.value || !writer.data.value.writable" />

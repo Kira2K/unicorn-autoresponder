@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { profileJobsRoute } from './profile-desktop-fixture.ts'
@@ -35,6 +36,7 @@ export async function checkProfilePreparation(page: Page) {
     await page.reload()
     await page.getByTestId('admin-dashboard').waitFor()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203)
     await page.getByTestId('profile-filler-203').click()
     if (started && ['failed', 'needs_expert_review', 'preview_ready', 'waiting_retry'].includes(job.status)) {
       await page.getByTestId('profile-filler-history').locator('summary').click()

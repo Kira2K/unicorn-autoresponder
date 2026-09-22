@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { profileJobsRoute } from './profile-desktop-fixture.ts'
@@ -24,6 +25,7 @@ export async function checkProfileObservation(page: Page) {
   await page.reload()
   await page.getByTestId('admin-dashboard').waitFor()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page, 203)
   await page.getByTestId('profile-filler-203').click()
   await page.getByTestId('profile-progress').getByText('Проверяем в LinkedIn', { exact: false }).first().waitFor()
   await page.locator('.profile-step-timer').waitFor()
@@ -35,6 +37,7 @@ export async function checkProfileObservation(page: Page) {
   await page.reload()
   await page.getByTestId('admin-dashboard').waitFor()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page, 203)
   await page.getByTestId('profile-filler-203').click()
   await page.getByTestId('profile-filler-history').locator('summary').click()
   await page.locator('.profile-history-button').first().click()

@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import PostWriterIntervals from './PostWriterIntervals.vue'
 import PostWriterCv from './PostWriterCv.vue'
-const props = defineProps({ settings: Object, disabled: Boolean, memesAvailable: Boolean })
+const props = defineProps({ settings: Object, disabled: Boolean, memesAvailable: Boolean, schedulingManaged:Boolean })
 const emit = defineEmits(['save', 'start'])
 const draft = ref({ days: [] })
 const topic = ref(''), cv = ref(), exclusions = ref('')
@@ -19,12 +19,12 @@ const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 <template>
   <section class="post-settings">
     <h3>Расписание</h3>
-    <label><input v-model="draft.scheduled" type="checkbox" :disabled="disabled" data-testid="post-scheduled" /> Автопубликация</label>
+    <label><input v-model="draft.scheduled" type="checkbox" :disabled="disabled || schedulingManaged" data-testid="post-scheduled" /> Автопубликация</label>
     <div class="post-days">
       <label v-for="(day, index) in days" :key="day"><input v-model="draft.days" type="checkbox" :value="index + 1"
-        :disabled="disabled" :data-testid="`post-day-${index + 1}`" /> {{ day }}</label>
+        :disabled="disabled || schedulingManaged" :data-testid="`post-day-${index + 1}`" /> {{ day }}</label>
     </div>
-    <PostWriterIntervals v-model="draft.intervals" :disabled="disabled" />
+    <PostWriterIntervals v-model="draft.intervals" :disabled="disabled || schedulingManaged" />
     <label>Не писать на темы (личные запреты, одна тема на строку)
       <textarea v-model="exclusions" rows="3" :disabled="disabled" data-testid="post-forbidden-topics" /></label>
     <label><input v-model="draft.likes" type="checkbox" :disabled="disabled" data-testid="post-likes" /> Лайки от других учеников</label>

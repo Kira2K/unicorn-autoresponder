@@ -1,5 +1,23 @@
 # Local LinkedIn web console
 
+The LinkedIn tab also includes the optional PostgreSQL-backed weekly
+[automation calendar and durable journal](LINKEDIN_ORCHESTRATOR.md). Search,
+connection filters and student selection share the existing manual controls.
+The main view is a compact student list: connection, automatic activity/result,
+next execution and automation switch. Selecting a student opens State, Schedule
+and Manual tabs. Manual tabs retain the existing feature components and observers;
+changing selection does not stop a job or discard its running dialog state.
+Bulk controls appear only for selected students. Schedule editors freeze their
+recipient list and optimistic revisions on opening, so selection changes cannot
+redirect a save and another administrator's changes produce a revision conflict.
+The History and errors view provides account/run filters, durable event pagination,
+technical details on demand and a separate account-connection history.
+Future runs are collapsed by default; their expanded state is remembered locally.
+Collapsing or navigating away never disables automation. Summary polling continues
+while the LinkedIn section is mounted; the event journal refreshes explicitly.
+Connection/manual controls remain usable when the optional orchestrator is absent.
+The instructions below describe the existing manual connection flow.
+
 The admin-only `LinkedIn` tab runs account checks and authorization on the same
 Windows machine as Dolphin Anty. Start both Dolphin and the console locally:
 

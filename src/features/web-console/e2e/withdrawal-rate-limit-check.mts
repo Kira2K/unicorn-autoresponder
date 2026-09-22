@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { fixture } from '../../linkedin-automation/invitation-withdrawal/test-fixture.ts'
@@ -21,6 +22,7 @@ export function rateLimitFixture() {
 export async function checkWithdrawalRateLimit(page: Page, f: ReturnType<typeof rateLimitFixture>, stop = false) {
   try {
     await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203, 'invitations')
     await page.getByTestId('withdrawal-open-203').click(); await page.getByTestId('withdrawal-load').click()
     await page.getByText('Всего ожидают: 2. Подходят для отзыва: 2.').waitFor()
     page.once('dialog', dialog => void dialog.accept()); await page.getByTestId('withdrawal-start').click()
@@ -30,6 +32,7 @@ export async function checkWithdrawalRateLimit(page: Page, f: ReturnType<typeof 
     await page.getByTestId('withdrawal-minimize').click()
     await page.getByTestId('withdrawal-summary-203').filter({ hasText: 'Пауза: Unipile' }).waitFor()
     await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203, 'invitations')
     await page.getByTestId('withdrawal-summary-203').filter({ hasText: 'Пауза: Unipile' }).waitFor()
     await page.getByTestId('withdrawal-open-203').click()
     await page.getByTestId('withdrawal-retry').waitFor()

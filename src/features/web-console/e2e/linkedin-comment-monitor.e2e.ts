@@ -1,3 +1,4 @@
+const { openLinkedInManual } = require('./linkedin-navigation.ts') as typeof import('./linkedin-navigation.ts')
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
@@ -110,9 +111,11 @@ async function run() {
     await page.locator('input[type="password"]').fill('101010')
     await page.getByTestId('login-button').click(); await page.getByTestId('admin-linkedin-tab').click()
     page.once('dialog', (dialog: any) => dialog.accept())
+    await openLinkedInManual(page, 203, 'comments')
     await page.getByTestId('comment-monitor-toggle-203').click()
     await page.getByTestId('comment-monitor-203').getByText('Waiting', { exact: true }).waitFor()
     assert.equal(await page.getByTestId('comment-monitor-203').locator('a').count(), 2)
+    await openLinkedInManual(page, 203, 'comments')
     await page.getByTestId('comment-monitor-toggle-203').click()
     await page.getByTestId('comment-monitor-203').getByText('Off', { exact: true }).waitFor()
   } finally {

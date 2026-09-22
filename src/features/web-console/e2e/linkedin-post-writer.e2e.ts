@@ -1,3 +1,4 @@
+const { openLinkedInManual } = require('./linkedin-navigation.ts') as typeof import('./linkedin-navigation.ts')
 const assert: typeof import('node:assert/strict') = require('node:assert/strict')
 const { chromium } = require('playwright') as typeof import('playwright')
 const { startIsolatedPostTestProcesses, waitPostHttp, postRoot } =
@@ -19,6 +20,7 @@ async function main() {
     await page.locator('input[type="password"]').fill('101010')
     await page.getByTestId('login-button').click()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203)
     await page.getByTestId('post-writer-203').click()
     const initial = await page.request.get(`http://127.0.0.1:${uiPort}/api/admin/linkedin/accounts/203/post-writer`)
     assert.deepEqual((await initial.json()).runs, [], 'E2E must use a fresh isolated backend')
@@ -43,6 +45,7 @@ async function main() {
     assert.equal(rejected.status(), 409, 'backend requires explicit meme review in manual approval mode')
     await page.reload()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203)
     await page.getByTestId('post-writer-203').click()
     await page.getByTestId('post-approve').waitFor()
     assert.equal(await page.getByTestId('post-meme-reviewed').isChecked(), false)
