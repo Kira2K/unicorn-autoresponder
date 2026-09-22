@@ -3,13 +3,13 @@ export type Feature = typeof features[number]
 export type WeekSlot = { id: string; day: number; start: string; end: string; features: Feature[] }
 export type AutomationSettings = { account: number; enabled: boolean; revision: number;
   timezone: 'Europe/Moscow'; slots: WeekSlot[]; updatedAt: number; managed?: boolean }
-export type RunState = 'planned' | 'starting' | 'running' | 'monitoring' | 'completed' |
+export type RunState = 'planned' | 'starting' | 'running' | 'deferred' | 'monitoring' | 'completed' |
   'blocked' | 'cancelled' | 'missed'
 export type AutomationRun = { key: string; account: number; feature: Feature; date: string;
   slotId: string; opensAt: number; closesAt: number; plannedAt: number; reserveMs: number;
   state: RunState; reason?: string; featureRunId?: string; startedAt?: number; finishedAt?: number;
   updatedAt: number; stopRequested?: boolean; stopReason?: 'disabled_by_admin' | 'task_time_limit';
-  pauseBeforeMs?: number; releasedAt?: number; deadlineAt?: number;
+  pauseBeforeMs?: number; releasedAt?: number; deadlineAt?: number; nextActionAt?: number;
   commentMode?: 'continuous'; publication?: {id:string;at:number} }
 export interface AutomationStore {
   settings(): Promise<AutomationSettings[]>
@@ -25,8 +25,8 @@ export type AuditEvent = { id?: number; at: number; account?: number; runKey?: s
   level: 'info' | 'warning' | 'error'; stage: string; code: string;
   details?: Record<string, string | number | boolean> }
 export type WorkerHeartbeat = { instance: string; at: number; startedAt: number; state: 'ready' | 'recovering' | 'error' | 'stopped'; code?: string }
-export type FeatureState = { id: string; state: 'running' | 'monitoring' | 'completed' | 'blocked' | 'stopped';
-  reason?: string; owned: boolean; publication?: {id:string;at:number} }
+export type FeatureState = { id: string; state: 'running' | 'deferred' | 'monitoring' | 'completed' | 'blocked' | 'stopped';
+  reason?: string; owned: boolean; nextActionAt?: number; publication?: {id:string;at:number} }
 export interface FeatureAdapter {
   inspect(account: number): Promise<{ ready: boolean; reason?: string; estimateMs?: number; busy?: boolean }>
   start(run: AutomationRun): Promise<FeatureState>

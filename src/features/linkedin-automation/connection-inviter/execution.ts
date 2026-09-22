@@ -113,6 +113,14 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
   }
   runtime.logger.event('run', 'started', details)
   try {
+    const readbackDue = Date.parse(run.nextActionAt ?? '')
+    if (run.retryState?.provider === 'unipile' && run.retryState.operation.includes('readback') &&
+      readbackDue > runtime.now().getTime()) {
+      // Includes recovery on the next day: it must not bypass Retry-After.
+      run.stage = runtime.stopRequested(run.runId) ? 'stop_requested' : 'resolving_uncertain'
+      await save(run, 'retry_scheduled', 'critical')
+      return
+    }
     const recoveringClosedDay = !connectionRunDayIsOpen(runtime, run)
     runtime.logger.event('operation_gate_acquire', 'started', details)
     release = await acquireAccountGate(runtime, run, save, recoveringClosedDay)
@@ -286,7 +294,7 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
         technicalShortfall: terminalProgress.remaining.technical })
       return
     }
-    if (await holdUnsafeTerminal('resolving_uncertain')) return
+    if (await holdUnsafeTerminal('resolving_uncertain', undefined, error)) return
     run.status = 'failed'; run.stage = 'failed'; run.errorCode = errorCode
     run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
     run.executorId = undefined; run.heartbeatAt = undefined

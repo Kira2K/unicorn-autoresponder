@@ -15,6 +15,8 @@ export function errorLogDetails(error: unknown) {
   const details = source?.details ?? {}
   return {
     errorCode: commentErrorCode(error),
+    ...Object.fromEntries(['retryAfterSeconds','rateLimitLimit','rateLimitRemaining','rateLimitResetSeconds','rateLimitResetAt','requestSent']
+      .filter(key=>Number.isFinite(details[key])).map(key=>[key,details[key]])),
     ...(Number.isInteger(details.httpStatus) ? { httpStatus: details.httpStatus } : {}),
     ...(typeof details.requestId === 'string' ? { requestId: details.requestId } : {}),
     ...(Number.isFinite(details.retryAfterMs) ? { retryAfterMs: details.retryAfterMs } : {})

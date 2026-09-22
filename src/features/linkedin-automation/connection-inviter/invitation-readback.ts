@@ -14,9 +14,9 @@ export async function resolveInvitationResult(context: InvitationSafetyContext,
   run.status = 'running'; run.stage = 'resolving_uncertain'
   await save(run, 'uncertain', 'critical')
   while (true) {
-    const ids = await pending.refresh({ allowAfterDayClose: true,
+    const found = await pending.findFresh(item.personId, { allowAfterDayClose: true,
       ignoreStopRequested: true, operation: 'invitation_pending_readback' })
-    if (ids.has(item.personId)) { await history.confirm(item); return true }
+    if (found) { await history.confirm(item); return true }
     const profile = await readInvitationProfile(context, item,
       'candidate_profile_readback', true)
     if (profileIsConnected(profile)) { await history.confirm(item, 'accepted'); return true }
@@ -63,10 +63,10 @@ export async function readBackSuccessfulPost(context: InvitationSafetyContext,
     audience: item.audience, itemStatus: item.status, reasonCode: item.reasonCode
   })
   try {
-    const ids = await pending.refresh({ allowAfterDayClose: true,
+    const found = await pending.findFresh(item.personId, { allowAfterDayClose: true,
       ignoreStopRequested: true, operation: 'invitation_pending_readback',
       onFirstTransientError: persistUncertain })
-    if (ids.has(item.personId)) { await history.confirm(item); return true }
+    if (found) { await history.confirm(item); return true }
   } catch (error) {
     await persistUncertain(error)
     throw error
