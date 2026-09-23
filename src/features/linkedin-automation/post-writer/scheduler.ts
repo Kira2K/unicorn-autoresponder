@@ -27,6 +27,12 @@ export async function schedulePosts(settings: Settings, runs: Map<string, PostRu
     if (accountActive(runs.values(), settings.account)) return
     const run = newRun(id, settings.account, 'scheduled', 'automatic', settings.likes, e)
     run.memeEnabled = settings.memes === true
+    if (settings.contentMode === 'prepared') {
+      const post = settings.preparedPosts?.find(item => item.date === slot.date)
+      if (!post) return
+      run.preparedPost = { ...post }
+      run.memeEnabled = true
+    }
     await e.save(run)
     runs.set(id, run)
   }

@@ -7,10 +7,12 @@ export type ManualMode = 'approval_required' | 'automatic'
 export type PostStatus = 'queued' | 'generating' | 'awaiting_approval' | 'ready' |
   'publishing' | 'verifying' | 'uncertain' | 'published' | 'blocked' | 'stopped' | 'rejected'
 export type Slot = { date: string; at: number; state: 'planned' | 'started' | 'missed' | 'cancelled' }
+export type PreparedPost = { date: string; text: string }
 export type Settings = {
   account: number; scheduled: boolean; days: number[]; manualMode: ManualMode; likes: boolean
   slot?: Slot; lastMissedSlot?: Slot; context?: Context
   intervals?: TimeWindow[]; forbiddenTopics?: string[]; memes?: boolean
+  contentMode?: 'generated' | 'prepared'; preparedPosts?: PreparedPost[]
 }
 export type Account = { platformAccountId: number; clientName: string; unipileAccountId: string
   verifiedProviderId: string; linkedinUrl?: string }
@@ -27,6 +29,7 @@ export type PostRun = {
   publishedAt?: number; errorCode?: string; engagement: Engagement
   requestedTopic?: string; policyKey?: string; reviewedKey?: string; cvRef?: string
   memeEnabled?: boolean; meme?: MemeState; postImageId?: string; memeReviewedHash?: string
+  preparedPost?: PreparedPost
 }
 export type History = { id: string; account: number; runId: string; hash: string; text: string
   signature: string; status: 'sending' | 'published'; postId?: string; url?: string

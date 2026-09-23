@@ -11,12 +11,19 @@ const id = (req: Request) => {
 }
 export function postFailure(res: Response, error: unknown) {
   const code = errorCode(error)
+  const messages: Record<string, string> = {
+    post_prepared_invalid: 'Нужно не больше семи постов за одну неделю: разные даты и до 3000 знаков в каждом тексте.',
+    post_prepared_day_started: 'Пост на эту дату уже запущен. Его текст не изменён; результат доступен в истории.',
+    post_prepared_manual_unavailable: 'В режиме готовых постов используется план по датам. Для генерации из CV смените режим.',
+    meme_generation_disabled: 'Генерация мемов на сервере выключена. Пост без заказанного мема не публикуется.'
+  }
   const status = code === 'post_run_not_found' ? 404 : code.includes('invalid') ? 400 :
-    ['post_hash_mismatch', 'post_action_invalid', 'meme_review_required'].includes(code) ? 409 : 503
-  res.status(status).json({ error: code, message: code === 'post_writer_read_only'
+    ['post_hash_mismatch', 'post_action_invalid', 'meme_review_required', 'post_prepared_day_started',
+      'post_prepared_manual_unavailable'].includes(code) ? 409 : 503
+  res.status(status).json({ error: code, message: messages[code] ?? (code === 'post_writer_read_only'
     ? 'Post Writer работает только на чтение.' : code === 'post_schema_missing'
       ? 'Нужна миграция таблиц Post Writer. Другие функции доступны.'
-      : `Post Writer: ${code}` })
+      : `Post Writer: ${code}`) })
 }
 export function registerPostWriterRoutes(app: Express, requireAdmin: RequestHandler, service: PostWriterService) {
   app.get('/api/admin/linkedin/post-writer/policy', requireAdmin, async (_req, res) => {

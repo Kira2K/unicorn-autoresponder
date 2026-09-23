@@ -5,11 +5,13 @@ import { generateRunMeme } from './run-meme.ts'
 import { PostError } from './errors.ts'
 import type { GenerationExecution } from './execution-types.ts'
 import type { PostRun } from './types.ts'
+import { generatePrepared } from './generate-prepared.ts'
 
 export async function generate(run: PostRun, e: GenerationExecution) {
   const controller = new AbortController()
   e.generationControllers.set(run.id, controller)
   try {
+    if (run.preparedPost) return await generatePrepared(run, e, controller.signal)
     if (run.memeEnabled && !e.memes?.enabled) throw new PostError('meme_generation_disabled')
     const input = await prepareGeneration(run, e)
     if (!input || run.stop || controller.signal.aborted) return
