@@ -40,6 +40,7 @@ export function usePostWriter(account) {
   onUnmounted(() => { stream?.close(); clearInterval(polling); clearInterval(clock) })
   return { visible, data, error, busy, now, run, open,
     save: settings => execute(() => postApi.settings(id, settings)),
+    startPrepared: post => execute(() => postApi.startPrepared(id, post)),
     start: input => execute(async () => {
       key ??= crypto.randomUUID()
       await postApi.start(id, input.mode, key, input)

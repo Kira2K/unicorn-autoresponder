@@ -11,6 +11,7 @@ export const postApi = {
   get: account => request(root(account)),
   settings: (account, settings) => request(`${root(account)}/settings`, 'PUT', settings),
   start: (account, mode, requestKey, input = {}) => request(`${root(account)}/runs`, 'POST', { ...input, mode, requestKey }),
+  startPrepared: (account, post) => request(`${root(account)}/prepared-runs`, 'POST', post),
   policy: () => request('/api/admin/linkedin/post-writer/policy'),
   savePolicy: value => request('/api/admin/linkedin/post-writer/policy', 'PUT', value),
   action: (run, action, memeReviewedHash) => request(`/api/admin/linkedin/post-runs/${run.id}/${action}`, 'POST',

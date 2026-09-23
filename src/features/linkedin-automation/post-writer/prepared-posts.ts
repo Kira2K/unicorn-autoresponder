@@ -24,7 +24,7 @@ export function validatePreparedPosts(input: unknown): PreparedPost[] {
 
 // A started run owns its text. Editing future days must not replace that snapshot.
 export function assertPreparedEdits(previous: Settings, next: Settings, runs: Iterable<PostRun>) {
-  const started = new Set([...runs].filter(run => run.account === next.account && run.trigger === 'scheduled')
+  const started = new Set([...runs].filter(run => run.account === next.account)
     .map(run => run.id))
   for (const post of next.preparedPosts ?? []) {
     if (started.has(`scheduled-${next.account}-${post.date}`) &&

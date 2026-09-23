@@ -15,11 +15,14 @@ export function postFailure(res: Response, error: unknown) {
     post_prepared_invalid: 'Нужно не больше семи постов за одну неделю: разные даты и до 3000 знаков в каждом тексте.',
     post_prepared_day_started: 'Пост на эту дату уже запущен. Его текст не изменён; результат доступен в истории.',
     post_prepared_manual_unavailable: 'В режиме готовых постов используется план по датам. Для генерации из CV смените режим.',
+    post_prepared_changed: 'Текст или режим изменился. Сохраните план и проверьте его перед публикацией.',
+    post_prepared_past: 'Дата уже прошла. Выберите сегодняшний или будущий день.',
+    post_account_busy: 'У этого аккаунта уже есть незавершённое задание. Дождитесь результата или остановите его.',
     meme_generation_disabled: 'Генерация мемов на сервере выключена. Пост без заказанного мема не публикуется.'
   }
   const status = code === 'post_run_not_found' ? 404 : code.includes('invalid') ? 400 :
     ['post_hash_mismatch', 'post_action_invalid', 'meme_review_required', 'post_prepared_day_started',
-      'post_prepared_manual_unavailable'].includes(code) ? 409 : 503
+      'post_prepared_manual_unavailable', 'post_prepared_changed', 'post_prepared_past', 'post_account_busy'].includes(code) ? 409 : 503
   res.status(status).json({ error: code, message: messages[code] ?? (code === 'post_writer_read_only'
     ? 'Post Writer работает только на чтение.' : code === 'post_schema_missing'
       ? 'Нужна миграция таблиц Post Writer. Другие функции доступны.'
@@ -43,6 +46,10 @@ export function registerPostWriterRoutes(app: Express, requireAdmin: RequestHand
   app.post(`${base}/runs`, requireAdmin, async (req, res) => {
     try { res.status(202).json(await service.start(id(req), req.body?.mode, req.body?.requestKey,
       { topic: req.body?.topic, cv: req.body?.cv })) }
+    catch (error) { postFailure(res, error) }
+  })
+  app.post(`${base}/prepared-runs`, requireAdmin, async (req, res) => {
+    try { res.status(202).json(await service.startPrepared(id(req), req.body)) }
     catch (error) { postFailure(res, error) }
   })
   app.get('/api/admin/linkedin/post-runs/:runId/meme', requireAdmin, async (req, res) => {
