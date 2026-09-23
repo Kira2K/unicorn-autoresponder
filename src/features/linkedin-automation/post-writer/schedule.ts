@@ -10,7 +10,8 @@ export const windowEnd = (date: string, settings?: Settings) =>
   Math.max(0, ...dayWindows(date, settings?.intervals).map(item => item.end))
 export const scheduledId = (account: number, date: string) => `scheduled-${account}-${date}`
 
-export function nextSlot(settings: Settings, now: number, random: () => number): Slot | undefined {
+export function nextSlot(settings: Settings, now: number, random: () => number,
+  hasRun: (date: string) => boolean = () => false): Slot | undefined {
   if (!settings.scheduled) return undefined
   const today = moscowDate(now)
   const prepared = settings.contentMode === 'prepared'
@@ -18,7 +19,7 @@ export function nextSlot(settings: Settings, now: number, random: () => number):
     Array.from({ length: 8 }, (_, offset) => new Date(Date.parse(`${today}T00:00:00Z`) + offset * DAY).toISOString().slice(0, 10))
   for (const date of dates) {
     const weekday = new Date(`${date}T12:00:00Z`).getUTCDay() || 7
-    if ((!prepared && !settings.days.includes(weekday)) || windowEnd(date, settings) <= now) continue
+    if ((!prepared && !settings.days.includes(weekday)) || windowEnd(date, settings) <= now || hasRun(date)) continue
     if (date === settings.slot?.date) {
       if (settings.slot.state === 'planned') return settings.slot
       if (settings.slot.state !== 'cancelled') continue

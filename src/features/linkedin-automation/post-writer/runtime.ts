@@ -83,6 +83,7 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
     image: async id => (await initialize()).image(id),
     update: async (account, input) => (await initialize()).update(account, input),
     start: async (account, mode, key, input) => (await initialize()).start(account, mode, key, input),
+    startPrepared: async (account, input) => (await initialize()).startPrepared(account, input),
     action: async (id, action, hash, reviewed) => (await initialize()).action(id, action, hash, reviewed),
     tick: async () => (await initialize()).tick(),
     subscribe(account, listener) {

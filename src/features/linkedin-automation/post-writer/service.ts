@@ -13,6 +13,7 @@ import { prepareManualInput, type ManualInput } from './manual-input.ts'
 import { unlock } from './execution-types.ts'
 import { runImage } from './run-content.ts'
 import { assertPreparedEdits } from './prepared-posts.ts'
+import { startPreparedPost } from './prepared-start.ts'
 export function createPostWriterService(deps: Dependencies, autoStart = true) {
   const state = createServiceState(deps)
   const { e, runs, settings } = state
@@ -73,6 +74,10 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
       await e.saveSettings(value)
       if (!value.likes) await cancelRemainingLikes(account, runs.values(), e)
       return state.snapshot(account)
+    })) },
+    startPrepared(account: number, input: unknown) { return work.run(() => serial(account, async () => {
+      await writable()
+      return startPreparedPost(e.settings(account), input, runs, e)
     })) },
     start(account: number, mode: ManualMode, key: string, input?: ManualInput) { return work.run(() => serial(account, async () => {
       await writable()
