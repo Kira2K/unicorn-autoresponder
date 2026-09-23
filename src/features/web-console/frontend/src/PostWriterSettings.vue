@@ -2,14 +2,17 @@
 import { ref, watch } from 'vue'
 import PostWriterIntervals from './PostWriterIntervals.vue'
 import PostWriterCv from './PostWriterCv.vue'
-const props = defineProps({ settings: Object, disabled: Boolean, memesAvailable: Boolean })
+import PostWriterPrepared from './PostWriterPrepared.vue'
+const props = defineProps({ settings: Object, disabled: Boolean, memesAvailable: Boolean, runs: Array })
 const emit = defineEmits(['save', 'start'])
 const draft = ref({ days: [] })
 const topic = ref(''), cv = ref(), exclusions = ref('')
 watch(() => JSON.stringify(props.settings && [props.settings.scheduled, props.settings.days,
-  props.settings.likes, props.settings.memes, props.settings.manualMode, props.settings.intervals, props.settings.forbiddenTopics]), () => {
+  props.settings.likes, props.settings.memes, props.settings.manualMode, props.settings.intervals, props.settings.forbiddenTopics,
+  props.settings.contentMode, props.settings.preparedPosts]), () => {
   if (props.settings) {
-    draft.value = { ...props.settings, days: [...props.settings.days],
+    draft.value = { ...props.settings, days: [...props.settings.days], contentMode: props.settings.contentMode ?? 'generated',
+      preparedPosts: (props.settings.preparedPosts ?? []).map(item => ({ ...item })),
       intervals: (props.settings.intervals ?? [{ start: '10:00', end: '15:00' }]).map(x => ({ ...x })) }
     exclusions.value = (props.settings.forbiddenTopics ?? []).join('\n')
   }
@@ -18,9 +21,13 @@ const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 </script>
 <template>
   <section class="post-settings">
+    <label>Режим <select v-model="draft.contentMode" :disabled="disabled" data-testid="post-content-mode">
+      <option value="generated">Генерация из CV</option><option value="prepared">Готовые посты на неделю</option>
+    </select></label>
+    <PostWriterPrepared v-if="draft.contentMode === 'prepared'" v-model="draft.preparedPosts" :disabled="disabled" :runs="runs" />
     <h3>Расписание</h3>
     <label><input v-model="draft.scheduled" type="checkbox" :disabled="disabled" data-testid="post-scheduled" /> Автопубликация</label>
-    <div class="post-days">
+    <div v-if="draft.contentMode !== 'prepared'" class="post-days">
       <label v-for="(day, index) in days" :key="day"><input v-model="draft.days" type="checkbox" :value="index + 1"
         :disabled="disabled" :data-testid="`post-day-${index + 1}`" /> {{ day }}</label>
     </div>
@@ -29,6 +36,7 @@ const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
       <textarea v-model="exclusions" rows="3" :disabled="disabled" data-testid="post-forbidden-topics" /></label>
     <label><input v-model="draft.likes" type="checkbox" :disabled="disabled" data-testid="post-likes" /> Лайки от других учеников</label>
     <p>После публикации: 6–7 подключённых учеников. Выключение не удаляет уже поставленные лайки.</p>
+    <template v-if="draft.contentMode !== 'prepared'">
     <h3>Ручной запуск</h3>
     <label><input v-model="draft.memes" type="checkbox" :disabled="disabled || (!memesAvailable && !draft.memes)"
       data-testid="post-memes" /> Добавлять мем к посту</label>
@@ -43,10 +51,12 @@ const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
       <option value="approval_required">С подтверждением</option><option value="automatic">Без подтверждения</option>
     </select></label>
     <p>Доступен в любое время. Выбор подтверждения не влияет на расписание.</p>
+    </template>
+    <p v-if="draft.contentMode === 'prepared' && !memesAvailable">Генерация мемов на сервере выключена. План можно сохранить, но автопубликацию пока включить нельзя.</p>
     <div class="post-actions">
-      <Button label="Сохранить настройки" :disabled="disabled || (draft.scheduled && !draft.days.length)"
+      <Button label="Сохранить настройки" :disabled="disabled || (draft.scheduled && (draft.contentMode === 'prepared' ? !memesAvailable : !draft.days.length))"
         data-testid="post-save" @click="emit('save', { ...draft, forbiddenTopics: exclusions.split('\n').map(x => x.trim()).filter(Boolean) })" />
-      <Button label="Создать пост сейчас" outlined :disabled="disabled || Boolean(draft.memes) !== Boolean(settings?.memes)" data-testid="post-start"
+      <Button v-if="draft.contentMode !== 'prepared'" label="Создать пост сейчас" outlined :disabled="disabled || Boolean(draft.memes) !== Boolean(settings?.memes)" data-testid="post-start"
         @click="emit('start', { mode: draft.manualMode, topic, cv })" />
     </div>
   </section>

@@ -34,3 +34,11 @@ test('test accounts retain global forbidden topics without permission to edit sh
   assert.equal((await store.list('settings')).length, 1);
   await assert.rejects(store.put('settings', '0', { ...policy, forbiddenTopics: [] }), /forbidden/);
 });
+
+test('SQL preserves prepared dates and exact Unicode text through a fresh store', async () => {
+  const f = featureFixture(), store = createSqlPostStore(f.db, f.grant);
+  const value = { ...defaults(21), contentMode: 'prepared' as const,
+    preparedPosts: [{ date: '2026-09-23', text: '  Текст 🦄\n\nВторой абзац.  ' }] };
+  await store.put('settings', '21', value);
+  assert.deepEqual(await createSqlPostStore(f.db, f.grant).get('settings', '21'), value);
+});

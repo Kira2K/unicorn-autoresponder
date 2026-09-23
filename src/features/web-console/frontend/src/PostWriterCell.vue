@@ -21,7 +21,7 @@ const writer = usePostWriter(props.account)
       <p>Следующий автозапуск: {{ writer.data.value.settings.scheduled && writer.data.value.settings.slot?.state === 'planned' ? dateMsk(writer.data.value.settings.slot.at) : 'Не назначен' }}</p>
       <p v-if="writer.data.value.settings.lastMissedSlot">Пропущено: {{ dateMsk(writer.data.value.settings.lastMissedSlot.at) }} — окно завершилось.</p>
       <PostWriterSettings :settings="writer.data.value.settings" :disabled="writer.busy.value || !writer.data.value.writable"
-        :memes-available="writer.data.value.memesAvailable"
+        :memes-available="writer.data.value.memesAvailable" :runs="writer.data.value.runs"
         @save="writer.save" @start="writer.start" />
       <PostWriterPolicy :disabled="writer.busy.value || !writer.data.value.writable" />
       <PostWriterProgress :run="writer.run.value" :now="writer.now.value"

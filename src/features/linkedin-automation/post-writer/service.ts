@@ -12,6 +12,7 @@ import { createWorkTracker } from './work-tracker.ts'
 import { prepareManualInput, type ManualInput } from './manual-input.ts'
 import { unlock } from './execution-types.ts'
 import { runImage } from './run-content.ts'
+import { assertPreparedEdits } from './prepared-posts.ts'
 export function createPostWriterService(deps: Dependencies, autoStart = true) {
   const state = createServiceState(deps)
   const { e, runs, settings } = state
@@ -64,7 +65,10 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
     update(account: number, input: unknown) { return work.run(() => serial(account, async () => {
       await writable()
       const value = validateSettings(input, e.settings(account))
-      if (value.memes && !e.memes?.enabled) throw new PostError('meme_generation_disabled')
+      assertPreparedEdits(e.settings(account), value, runs.values())
+      if ((value.memes || (value.contentMode === 'prepared' && value.scheduled)) && !e.memes?.enabled) {
+        throw new PostError('meme_generation_disabled')
+      }
       value.slot = nextSlot(value, e.now(), e.random) ?? value.slot
       await e.saveSettings(value)
       if (!value.likes) await cancelRemainingLikes(account, runs.values(), e)
@@ -72,6 +76,7 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
     })) },
     start(account: number, mode: ManualMode, key: string, input?: ManualInput) { return work.run(() => serial(account, async () => {
       await writable()
+      if (e.settings(account).contentMode === 'prepared') throw new PostError('post_prepared_manual_unavailable')
       if (!['automatic', 'approval_required'].includes(mode) || !/^[a-z0-9_-]{8,100}$/i.test(key)) {
         throw new PostError('post_start_invalid')
       }

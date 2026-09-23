@@ -3,6 +3,7 @@ const { chromium } = require('playwright') as typeof import('playwright')
 const { startIsolatedPostTestProcesses, waitPostHttp, postRoot } =
   require('./post-writer-processes.ts') as typeof import('./post-writer-processes.ts')
 const { checkTextWorkspace } = require('./post-text-check.ts') as typeof import('./post-text-check.ts')
+const { checkPreparedPosts } = require('./post-prepared-check.ts') as typeof import('./post-prepared-check.ts')
 async function main() {
   const processes = await startIsolatedPostTestProcesses()
   const { apiPort, uiPort } = processes
@@ -12,6 +13,8 @@ async function main() {
     await waitPostHttp(`http://127.0.0.1:${uiPort}/`, processes.frontend)
     browser = await chromium.launch()
     const page = await browser.newPage({ viewport: { width: 1366, height: 768 } })
+    await page.route('**/*', route => ['127.0.0.1', 'localhost'].includes(new URL(route.request().url()).hostname)
+      ? route.continue() : route.abort())
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`http://127.0.0.1:${uiPort}`)
@@ -68,6 +71,7 @@ async function main() {
     await page.screenshot({ path: `${postRoot}/logs/post-writer-checks/mock-desktop.png`, fullPage: true })
     await page.setViewportSize({ width: 1920, height: 1080 })
     await page.screenshot({ path: `${postRoot}/logs/post-writer-checks/mock-wide.png`, fullPage: true })
+    await checkPreparedPosts(page, `http://127.0.0.1:${uiPort}`)
     await checkTextWorkspace(page, `http://127.0.0.1:${uiPort}`)
     assert.deepEqual(errors, [])
     console.log('Post Writer mock E2E passed: settings, approval, SSE, reload, read-back, no duplicate.')
