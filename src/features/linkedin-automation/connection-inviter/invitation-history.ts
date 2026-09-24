@@ -10,13 +10,13 @@ export type InvitationHistoryController = {
   release(item: ConnectionHistoryItem, reasonCode: string,
     status?: 'deferred' | 'failed' | 'pending'): Promise<void>
   countSkip(item: ConnectionHistoryItem, reasonCode: string): void
-  confirm(item: ConnectionHistoryItem, status?: 'sent' | 'accepted'): Promise<void>
+  confirm(item: ConnectionHistoryItem, status?: 'sent' | 'accepted', reasonCode?: string): Promise<void>
 }
 
 export function createInvitationHistoryController(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun, pending: PendingSnapshotController): InvitationHistoryController {
   const update = async (item: ConnectionHistoryItem) => {
-    await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
+    await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
       runtime.store.updateHistory(item), { allowAfterDayClose: true })
   }
 
@@ -34,7 +34,7 @@ export function createInvitationHistoryController(runtime: ConnectionRuntime, ru
 
   return {
     claim(item) {
-      return withConnectionRetry(runtime, run, save, 'noco', 'history_claim', () =>
+      return withConnectionRetry(runtime, run, save, 'storage', 'history_claim', () =>
         claimRunCandidate(runtime.store, item))
     },
     update,
@@ -44,9 +44,9 @@ export function createInvitationHistoryController(runtime: ConnectionRuntime, ru
       await update(item)
     },
     countSkip,
-    async confirm(item, status = 'sent') {
+    async confirm(item, status = 'sent', reasonCode) {
       item.status = status
-      item.reasonCode = status === 'accepted' ? 'connection_accepted' : 'pending_readback_confirmed'
+      item.reasonCode = reasonCode ?? (status === 'accepted' ? 'connection_accepted' : 'pending_readback_confirmed')
       item.verifiedAt = runtime.now().toISOString()
       await update(item)
       pending.add(item.personId)

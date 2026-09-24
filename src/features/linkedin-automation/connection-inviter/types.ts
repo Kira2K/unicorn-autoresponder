@@ -15,7 +15,8 @@ export type ConnectionHistoryStatus = 'discovered' | 'eligible' | 'sending' | 'd
   'sent' | 'pending' | 'accepted' | 'skipped' | 'failed' | 'uncertain'
 
 export type ConnectionRetryState = {
-  provider: 'noco' | 'unipile'
+  // Keep the legacy value readable in already persisted runs.
+  provider: 'storage' | 'noco' | 'unipile'
   operation: string
   attempt: number
   errorCode: string
@@ -59,6 +60,12 @@ export type ConnectionPeopleSearchInput = {
 }
 
 export type ConnectionSearchProgress = {
+  invitationNotBefore?: string
+  invitationPacingStarted?: boolean
+  invitationPauseAfterPersonId?: string
+  verifiedAccount?: { accountId: string; providerId: string; lastVerifiedAt: string }
+  carriedCandidatesChecked?: boolean
+  carriedCandidateIds?: string[]
   audience?: SearchAudience
   nextAudience?: SearchAudience
   keyIndex: Record<SearchAudience, number>
@@ -213,7 +220,7 @@ export type ConnectionInviterStore = {
   withNocoBudgetMode?<T>(runId: string, mode: 'mandatory' | 'optional',
     action: () => Promise<T>): Promise<T>
   nocoBudgetCanStart?(runId: string, requiredPhysicalAttempts: number): boolean
-  resetNocoBudget(runId: string): void
+  resetNocoBudget?(runId: string): void
   nocoBudgetSnapshot?(runId: string): {
     limit: number
     physicalAttempts: number
@@ -227,9 +234,17 @@ export type ConnectionUnipileAdapter = {
   getAccount(accountId: string): Promise<any>
   getOwnProfile(accountId: string): Promise<any>
   getProfile(accountId: string, personId: string): Promise<any>
+  getInvitationProfile?(accountId: string, personId: string): Promise<ConnectionInvitationProfile>
   listRelations?(accountId: string, cursor?: string): Promise<any>
   resolveLocations(accountId: string, city: string): Promise<any>
   searchPeople(accountId: string, input: ConnectionPeopleSearchInput, cursor?: string): Promise<any>
   listPendingInvitations(accountId: string, page?: number | string): Promise<any>
   sendInvitation(accountId: string, personId: string): Promise<any>
+}
+
+export type ConnectionInvitationProfile = {
+  profile: any
+  accountId: string
+  personId: string
+  pendingStateObservedAt?: number
 }

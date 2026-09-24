@@ -3,7 +3,6 @@ import { connectionAccountScope } from './account-scope.ts'
 import { executeConnectionRun } from './execution.ts'
 import { dateParts } from './limits.ts'
 import { createConnectionLogger, logged } from './logger.ts'
-import { createConnectionInviterStore } from './noco-store.mts'
 import { createConnectionUnipileAdapter } from './unipile-adapter.ts'
 import { makeRun, publicHistory, publicRun } from './run-model.ts'
 import { requestRunStop, waitOrStop } from './run-control.ts'
@@ -53,6 +52,8 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
   const scope = connectionAccountScope(options.allowedAccounts)
   const repository = options.repository
   if (!repository) throw new Error('Connection Inviter requires a LinkedIn repository.')
+  if (!options.store) throw connectionError('connection_store_required',
+    'Connection Inviter requires an explicitly configured storage adapter.')
   const logger = options.logger ?? createConnectionLogger()
   const events = createConnectionRunEvents()
   const stopRequests = new Set<string>()
@@ -62,7 +63,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
   const persistQueues = new Map<string, Promise<void>>()
   const lastPersistedAt = new Map<string, number>()
   const persistedStoppedRuns = new Set<string>()
-  // Search progress is served from the active in-memory run and SSE. Noco keeps a durable,
+  // Search progress is served from the active in-memory run and SSE. Storage keeps a durable,
   // coarse checkpoint; invitation safety remains durable in the history table per mutation.
   const checkpointIntervalMs = CONNECTION_WRITER_HEARTBEAT_MS
   let adapter: ReturnType<ConnectionRuntime['adapter']> | undefined
@@ -86,7 +87,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
     writerLock?.release(); releaseWriterWhenIdle = false
   }
   const runtime: ConnectionRuntime = {
-    store: options.store ?? createConnectionInviterStore(), repository,
+    store: options.store, repository,
     adapter: () => adapter ??= options.adapter ?? createConnectionUnipileAdapter({ logger }),
     gate: options.gate, now: options.now ?? (() => new Date()),
     timeZone: options.timeZone ?? process.env.LINKEDIN_CONNECTION_TIME_ZONE ?? 'Europe/Moscow',
@@ -123,12 +124,12 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       return
     }
     const resumeStage = run.stage
-    const outerRetry = run.retryState?.provider !== 'noco' ? structuredClone(run.retryState) : undefined
+    const outerRetry = run.retryState?.provider === 'unipile' ? structuredClone(run.retryState) : undefined
     const outerTimer = outerRetry && run.timerState ? structuredClone(run.timerState) : undefined
     const outerNextActionAt = outerRetry ? run.nextActionAt : undefined
     const outerPausedAt = outerRetry ? run.pausedAt : undefined
     const outerErrorCode = outerRetry ? run.errorCode : undefined
-    let nocoRetried = false
+    let storageRetried = false
     while (true) {
       run.updatedAt = runtime.now().toISOString()
       if (run.status === 'running') {
@@ -137,8 +138,8 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
       try {
         await persistRunSnapshot(run)
         if (run.status === 'stopped') persistedStoppedRuns.add(run.runId)
-        if (nocoRetried) {
-          nocoRetried = false; run.retryState = outerRetry; run.timerState = outerTimer
+        if (storageRetried) {
+          storageRetried = false; run.retryState = outerRetry; run.timerState = outerTimer
           run.nextActionAt = outerNextActionAt; run.pausedAt = outerPausedAt
           run.errorCode = outerErrorCode
           run.stage = resumeStage; runtime.emit(run, 'retry_succeeded')
@@ -149,17 +150,17 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
         runtime.emit(run, event)
         return
       } catch (caught) {
-        const error = normalizeConnectionProviderError('noco', caught)
+        const error = normalizeConnectionProviderError('storage', caught)
         if (!transientConnectionError(error)) throw error
-        nocoRetried = true
+        storageRetried = true
         runtime.store.recordRetry?.()
-        run.retryState = makeRetryState(runtime, run, 'noco', 'update_run', error)
+        run.retryState = makeRetryState(runtime, run, 'storage', 'update_run', error)
         run.stage = 'waiting_retry'; run.errorCode = run.retryState.errorCode
         run.pausedAt = runtime.now().toISOString(); run.nextActionAt = run.retryState.nextRetryAt
         run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
           nextActionAt: run.retryState.nextRetryAt }
         logger.event('retry', 'failed', { runId: run.runId,
-          platformAccountId: run.platformAccountId, provider: 'noco', operation: 'update_run',
+          platformAccountId: run.platformAccountId, provider: 'storage', operation: 'update_run',
           attempt: run.retryState.attempt, errorCode: run.retryState.errorCode,
           delayMs: run.retryState.delayMs, nextRetryAt: run.retryState.nextRetryAt })
         runtime.emit(run, 'retry_scheduled')
@@ -269,7 +270,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           run.status = 'running'; run.finishedAt = undefined
           await save(run, 'stage_changed', 'critical'); assertRecoveryOwner(); await execute(run)
         } else {
-          const closingHistory = await withConnectionRetry(runtime, run, save, 'noco',
+          const closingHistory = await withConnectionRetry(runtime, run, save, 'storage',
             'day_close_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
             { allowAfterDayClose: true })
           assertRecoveryOwner()
@@ -413,7 +414,7 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           if (stackResume || retry || topUp || resume) {
             if (topUp || resume) {
               prepareRunTopUp(existing, context, input.safeRecruiterOnly === true)
-              if (topUp) runtime.store.resetNocoBudget(existing.runId)
+              if (topUp) runtime.store.resetNocoBudget?.(existing.runId)
             }
             else prepareRunRetry(existing, context, input.safeRecruiterOnly === true)
             await save(existing, 'stage_changed', 'critical'); void execute(existing)

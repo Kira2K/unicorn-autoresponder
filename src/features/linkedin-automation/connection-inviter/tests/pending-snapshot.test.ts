@@ -39,8 +39,8 @@ async function staleSnapshotRefreshesBeforePost() {
   now += PENDING_SNAPSHOT_TTL_MS + 1
   const result = await publisher.publish('recruiter', [invitationCandidate(run, 'stale')], 1)
   assert.equal(result.sentCount, 1)
-  assert.equal(pendingCalls, 4,
-    'Expected initial scan, stale refresh and a two-page mandatory read-back.')
+  assert.equal(pendingCalls, 3,
+    'Expected initial scan, stale refresh and read-back stopping at the confirmed target.')
 }
 
 Promise.all([lifetimeBoundary(), staleSnapshotRefreshesBeforePost()])

@@ -16,8 +16,9 @@ export function networkDistance(value: unknown): number | undefined {
 }
 
 export function relationBlocks(value: any): boolean {
-  if (value?.pending_invitation === true || value?.is_connection === true ||
+  if (value?.is_blocked === true || value?.pending_invitation === true || value?.is_connection === true ||
     value?.is_relationship === true) return true
+  if (['sent', 'received'].includes(linkedinValue(value, 'relation_request')?.type)) return true
   const request = normalized(linkedinValue(value, 'relation_request_status') ??
     linkedinValue(value, 'relation_request')?.status)
   if (request && !/^(?:none|no_relation|not_connected|unknown)$/.test(request)) return true

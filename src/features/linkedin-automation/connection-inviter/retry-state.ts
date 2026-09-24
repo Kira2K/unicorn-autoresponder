@@ -4,6 +4,7 @@ import { waitOrStop } from './run-control.ts'
 import { requireConnectionRunDay } from './day-window.ts'
 import type { ConnectionRunStage, ConnectionRetryState, ConnectionRun } from './types.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
+import { withConnectionRequestAttempt } from './logger.ts'
 
 const STEP_MS = 90_000
 const MAX_MS = 30 * 60_000
@@ -47,12 +48,13 @@ export function unipileRateLimitDelay(attempt: number, random: () => number,
   return Math.max(adaptive, explicitRetryAfterMs ?? 0)
 }
 
-export function connectionRetryProvider(error: unknown): 'noco' | 'unipile' {
-  return connectionErrorCode(error).startsWith('noco_') ? 'noco' : 'unipile'
+export function connectionRetryProvider(error: unknown): 'storage' | 'unipile' {
+  const code = connectionErrorCode(error)
+  return code.startsWith('noco_') || code === 'connection_storage_read_unavailable' ? 'storage' : 'unipile'
 }
 
 export function makeRetryState(runtime: ConnectionRuntime, run: ConnectionRun,
-  provider: 'noco' | 'unipile', operation: string, error: unknown,
+  provider: ConnectionRetryState['provider'], operation: string, error: unknown,
   previousState: ConnectionRetryState | undefined = run.retryState): ConnectionRetryState {
   const errorCode = connectionErrorCode(error)
   const rateLimited = provider === 'unipile' && (connectionHttpStatus(error) === 429 ||
@@ -78,16 +80,19 @@ export function makeRetryState(runtime: ConnectionRuntime, run: ConnectionRun,
 }
 
 export async function withConnectionRetry<T>(runtime: ConnectionRuntime, run: ConnectionRun,
-  save: SaveRun, provider: 'noco' | 'unipile', operation: string, action: () => Promise<T>,
+  save: SaveRun, provider: ConnectionRetryState['provider'], operation: string, action: () => Promise<T>,
   options: { allowAfterDayClose?: boolean; ignoreStopRequested?: boolean;
     onFirstTransientError?: (error: unknown) => Promise<void> } = {}): Promise<T> {
   const resumeStage = run.stage
   let retried = false
+  let requestAttempt = 0
   while (true) {
     try {
       runtime.assertWriterOwnership?.()
       if (!options.allowAfterDayClose) requireConnectionRunDay(runtime, run)
-      const result = await action()
+      requestAttempt++
+      const result = await (provider === 'unipile'
+        ? withConnectionRequestAttempt(requestAttempt, action) : action())
       if (retried) {
         run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
         run.pausedAt = undefined; run.errorCode = undefined; run.stage = resumeStage
@@ -142,4 +147,4 @@ export async function waitWithRunTimer(runtime: ConnectionRuntime, run: Connecti
 }
 
 export const searchRequestDelay = (random: () => number) =>
-  60_000 + Math.floor(boundedRandom(random()) * 30_000)
+  40_000 + Math.floor(boundedRandom(random()) * 30_000)

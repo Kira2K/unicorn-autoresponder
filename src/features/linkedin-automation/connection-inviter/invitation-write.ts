@@ -7,6 +7,7 @@ import { recoverInvitationRateLimit } from './invitation-rate-limit.ts'
 import { requireConnectionRunDay } from './day-window.ts'
 import { isUnknownWrite } from './run-model.ts'
 import type { ConnectionHistoryItem } from './types.ts'
+import { withConnectionRequestAttempt } from './logger.ts'
 
 async function stopOrCloseBeforePost(context: InvitationSafetyContext,
   item: ConnectionHistoryItem) {
@@ -59,12 +60,20 @@ export async function sendInvitationSafely(context: InvitationSafetyContext,
       if (!preflight.ready) return preflight.sent
     }
     if (await stopOrCloseBeforePost(context, item)) return false
+    // A real write attempt consumes the pause; a rejected candidate does not.
+    // An unresolved claim forces a new pause on recovery; no extra storage write per POST.
+    run.searchProgress.invitationPacingStarted = true
+    run.searchProgress.invitationPauseAfterPersonId = item.personId
+    run.searchProgress.invitationNotBefore = undefined
     runtime.assertWriterOwnership?.()
     runtime.logger.event('invitation_write', 'started', {
       runId: run.runId, platformAccountId: run.platformAccountId, audience: item.audience
     })
     let response: unknown
-    try { response = await runtime.adapter().sendInvitation(run.accountId, item.personId) }
+    try {
+      response = await withConnectionRequestAttempt((run.invitationRetryState?.attempt ?? 0) + 1,
+        () => runtime.adapter().sendInvitation(run.accountId, item.personId))
+    }
     catch (caught) {
       const error = normalizeConnectionProviderError('unipile', caught)
       const result = await handleWriteFailure(context, item, error)

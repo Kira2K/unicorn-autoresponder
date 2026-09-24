@@ -96,7 +96,7 @@ function locationMatch(location: string, city: string): CandidatePolicyEvaluatio
 const stablePersonId = (value: string) => value.length >= 3 && !/\s|https?:\/\//iu.test(value)
 const meaningfulHeadline = (value: string) => (value.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 2
 
-export function evaluateCandidate(candidate: ParsedCandidate, template: ConnectionSearchTemplate,
+export function evaluateCandidate(candidate: ParsedCandidate, template: Pick<ConnectionSearchTemplate, 'audience' | 'city'>,
   stack: string | undefined, safeRecruiterOnly = false): CandidatePolicyEvaluation {
   const hardReasons: string[] = []
   const softSignals: string[] = []

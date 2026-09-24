@@ -42,7 +42,7 @@ async function run() {
   const requestStats = test.store.requestStats()
   assert.equal(requestStats.pages + requestStats.creates + requestStats.patches <= 220, true)
   assert.equal(requestStats.patches < 100, true)
-  assert.equal(sleeps.reduce((total, value) => total + value, 0) >= 39 * 15_000, true)
+  assert.equal(sleeps.reduce((total, value) => total + value, 0) >= 39 * 20_000, true)
   assert.equal(sleeps.every(value => value === 1000), true)
   const history: any[] = await service.history(7)
   assert.equal(history.filter(item => item.status === 'sent' && item.audience === 'recruiter').length, 28)

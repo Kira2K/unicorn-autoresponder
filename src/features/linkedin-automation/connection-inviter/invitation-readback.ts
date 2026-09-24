@@ -5,19 +5,31 @@ import { profileIsConnected } from './relation-policy.ts'
 import { waitOrStop } from './run-control.ts'
 import { makeRetryState } from './retry-state.ts'
 import type { ConnectionHistoryItem } from './types.ts'
-import { invitationRequestId } from './unipile-adapter.ts'
+import { invitationRequestId, confirmedInvitationReceipt } from './unipile-adapter.ts'
 import { clearInvitationRateLimitState } from './invitation-rate-limit.ts'
+import type { PendingRead } from './pending-reader.ts'
+import { pendingReadIsFresh } from './pending-snapshot.ts'
+import { recordPendingReuse } from './logger.ts'
 
 export async function resolveInvitationResult(context: InvitationSafetyContext,
-  item: ConnectionHistoryItem) {
+  item: ConnectionHistoryItem, initialRead?: PendingRead) {
   const { runtime, run, save, pending, history } = context
   run.status = 'running'; run.stage = 'resolving_uncertain'
   await save(run, 'uncertain', 'critical')
   while (true) {
-    const ids = await pending.refresh({ allowAfterDayClose: true,
-      ignoreStopRequested: true, operation: 'invitation_pending_readback' })
-    if (ids.has(item.personId)) { await history.confirm(item); return true }
-    const profile = await readInvitationProfile(context, item,
+    const reusable = initialRead?.complete === true &&
+      initialRead.targetPersonId === item.personId &&
+      initialRead.refreshedAt >= Date.parse(item.sentAt ?? '') &&
+      pendingReadIsFresh(initialRead, run.accountId, runtime.now().getTime())
+    const read = reusable ? initialRead! : await pending.findFresh(item.personId, {
+      allowAfterDayClose: true, ignoreStopRequested: true, operation: 'invitation_pending_readback' })
+    if (reusable) recordPendingReuse('pending_readback_reused')
+    if (reusable) runtime.logger.event('pending_snapshot', 'succeeded', {
+      runId: run.runId, platformAccountId: run.platformAccountId,
+      reasonCode: 'pending_readback_reused', snapshotAgeMs: runtime.now().getTime() - read.refreshedAt })
+    initialRead = undefined
+    if (read.personIds.has(item.personId)) { await history.confirm(item); return true }
+    const { profile } = await readInvitationProfile(context, item,
       'candidate_profile_readback', true)
     if (profileIsConnected(profile)) { await history.confirm(item, 'accepted'); return true }
 
@@ -48,6 +60,14 @@ export async function readBackSuccessfulPost(context: InvitationSafetyContext,
   clearInvitationRateLimitState(context)
   item.requestId = invitationRequestId(response)
   item.sentAt = runtime.now().toISOString(); item.updatedAt = item.sentAt
+  if (confirmedInvitationReceipt(response, run.accountId, item.personId)) {
+    // The V2 adapter validated HTTP 201, sent type, provider request ID and target binding.
+    // Unknown outcomes still use the original read-back path below.
+    await history.confirm(item, 'sent', 'invitation_receipt_confirmed')
+    runtime.logger.event('invitation_write', 'succeeded', { runId: run.runId,
+      platformAccountId: run.platformAccountId, reasonCode: 'invitation_receipt_confirmed' })
+    return true
+  }
   item.status = 'uncertain'; item.reasonCode = 'invitation_readback_pending'
   let uncertainPersisted = false
   const persistUncertain = async (error?: unknown) => {
@@ -62,16 +82,17 @@ export async function readBackSuccessfulPost(context: InvitationSafetyContext,
     runId: run.runId, platformAccountId: run.platformAccountId,
     audience: item.audience, itemStatus: item.status, reasonCode: item.reasonCode
   })
+  let read: PendingRead
   try {
-    const ids = await pending.refresh({ allowAfterDayClose: true,
+    read = await pending.findFresh(item.personId, { allowAfterDayClose: true,
       ignoreStopRequested: true, operation: 'invitation_pending_readback',
       onFirstTransientError: persistUncertain })
-    if (ids.has(item.personId)) { await history.confirm(item); return true }
+    if (read.personIds.has(item.personId)) { await history.confirm(item); return true }
   } catch (error) {
     await persistUncertain(error)
     throw error
   }
   item.reasonCode = 'connection_invitation_readback_missing'
   await history.update(item)
-  return resolveInvitationResult(context, item)
+  return resolveInvitationResult(context, item, read)
 }

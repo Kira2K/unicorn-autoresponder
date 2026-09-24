@@ -43,15 +43,15 @@ export async function recoverInvitationRateLimit(context: InvitationSafetyContex
   const continued = await waitOrStop(runtime, run.runId, run.retryState!.delayMs, run.localDate)
   if (!continued) return { retry: false, sent: false }
 
-  const ids = await pending.refresh({ allowAfterDayClose: true,
+  const read = await pending.findFresh(item.personId, { allowAfterDayClose: true,
     ignoreStopRequested: true, operation: 'invitation_pending_readback' })
   clearInvitationRateLimitState(context, true); await save(run, 'retry_succeeded', 'critical')
-  if (ids.has(item.personId)) {
+  if (read.personIds.has(item.personId)) {
     clearInvitationRateLimitState(context); await history.confirm(item)
     return { retry: false, sent: true }
   }
 
-  const profile = await readInvitationProfile(context, item, 'candidate_profile_readback', true)
+  const { profile } = await readInvitationProfile(context, item, 'candidate_profile_readback', true)
   if (profileIsConnected(profile)) {
     clearInvitationRateLimitState(context); await history.confirm(item, 'accepted')
     return { retry: false, sent: true }

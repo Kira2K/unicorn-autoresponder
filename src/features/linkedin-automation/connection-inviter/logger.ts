@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import type { ConnectionRun } from './types.ts'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -21,7 +23,10 @@ const SAFE_KEYS = new Set([
   'termFinishReason', 'city', 'locationId', 'locationLabel', 'unresolvedCount',
   'recruiterShortfall', 'technicalShortfall', 'nocoPhysicalAttempts',
   'nocoPhysicalRetries', 'nocoSafetyOverrun', 'snapshotAgeMs', 'snapshotFresh',
-  'requestNumber', 'queueWaitMs', 'willRetry'
+  'requestNumber', 'queueWaitMs', 'willRetry', 'executionId', 'retryAttempt', 'complete',
+  'unipileRequests', 'unipilePages', 'unipileRetries', 'unipileFailures', 'cacheUses',
+  'providerCache', 'providerCacheAgeSeconds', 'providerCacheHits', 'providerCacheMisses',
+  'rateLimitSource', 'retryAfterMs'
 ])
 
 const token = (value: unknown, fallback = 'unknown') => {
@@ -82,4 +87,56 @@ export function safeErrorDetails(error: any) {
     httpStatus: Number(error?.details?.httpStatus ?? error?.response?.status ??
       error?.cause?.response?.status) || undefined
   }
+}
+
+type Counts = { requests: number; pages: number; retries: number; failures: number;
+  providerCacheHits: number; providerCacheMisses: number }
+type Trace = {
+  details: { runId: string; platformAccountId: number; executionId: string }
+  counts: Map<string, Counts>
+  reuse: Map<string, number>
+  retryAttempt: number
+}
+const traces = new AsyncLocalStorage<Trace>()
+
+// Capture before entering the shared scheduler; queued requests keep their own run attribution.
+export const captureConnectionRequestTrace = () => traces.getStore()
+export function recordConnectionRequest(trace: Trace | undefined, operation: string,
+  page: boolean, adapterAttempt: number) {
+  if (!trace) return undefined
+  const counts = trace.counts.get(operation) ?? { requests: 0, pages: 0, retries: 0,
+    failures: 0, providerCacheHits: 0, providerCacheMisses: 0 }
+  trace.counts.set(operation, counts)
+  counts.requests++; if (page) counts.pages++
+  if (adapterAttempt > 1 || trace.retryAttempt > 1) counts.retries++
+  return counts
+}
+
+export function recordPendingReuse(reason: string) {
+  const trace = traces.getStore()
+  if (trace) trace.reuse.set(reason, (trace.reuse.get(reason) ?? 0) + 1)
+}
+
+export function withConnectionRequestAttempt<T>(attempt: number, action: () => Promise<T>) {
+  const trace = traces.getStore()
+  return trace ? traces.run({ ...trace, retryAttempt: Math.max(trace.retryAttempt, attempt) }, action) : action()
+}
+
+export async function withConnectionRequestTrace<T>(run: ConnectionRun, logger: ConnectionLogger,
+  action: () => Promise<T>) {
+  const trace: Trace = { details: { runId: run.runId, platformAccountId: run.platformAccountId,
+    executionId: randomUUID() }, counts: new Map(), reuse: new Map(), retryAttempt: 1 }
+  return traces.run(trace, async () => {
+    try { return await action() }
+    finally {
+      for (const [operation, counts] of trace.counts) {
+        logger.event('unipile_request_summary', 'succeeded', { ...trace.details, operation,
+          unipileRequests: counts.requests, unipilePages: counts.pages, unipileRetries: counts.retries,
+          unipileFailures: counts.failures, providerCacheHits: counts.providerCacheHits,
+          providerCacheMisses: counts.providerCacheMisses })
+      }
+      for (const [reasonCode, count] of trace.reuse) logger.event('pending_cache_summary', 'succeeded',
+        { ...trace.details, reasonCode, cacheUses: count })
+    }
+  })
 }

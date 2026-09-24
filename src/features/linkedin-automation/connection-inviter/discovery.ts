@@ -87,9 +87,9 @@ function displayStream(run: ConnectionRun, audience: SearchAudience,
 
 export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun) {
-  const catalog = await withConnectionRetry(runtime, run, save, 'noco', 'catalog_read', () =>
+  const catalog = await withConnectionRetry(runtime, run, save, 'storage', 'catalog_read', () =>
     runtime.store.listCatalog())
-  const previousRuns = await withConnectionRetry(runtime, run, save, 'noco', 'runs_read', () =>
+  const previousRuns = await withConnectionRetry(runtime, run, save, 'storage', 'runs_read', () =>
     runtime.store.listRunsForAccount(run.platformAccountId, 1000))
   const accountAttempts = previousRuns.flatMap(item => item.searchProgress.recentSearchAt ?? [])
   run.searchProgress.recentSearchAt = [...new Set([
@@ -135,7 +135,7 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
       } while (Date.parse(run.searchProgress.searchReservedUntil) - runtime.now().getTime() <
         CONNECTION_SEARCH_WINDOW_MS)
       requireConnectionRunDay(runtime, run)
-      // Timestamp the actual dispatch after a potentially slow Noco checkpoint. The crash-only
+      // Timestamp the actual dispatch after a potentially slow storage checkpoint. The crash-only
       // reservation above covers a process loss until this timestamp is persisted with the
       // provider result (or in the error path below).
       const attemptedAt = runtime.now().toISOString()
@@ -207,7 +207,7 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
     }
 
     const existingRows = evaluated.length
-      ? await withConnectionRetry(runtime, run, save, 'noco', 'history_batch_read', () =>
+      ? await withConnectionRetry(runtime, run, save, 'storage', 'history_batch_read', () =>
         runtime.store.findHistoryBatch(run.accountId, evaluated.map(item => item.candidate.personId)))
       : []
     const existingByPerson = new Map(existingRows.map(item => [item.personId, item]))
@@ -226,8 +226,43 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
     return { candidates, skipped }
   }
 
+  async function reusePreviousCandidates() {
+    if (run.searchProgress.carriedCandidatesChecked) return
+    run.searchProgress.carriedCandidatesChecked = true
+    // Only the latest completed run of this same account/stack can donate its unused queue.
+    // Original discovery time is retained, so repeated reuse cannot extend its lifetime.
+    const previous = previousRuns.filter(item => item.runId !== run.runId &&
+      item.platformAccountId === run.platformAccountId && item.accountId === run.accountId &&
+      item.stack === run.stack && item.stackId === run.stackId &&
+      item.safeRecruiterOnly === run.safeRecruiterOnly && item.status === 'succeeded' &&
+      item.localDate < run.localDate).sort((a, b) => b.localDate.localeCompare(a.localDate))[0]
+    if (!previous) return
+    const now = runtime.now().getTime()
+    for (const item of previous.searchProgress.pendingCandidates.slice(0, 100)) {
+      const age = now - Date.parse(item.discoveredAt)
+      const template = catalog.find(entry => entry.enabled && entry.sourceKey === item.searchKey &&
+        entry.audience === item.audience)
+      if (!template || item.status !== 'eligible' || item.accountId !== run.accountId ||
+        item.platformAccountId !== run.platformAccountId || !Number.isFinite(age) ||
+        age < 0 || age > 36 * 60 * 60_000 || seenPeople.has(item.personId)) continue
+      const result = await evaluatePage(item.audience, item.searchKey, template, [{
+        id: item.personId, display_name: item.name, headline: item.headline,
+        location: item.location, profile_url: item.profileUrl, network_distance: 2 }])
+      for (const candidate of result.candidates) {
+        candidate.discoveredAt = item.discoveredAt
+        ;(run.searchProgress.carriedCandidateIds ??= []).push(candidate.personId)
+      }
+    }
+    await save(run, 'progress', 'critical')
+    runtime.logger.event('candidate_cache', 'succeeded', { runId: run.runId,
+      candidateCount: run.searchProgress.pendingCandidates.length, reasonCode: 'previous_queue_checked' })
+  }
+
   return {
     async next(audience: SearchAudience): Promise<ConnectionHistoryItem[]> {
+      await reusePreviousCandidates()
+      const cached = run.searchProgress.pendingCandidates.filter(item => item.audience === audience)
+      if (cached.length) return cached
       while (!run.searchProgress.exhausted[audience]) {
         if (runtime.stopRequested(run.runId)) return []
         const stream = run.searchProgress.streams[audience]
