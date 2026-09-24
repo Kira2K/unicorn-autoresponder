@@ -1,7 +1,8 @@
 <script setup>
 import { ref, watch } from 'vue'
 import PostWriterMeme from './PostWriterMeme.vue'
-import { stages, engagementLabels, dateMsk, countdown, runActive } from './post-writer-view'
+import PostWriterMemeRecovery from './PostWriterMemeRecovery.vue'
+import { stages, engagementLabels, dateMsk, countdown, runActive, memeNotes } from './post-writer-view'
 const props = defineProps({ run: Object, now: Number, disabled: Boolean, stopDisabled: Boolean })
 const emit = defineEmits(['action'])
 const memeLoaded = ref(false), memeReviewed = ref(false)
@@ -19,6 +20,13 @@ function onMemeLoaded(value) { memeLoaded.value = value; if (!value) memeReviewe
       :url="`/api/admin/linkedin/post-runs/${encodeURIComponent(run.id)}/meme`" @loaded="onMemeLoaded" />
     <p v-else-if="run.memeEnabled">Мем: {{ run.meme?.errorCode || run.meme?.status || 'ожидает подготовки' }}</p>
     <p v-if="run.meme?.blockingReason">{{ run.meme.blockingReason }}</p>
+    <p v-if="run.meme?.qa" data-testid="post-meme-qa">Проверка мема:
+      {{ run.meme.qa.issues.length ? 'есть замечания: ' + run.meme.qa.issues.map(code => memeNotes[code] || code).join('; ') : 'пройдена' }}.</p>
+    <p v-if="run.meme?.warnings?.length" data-testid="post-meme-warnings">
+      Замечания к мему сохранены. Они не отменяют публикацию.
+      <small>{{ run.meme.warnings.map(code => memeNotes[code] || code).join('; ') }}</small>
+    </p>
+    <PostWriterMemeRecovery :run="run" :disabled="disabled" @action="(...args) => emit('action', ...args)" />
     <label v-if="run.memeEnabled && run.mode === 'approval_required' && run.status === 'awaiting_approval'">
       <input v-model="memeReviewed" type="checkbox" :disabled="disabled || !memeLoaded" data-testid="post-meme-reviewed" />
       Мем просмотрен. Подтверждаю текст и изображение вместе.

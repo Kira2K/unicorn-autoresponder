@@ -3,6 +3,7 @@ import { PostError, retryDelay } from './errors.ts'
 import { defaults, type Dependencies, type PostRun, type Settings } from './types.ts'
 import { lock, type Execution } from './execution-types.ts'
 import { createSerialQueue } from './serial.ts'
+import { canRetryMeme } from './meme-recovery.ts'
 export function createServiceState(deps: Dependencies) {
   const runs = new Map<string, PostRun>()
   const settings = new Map<number, Settings>()
@@ -87,7 +88,8 @@ export function createServiceState(deps: Dependencies) {
       mock: deps.mock === true, writerEnabled: e.writable, storageRetryAt, storageError,
       memesAvailable: e.memes?.enabled === true,
       runs: [...runs.values()].reverse().filter(run => run.account === account)
-        .sort((a, b) => b.createdAt - a.createdAt).slice(0, 30) })
+        .sort((a, b) => b.createdAt - a.createdAt).slice(0, 30)
+        .map(run => ({ ...run, canRetryMeme: canRetryMeme(run) })) })
   }
   return { e, runs, settings, events, hydrate, flush, snapshot,
     storageBlocked: () => storageError }

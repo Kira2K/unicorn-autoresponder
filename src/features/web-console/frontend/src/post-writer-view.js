@@ -4,6 +4,16 @@ export const stages = { queued: 'В очереди', generating: 'Готовим
   stopped: 'Остановлено', rejected: 'Отклонено' }
 export const engagementLabels = { off: 'Выключены', pending: 'Готовим лайки', running: 'Ставим лайки',
   uncertain: 'Проверяем результат лайка', partial: 'Выполнены частично', completed: 'Завершены', cancelled: 'Отменены' }
+export const memeNotes = {
+  weak_relevance: 'слабая связь с постом', unclear_joke: 'неочевидная шутка',
+  unreadable_text: 'плохо читаются подписи', visual_defect: 'дефекты картинки', forbidden_content: 'запрещённое содержание',
+  meme_anchor_paraphrased: 'описание использует пересказ', meme_duplicate_concept: 'похожая идея уже использовалась',
+  meme_direct_generation: 'картинка создана по тексту поста после ошибки описания',
+  meme_qa_unavailable: 'проверка качества недоступна', meme_qa_result_unknown: 'проверка качества прервана',
+  meme_quality_repair_failed: 'улучшение не удалось, сохранена первая картинка',
+  meme_quality_repair_unknown: 'результат улучшения неизвестен, сохранена первая картинка',
+  meme_qa_warnings: 'качество не идеально, выбран лучший вариант'
+}
 export const runActive = run => run && !['blocked', 'stopped', 'rejected'].includes(run.status) &&
   (run.status !== 'published' || ['pending', 'running', 'uncertain'].includes(run.engagement.status))
 export const dateMsk = value => value ? new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow',

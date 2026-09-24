@@ -1,6 +1,7 @@
 import { digest } from './content-identity.ts'
 import { PostError, errorCode } from './errors.ts'
-import { parseMemeConcept } from './meme-concept.ts'
+import { planMeme } from './meme-planning.ts'
+import { checkMemeQuality } from './meme-quality.ts'
 import type { MemeInput, MemeServices, MemeState, MemeOptions } from './meme-types.ts'
 
 export async function writeMeme(input: MemeInput, services: MemeServices, options: MemeOptions): Promise<MemeState> {
@@ -16,36 +17,20 @@ export async function writeMeme(input: MemeInput, services: MemeServices, option
   if (state.sourceHash !== sourceHash || state.policyHash !== policyHash) return finish('blocked', 'meme_source_changed')
   if (options.signal?.aborted) return finish('cancelled')
   if (['blocked', 'uncertain', 'cancelled'].includes(state.status)) return state
-  if (['ready', 'rendering'].includes(state.status)) {
-    const cached = await services.assets.get(state.assetId)
+  if (['ready', 'rendering', 'reviewing'].includes(state.status)) {
+    const cached = await services.assets.get(state.asset?.id ?? state.assetId)
     if (cached && cached.asset.sourceHash === sourceHash && cached.asset.altText === state.concept?.altText) {
       state.asset = cached.asset
-      return finish('ready')
+      if (state.status === 'ready') return finish('ready')
+      state.status = 'reviewing'
+      return checkMemeQuality(source, services, state, save, options.signal)
     }
     return finish('uncertain', 'meme_image_result_unknown')
   }
   if (state.status === 'planning') return finish('uncertain', 'meme_plan_result_unknown')
   if (!services.enabled) throw new PostError('meme_generation_disabled')
-  if (state.status === 'pending') {
-    if (state.plannerCalls) return finish('uncertain', 'meme_plan_result_unknown')
-    state.status = 'planning'; state.plannerCalls = 1
-    await save()
-    if (options.signal?.aborted) return finish('cancelled')
-    let raw: unknown
-    try { raw = await services.plan(source) }
-    catch (error) { return finish(options.signal?.aborted ? 'cancelled' : 'uncertain', errorCode(error)) }
-    if (options.signal?.aborted) return finish('cancelled')
-    try {
-      const result = parseMemeConcept(raw, source)
-      if (result.status === 'blocked') {
-        state.blockingReason = result.reason
-        return finish('blocked', 'meme_policy_blocked')
-      }
-      state.concept = result.concept
-    } catch (error) { return finish('blocked', errorCode(error)) }
-    state.status = 'planned'
-    await save()
-  }
+  await planMeme(source, services, state, save, options.signal)
+  if (state.status !== 'planned') return state
   if (!state.concept || state.imageCalls) return finish('uncertain', 'meme_image_result_unknown')
   if (options.signal?.aborted) return finish('cancelled')
   state.status = 'rendering'; state.imageCalls = 1
@@ -56,5 +41,8 @@ export async function writeMeme(input: MemeInput, services: MemeServices, option
   catch (error) { return finish(options.signal?.aborted ? 'cancelled' : 'uncertain', errorCode(error)) }
   try { state.asset = await services.assets.put(state.assetId, sourceHash, bytes, state.concept.altText) }
   catch (error) { return finish('blocked', errorCode(error)) }
-  return finish(options.signal?.aborted ? 'cancelled' : 'ready')
+  if (options.signal?.aborted) return finish('cancelled')
+  state.status = 'reviewing'
+  await save()
+  return checkMemeQuality(source, services, state, save, options.signal)
 }
