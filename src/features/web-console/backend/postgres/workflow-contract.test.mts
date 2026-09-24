@@ -13,11 +13,21 @@ for (const mode of ['legacy', 'sql'] as const) test(`${mode}: Telegram contacts 
   account(23, { login: 'en@example.invalid', nickname: '@student_en' });
   f.set(t.platforms, 30, { platform: 'phone_en' });
   f.set(t.accounts, 24, { clients_id: 7, platforms_id: 30, login: '+15550100', nickname: 'not-a-phone' });
+  f.set(t.platforms, 25, { platform: 'email_en' });
+  f.set(t.accounts, 25, { clients_id: 7, platforms_id: 25, login: 'student.en@example.invalid' });
+  f.set(t.platforms, 27, { platform: 'email_ru' });
+  f.set(t.accounts, 26, { clients_id: 7, platforms_id: 27, login: 'student.ru@example.invalid' });
+  f.set(t.platforms, 11, { platform: 'hh_ru' });
+  f.set(t.accounts, 27, { clients_id: 7, platforms_id: 11, login: 'hh-login-must-not-be-used', phone: '+79992223344' });
   await repo.getResumeWorkflowByTelegramChatId('-7007', { ensure: true });
   const before = structuredClone(accounts), writes = f.count();
   let workflow = await repo.getResumeWorkflowByTelegramChatId('-7007');
   assert.equal(workflow?.clientTelegramRu, '@student_ru');
   assert.equal(workflow?.clientTelegramEn, '@student_en');
+  assert.equal(workflow?.clientTelegramEnNickname, '@student_en');
+  assert.equal(workflow?.clientEmailEn, 'student.en@example.invalid');
+  assert.equal(workflow?.clientEmailRu, 'student.ru@example.invalid');
+  assert.equal(workflow?.clientHhRuPhone, '+79992223344');
   assert.equal(workflow?.clientTelegramUsername, '@sql_student', 'student authorization identity is unchanged');
   assert.equal(workflow?.clientPhoneEn, '+15550100', 'other platforms retain login-first display');
   const card = await repo.getProviderClientByIdForStatus(7, 'studying');
@@ -28,7 +38,12 @@ for (const mode of ['legacy', 'sql'] as const) test(`${mode}: Telegram contacts 
     workflow = await repo.getResumeWorkflowByTelegramChatId('-7007');
     assert.equal(workflow?.clientTelegramRu, 'ru@example.invalid');
     assert.equal(workflow?.clientTelegramEn, '@student_en');
+    assert.equal(workflow?.clientTelegramEnNickname, '@student_en');
   }
+  account(23, { nickname: '', login: 'telegram-login-must-not-be-used' });
+  workflow = await repo.getResumeWorkflowByTelegramChatId('-7007');
+  assert.equal(workflow?.clientTelegramEn, 'telegram-login-must-not-be-used');
+  assert.equal(workflow?.clientTelegramEnNickname, undefined);
 });
 
 for (const market of ['Ru', 'En']) test(`complete ${market} workflow retains legacy transitions and role rules`, async () => {
