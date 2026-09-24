@@ -16,6 +16,43 @@ const {
   kiraTaskListMessage,
   kiraTaskUnavailableMessage
 } = require('./resume-kira-message-templates.ts')
+const {
+  yuliaInvalidLinkMessage,
+  yuliaLinkNotRequiredMessage,
+  yuliaLinkSavedMessage,
+  yuliaMissingLinkMessage,
+  yuliaMultipleLinkTasksMessage,
+  yuliaNewTaskMessage,
+  yuliaNoClientAccessMessage,
+  yuliaNoLinkTasksMessage,
+  yuliaNoTasksMessage,
+  yuliaReworkMessage,
+  yuliaStaleStatusMessage,
+  yuliaTaskCardMessage,
+  yuliaTaskListMessage,
+  yuliaTaskUnavailableMessage,
+  yuliaWrongActorMessage
+} = require('./resume-provider-message-templates.ts')
+const {
+  polinaInvalidLinkMessage,
+  polinaLinkNotRequiredMessage,
+  polinaLinkSavedMessage,
+  polinaMissingLinkMessage,
+  polinaMultipleLinkTasksMessage,
+  polinaNewTaskMessage,
+  polinaNoClientAccessMessage,
+  polinaNoLinkTasksMessage,
+  polinaNoTasksMessage,
+  polinaProviderOnlyMessage,
+  polinaReworkMessage,
+  polinaStaleStatusMessage,
+  polinaTaskCardMessage,
+  polinaTaskListMessage,
+  polinaTaskUnavailableMessage,
+  polinaUnauthorizedTaskAccountMessage,
+  polinaWorkflowNotFoundMessage,
+  polinaWrongActorMessage
+} = require('./resume-polina-message-templates.ts')
 
 type ResumeStatus =
   | 'stopped'
@@ -63,6 +100,10 @@ type ResumeWorkflowRecord = {
   clientTelegramUsername?: string
   clientTelegramRu?: string
   clientTelegramEn?: string
+  clientTelegramEnNickname?: string
+  clientEmailEn?: string
+  clientEmailRu?: string
+  clientHhRuPhone?: string
   clientPhoneRu?: string
   clientPhoneEn?: string
   clientGoogleFolder?: string
@@ -373,6 +414,27 @@ function isRusTranslatorActor(input: ResumeActorInput | undefined): boolean {
 
 function isMainProviderActor(input: ResumeActorInput | undefined): boolean {
   return envHasId('RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS', input?.userId, DEFAULT_PROVIDER_USER_IDS)
+}
+
+function isYuliaWorkflowActor(actor: ResumeActor, workflow: ResumeWorkflowRecord): boolean {
+  return actor.role === 'provider' && isMainProviderActor(actor) && providerLaneForWorkflow(workflow) === 'main'
+}
+
+function isPolinaWorkflowActor(actor: ResumeActor, workflow: ResumeWorkflowRecord): boolean {
+  return actor.role === 'provider' && isRusTranslatorActor(actor) && providerLaneForWorkflow(workflow) === 'rus_translator'
+}
+
+function providerStageForWorkflow(workflow: ResumeWorkflowRecord): 'draft' | 'en' | 'ru' | null {
+  switch (statusText(workflow)) {
+    case 'Draft in process':
+      return 'draft'
+    case 'English version in progress':
+      return 'en'
+    case 'Russian version in process':
+      return 'ru'
+    default:
+      return null
+  }
 }
 
 function providerLanesForActor(actor: ResumeActor): Set<'main' | 'rus_translator'> {
@@ -741,7 +803,8 @@ function taskActorTitle(actor: ResumeActor): string {
 
 function ensureTaskActor(actor: ResumeActor): void {
   if (actor.role !== 'provider' && actor.role !== 'kira') {
-    throw Object.assign(new Error('Открывать задачи по резюме могут только настроенные Telegram-аккаунты Киры или подрядчика.'), {
+    const message = polinaUnauthorizedTaskAccountMessage()
+    throw Object.assign(new Error(message.text), {
       code: 'forbidden'
     })
   }
@@ -780,14 +843,23 @@ function ensureActorCanAdvance(workflow: ResumeWorkflowRecord, actor: ResumeActo
     throw Object.assign(new Error('Работа над резюме остановлена и требует действия админа.'), { code: 'resume_workflow_stopped' })
   }
   if (actor.role !== required) {
+    if (required === 'provider') {
+      const message = providerLaneForWorkflow(workflow) === 'rus_translator'
+        ? polinaWrongActorMessage()
+        : yuliaWrongActorMessage()
+      throw Object.assign(new Error(message.text), { code: 'forbidden', requiredRole: required, actorRole: actor.role })
+    }
     throw Object.assign(
       new Error(`Этот шаг должен выполнить: ${displayResponsibility(status)}.`),
       { code: 'forbidden', requiredRole: required, actorRole: actor.role }
     )
   }
   if (required === 'provider' && !providerCanAccessWorkflow(workflow, actor)) {
+    const message = providerLaneForWorkflow(workflow) === 'main'
+      ? yuliaNoClientAccessMessage(workflow.clientName)
+      : polinaNoClientAccessMessage(workflow.clientName)
     throw Object.assign(
-      new Error(`Этот аккаунт подрядчика не назначен на ${workflow.clientName}.`),
+      new Error(message?.text ?? `Этот аккаунт подрядчика не назначен на ${workflow.clientName}.`),
       { code: 'forbidden', requiredRole: required, actorRole: actor.role, clientId: workflow.clientId }
     )
   }
@@ -803,6 +875,20 @@ function ensureExpectedStatus(workflow: ResumeWorkflowRecord, expectedStatus?: s
       throw Object.assign(
         new Error(message.text),
         { code: 'resume_workflow_stale_status', parseMode: message.parseMode }
+      )
+    }
+    if (actor?.role === 'provider' && isMainProviderActor(actor)) {
+      const message = yuliaStaleStatusMessage(displayStatus(expected), displayStatus(current))
+      throw Object.assign(
+        new Error(message.text),
+        { code: 'resume_workflow_stale_status', parseMode: message.parseMode }
+      )
+    }
+    if (actor?.role === 'provider' && isRusTranslatorActor(actor)) {
+      const message = polinaStaleStatusMessage(displayStatus(expected), displayStatus(current))
+      throw Object.assign(
+        new Error(message.text),
+        { code: 'resume_workflow_stale_status' }
       )
     }
     throw Object.assign(
@@ -1132,6 +1218,28 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCv
   if (responsible === 'provider') {
     const chatIds = providerNotifyChatIdsForWorkflow(record)
     if (!chatIds.length) return null
+    const providerStage = providerStageForWorkflow(record)
+    if (providerLaneForWorkflow(record) === 'main' && providerStage) {
+      const market = providerStage === 'ru' && isRuOnlyWorkflow(record)
+        ? 'ru'
+        : normalizeText(record.clientMarket) || 'рынок не указан'
+      const message = returnedCvUrl
+        ? yuliaReworkMessage(providerStage, record.clientName, normalizeText(record.lastRejectionComment))
+        : yuliaNewTaskMessage(providerStage, record.clientName, market)
+      return { kind: 'private_provider', chatId: chatIds[0], chatIds, ...message }
+    }
+    if (providerLaneForWorkflow(record) === 'rus_translator') {
+      const market = normalizeText(record.clientMarket) || 'рынок не указан'
+      const message = returnedCvUrl
+        ? polinaReworkMessage({
+            clientName: record.clientName,
+            market,
+            comment: normalizeText(record.lastRejectionComment),
+            enVersionUrl: normalizeText(record.enVersionUrl)
+          })
+        : polinaNewTaskMessage(record.clientName, market)
+      return { kind: 'private_provider', chatId: chatIds[0], chatIds, ...message }
+    }
     const text = privateStaffNotificationText([
       intro,
       action,
@@ -1214,14 +1322,14 @@ function educationDetails(workflow: ResumeWorkflowRecord): string {
   return normalizeText(workflow.education)
 }
 
-function studentInfoMessage(workflow: ResumeWorkflowRecord): string {
+function studentInfoMessage(workflow: ResumeWorkflowRecord, options: { omitPhoneRu?: boolean } = {}): string {
   const education = educationDetails(workflow)
   const rows = [
     workflow.clientMarket ? `Рынок ученика: ${workflow.clientMarket}` : undefined,
     workflow.clientStack ? `Стек: ${workflow.clientStack}` : undefined,
     workflow.clientTelegramRu ? `Telegram RU: ${workflow.clientTelegramRu}` : undefined,
     workflow.clientTelegramEn ? `Telegram EN: ${workflow.clientTelegramEn}` : undefined,
-    workflow.clientPhoneRu ? `Phone RU: ${workflow.clientPhoneRu}` : undefined,
+    !options.omitPhoneRu && workflow.clientPhoneRu ? `Phone RU: ${workflow.clientPhoneRu}` : undefined,
     workflow.clientPhoneEn ? `Phone EN: ${workflow.clientPhoneEn}` : undefined,
     workflow.realLocation ? `Реальная локация: ${workflow.realLocation}` : undefined,
     workflow.desiredLocation ? `Желаемая локация: ${workflow.desiredLocation}` : undefined,
@@ -1262,6 +1370,46 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
   ].filter(Boolean)
 
   return rows.join('\n')
+}
+
+function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
+  const stage = providerStageForWorkflow(workflow)
+  if (!stage) return null
+  const rootFolder = normalizeText(workflow.clientGoogleFolder)
+  const sourceFolder = normalizeText(workflow.studentDataFolderUrl)
+  const showEnContacts = stage === 'draft' && isEnMarketWorkflow(workflow)
+  return yuliaTaskCardMessage(stage, {
+    clientName: workflow.clientName,
+    market: stage === 'ru' && isRuOnlyWorkflow(workflow)
+      ? 'ru'
+      : normalizeText(workflow.clientMarket) || 'рынок не указан',
+    rootFolder,
+    sourceFolder: sourceFolder && sourceFolder !== rootFolder ? sourceFolder : sourceFolder || rootFolder,
+    kirasComments: normalizeText(workflow.kirasComments),
+    draftUrl: normalizeText(workflow.cvDraftUrl),
+    emailEn: showEnContacts ? normalizeText(workflow.clientEmailEn) : '',
+    telegramEn: showEnContacts ? normalizeText(workflow.clientTelegramEnNickname) : '',
+    phoneEn: showEnContacts ? normalizeText(workflow.clientPhoneEn) : '',
+    linkedInUrl: showEnContacts ? normalizeText(workflow.clientLinkedInUrl) : ''
+  })
+}
+
+function polinaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
+  if (providerLaneForWorkflow(workflow) !== 'rus_translator') return null
+  const rootFolder = normalizeText(workflow.clientGoogleFolder)
+  const sourceFolder = normalizeText(workflow.studentDataFolderUrl)
+  return polinaTaskCardMessage({
+    clientName: workflow.clientName,
+    market: normalizeText(workflow.clientMarket) || 'рынок не указан',
+    emailRu: normalizeText(workflow.clientEmailRu),
+    phoneRu: normalizeText(workflow.clientHhRuPhone),
+    studentData: studentInfoMessage(workflow, { omitPhoneRu: true }),
+    rootFolder,
+    sourceFolder: sourceFolder && sourceFolder !== rootFolder ? sourceFolder : undefined,
+    kirasComments: normalizeText(workflow.kirasComments),
+    draftUrl: normalizeText(workflow.cvDraftUrl),
+    enVersionUrl: normalizeText(workflow.enVersionUrl)
+  })
 }
 
 function kiraNewTaskMessageForWorkflow(workflow: ResumeWorkflowRecord) {
@@ -1764,16 +1912,45 @@ async function getProviderTasks(
         })
       : kiraNoTasksMessage()
     : undefined
+  const yuliaMessage = actor.role === 'provider' && isMainProviderActor(actor)
+    ? tasks.length
+      ? yuliaTaskListMessage({
+          from: page.offset + 1,
+          to: page.offset + page.visibleWorkflows.length,
+          total: workflows.length,
+          tasks: page.visibleWorkflows.map(workflow => ({
+            clientName: workflow.clientName,
+            market: normalizeText(workflow.clientMarket) || 'рынок не указан',
+            status: displayStatus(statusText(workflow)),
+            action: compactTaskAction(workflow)
+          }))
+        })
+      : yuliaNoTasksMessage()
+    : undefined
+  const polinaMessage = actor.role === 'provider' && isRusTranslatorActor(actor)
+    ? tasks.length
+      ? polinaTaskListMessage({
+          from: page.offset + 1,
+          to: page.offset + page.visibleWorkflows.length,
+          total: workflows.length,
+          tasks: page.visibleWorkflows.map(workflow => ({
+            clientName: workflow.clientName,
+            market: normalizeText(workflow.clientMarket) || 'рынок не указан'
+          }))
+        })
+      : polinaNoTasksMessage()
+    : undefined
+  const staffMessage = kiraMessage ?? yuliaMessage ?? polinaMessage
 
   return {
     actor,
     tasks,
     offset: page.offset,
     total: workflows.length,
-    message: kiraMessage?.text ?? (tasks.length
+    message: staffMessage?.text ?? (tasks.length
       ? page.message
       : `Сейчас нет ожидающих задач ${title} по резюме.`),
-    parseMode: kiraMessage?.parseMode,
+    parseMode: staffMessage?.parseMode,
     replyMarkup: tasks.length ? taskListReplyMarkup(tasks, page.offset, workflows.length) : undefined
   }
 }
@@ -1787,22 +1964,38 @@ async function getProviderTaskById(workflowId: number, repository: ResumeWorkflo
   const workflow = await repository.getResumeWorkflowById(workflowId)
   if (!workflow || !actorCanAccessTaskWorkflow(workflow, actor)) {
     const kiraMessage = actor.role === 'kira' ? kiraTaskUnavailableMessage() : undefined
+    const yuliaMessage = actor.role === 'provider' && isMainProviderActor(actor)
+      ? workflow && providerLaneForWorkflow(workflow) === 'main' && !providerCanAccessWorkflow(workflow, actor)
+        ? yuliaNoClientAccessMessage(workflow.clientName)
+        : yuliaTaskUnavailableMessage()
+      : undefined
+    const polinaMessage = actor.role === 'provider' && isRusTranslatorActor(actor)
+      ? !workflow
+        ? polinaWorkflowNotFoundMessage()
+        : providerLaneForWorkflow(workflow) === 'rus_translator' && !providerCanAccessWorkflow(workflow, actor)
+          ? polinaNoClientAccessMessage(workflow.clientName)
+          : polinaTaskUnavailableMessage()
+      : undefined
+    const staffMessage = kiraMessage ?? yuliaMessage ?? polinaMessage
     return {
       actor,
       tasks: [],
-      message: kiraMessage?.text ?? 'Эта задача по резюме больше недоступна. Обнови список задач.',
-      parseMode: kiraMessage?.parseMode
+      message: staffMessage?.text ?? 'Эта задача по резюме больше недоступна. Обнови список задач.',
+      parseMode: staffMessage?.parseMode
     }
   }
 
   const kiraMessage = actor.role === 'kira' ? kiraNewTaskMessageForWorkflow(workflow) : undefined
+  const yuliaMessage = isYuliaWorkflowActor(actor, workflow) ? yuliaTaskCardForWorkflow(workflow) : undefined
+  const polinaMessage = isPolinaWorkflowActor(actor, workflow) ? polinaTaskCardForWorkflow(workflow) : undefined
+  const staffMessage = kiraMessage ?? yuliaMessage ?? polinaMessage
 
   return {
     actor,
     workflow,
     tasks: [providerTaskFromWorkflow(workflow)],
-    message: kiraMessage?.text ?? providerTaskMessage(workflow),
-    parseMode: kiraMessage?.parseMode,
+    message: staffMessage?.text ?? providerTaskMessage(workflow),
+    parseMode: staffMessage?.parseMode,
     replyMarkup: taskReplyMarkup(workflow)
   }
 }
@@ -1950,24 +2143,38 @@ async function saveProviderLinkToWorkflow(
   expectedStatus = ''
 ): Promise<ResumeTaskInputResult> {
   const currentStatus = statusText(workflow)
+  const yuliaStage = isYuliaWorkflowActor(actor, workflow) ? providerStageForWorkflow(workflow) : null
+  const polinaWorkflow = isPolinaWorkflowActor(actor, workflow)
   if (expectedStatus && currentStatus !== expectedStatus) {
+    const message = actor.role === 'provider' && isMainProviderActor(actor)
+      ? yuliaStaleStatusMessage(displayStatus(expectedStatus), displayStatus(currentStatus))
+      : actor.role === 'provider' && isRusTranslatorActor(actor)
+        ? polinaStaleStatusMessage(displayStatus(expectedStatus), displayStatus(currentStatus))
+        : undefined
     return {
       actor,
       workflow,
       tasks: [providerTaskFromWorkflow(workflow)],
       clearActiveTask: true,
-      message: `Статус резюме изменился с «${displayStatus(expectedStatus)}» на «${displayStatus(currentStatus)}». Обнови задачи и открой нужную задачу снова.`
+      message: message?.text ?? `Статус резюме изменился с «${displayStatus(expectedStatus)}» на «${displayStatus(currentStatus)}». Обнови задачи и открой нужную задачу снова.`,
+      parseMode: message?.parseMode
     }
   }
 
   const requirement = providerLinkRequirement(workflow)
   if (!requirement) {
+    const message = actor.role === 'provider' && isMainProviderActor(actor)
+      ? yuliaLinkNotRequiredMessage()
+      : actor.role === 'provider' && isRusTranslatorActor(actor)
+        ? polinaLinkNotRequiredMessage()
+        : undefined
     return {
       actor,
       workflow,
       tasks: [providerTaskFromWorkflow(workflow)],
       clearActiveTask: true,
-      message: 'Эта задача больше не ожидает ссылку от подрядчика. Обнови задачи и открой нужную задачу снова.'
+      message: message?.text ?? 'Эта задача больше не ожидает ссылку от подрядчика. Обнови задачи и открой нужную задачу снова.',
+      parseMode: message?.parseMode
     }
   }
 
@@ -1977,16 +2184,26 @@ async function saveProviderLinkToWorkflow(
     workflowTrace: appendTrace(workflow, requirement.trace, actor)
   })
 
+  const message = yuliaStage
+    ? yuliaLinkSavedMessage(yuliaStage, updated.clientName)
+    : polinaWorkflow
+      ? polinaLinkSavedMessage(
+          updated.clientName,
+          normalizeText(updated.clientMarket) || 'рынок не указан',
+          updated.ruVersionUrl
+        )
+      : undefined
   return {
     actor,
     workflow: updated,
     tasks: [providerTaskFromWorkflow(updated)],
-    message: [
+    message: message?.text ?? [
       `${requirement.label} для ${updated.clientName} сохранена.`,
       'Ссылка сохранена в задаче. Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу».',
       '',
       providerTaskMessage(updated)
     ].join('\n'),
+    parseMode: message?.parseMode,
     replyMarkup: taskReplyMarkup(updated)
   }
 }
@@ -2000,16 +2217,34 @@ async function saveProviderLinkFromChat(
   const actor = resolveGlobalActor(actorInput)
   ensureTaskActor(actor)
   if (actor.role !== 'provider') {
-    throw Object.assign(new Error('Добавлять ссылки на резюме из чата может только подрядчик.'), { code: 'forbidden' })
+    const message = polinaProviderOnlyMessage()
+    throw Object.assign(new Error(message.text), { code: 'forbidden' })
   }
   if (!repository.getProviderResumeTasks) {
     throw new Error('Repository does not support provider resume tasks.')
   }
 
-  const url = normalizeOptionalUrl(link)
-  if (!url) {
+  const rawLink = normalizeText(link)
+  if (!rawLink) {
+    if (isMainProviderActor(actor)) {
+      const message = yuliaMissingLinkMessage()
+      return { actor, tasks: [], message: message.text, parseMode: message.parseMode }
+    }
+    if (isRusTranslatorActor(actor)) {
+      const message = polinaMissingLinkMessage()
+      return { actor, tasks: [], message: message.text }
+    }
     throw Object.assign(new Error('Нужно отправить ссылку на резюме.'), { code: 'missing_provider_resume_link' })
   }
+  if (!/^https?:\/\//i.test(rawLink)) {
+    const message = isMainProviderActor(actor)
+      ? yuliaInvalidLinkMessage()
+      : isRusTranslatorActor(actor)
+        ? polinaInvalidLinkMessage()
+        : undefined
+    if (message) return { actor, tasks: [], message: message.text, parseMode: message.parseMode }
+  }
+  const url = normalizeOptionalUrl(rawLink)
 
   if (options.workflowId) {
     if (!repository.getResumeWorkflowById) {
@@ -2017,11 +2252,23 @@ async function saveProviderLinkFromChat(
     }
     const workflow = await repository.getResumeWorkflowById(options.workflowId)
     if (!workflow || !actorCanAccessTaskWorkflow(workflow, actor)) {
+      const message = isMainProviderActor(actor)
+        ? workflow && providerLaneForWorkflow(workflow) === 'main' && !providerCanAccessWorkflow(workflow, actor)
+          ? yuliaNoClientAccessMessage(workflow.clientName)
+          : yuliaTaskUnavailableMessage()
+        : isRusTranslatorActor(actor)
+          ? workflow && providerLaneForWorkflow(workflow) === 'rus_translator' && !providerCanAccessWorkflow(workflow, actor)
+            ? polinaNoClientAccessMessage(workflow.clientName)
+            : workflow
+              ? polinaTaskUnavailableMessage()
+              : polinaWorkflowNotFoundMessage()
+          : undefined
       return {
         actor,
         tasks: [],
         clearActiveTask: true,
-        message: 'Эта задача по резюме больше недоступна. Обнови список задач и открой нужную задачу снова.'
+        message: message?.text ?? 'Эта задача по резюме больше недоступна. Обнови список задач и открой нужную задачу снова.',
+        parseMode: message?.parseMode
       }
     }
     return await saveProviderLinkToWorkflow(repository, actor, workflow, url, normalizeText(options.expectedStatus))
@@ -2032,18 +2279,30 @@ async function saveProviderLinkFromChat(
     .filter(workflow => providerLinkRequirement(workflow))
 
   if (!linkTasks.length) {
+    const message = isMainProviderActor(actor)
+      ? yuliaNoLinkTasksMessage()
+      : isRusTranslatorActor(actor)
+        ? polinaNoLinkTasksMessage()
+        : undefined
     return {
       actor,
       tasks: [],
-      message: 'Сейчас нет задачи подрядчика, которая ожидает ссылку.'
+      message: message?.text ?? 'Сейчас нет задачи подрядчика, которая ожидает ссылку.',
+      parseMode: message?.parseMode
     }
   }
 
   if (linkTasks.length > 1) {
+    const message = isMainProviderActor(actor)
+      ? yuliaMultipleLinkTasksMessage()
+      : isRusTranslatorActor(actor)
+        ? polinaMultipleLinkTasksMessage()
+        : undefined
     return {
       actor,
       tasks: linkTasks.map(providerTaskFromWorkflow),
-      message: 'Сейчас несколько задач подрядчика ожидают ссылку. Сначала открой конкретную задачу.',
+      message: message?.text ?? 'Сейчас несколько задач подрядчика ожидают ссылку. Сначала открой конкретную задачу.',
+      parseMode: message?.parseMode,
       replyMarkup: taskListReplyMarkup(linkTasks.map(providerTaskFromWorkflow))
     }
   }

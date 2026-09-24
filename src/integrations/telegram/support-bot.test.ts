@@ -64,6 +64,8 @@ const {
   saveProviderLinkFromChat(repository: any, actor?: any, link?: string, options?: any): Promise<any>
 }
 const kiraTemplates = require('./resume-kira-message-templates.ts') as Record<string, (...args: any[]) => any>
+const yuliaTemplates = require('./resume-provider-message-templates.ts') as Record<string, (...args: any[]) => any>
+const polinaTemplates = require('./resume-polina-message-templates.ts') as Record<string, (...args: any[]) => any>
 
 const studentActor = {
   userId: '100',
@@ -92,6 +94,8 @@ const ruTranslatorActor = {
 
 const PRIVATE_STAFF_TASKS_FOOTER = 'Открыть все задачи /open_my_tasks'
 const KIRA_TASKS_FOOTER = 'Все задачи: /open_my_tasks'
+const YULIA_TASKS_FOOTER = 'Все задачи: /open_my_tasks'
+const POLINA_TASKS_FOOTER = 'Все задачи /open_my_tasks'
 
 function assertPrivateStaffTasksFooter(text: string): void {
   assert.equal(text.endsWith(`\n${PRIVATE_STAFF_TASKS_FOOTER}`), true)
@@ -276,6 +280,215 @@ function testKiraMessageTemplateContract(): void {
   ].join('\n'))
 }
 
+function assertYuliaTemplate(actual: any, expectedText: string, html = true): void {
+  assert.deepEqual(actual, html ? { text: expectedText, parseMode: 'HTML' } : { text: expectedText })
+}
+
+function testYuliaMessageTemplateContract(): void {
+  assertYuliaTemplate(yuliaTemplates.yuliaNewTaskMessage('draft', 'Анна & Ко', 'EN'), [
+    'Юля, резюме для Анна &amp; Ко [EN] перешло на этап «черновик в работе».',
+    'Подготовь, пожалуйста, черновик CV.',
+    'Открой /open_my_tasks, чтобы взять задачу в работу.'
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaNewTaskMessage('en', 'Анна', 'EN'), [
+    'Юля, резюме для Анна [EN] перешло на этап «английская версия в работе».',
+    'Подготовь, пожалуйста, EN-версию.',
+    'Открой /open_my_tasks, чтобы взять задачу в работу.'
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaNewTaskMessage('ru', 'Анна', 'ru'), [
+    'Юля, резюме для Анна [ru] перешло на этап «русская версия в работе».',
+    'Подготовь, пожалуйста, RU-версию.',
+    'Открой /open_my_tasks, чтобы взять задачу в работу.'
+  ].join('\n'))
+
+  assertYuliaTemplate(yuliaTemplates.yuliaTaskCardMessage('draft', {
+    clientName: 'Анна', market: 'EN', rootFolder: 'https://drive.test/root?a=1&b=2',
+    sourceFolder: 'https://drive.test/source', kirasComments: 'Добавить <опыт>',
+    emailEn: 'anna&work@example.com', telegramEn: '@anna<en>', phoneEn: '+1 555 0100',
+    linkedInUrl: 'https://linkedin.com/in/anna?a=1&b=2'
+  }), [
+    '<b>Черновик резюме</b>',
+    'Студент: Анна',
+    'Рынок: EN',
+    'Статус: черновик в работе',
+    'Email EN: anna&amp;work@example.com',
+    'Telegram EN: @anna&lt;en&gt;',
+    'Phone EN: +1 555 0100',
+    'LinkedIn: https://linkedin.com/in/anna?a=1&amp;b=2',
+    'Корневая папка: https://drive.test/root?a=1&amp;b=2',
+    'Исходные данные: https://drive.test/source',
+    'Комментарии Киры: Добавить &lt;опыт&gt;',
+    'Отправь ссылку на черновик следующим сообщением — я прикреплю её к этой задаче.',
+    YULIA_TASKS_FOOTER
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaTaskCardMessage('en', {
+    clientName: 'Анна', market: 'EN', draftUrl: 'https://docs.test/draft',
+    emailEn: 'must-not-appear@example.com', telegramEn: '@must_not_appear',
+    phoneEn: '+1 000', linkedInUrl: 'https://linkedin.com/in/must-not-appear'
+  }), [
+    '<b>Английская версия</b>',
+    'Студент: Анна',
+    'Рынок: EN',
+    'Статус: английская версия в работе',
+    'Черновик: https://docs.test/draft',
+    'Отправь ссылку на EN-версию следующим сообщением — я прикреплю её к этой задаче.',
+    YULIA_TASKS_FOOTER
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaTaskCardMessage('ru', {
+    clientName: 'Анна', market: 'ru', draftUrl: 'https://docs.test/draft'
+  }), [
+    '<b>Русская версия</b>',
+    'Студент: Анна',
+    'Рынок: ru',
+    'Статус: русская версия в работе',
+    'Черновик: https://docs.test/draft',
+    'Отправь ссылку на RU-версию следующим сообщением — я прикреплю её к этой задаче.',
+    YULIA_TASKS_FOOTER
+  ].join('\n'))
+
+  const savedSubjects = [
+    ['draft', 'Черновик для Анна записан.'],
+    ['en', 'Английская версия для Анна записана.'],
+    ['ru', 'Русская версия для Анна записана.']
+  ]
+  for (const [stage, subject] of savedSubjects) {
+    assertYuliaTemplate(yuliaTemplates.yuliaLinkSavedMessage(stage, 'Анна'), [
+      '<b>Ссылка сохранена!</b>',
+      `${subject} Чтобы передать задачу дальше, нажми «Перейти к следующему шагу».`,
+      YULIA_TASKS_FOOTER
+    ].join('\n'))
+  }
+
+  const reworkScenarios = [
+    ['draft', 'Черновик отправлен на доработку', 'Ждем новую ссылку на черновик следующим сообщением.'],
+    ['en', 'EN-версия отправлена на доработку', 'Отправь обновленную ссылку на EN-версию следующим сообщением.'],
+    ['ru', 'RU-версия отправлена на доработку', 'Отправь обновленную ссылку на RU-версию следующим сообщением.']
+  ]
+  for (const [stage, heading, hint] of reworkScenarios) {
+    assertYuliaTemplate(yuliaTemplates.yuliaReworkMessage(stage, 'Анна', 'Исправить <опыт>'), [
+      `<b>${heading}</b>`,
+      'Студент: Анна',
+      'Комментарий: Исправить &lt;опыт&gt;',
+      hint,
+      YULIA_TASKS_FOOTER
+    ].join('\n'))
+  }
+
+  assertYuliaTemplate(yuliaTemplates.yuliaTaskListMessage({
+    from: 1, to: 2, total: 2,
+    tasks: [
+      { clientName: 'Анна', market: 'EN', status: 'черновик в работе', action: 'отправь ссылку на черновик' },
+      { clientName: 'Борис', market: 'Ru', status: 'английская версия в работе', action: 'отправь ссылку на EN' }
+    ]
+  }), [
+    '<b>Твои задачи по резюме (1–2 из 2):</b>',
+    'Анна [EN] — черновик в работе; отправь ссылку на черновик',
+    'Борис [Ru] — английская версия в работе; отправь ссылку на EN',
+    YULIA_TASKS_FOOTER
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaNoTasksMessage(), [
+    '<b>Все чисто!</b>', 'Сейчас нет активных задач по резюме.', YULIA_TASKS_FOOTER
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaMultipleLinkTasksMessage(), [
+    '<b>Выбери конкретную задачу</b>',
+    'Сразу несколько задач ждут ссылку. Открой нужную задачу из списка, чтобы прикрепить ссылку.',
+    YULIA_TASKS_FOOTER
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaTaskUnavailableMessage(), [
+    '<b>Задача недоступна</b>',
+    'Эта задача по резюме уже закрыта или перенесена. Обнови список задач: /open_my_tasks'
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaStaleStatusMessage('старый', 'новый'), [
+    '<b>Статус задачи обновился</b>',
+    'Был: «старый» ➔ Стал: «новый».',
+    'Обнови список и открой задачу заново: /open_my_tasks'
+  ].join('\n'))
+  assertYuliaTemplate(yuliaTemplates.yuliaNoLinkTasksMessage(), `Сейчас нет задач, ожидающих ссылку.\n${YULIA_TASKS_FOOTER}`, false)
+  assertYuliaTemplate(yuliaTemplates.yuliaLinkNotRequiredMessage(), 'Эта задача больше не ждет ссылку. Обнови список задач: /open_my_tasks', false)
+  assertYuliaTemplate(yuliaTemplates.yuliaMissingLinkMessage(), `Пожалуйста, отправь ссылку на резюме.\n${YULIA_TASKS_FOOTER}`, false)
+  assertYuliaTemplate(yuliaTemplates.yuliaInvalidLinkMessage(), `Кажется, ссылка некорректная. Пожалуйста, отправь прямую ссылку на документ резюме.\n${YULIA_TASKS_FOOTER}`, false)
+  assertYuliaTemplate(yuliaTemplates.yuliaWrongActorMessage(), `Этот шаг должен выполнить подрядчик.\n${YULIA_TASKS_FOOTER}`, false)
+  assertYuliaTemplate(yuliaTemplates.yuliaNoClientAccessMessage('Анна'), `У твоего аккаунта нет доступа к студенту Анна.\n${YULIA_TASKS_FOOTER}`, false)
+}
+
+function assertPolinaTemplate(actual: any, rows: string[]): void {
+  assert.deepEqual(actual, { text: [...rows, '', POLINA_TASKS_FOOTER].join('\n') })
+}
+
+function testPolinaMessageTemplateContract(): void {
+  assertPolinaTemplate(polinaTemplates.polinaNewTaskMessage('Анна', 'EN'), [
+    'Полина, резюме для Анна (EN) перешло в статус «русская версия в работе».',
+    'Что нужно сделать: подготовь русскую версию резюме.',
+    'Введи /open_my_tasks, чтобы взять задачу в работу.'
+  ])
+  assertPolinaTemplate(polinaTemplates.polinaTaskCardMessage({
+    clientName: 'Анна', market: 'EN', studentData: 'Данные ученика:\nСтек: Python',
+    emailRu: 'anna.ru@example.com', phoneRu: '+7 999 111 2233',
+    rootFolder: 'https://drive.test/root', sourceFolder: 'https://drive.test/source',
+    kirasComments: 'Уточнить опыт', draftUrl: 'https://docs.test/draft', enVersionUrl: 'https://docs.test/en'
+  }), [
+    'Ученик: Анна', 'Рынок: EN', 'Статус: русская версия в работе',
+    'Email RU: anna.ru@example.com', 'Phone RU: +7 999 111 2233',
+    'Данные ученика:\nСтек: Python', 'Основная папка в Google: https://drive.test/root',
+    'Папка с исходниками: https://drive.test/source', 'Комментарии Киры: Уточнить опыт',
+    'Черновик: https://docs.test/draft', 'EN: https://docs.test/en',
+    'Пришли ссылку на русскую версию следующим сообщением.',
+    'Я прикреплю её прямо к этой задаче.'
+  ])
+  assertPolinaTemplate(polinaTemplates.polinaTaskCardMessage({ clientName: 'Анна', market: 'EN' }), [
+    'Ученик: Анна', 'Рынок: EN', 'Статус: русская версия в работе',
+    'Пришли ссылку на русскую версию следующим сообщением.',
+    'Я прикреплю её прямо к этой задаче.'
+  ])
+  assertPolinaTemplate(polinaTemplates.polinaReworkMessage({
+    clientName: 'Анна', market: 'EN', comment: 'Исправить опыт', enVersionUrl: 'https://docs.test/en'
+  }), [
+    'Полина, резюме для Анна (EN) снова в статусе «русская версия в работе».',
+    'Что нужно сделать: доработай русскую версию резюме.',
+    'Открой /open_my_tasks, чтобы посмотреть детали задачи.',
+    'Ученик: Анна', 'Рынок: EN', 'Статус: русская версия в работе',
+    'Причина возврата: Исправить опыт', 'EN: https://docs.test/en',
+    'Пришли новую ссылку на русскую версию следующим сообщением.',
+    'Я сразу привяжу её к этой задаче.'
+  ])
+  assertPolinaTemplate(polinaTemplates.polinaLinkSavedMessage('Анна', 'EN', 'https://docs.test/ru'), [
+    'Ссылка на русскую версию для Анна успешно сохранена.',
+    'Она прикреплена к задаче. Чтобы передать работу дальше, нажми «Перейти к следующему шагу».',
+    'Ученик: Анна', 'Маркет: EN', 'Статус: русская версия в работе', 'RU: https://docs.test/ru'
+  ])
+  assertPolinaTemplate(polinaTemplates.polinaTaskListMessage({
+    from: 1, to: 2, total: 2,
+    tasks: [{ clientName: 'Анна', market: 'EN' }, { clientName: 'Борис', market: 'both' }]
+  }), [
+    'Задачи подрядчика по резюме: показы 1–2 из 2',
+    '1. Анна [EN] — русская версия в работе (ожидается ссылка на RU)',
+    '2. Борис [both] — русская версия в работе (ожидается ссылка на RU)'
+  ])
+
+  const singleRowCases = [
+    ['polinaNoTasksMessage', 'У тебя пока нет активных задач по резюме.'],
+    ['polinaMultipleLinkTasksMessage', 'Сейчас сразу несколько задач ждут ссылку. Пожалуйста, сначала выбери и открой нужную карточку.'],
+    ['polinaNoLinkTasksMessage', 'Сейчас нет задач, ждущих ссылку.'],
+    ['polinaTaskUnavailableMessage', 'Эта задача больше недоступна. Обнови список и зайди в неё снова.'],
+    ['polinaLinkNotRequiredMessage', 'Для этой задачи ссылка больше не нужна. Обнови список задач, чтобы увидеть актуальный статус.'],
+    ['polinaMissingLinkMessage', 'Пожалуйста, прикрепи ссылку на резюме.'],
+    ['polinaInvalidLinkMessage', 'Пожалуйста, отправь рабочую ссылку на документ резюме.'],
+    ['polinaWrongActorMessage', 'Этот шаг находится в твоей зоне ответственности.'],
+    ['polinaProviderOnlyMessage', 'Добавлять ссылки на резюме прямо из чата входит в обязанности исполнителя.'],
+    ['polinaUnauthorizedTaskAccountMessage', 'Просматривать задачи по резюме могут только авторизованные Telegram-аккаунты Киры или подрядчика.'],
+    ['polinaWorkflowNotFoundMessage', 'Не удалось найти процесс (workflow) по этому резюме.']
+  ]
+  for (const [functionName, expected] of singleRowCases) {
+    assertPolinaTemplate(polinaTemplates[functionName](), [expected])
+  }
+  assertPolinaTemplate(polinaTemplates.polinaStaleStatusMessage('старый', 'новый'), [
+    'Статус резюме изменился: был «старый», стал «новый». Пожалуйста, обнови список и открой карточку заново.'
+  ])
+  assertPolinaTemplate(polinaTemplates.polinaNoClientAccessMessage('Анна'), [
+    'Этот аккаунт подрядчика не привязан к ученику Анна.'
+  ])
+}
+
 function makeWorkflow(overrides: Record<string, any> = {}) {
   return {
     id: 98,
@@ -286,6 +499,10 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     clientTelegramUsername: '@student_user',
     clientTelegramRu: '@student_ru',
     clientTelegramEn: '@student_en',
+    clientTelegramEnNickname: '@student_en',
+    clientEmailEn: 'student.en@example.com',
+    clientEmailRu: 'student.ru@example.com',
+    clientHhRuPhone: '+7 999 222 3344',
     clientPhoneRu: '+7 999 000 1122',
     clientPhoneEn: '+1 555 0100',
     commonChatId: '-5216637594',
@@ -371,6 +588,8 @@ function makeWorkflowListRepository(workflowRecords: any[]) {
 
 async function runTests() {
   testKiraMessageTemplateContract()
+  testYuliaMessageTemplateContract()
+  testPolinaMessageTemplateContract()
   clearActiveTaskContextsForTest()
   assert.equal(commandName('/student@veu_support_bot hello'), '/student')
   assert.equal(commandArgument('/change_google_folder https://drive.google.com/drive/folders/abc'), 'https://drive.google.com/drive/folders/abc')
@@ -1342,6 +1561,10 @@ async function runTests() {
     }))
     const missingDraftTask = await getProviderTaskById(98, missingDraftRepository, providerActor)
     assert.match(missingDraftTask.message, /Отправь ссылку на черновик следующим сообщением/)
+    assert.match(missingDraftTask.message, /Email EN: student\.en@example\.com/)
+    assert.match(missingDraftTask.message, /Telegram EN: @student_en/)
+    assert.match(missingDraftTask.message, /Phone EN: \+1 555 0100/)
+    assert.match(missingDraftTask.message, /LinkedIn: https:\/\/linkedin\.com\/in\/student-user/)
     assert.deepEqual(
       missingDraftTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Назад к задачам']
@@ -1351,14 +1574,45 @@ async function runTests() {
     assert.deepEqual(missingDraftResult.transitions, [])
     assert.equal(missingDraftRepository.workflowRecord.cvDraftUrl, '')
 
+    const loginOnlyTelegramTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in process',
+      clientTelegramEn: '@login_must_not_appear',
+      clientTelegramEnNickname: ''
+    })), providerActor)
+    assert.doesNotMatch(loginOnlyTelegramTask.message, /Telegram EN:/)
+    assert.doesNotMatch(loginOnlyTelegramTask.message, /login_must_not_appear/)
+
+    const emptyEnContactsTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in process',
+      clientEmailEn: '',
+      clientTelegramEnNickname: '',
+      clientPhoneEn: '',
+      clientLinkedInUrl: ''
+    })), providerActor)
+    assert.doesNotMatch(emptyEnContactsTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+
+    const bothMarketDraftTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in process',
+      clientMarket: 'both'
+    })), providerActor)
+    assert.match(bothMarketDraftTask.message, /Email EN: student\.en@example\.com/)
+    assert.match(bothMarketDraftTask.message, /Telegram EN: @student_en/)
+
+    const ruOnlyDraftTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in process',
+      clientMarket: 'Ru'
+    })), providerActor)
+    assert.doesNotMatch(ruOnlyDraftTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+
     const savedProviderDraftResult = await saveProviderLinkFromChat(
       missingDraftRepository,
       providerActor,
       'https://drive.google.com/drive/folders/draft-from-provider'
     )
     assert.equal(missingDraftRepository.workflowRecord.cvDraftUrl, 'https://drive.google.com/drive/folders/draft-from-provider')
-    assert.match(savedProviderDraftResult.message, /Ссылка на черновик для Test сохранена/)
-    assert.match(savedProviderDraftResult.message, /Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу»/)
+    assert.match(savedProviderDraftResult.message, /<b>Ссылка сохранена!<\/b>/)
+    assert.match(savedProviderDraftResult.message, /Черновик для Test записан\. Чтобы передать задачу дальше, нажми «Перейти к следующему шагу»/)
+    assert.equal(savedProviderDraftResult.parseMode, 'HTML')
     assert.deepEqual(
       savedProviderDraftResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Перейти к следующему шагу', 'Назад к задачам']
@@ -1371,15 +1625,17 @@ async function runTests() {
       cvDraftUrl: 'https://drive.google.com/drive/folders/draft-from-provider'
     }))
     const missingEnglishTask = await getProviderTaskById(98, missingEnglishVersionRepository, providerActor)
-    assert.match(missingEnglishTask.message, /Отправь ссылку на английскую версию следующим сообщением/)
+    assert.match(missingEnglishTask.message, /Отправь ссылку на EN-версию следующим сообщением/)
+    assert.doesNotMatch(missingEnglishTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
     const savedProviderEnglishResult = await saveProviderLinkFromChat(
       missingEnglishVersionRepository,
       providerActor,
       'https://drive.google.com/drive/folders/cv-eng-from-provider'
     )
     assert.equal(missingEnglishVersionRepository.workflowRecord.enVersionUrl, 'https://drive.google.com/drive/folders/cv-eng-from-provider')
-    assert.match(savedProviderEnglishResult.message, /Ссылка на английскую версию для Test сохранена/)
-    assert.match(savedProviderEnglishResult.message, /Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу»/)
+    assert.match(savedProviderEnglishResult.message, /<b>Ссылка сохранена!<\/b>/)
+    assert.match(savedProviderEnglishResult.message, /Английская версия для Test записана\. Чтобы передать задачу дальше, нажми «Перейти к следующему шагу»/)
+    assert.equal(savedProviderEnglishResult.parseMode, 'HTML')
     assert.deepEqual(
       savedProviderEnglishResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Перейти к следующему шагу', 'Назад к задачам']
@@ -1394,9 +1650,13 @@ async function runTests() {
     }))
     const unavailableRussianTaskForMainProvider = await getProviderTaskById(98, missingRussianVersionRepository, providerActor)
     assert.equal(unavailableRussianTaskForMainProvider.workflow, undefined)
-    assert.match(unavailableRussianTaskForMainProvider.message, /больше недоступна/)
+    assert.match(unavailableRussianTaskForMainProvider.message, /<b>Задача недоступна<\/b>/)
     const missingRussianTask = await getProviderTaskById(98, missingRussianVersionRepository, ruTranslatorActor)
-    assert.match(missingRussianTask.message, /Отправь ссылку на русскую версию следующим сообщением/)
+    assert.match(missingRussianTask.message, /Пришли ссылку на русскую версию следующим сообщением/)
+    assert.match(missingRussianTask.message, /Email RU: student\.ru@example\.com/)
+    assert.match(missingRussianTask.message, /Phone RU: \+7 999 222 3344/)
+    assert.doesNotMatch(missingRussianTask.message, /Phone RU: \+7 999 000 1122/)
+    assert.equal(missingRussianTask.message.split('Phone RU:').length - 1, 1)
     const wrongProviderRussianSave = await saveProviderLinkFromChat(
       missingRussianVersionRepository,
       providerActor,
@@ -1411,8 +1671,9 @@ async function runTests() {
       'https://drive.google.com/drive/folders/cv-ru-from-provider'
     )
     assert.equal(missingRussianVersionRepository.workflowRecord.ruVersionUrl, 'https://drive.google.com/drive/folders/cv-ru-from-provider')
-    assert.match(savedProviderRussianResult.message, /Ссылка на русскую версию для Test сохранена/)
-    assert.match(savedProviderRussianResult.message, /Чтобы передать её дальше, нажми кнопку «Перейти к следующему шагу»/)
+    assert.match(savedProviderRussianResult.message, /Ссылка на русскую версию для Test успешно сохранена/)
+    assert.match(savedProviderRussianResult.message, /Чтобы передать работу дальше, нажми «Перейти к следующему шагу»/)
+    assert.equal(savedProviderRussianResult.message.endsWith(`\n${POLINA_TASKS_FOOTER}`), true)
     assert.deepEqual(
       savedProviderRussianResult.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Перейти к следующему шагу', 'Назад к задачам']
@@ -1664,8 +1925,11 @@ async function runTests() {
     assert.deepEqual(studentRejectResult.transitions, ['Draft in approve by student -> Draft in process'])
     assert.equal(studentRejectResult.notifications.some((notification: any) => notification.kind === 'private_provider'), true)
     assert.ok(studentRejectResult.message.includes('Возвращённое резюме: https://docs.google.com/document/d/test-draft'))
-    assert.ok(studentRejectResult.notifications.find((n: any) => n.kind === 'private_provider').text
-      .includes('Возвращённое резюме: https://docs.google.com/document/d/test-draft'))
+    const yuliaReworkNotification = studentRejectResult.notifications.find((n: any) => n.kind === 'private_provider')
+    assert.match(yuliaReworkNotification.text, /^<b>Черновик отправлен на доработку<\/b>/)
+    assert.match(yuliaReworkNotification.text, /Комментарий: оставил комменты в резюме/)
+    assert.equal(yuliaReworkNotification.parseMode, 'HTML')
+    assert.equal(yuliaReworkNotification.text.endsWith(`\n${YULIA_TASKS_FOOTER}`), true)
 
     const longComment = 'Нужно исправить формат, опыт и короткое саммари.'
     const kiraRejectRepository = makeWorkflowRepository(makeWorkflow({
@@ -1760,25 +2024,19 @@ async function runTests() {
           if (step.notification === 'private_provider') {
             if (step.after === 'Russian version in process') {
               assert.match(notification.text, /^Полина, резюме/)
+              assert.match(notification.text, /Что нужно сделать: подготовь русскую версию резюме\./)
+              assert.equal(notification.text.endsWith(`\n${POLINA_TASKS_FOOTER}`), true)
             } else {
               assert.match(notification.text, /^Юля, резюме/)
+              assert.equal(notification.parseMode, 'HTML')
+              assert.doesNotMatch(notification.text, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+              assert.match(notification.text, /Открой \/open_my_tasks, чтобы взять задачу в работу\.$/)
+              if (step.after === 'Draft in process') {
+                assert.match(notification.text, /Подготовь, пожалуйста, черновик CV\./)
+              } else {
+                assert.match(notification.text, /Подготовь, пожалуйста, EN-версию\./)
+              }
             }
-            assertPrivateStaffTasksFooter(notification.text)
-            assert.match(notification.text, /Ученик: Test/)
-            assert.match(notification.text, /Данные ученика:/)
-            assert.match(notification.text, /Рынок ученика: EN/)
-            assert.match(notification.text, /Стек: Python/)
-            assert.match(notification.text, /Telegram RU: @student_ru/)
-            assert.match(notification.text, /Telegram EN: @student_en/)
-            assert.match(notification.text, /Phone RU: \+7 999 000 1122/)
-            assert.match(notification.text, /Phone EN: \+1 555 0100/)
-            assert.match(notification.text, /Реальная локация: Tbilisi, Georgia/)
-            assert.match(notification.text, /Желаемая локация: Remote RU proxy/)
-            assert.match(notification.text, /GitHub: https:\/\/github\.com\/student-user/)
-            assert.match(notification.text, /LinkedIn: https:\/\/linkedin\.com\/in\/student-user/)
-            assert.match(notification.text, /Реальный возраст: 24/)
-            assert.match(notification.text, /Английский: B1/)
-            assert.match(notification.text, /Образование: University/)
           }
           assert.doesNotMatch(notification.text, /^@student_user, резюме/)
           if (step.notification === 'private_provider') {
@@ -1891,24 +2149,22 @@ async function runTests() {
     assert.equal(providerTasks.tasks[0].clientName, 'Test')
     assert.equal(providerTasks.total, 1)
     assert.equal(providerTasks.offset, 0)
-    assert.match(providerTasks.message, /1-1/)
-    assert.match(providerTasks.message, /1\. Test \[EN\]/)
+    assert.match(providerTasks.message, /<b>Твои задачи по резюме \(1–1 из 1\):<\/b>/)
+    assert.match(providerTasks.message, /Test \[EN\] — черновик в работе; готово к следующему шагу/)
+    assert.equal(providerTasks.parseMode, 'HTML')
     assert.doesNotMatch(providerTasks.message, /Google-/)
     const openedProviderTask = await getProviderTaskById(98, makeWorkflowRepository(beforeFilled), providerActor)
-    assert.match(openedProviderTask.message, /Данные ученика:/)
-    assert.match(openedProviderTask.message, /Рынок ученика: EN/)
-    assert.match(openedProviderTask.message, /Стек: Python/)
-    assert.match(openedProviderTask.message, /Telegram RU: @student_ru/)
+    assert.match(openedProviderTask.message, /^<b>Черновик резюме<\/b>/)
+    assert.match(openedProviderTask.message, /Студент: Test/)
+    assert.match(openedProviderTask.message, /Рынок: EN/)
+    assert.match(openedProviderTask.message, /Статус: черновик в работе/)
+    assert.match(openedProviderTask.message, /Email EN: student\.en@example\.com/)
     assert.match(openedProviderTask.message, /Telegram EN: @student_en/)
-    assert.match(openedProviderTask.message, /Phone RU: \+7 999 000 1122/)
     assert.match(openedProviderTask.message, /Phone EN: \+1 555 0100/)
-    assert.match(openedProviderTask.message, /Реальная локация: Tbilisi, Georgia/)
-    assert.match(openedProviderTask.message, /Желаемая локация: Remote RU proxy/)
-    assert.match(openedProviderTask.message, /GitHub: https:\/\/github\.com\/student-user/)
     assert.match(openedProviderTask.message, /LinkedIn: https:\/\/linkedin\.com\/in\/student-user/)
-    assert.match(openedProviderTask.message, /Реальный возраст: 24/)
-    assert.match(openedProviderTask.message, /Английский: B1/)
-    assert.match(openedProviderTask.message, /Образование: University/)
+    assert.match(openedProviderTask.message, /Отправь ссылку на черновик следующим сообщением — я прикреплю её к этой задаче\./)
+    assert.equal(openedProviderTask.parseMode, 'HTML')
+    assert.equal(openedProviderTask.message.endsWith(`\n${YULIA_TASKS_FOOTER}`), true)
     const fillingTaskRepository = {
       async getProviderResumeTasks() {
         return [
@@ -1927,6 +2183,8 @@ async function runTests() {
     assert.doesNotMatch(fillingProviderTasks.message, /Provider Work/)
     const fillingRuTranslatorTasks = await getProviderTasks(fillingTaskRepository, ruTranslatorActor)
     assert.deepEqual(fillingRuTranslatorTasks.tasks.map((task: any) => task.clientName), ['Provider Work'])
+    assert.match(fillingRuTranslatorTasks.message, /^Задачи подрядчика по резюме: показы 1–1 из 1/)
+    assert.equal(fillingRuTranslatorTasks.message.endsWith(`\n${POLINA_TASKS_FOOTER}`), true)
     const kiraTaskRows = [
       makeWorkflow({ id: 98, clientId: 102, clientName: 'Test', status: 'Draft in approve by Kira' }),
       makeWorkflow({ id: 99, clientId: 999, clientName: 'Other Kira Client', status: 'English version in approve by Kira' }),
@@ -2024,7 +2282,8 @@ async function runTests() {
       ),
       (error: any) => {
         assert.equal(error.code, 'forbidden')
-        assert.match(error.message, /аккаунт подрядчика не назначен/)
+        assert.match(error.message, /У твоего аккаунта нет доступа к студенту Other Client/)
+        assert.match(error.message, /Все задачи: \/open_my_tasks/)
         return true
       }
     )

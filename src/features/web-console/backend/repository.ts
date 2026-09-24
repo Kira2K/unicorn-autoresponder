@@ -527,6 +527,18 @@ function platformContact(platformAccounts: NocoRecord[], labels: string[]): stri
   return ''
 }
 
+function platformFieldValue(platformAccounts: NocoRecord[], labels: string[], field: string): string {
+  const expected = new Set(labels.map(normalizedPlatformLabel))
+  for (const account of platformAccounts) {
+    const label = normalizedPlatformLabel(account.platform || linkedLabel(account.rel_platformAccounts_platform) || linkedName(account.rel_platformAccounts_platform))
+    const relationLabel = platformLabelFromRelation(account)
+    if (!expected.has(label) && !expected.has(relationLabel)) continue
+    const value = normalizeText(account[field])
+    if (value) return value
+  }
+  return ''
+}
+
 const GITHUB_LEGACY_URL_FIELDS = [
   'account_label',
   'login',
@@ -672,6 +684,10 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     clientTelegramUsername: normalizeText((client as any)?.telegram_personal_chat_id ?? (client as any)?.telegramPersonalChatId) || undefined,
     clientTelegramRu: platformContact(platformAccounts, ['telegram_ru']) || undefined,
     clientTelegramEn: platformContact(platformAccounts, ['telegram_en']) || undefined,
+    clientTelegramEnNickname: platformFieldValue(platformAccounts, ['telegram_en'], 'nickname') || undefined,
+    clientEmailEn: platformFieldValue(platformAccounts, ['email_en'], 'login') || undefined,
+    clientEmailRu: platformFieldValue(platformAccounts, ['email_ru'], 'login') || undefined,
+    clientHhRuPhone: platformFieldValue(platformAccounts, ['hh_ru'], 'phone') || undefined,
     clientPhoneRu: platformContact(platformAccounts, ['phone_ru', 'phone']) || undefined,
     clientPhoneEn: platformContact(platformAccounts, ['phone_en']) || undefined,
     clientGoogleFolder: normalizeText((client as any)?.google_folder ?? (client as any)?.googleFolder) || undefined,

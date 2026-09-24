@@ -65,6 +65,13 @@ Commands:
   GitHub platform `github`, a LinkedIn platform account, `telegram_ru`, and
   `telegram_en`. GitHub/LinkedIn validation checks account existence; URL
   fields are used for display when present.
+- Yulia's initial draft card can also show optional EN contacts from platform
+  accounts: Email EN from `email_en.login`, Telegram EN strictly from
+  `telegram_en.nickname`, Phone EN from `phone_en`, and the LinkedIn URL. Empty
+  values are omitted and do not block the workflow.
+- Polina's Russian-version task card can show optional RU contacts: Email RU
+  strictly from `email_ru.login` and Phone RU strictly from `hh_ru.phone`.
+  Empty values are omitted and do not block the workflow.
 
 `CV processing` fields used by the workflow:
 
@@ -166,9 +173,10 @@ clears that phase link (`cv_draft_url`, `en_version_url`, or `ru_version_url`),
 stores `last_rejection_comment`, appends `rejection_history`, and notifies the
 producer. Producer phases cannot reject themselves.
 
-При возврате ответ бота и уведомление исполнителю содержат ссылку именно на
-возвращённый файл. Ссылка берётся до очистки поля; правила переходов не меняются.
-Если ссылки нет, бот не подставляет другую версию резюме.
+При возврате ответ бота Кире содержит ссылку именно на возвращённый файл. Ссылка
+берётся до очистки поля; правила переходов не меняются. Фиксированные шаблоны
+Юли и Полины показывают студента, комментарий и действие по доработке; шаблон
+Полины дополнительно показывает актуальную ссылку на EN-версию.
 
 В контактах Telegram RU/EN бот и карточка исполнителя показывают `nickname`,
 если он заполнен. Иначе используется прежний вариант — `login` и остальные
@@ -195,9 +203,50 @@ notification:
 - Main provider next: private Provider chat, usually addressed to Yulia.
 - Russian translator next: private translator chat, usually addressed to Polina.
 
-Every private workflow notification to Yulia or Polina ends with the separate
-line `Открыть все задачи /open_my_tasks`. Kira notifications use the fixed
-templates described below and end with `Все задачи: /open_my_tasks`.
+Yulia, Polina, and Kira use the fixed templates described below.
+
+### Yulia message template contract
+
+Yulia's messages are deterministic templates implemented in
+`src/integrations/telegram/resume-provider-message-templates.ts`. They apply
+only to the main provider lane. The wording, line order, bold headings, and
+footer come from the local acceptance template and are not generated or
+paraphrased.
+
+Covered scenarios are: new draft/EN/RU tasks; the three task cards; confirmation
+after each link is saved; draft/EN/RU rework; task list and empty list; multiple
+or missing link tasks; unavailable, stale, and no-longer-relevant tasks; missing
+or invalid resume links; wrong actor; and missing access to a student. RU task
+templates are used for Yulia only for RU-only clients. Dynamic values are
+HTML-escaped. Task cards and state/error replies use the footer
+`Все задачи: /open_my_tasks`; new-task notifications use
+`Открой /open_my_tasks, чтобы взять задачу в работу.`
+
+For EN and both-market workflows, the initial draft card shows optional
+`Email EN`, `Telegram EN`, `Phone EN`, and `LinkedIn` rows immediately after
+the status. `Telegram EN` uses only the `nickname` column; it never falls back
+to the Telegram account login. These rows are omitted from later-stage cards,
+RU-only draft cards, and the short new-task notification.
+
+### Polina message template contract
+
+Polina's messages are deterministic plain-text templates implemented in
+`src/integrations/telegram/resume-polina-message-templates.ts`. They apply to
+the Russian-translator lane for EN and both-market workflows; RU-only workflows
+remain in Yulia's main-provider lane.
+
+Covered scenarios are: a new RU task; RU task card; RU rework; saved RU link;
+task list and empty list; multiple or missing link tasks; unavailable, stale,
+and no-longer-relevant tasks; missing or invalid resume links; wrong actor;
+provider-only chat input; unauthorized task account; missing student access;
+and missing workflow. Optional student data, folders, comments, draft, and EN
+links are shown only when present. Each Polina template ends with a blank line
+and the exact footer `Все задачи /open_my_tasks`.
+
+The Polina task card shows optional `Email RU` and `Phone RU` rows immediately
+after the status. The phone uses only `hh_ru.phone`; the generic Phone RU value
+from the shared student-data block is omitted from this card to prevent a
+duplicate or a value from another platform account.
 
 ### Kira message template contract
 
