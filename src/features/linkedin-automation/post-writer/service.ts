@@ -14,6 +14,7 @@ import { unlock } from './execution-types.ts'
 import { runImage } from './run-content.ts'
 import { assertPreparedEdits } from './prepared-posts.ts'
 import { startPreparedPost } from './prepared-start.ts'
+import { retryMeme } from './meme-recovery.ts'
 export function createPostWriterService(deps: Dependencies, autoStart = true) {
   const state = createServiceState(deps)
   const { e, runs, settings } = state
@@ -102,6 +103,18 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
       } else await writable()
       const run = runs.get(id)
       if (!run) throw new PostError('post_run_not_found')
+      if (action === 'retry-meme') return serial(run.account, async () => {
+        if (busy.has(id) || accountActive(runs.values(), run.account)) throw new PostError('post_account_busy')
+        busy.add(id)
+        try {
+          if ((await e.store.list('history', run.account)).some(item => item.runId === id)) {
+            throw new PostError('post_meme_retry_invalid')
+          }
+          retryMeme(run)
+          await e.save(run)
+          return structuredClone(run)
+        } finally { busy.delete(id) }
+      })
       applyAction(run, action, hash, memeReviewedHash)
       if (action === 'stop') e.generationControllers.get(id)?.abort()
       try { await e.save(run) }

@@ -23,16 +23,17 @@ test('planner receives finished text, policy and history in one call, not prewri
   assert.equal(parseMemeConcept(result, input).status, 'blocked')
   assert.equal(calls, 1)
 })
-test('caption zones, word limit, missing source, prompt, history and malformed shape block rendering', async () => {
+test('invalid captions require repair; formatting and repeat warnings do not block rendering', async () => {
   const services = createMockMemes(), raw = await services.plan(input)
   const ready = parseMemeConcept(raw, input)
   assert.equal(ready.status, 'ready')
   if (ready.status !== 'ready') return
-  for (const change of [ { captionLines: ['a', 'b', 'c'] }, { captionLines: [Array(16).fill('word').join(' ')] },
-    { postAnchor: 'not in post' }, { prompt: 'Missing layout' }, { altText: 'a'.repeat(301) } ]) {
+  for (const change of [ { captionLines: ['a', 'b', 'c'] }, { captionLines: [Array(16).fill('word').join(' ')] } ]) {
     assert.throws(() => parseMemeConcept({ ...ready, concept: { ...ready.concept, ...change } }, input))
   }
-  assert.throws(() => parseMemeConcept(ready, { ...input, history: [ready.concept] }), /duplicate_concept/)
+  const repeated = parseMemeConcept(ready, { ...input, history: [ready.concept] })
+  assert.equal(repeated.status, 'ready')
+  if (repeated.status === 'ready') assert.ok(repeated.warnings?.includes('meme_duplicate_concept'))
   assert.throws(() => parseMemeConcept({ status: 'ready' }, input))
   services.plan = async () => ({ status: 'blocked', reason: 'Conflicts with topic restrictions', concept: null })
   const blocked = await writeMeme(input, services, { id: 'blocked', onCheckpoint: async () => {} })

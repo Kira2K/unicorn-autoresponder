@@ -5,6 +5,7 @@ const { startIsolatedPostTestProcesses, waitPostHttp, postRoot } =
 const { checkTextWorkspace } = require('./post-text-check.ts') as typeof import('./post-text-check.ts')
 const { checkPreparedPosts } = require('./post-prepared-check.ts') as typeof import('./post-prepared-check.ts')
 const { checkPreparedNow } = require('./post-prepared-now-check.ts') as typeof import('./post-prepared-now-check.ts')
+const { checkMemeRecovery } = require('./post-meme-recovery-check.ts') as typeof import('./post-meme-recovery-check.ts')
 async function main() {
   const processes = await startIsolatedPostTestProcesses()
   const { apiPort, uiPort } = processes
@@ -78,4 +79,4 @@ async function main() {
     console.log('Post Writer mock E2E passed: settings, approval, SSE, reload, read-back, no duplicate.')
   } finally { await browser?.close(); processes.close() }
 }
-main().then(checkPreparedNow).catch(error => { console.error(error); process.exitCode = 1 })
+main().then(checkPreparedNow).then(checkMemeRecovery).catch(error => { console.error(error); process.exitCode = 1 })

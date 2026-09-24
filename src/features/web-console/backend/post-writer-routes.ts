@@ -12,6 +12,7 @@ const id = (req: Request) => {
 export function postFailure(res: Response, error: unknown) {
   const code = errorCode(error)
   const messages: Record<string, string> = {
+    post_meme_retry_invalid: 'Продолжение недоступно: это не ошибка описания мема либо отправка уже могла начаться. Обновите историю.',
     post_prepared_invalid: 'Нужно не больше семи постов за одну неделю: разные даты и до 3000 знаков в каждом тексте.',
     post_prepared_day_started: 'Пост на эту дату уже запущен. Его текст не изменён; результат доступен в истории.',
     post_prepared_manual_unavailable: 'В режиме готовых постов используется план по датам. Для генерации из CV смените режим.',
@@ -20,7 +21,7 @@ export function postFailure(res: Response, error: unknown) {
     post_account_busy: 'У этого аккаунта уже есть незавершённое задание. Дождитесь результата или остановите его.',
     meme_generation_disabled: 'Генерация мемов на сервере выключена. Пост без заказанного мема не публикуется.'
   }
-  const status = code === 'post_run_not_found' ? 404 : code.includes('invalid') ? 400 :
+  const status = code === 'post_run_not_found' ? 404 : code === 'post_meme_retry_invalid' ? 409 : code.includes('invalid') ? 400 :
     ['post_hash_mismatch', 'post_action_invalid', 'meme_review_required', 'post_prepared_day_started',
       'post_prepared_manual_unavailable', 'post_prepared_changed', 'post_prepared_past', 'post_account_busy'].includes(code) ? 409 : 503
   res.status(status).json({ error: code, message: messages[code] ?? (code === 'post_writer_read_only'

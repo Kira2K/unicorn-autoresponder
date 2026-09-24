@@ -41,11 +41,11 @@ test('intent save failure stops before paid requests; Stop between phases preven
   const result = await writeMeme(input, f.services, { ...f.options, signal: controller.signal })
   assert.equal(result.status, 'cancelled'); assert.equal(f.counts.image, 0)
 })
-test('invalid concept blocks image; wrong dimensions block without correction', async () => {
+test('invalid concept is repaired or generated from source; corrupt dimensions remain invalid', async () => {
   const f = setup()
   f.services.plan = async () => ({ status: 'ready', reason: '', concept: {} })
-  assert.equal((await writeMeme(input, f.services, f.options)).status, 'blocked')
-  assert.equal(f.counts.image, 0)
+  assert.equal((await writeMeme(input, f.services, f.options)).status, 'ready')
+  assert.equal(f.counts.image, 1)
   const png = mockMemePng(); png.writeUInt32BE(1003, 16)
   assert.throws(() => inspectMemeImage(png), /dimensions_invalid/)
 })
@@ -54,7 +54,7 @@ test('render result persisted before final checkpoint survives restart without a
   const originalSave = f.options.onCheckpoint
   f.options.onCheckpoint = async value => { if (value.status === 'ready') throw new Error('storage'); await originalSave(value) }
   await assert.rejects(writeMeme(input, f.services, f.options))
-  assert.equal(f.saved()?.status, 'rendering')
+  assert.equal(f.saved()?.status, 'reviewing')
   const result = await writeMeme(input, f.services, { id: 'job-1', checkpoint: f.saved(), onCheckpoint: originalSave })
   assert.equal(result.status, 'ready'); assert.deepEqual(f.counts, { plan: 1, image: 1 })
 })
