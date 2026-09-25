@@ -9,7 +9,10 @@ const PROVIDER_UNREACHABLE_CODES = new Set([
   'ECONNREFUSED', 'ECONNRESET', 'ENETUNREACH', 'EHOSTUNREACH', 'ENOTFOUND', 'EAI_AGAIN'
 ])
 
-export function normalizeConnectionProviderError(provider: 'noco' | 'unipile', error: any) {
+export function normalizeConnectionProviderError(provider: 'storage' | 'noco' | 'unipile', error: any) {
+  // SQL authorizes a retry only with its explicit temporary-read code. A raw socket
+  // error may hide an unknown COMMIT; never turn it into permission to repeat a write.
+  if (provider === 'storage') return error
   const code = String(error?.code ?? '')
   if (code.startsWith(`${provider}_`)) return error
   const normalizedCode = PROVIDER_TIMEOUT_CODES.has(code)

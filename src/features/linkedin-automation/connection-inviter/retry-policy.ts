@@ -1,6 +1,13 @@
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 import { dailyAudienceTargets } from './limits.ts'
 
+function continuedInvitationState(run: ConnectionRun) {
+  const { verifiedAccount, invitationNotBefore, invitationPacingStarted,
+    invitationPauseAfterPersonId, carriedCandidatesChecked, carriedCandidateIds } = run.searchProgress
+  return { verifiedAccount, invitationNotBefore, invitationPacingStarted,
+    invitationPauseAfterPersonId, carriedCandidatesChecked, carriedCandidateIds }
+}
+
 export function failedRunCanRetry(run: ConnectionRun, history: ConnectionHistoryItem[]) {
   const runHistory = history.filter(item => item.runId === run.runId)
   return run.status === 'failed' && runHistory.every(item => {
@@ -38,7 +45,7 @@ export function prepareRunRetry(run: ConnectionRun, context: any, safeRecruiterO
   run.searchProgress = { keyIndex: { recruiter: 0, technical: 0 },
     keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
     streams: { recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 } },
-    recentSearchAt, locations,
+    recentSearchAt, locations, ...continuedInvitationState(run),
     eligible: 0, skipped: 0, consecutiveEmptyRecruiterSearches: 0,
     exhausted: { recruiter: false, technical: run.safeRecruiterOnly },
     pass: nextPass, passUsedSearchKeys: [], pendingCandidates }
@@ -71,7 +78,7 @@ export function prepareRunTopUp(run: ConnectionRun, context: any, safeRecruiterO
   run.searchProgress = { keyIndex: { recruiter: 0, technical: 0 },
     keyTotal: { recruiter: 0, technical: 0 }, page: 0, found: 0, checked: 0,
     streams: { recruiter: { keyIndex: 0, page: 0 }, technical: { keyIndex: 0, page: 0 } },
-    recentSearchAt, locations,
+    recentSearchAt, locations, ...continuedInvitationState(run),
     eligible: 0, skipped: 0, consecutiveEmptyRecruiterSearches: 0,
     exhausted: { recruiter: false, technical: run.safeRecruiterOnly },
     pass: (run.searchProgress?.pass ?? 0) + 1, passUsedSearchKeys: [], pendingCandidates }

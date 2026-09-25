@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { dailyAudienceTargets, dailyInvitationLimit, dateParts } =
+const { dailyAudienceTargets, dailyInvitationLimit, dateParts, connectionCount } =
   require('../limits.ts') as typeof import('../limits.ts')
 const { makeRun } = require('../run-model.ts') as typeof import('../run-model.ts')
 const { confirmedQuotaExceeded, confirmedQuotaReached, synchronizeConfirmedProgress } =
@@ -10,6 +10,11 @@ const boundaries = [[0, 5], [149, 5], [150, 7], [199, 7], [200, 8], [250, 10],
   [300, 11], [350, 13], [400, 15], [450, 17], [500, 18], [550, 20], [600, 22],
   [650, 24], [700, 27], [750, 29], [800, 31], [850, 33], [900, 36], [950, 38],
   [999, 38], [1000, 40], [5000, 40]]
+for (const invalid of [null, undefined, '', ' ', false, true, -1, NaN, Infinity]) {
+  assert.equal(connectionCount({ relations_count: invalid }), undefined)
+}
+assert.equal(connectionCount({ relations_count: 0 }), 0)
+assert.equal(connectionCount({ relations_count: null, connections_count: '2030' }), 2030)
 for (const [connections, expected] of boundaries) {
   assert.equal(dailyInvitationLimit(connections), expected, String(connections))
 }

@@ -1,6 +1,7 @@
 import type { SearchAudience } from './catalog.ts'
 import { connectionErrorCode } from './errors.ts'
 import { createInvitationSafety } from './invitation-safety.ts'
+import type { PendingRead } from './pending-reader.ts'
 import { requireConnectionRunDay } from './day-window.ts'
 import { sendDelay } from './run-model.ts'
 import { waitWithRunTimer } from './retry-state.ts'
@@ -8,10 +9,9 @@ import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 
 export async function createInvitationPublisher(runtime: ConnectionRuntime, run: ConnectionRun,
-  save: SaveRun) {
+  save: SaveRun, seed?: PendingRead) {
   const details = { runId: run.runId, platformAccountId: run.platformAccountId }
-  const safety = await createInvitationSafety(runtime, run, save)
-  let sentAny = run.counters.sent > 0
+  const safety = await createInvitationSafety(runtime, run, save, seed)
 
   return {
     async publish(audience: SearchAudience, candidates: ConnectionHistoryItem[], sentLimit = 1) {
@@ -27,8 +27,13 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
             processedPersonIds.push(candidate.personId)
             continue
           }
-          if (sentAny) {
-            const delayMs = sendDelay(runtime.random)
+          if (run.counters.sent > 0 || run.searchProgress.invitationPacingStarted) {
+            let nextSendAt = Date.parse(run.searchProgress.invitationNotBefore ?? '')
+            if (!Number.isFinite(nextSendAt)) {
+              nextSendAt = runtime.now().getTime() + sendDelay(runtime.random)
+              run.searchProgress.invitationNotBefore = new Date(nextSendAt).toISOString()
+            }
+            const delayMs = Math.max(0, nextSendAt - runtime.now().getTime())
             runtime.logger.event('invitation_delay', 'succeeded', { ...details, delayMs })
             const proceed = await waitWithRunTimer(runtime, run, save, 'invitation_delay',
               'invitation_delay', delayMs, true)
@@ -54,7 +59,6 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
           processedPersonIds.push(candidate.personId)
           if (sent) {
             sentCount += 1
-            sentAny = true
           }
         }
         runtime.logger.event('invitation_publish', 'succeeded', {

@@ -1,10 +1,12 @@
 const assert = require('node:assert/strict')
 const { CONNECTION_SEARCH_CATALOG, connectionMarketTier } = require('../catalog.ts') as
   typeof import('../catalog.ts')
-const { makeRun, publicRun, selectTemplates } = require('../run-model.ts') as
+const { makeRun, publicRun, selectTemplates, sendDelay } = require('../run-model.ts') as
   typeof import('../run-model.ts')
 const { nextConnectionAudience } = require('../audience-sequence.ts') as
   typeof import('../audience-sequence.ts')
+
+assert.deepEqual([0, .5, 1].map(value => sendDelay(() => value)), [20_000, 100_000, 180_000])
 
 const run = {
   runId: 'random-city-order-2026-08-29', platformAccountId: 7, safeRecruiterOnly: false

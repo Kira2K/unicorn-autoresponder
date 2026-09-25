@@ -128,7 +128,7 @@ function templateRank(seed: string, value: string): number {
 }
 
 export const sendDelay = (random: () => number) =>
-  15_000 + Math.floor(Math.min(1, Math.max(0, random())) * 165_000)
+  20_000 + Math.floor(Math.min(1, Math.max(0, random())) * 160_000)
 
 export const isUnknownWrite = (error: any) =>
   ['unipile_timeout', 'unipile_unreachable'].includes(String(error?.code ?? ''))

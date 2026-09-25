@@ -60,7 +60,6 @@ export function createSqlInviterStore(db: FeatureSql, grant?: FeatureWrites): Co
     listHistory: id => historyList('platform_account_id', [String(id)]),
     listRunHistory: id => historyList('run_id', [id]),
     listOpenHistory: async id => (await historyList('platform_account_id', [String(id)]))
-      .filter(row => ['sending','deferred','sent','uncertain'].includes(row.status)),
-    resetNocoBudget() { /* SQL has no physical Noco request budget. Stored checkpoints remain unchanged. */ }
+      .filter(row => ['sending','deferred','sent','uncertain'].includes(row.status))
   };
 }

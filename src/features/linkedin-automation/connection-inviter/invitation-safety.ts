@@ -1,5 +1,6 @@
 import { createInvitationHistoryController } from './invitation-history.ts'
 import { createPendingSnapshotController } from './pending-snapshot.ts'
+import type { PendingRead } from './pending-reader.ts'
 import { sendInvitationSafely } from './invitation-write.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
@@ -12,8 +13,8 @@ export type InvitationSafety = {
 }
 
 export async function createInvitationSafety(runtime: ConnectionRuntime, run: ConnectionRun,
-  save: SaveRun): Promise<InvitationSafety> {
-  const pending = await createPendingSnapshotController(runtime, run, save)
+  save: SaveRun, seed?: PendingRead): Promise<InvitationSafety> {
+  const pending = await createPendingSnapshotController(runtime, run, save, seed)
   const history = createInvitationHistoryController(runtime, run, save, pending)
   const context = { runtime, run, save, pending, history }
   return {

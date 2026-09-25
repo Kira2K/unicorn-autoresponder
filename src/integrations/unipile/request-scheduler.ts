@@ -1,7 +1,7 @@
 type Sleep = (milliseconds: number) => Promise<void>
 
 export function createUnipileRequestScheduler(options: {
-  minIntervalMs?: number
+  minIntervalMs?: number | (() => number)
   now?: () => number
   sleep?: Sleep
 } = {}) {
@@ -14,7 +14,8 @@ export function createUnipileRequestScheduler(options: {
 
   function run<T>(operation: () => Promise<T>) {
     const queued = tail.then(async () => {
-      const waitMs = Math.max(0, lastStartedAt + minIntervalMs - now())
+      const intervalMs = typeof minIntervalMs === 'function' ? minIntervalMs() : minIntervalMs
+      const waitMs = Math.max(0, lastStartedAt + intervalMs - now())
       if (waitMs) await sleep(waitMs)
       lastStartedAt = now()
       return operation()

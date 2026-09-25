@@ -1,11 +1,13 @@
 const assert = require('node:assert/strict')
 const { connectionRetryDelay, retryAfterMilliseconds,
-  makeRetryState, unipileRateLimitDelay, withConnectionRetry } = require('../retry-state.ts') as
+  makeRetryState, unipileRateLimitDelay, withConnectionRetry, searchRequestDelay } = require('../retry-state.ts') as
   typeof import('../retry-state.ts')
 const { makeRun } = require('../run-model.ts') as typeof import('../run-model.ts')
 const { runFromRow, runRow } = require('../store-rows.ts') as typeof import('../store-rows.ts')
 const { waitOrStop } = require('../run-control.ts') as typeof import('../run-control.ts')
 const { fixture } = require('./fixtures.ts') as typeof import('./fixtures.ts')
+
+assert.deepEqual([0, .5, 1].map(value => searchRequestDelay(() => value)), [40_000, 55_000, 70_000])
 
 assert.equal(connectionRetryDelay(1, () => 0), 90_000)
 assert.equal(connectionRetryDelay(1, () => 1), 180_000)

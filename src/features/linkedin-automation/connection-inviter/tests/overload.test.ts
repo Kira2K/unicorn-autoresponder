@@ -104,7 +104,8 @@ async function invitation429InvalidReadbackNeverRepeatsBlindly() {
     if (posts === 1 && invalidReads === 2) return { items: [{ name: 'missing-id' }] }
     const response = await originalPending(accountId, offset)
     return offset === 0 && attemptedPersonId
-      ? { items: [{ user_id: attemptedPersonId }, ...response.items] } : response
+      ? { items: [{ user_id: attemptedPersonId }, ...response.items.filter(
+        (item: any) => item.user_id !== attemptedPersonId)] } : response
   }
   const service = createConnectionInviterService({ ...test,
     now: () => new Date('2026-08-29T09:00:00Z'), random: () => 0,
@@ -250,7 +251,7 @@ async function nocoRetriesWithoutStoppingRun() {
   const service = createConnectionInviterService({ ...test,
     now: () => new Date('2026-08-29T09:00:00Z'), random: () => 0,
     sleep: async () => undefined, logger: { event(stage: string, status: string, details?: any) {
-      if (stage === 'retry' && status === 'failed' && details?.provider === 'noco') {
+      if (stage === 'retry' && status === 'failed' && details?.provider === 'storage') {
         retryDelays.push(details.delayMs)
       }
     } } })

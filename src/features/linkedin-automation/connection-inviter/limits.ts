@@ -19,7 +19,9 @@ export function dailyAudienceTargets(dailyLimit: number): Record<SearchAudience,
 export function connectionCount(value: any): number | undefined {
   const candidates = [value?.relations_count, value?.connections_count, value?.connection_count,
     value?.network_info?.connections_count]
-  const parsed = candidates.map(Number).find(number => Number.isFinite(number) && number >= 0)
+  const parsed = candidates.filter(value => typeof value === 'number' ||
+    (typeof value === 'string' && value.trim() !== '')).map(Number)
+    .find(number => Number.isFinite(number) && number >= 0)
   return parsed === undefined ? undefined : Math.floor(parsed)
 }
 

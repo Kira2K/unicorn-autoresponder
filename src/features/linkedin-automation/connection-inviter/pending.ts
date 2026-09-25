@@ -5,79 +5,27 @@ import { waitOrStop } from './run-control.ts'
 import { makeRetryState, withConnectionRetry } from './retry-state.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
-import { parseConnectionPendingResponse, pendingPersonId } from './unipile-adapter.ts'
+import { readPendingInvitations, type PendingRead } from './pending-reader.ts'
 
 export async function listAllPending(runtime: ConnectionRuntime, accountId: string) {
-  const result: any[] = []; let offset = 0; let cursor: string | undefined
-  let expectedTotal: number | undefined
-  const seenCursors = new Set<string>(); const seenPeople = new Set<string>()
-  for (let page = 0; page < 20; page += 1) {
-    const response = await runtime.adapter().listPendingInvitations(accountId, cursor ?? offset)
-    const { items, nextCursor, totalCount, hasMore } = parseConnectionPendingResponse(response)
-    if (totalCount !== undefined) {
-      if (expectedTotal !== undefined && totalCount !== expectedTotal) {
-        throw connectionError('unipile_pending_pagination_invalid',
-          'Pending invitations returned conflicting page totals.', { httpStatus: 503 })
-      }
-      expectedTotal = totalCount
-    }
-    if (hasMore === true && !nextCursor) {
-      throw connectionError('unipile_pending_pagination_invalid',
-        'Pending invitations response declares another page without a cursor.', { httpStatus: 503 })
-    }
-    if (nextCursor && (!items.length || nextCursor === cursor || seenCursors.has(nextCursor))) {
-      throw connectionError('unipile_pending_pagination_invalid',
-        'Pending invitations returned an unsafe cursor chain.', { httpStatus: 503 })
-    }
-    const pageIds = items.map(pendingPersonId)
-    if (pageIds.some(personId => seenPeople.has(personId))) {
-      throw connectionError('unipile_pending_pagination_invalid',
-        'Pending invitations repeated a previous page item.', { httpStatus: 503 })
-    }
-    if (!items.length) {
-      if (expectedTotal !== undefined && result.length < expectedTotal) {
-        throw connectionError('unipile_pending_pagination_invalid',
-          'Pending invitations ended before the declared total.', { httpStatus: 503 })
-      }
-      runtime.logger.event('pending_read', 'succeeded', { pendingCount: result.length, page: page + 1 })
-      return result
-    }
-    for (const personId of pageIds) seenPeople.add(personId)
-    result.push(...items)
-    if (expectedTotal !== undefined && result.length > expectedTotal) {
-      throw connectionError('unipile_pending_pagination_invalid',
-        'Pending invitations exceeded the declared total.', { httpStatus: 503 })
-    }
-    if (nextCursor) {
-      seenCursors.add(nextCursor); cursor = nextCursor
-      continue
-    }
-    if (cursor && expectedTotal !== undefined && result.length < expectedTotal) {
-      throw connectionError('unipile_pending_pagination_invalid',
-        'Pending invitations cursor chain ended before the declared total.', { httpStatus: 503 })
-    }
-    if (cursor || (expectedTotal !== undefined && result.length >= expectedTotal)) {
-      runtime.logger.event('pending_read', 'succeeded', { pendingCount: result.length, page: page + 1 })
-      return result
-    }
-    offset += items.length
-  }
-  runtime.logger.event('pending_read', 'failed', { pendingCount: result.length, page: 20,
-    errorCode: 'pending_invitations_truncated' })
-  throw connectionError('unipile_pending_invitations_truncated',
-    'Pending invitations exceeded the safe read-back pagination limit.', { httpStatus: 503 })
+  return (await readPendingInvitations(runtime, accountId)).items
 }
 
 export async function reconcileInvitations(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun, options: { singlePass?: boolean; ignoreStopRequested?: boolean;
     runOnly?: boolean; openHistory?: ConnectionHistoryItem[] } = {}):
-  Promise<{ unresolved: number; retryError?: unknown }> {
+  Promise<{ unresolved: number; retryError?: unknown; snapshot?: PendingRead }> {
   const retryOptions = { allowAfterDayClose: true,
     ignoreStopRequested: options.ignoreStopRequested }
   let retryError: unknown
-  const open = options.openHistory ?? await withConnectionRetry(runtime, run, save, 'noco',
+  const open = options.openHistory ?? await withConnectionRetry(runtime, run, save, 'storage',
     'open_history_list', () => runtime.store.listOpenHistory(run.platformAccountId, 1000), retryOptions)
   const active = options.runOnly ? open.filter(item => item.runId === run.runId) : open
+  if (active.some(item => ['sending', 'uncertain'].includes(item.status))) {
+    // A crash may have happened after dispatch but before its run checkpoint.
+    run.searchProgress.invitationPacingStarted = true
+    run.searchProgress.invitationNotBefore = undefined
+  }
   if (!active.length) {
     runtime.logger.event('invitation_reconcile', 'succeeded', {
       platformAccountId: run.platformAccountId, activeCount: 0 })
@@ -101,13 +49,13 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
   }
   let accepted = 0
   let unresolved = 0
-  const initialPendingRows = await unipileRead('pending_invitations_read', () =>
-    listAllPending(runtime, run.accountId))
-  if (!initialPendingRows) {
+  let snapshot = await unipileRead('pending_invitations_read', () =>
+    readPendingInvitations(runtime, run.accountId))
+  if (!snapshot) {
     return { unresolved: active.filter(item =>
       ['sending', 'uncertain'].includes(item.status)).length, retryError }
   }
-  let pending = new Set(initialPendingRows.map(pendingPersonId).filter(Boolean))
+  let pending = snapshot.personIds
   for (const item of active) {
     while (true) {
       if (runtime.stopRequested(run.runId) && !options.ignoreStopRequested) {
@@ -118,18 +66,22 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
         if (item.status !== 'sent') {
           item.status = 'sent'; item.reasonCode = 'pending_readback_confirmed'
           item.verifiedAt = runtime.now().toISOString()
-          await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
+          await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
             runtime.store.updateHistory(item), retryOptions)
         }
         break
       }
-      const profile = await unipileRead('candidate_profile_readback', () =>
-        runtime.adapter().getProfile(run.accountId, item.personId))
+      const profile = await unipileRead('candidate_profile_readback', async () => {
+        const result = await runtime.adapter().getProfile(run.accountId, item.personId)
+        if (!result) throw connectionError('unipile_profile_readback_invalid',
+          'Candidate profile read-back returned no result.', { httpStatus: 503 })
+        return result
+      })
       if (!profile) { unresolved += 1; break }
       if (profileIsConnected(profile)) {
         item.status = 'accepted'; item.reasonCode = 'connection_accepted'
         item.verifiedAt = runtime.now().toISOString()
-        await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
+        await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
           runtime.store.updateHistory(item), retryOptions)
         accepted += 1; break
       }
@@ -137,7 +89,7 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
       if (item.status === 'sending') {
         item.status = 'uncertain'; item.reasonCode = 'connection_invitation_readback_missing'
         item.updatedAt = runtime.now().toISOString()
-        await withConnectionRetry(runtime, run, save, 'noco', 'history_update', () =>
+        await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
           runtime.store.updateHistory(item), retryOptions)
       }
       if (options.singlePass) {
@@ -159,13 +111,13 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
         return { unresolved: Math.max(1, active.filter(candidate =>
           ['sending', 'uncertain'].includes(candidate.status)).length) }
       }
-      const pendingRows = await withConnectionRetry(runtime, run, save, 'unipile',
-        'pending_invitations_read', () => listAllPending(runtime, run.accountId),
+      snapshot = await withConnectionRetry(runtime, run, save, 'unipile',
+        'pending_invitations_read', () => readPendingInvitations(runtime, run.accountId),
         retryOptions)
-      pending = new Set(pendingRows.map(pendingPersonId).filter(Boolean))
+      pending = snapshot.personIds
     }
   }
   runtime.logger.event('invitation_reconcile', 'succeeded', { platformAccountId: run.platformAccountId,
     activeCount: active.length, acceptedCount: accepted, unresolvedCount: unresolved })
-  return { unresolved, ...(retryError ? { retryError } : {}) }
+  return { unresolved, snapshot, ...(retryError ? { retryError } : {}) }
 }

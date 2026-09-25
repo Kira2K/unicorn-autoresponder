@@ -57,7 +57,7 @@ async function run() {
   assert.equal(calls[0].cursor, undefined)
   assert.equal(calls[0].keywords, 'Recruiter')
   assert.equal(calls[0].keywords.includes('Berlin'), false)
-  assert.equal(calls[0].at - locationAt >= 60_000, true)
+  assert.equal(calls[0].at - locationAt >= 40_000, true)
   assert.equal(candidates.length, 1)
   assert.equal(candidates[0].personId, 'person-1')
   assert.equal(run.searchProgress.streams.recruiter.sourceKey, 'recruiter-berlin')
@@ -92,7 +92,7 @@ async function run() {
   assert.equal(resumedCalls[0].keywords, 'Recruiter')
   assert.equal(resumedCalls[0].cursor, 'cursor-1')
   assert.equal(reloaded.searchProgress.streams.recruiter.sourceKey, 'recruiter-berlin')
-  assert.equal(resumedCalls[0].at - calls[0].at >= 60_000, true)
+  assert.equal(resumedCalls[0].at - calls[0].at >= 40_000, true)
   assert.equal(reloaded.searchProgress.consecutiveEmptyRecruiterSearches, 7)
 
   const emptyCursorCalls: string[] = []

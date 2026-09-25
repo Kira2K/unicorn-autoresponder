@@ -37,7 +37,7 @@ async function run() {
     body: { keywords: 'Python Recruiter', location: ['geo-1'], network_distance: [2] } })
   assert.equal('advanced_keywords' in calls[4].body, false)
   assert.deepEqual(calls[5], { method: 'GET',
-    path: '/acc%201/users/me/relations?cursor=relations+cursor', body: undefined })
+    path: '/acc%201/users/me/relations?limit=100&cursor=relations+cursor', body: undefined })
   assert.deepEqual(calls[6], { method: 'GET',
     path: '/acc%201/users/me/relation-requests?type=sent&limit=100&offset=100', body: undefined })
   assert.deepEqual(calls[7], { method: 'GET',

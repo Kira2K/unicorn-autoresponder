@@ -7,7 +7,30 @@ const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as
   typeof import('./error-diagnostics.ts')
 
 type FetchLike = (url: string, init: Record<string, unknown>) => Promise<any>
-type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean }
+type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean;
+  onResponse?: UnipileResponseObserver }
+
+export type UnipileResponseMetadata = {
+  httpStatus: number
+  providerCache?: 'HIT' | 'MISS' | 'STALE' | 'BYPASS' | 'EXPIRED' | 'REVALIDATED' | 'UNKNOWN'
+  providerCacheAgeSeconds?: number
+}
+export type UnipileResponseObserver = (metadata: UnipileResponseMetadata) => void | Promise<void>
+
+// Only diagnostic cache metadata is exposed. No URLs, bodies, cookies or arbitrary headers.
+function observeUnipileResponse(response: any, observer?: UnipileResponseObserver) {
+  if (!observer) return
+  try {
+    const cache = String(response?.headers?.get?.('x-cache') ?? '').trim().toUpperCase()
+    const rawAge = String(response?.headers?.get?.('age') ?? '').trim()
+    const age = /^\d+$/.test(rawAge) ? Number(rawAge) : NaN
+    const metadata: UnipileResponseMetadata = { httpStatus: Number(response.status),
+      ...(cache ? { providerCache: (['HIT', 'MISS', 'STALE', 'BYPASS', 'EXPIRED', 'REVALIDATED']
+        .includes(cache) ? cache : 'UNKNOWN') as UnipileResponseMetadata['providerCache'] } : {}),
+      ...(Number.isSafeInteger(age) ? { providerCacheAgeSeconds: age } : {}) }
+    Promise.resolve(observer(metadata)).catch(() => undefined)
+  } catch { /* Diagnostics must never change a request's outcome. */ }
+}
 
 function retryAfterMs(response: any, capMs: number) {
   const value = String(response?.headers?.get?.('retry-after') ?? '').trim()
@@ -59,6 +82,7 @@ function createUnipileHttpClient(options: {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal
       })
+      observeUnipileResponse(response, requestOptions.onResponse)
       text = await response.text()
     } catch (error: any) {
       const code = error?.name === 'AbortError' ? 'unipile_timeout' : 'unipile_unreachable'
