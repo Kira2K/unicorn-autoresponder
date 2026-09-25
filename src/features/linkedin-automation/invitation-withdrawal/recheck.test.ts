@@ -14,13 +14,14 @@ test('recheck updates saved count once, survives restart, and does not resume re
   const f = await uncertain(), next = await f.service.preview(1)
   await assert.rejects(f.service.start(1, next.token), /Проверьте результат/)
   const result = await f.service.recheck(1, f.run.id)
-  assert.equal(result?.status, 'stopped'); assert.equal(result?.withdrawn, 1)
+  assert.equal(result?.status, 'stopped'); assert.equal(result?.withdrawn, 0)
+  assert.equal(result?.skipped, 1); assert.deepEqual(result?.noLongerPending, ['1'])
   assert.equal(result?.current, undefined); assert.equal(result?.error, undefined)
   assert.ok(result?.checkedAt)
-  assert.equal((await f.service.recheck(1, f.run.id))?.withdrawn, 1)
+  assert.equal((await f.service.recheck(1, f.run.id))?.withdrawn, 0)
   const restarted = createInvitationWithdrawal(f.runtime)
-  assert.equal((await restarted.status(1))?.withdrawn, 1)
-  assert.equal((await restarted.recheck(1, f.run.id))?.withdrawn, 1)
+  assert.equal((await restarted.status(1))?.withdrawn, 0)
+  assert.equal((await restarted.recheck(1, f.run.id))?.withdrawn, 0)
   assert.deepEqual(f.calls, ['1']); assert.deepEqual(f.stored()?.attempted, ['1'])
 })
 test('last invitation resolves to completed; missing intent or changed identity cannot confirm', async () => {
@@ -43,8 +44,52 @@ test('save failure or lost save response cannot show false success or count the 
     await assert.rejects(f.service.recheck(1, f.run.id))
     assert.equal((await f.service.status(1))?.status, 'uncertain')
     f.runtime.store.save = save
-    assert.equal((await f.service.recheck(1, f.run.id))?.withdrawn, 1)
+    assert.equal((await f.service.recheck(1, f.run.id))?.withdrawn, 0)
+    assert.equal((await f.service.recheck(1, f.run.id))?.skipped, 1)
     assert.deepEqual(f.calls, ['1'])
+  }
+})
+
+test('restart checks the whole saved batch without counting successful responses twice', async () => {
+  const f = fixture(), list = f.provider.list
+  f.provider.list = async () => { if (f.calls.length) throw new Error('offline'); return list() }
+  await f.service.start(1, (await f.service.preview(1)).token)
+  const run = (await finished(f.service))!
+  assert.equal(run.status, 'uncertain'); assert.equal(run.withdrawn, 2)
+  const restart = createInvitationWithdrawal(f.runtime)
+  f.provider.list = list
+  const result = await restart.recheck(1, run.id)
+  assert.equal(result?.status, 'completed'); assert.equal(result?.withdrawn, 2)
+  assert.deepEqual(result?.confirmed, ['1', '2']); assert.ok(result?.checkedAt)
+  assert.equal((await restart.recheck(1, run.id))?.withdrawn, 2)
+  assert.deepEqual(f.calls, ['1', '2'])
+})
+
+test('one confirmed cancel followed by a lost response keeps the two outcomes separate', async () => {
+  const f = fixture(), cancel = f.provider.cancel
+  f.provider.cancel = async (account, id) => { await cancel(account, id); if (id === '2') throw new Error('lost') }
+  await f.service.start(1, (await f.service.preview(1)).token)
+  const run = (await finished(f.service))!
+  assert.equal(run.withdrawn, 1); assert.equal(run.current, '2')
+  const result = await createInvitationWithdrawal(f.runtime).recheck(1, run.id)
+  assert.equal(result?.status, 'completed'); assert.equal(result?.withdrawn, 1); assert.equal(result?.skipped, 1)
+  assert.deepEqual(result?.confirmed, ['1']); assert.deepEqual(result?.noLongerPending, ['2'])
+  assert.deepEqual(f.calls, ['1', '2'])
+})
+
+test('old journals resolve absence without inventing a successful API receipt; corrupt new receipts block reads', async () => {
+  const f = await uncertain(), old = f.stored()!
+  delete old.run!.confirmed; delete old.run!.noLongerPending
+  await f.runtime.store.save(1, old)
+  const result = await createInvitationWithdrawal(f.runtime).recheck(1, f.run.id)
+  assert.equal(result?.withdrawn, 0); assert.equal(result?.skipped, 1)
+  for (const confirmed of [['unknown'], ['1', '1'], ['1'], 'bad'] as any[]) {
+    const g = await uncertain(), state = g.stored()!
+    state.run!.confirmed = confirmed; await g.runtime.store.save(1, state)
+    let reads = 0
+    g.provider.verify = async () => { reads++ }
+    await assert.rejects(g.service.recheck(1, g.run.id), /проверить журнал/)
+    assert.equal(reads, 0)
   }
 })
 test('pending, failed verification/read and 429 keep uncertainty; active recheck excludes duplicate work', async () => {

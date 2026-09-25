@@ -7,7 +7,7 @@ export function createMockWithdrawal() {
     async list(account: string) {
       if (!accounts.has(account)) accounts.set(account, [
         { id: 'old-1', name: 'Тест: старое приглашение', createdAt: new Date(Date.now() - 30 * 86400000).toISOString() },
-        { id: 'old-2', name: 'Тест: ручное приглашение', createdAt: new Date(Date.now() - 18 * 86400000).toISOString() },
+        { id: 'old-2', name: 'Тест: ручное приглашение', createdAt: new Date(Date.now() - 28 * 86400000).toISOString() },
         { id: 'new', name: 'Тест: новое приглашение', createdAt: new Date().toISOString() },
         { id: 'unknown', name: 'Тест: дата неизвестна' }
       ])

@@ -16,7 +16,7 @@ test('withdrawals use the existing Inviter backoff and preserve a longer Retry-A
   assert.equal(withdrawalRetryAt(limited(3_600_000), 0), 3_600_000)
   assert.equal(withdrawalRetryAt({ details: { httpStatus: 503 } }, 0), undefined)
 })
-test('429 during verification or initial list pauses, then continues the same approved queue', async () => {
+test('429 during verification or batch check pauses, then continues the same approved queue', async () => {
   for (const operation of ['verify', 'list'] as const) {
     const f = fixture(), preview = await f.service.preview(1)
     clock(f)
@@ -38,13 +38,14 @@ test('429 after POST retries only read-back with saved growing waits, without a 
     if (state.run?.retryAttempt) {
       waits.push(state.retryAt! - f.runtime.now())
       assert.equal(state.run.nextActionAt, new Date(state.retryAt!).toISOString())
-      assert.equal(state.run.current, '1'); assert.equal(state.run.withdrawn, 0)
+      assert.equal(state.run.current, undefined); assert.equal(state.run.withdrawn, 2)
+      assert.deepEqual(state.run.confirmed, ['1', '2'])
     }
     await save(id, state)
   }
   let failures = 0
   f.provider.list = async () => {
-    if (f.calls.length === 1 && failures++ < 2) throw limited()
+    if (f.calls.length === 2 && failures++ < 2) throw limited()
     return list()
   }
   await f.service.start(1, (await f.service.preview(1)).token)
@@ -65,6 +66,8 @@ test('429 on cancel is followed only by read-back; absent continues, present sta
     await f.service.start(1, (await f.service.preview(1)).token)
     const result = await finished(f.service)
     assert.equal(result?.status, applied ? 'completed' : 'uncertain')
+    assert.equal(result?.withdrawn, applied ? 1 : 0)
+    assert.deepEqual(result?.noLongerPending, applied ? ['1'] : [])
     assert.deepEqual(f.calls, applied ? ['1', '2'] : ['1'])
     assert.ok(f.delays.reduce((a, b) => a + b, 0) >= 600_000)
     assert.equal(f.stored()?.attempted.filter(id => id === '1').length, 1)

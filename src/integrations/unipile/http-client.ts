@@ -7,7 +7,7 @@ const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as
   typeof import('./error-diagnostics.ts')
 
 type FetchLike = (url: string, init: Record<string, unknown>) => Promise<any>
-type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean }
+type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean; expectedStatus?: number }
 
 function retryAfterMs(response: any, capMs: number) {
   const value = String(response?.headers?.get?.('retry-after') ?? '').trim()
@@ -87,6 +87,9 @@ function createUnipileHttpClient(options: {
           ...(retryDelay !== undefined ? { retryAfterMs: retryDelay } : {}) }
       )
     }
+    if (requestOptions.expectedStatus !== undefined && response.status !== requestOptions.expectedStatus)
+      throw new LinkedInAuthError('unipile_unexpected_status',
+        `Unipile returned unexpected HTTP ${response.status}.`, { httpStatus: response.status })
     return data as T
   }
 

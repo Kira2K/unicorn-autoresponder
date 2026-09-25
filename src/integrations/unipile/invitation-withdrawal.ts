@@ -8,7 +8,8 @@ const { assertAccountOperational, verifiedIdentity } = validationModule as unkno
 type Http = { request(method: 'GET' | 'POST', path: string, body?: unknown, options?: any): Promise<any> }
 export function createWithdrawalProvider(http: Http = createUnipileHttpClient()): Provider {
   const request = (method: 'GET' | 'POST', path: string) =>
-    http.request(method, path, undefined, { noCache: true, fullRetryAfter: true })
+    http.request(method, path, undefined, { noCache: true, fullRetryAfter: true,
+      ...(method === 'POST' ? { expectedStatus: 200 } : {}) })
   return {
     async verify(account) {
       const id = encodeURIComponent(account.accountId)

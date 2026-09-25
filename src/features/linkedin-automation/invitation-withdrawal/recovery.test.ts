@@ -40,12 +40,18 @@ test('Stop during a 429 pause respects full Retry-After even across restart', as
 test('accepted since preview is skipped; provider reads fail closed; read-back does not blindly repeat', async () => {
   const f = fixture(), preview = await f.service.preview(1)
   f.pending([{ id: '2', name: 'Still pending', createdAt: '2026-08-01T00:00:00Z' }])
+  const cancel = f.provider.cancel
+  f.provider.cancel = async (account, id) => {
+    if (id === '1') { f.calls.push(id); throw { details: { httpStatus: 404 } } }
+    await cancel(account, id)
+  }
   await f.service.start(1, preview.token)
-  assert.equal((await finished(f.service))?.skipped, 1); assert.deepEqual(f.calls, ['2'])
+  assert.equal((await finished(f.service))?.skipped, 1); assert.deepEqual(f.calls, ['1', '2'])
+  assert.deepEqual(f.stored()?.run?.noLongerPending, ['1'])
   const g = fixture()
   g.provider.cancel = async (_a, id) => { g.calls.push(id) }
   await g.service.start(1, (await g.service.preview(1)).token)
-  assert.equal((await finished(g.service))?.status, 'uncertain'); assert.deepEqual(g.calls, ['1'])
+  assert.equal((await finished(g.service))?.status, 'uncertain'); assert.deepEqual(g.calls, ['1', '2'])
 })
 test('close awaits in-flight write and read-back without starting the next one', async () => {
   const f = fixture(), cancel = f.provider.cancel

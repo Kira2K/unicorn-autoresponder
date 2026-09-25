@@ -9,8 +9,12 @@ test('Stop/close interrupts a saved pause; restart neither sends nor reads befor
     const f = fixture(), preview = await f.service.preview(1), list = f.provider.list
     let release!: () => void, entered!: () => void, reads = 0
     const waiting = new Promise<void>(resolve => { entered = resolve })
-    f.provider.list = async () => { reads++; if (!afterPost || f.calls.length) throw limited; return list() }
-    f.runtime.sleep = async () => { entered(); await new Promise<void>(resolve => { release = resolve }) }
+    if (afterPost) f.provider.list = async () => { reads++; throw limited }
+    else f.provider.verify = async () => { reads++; throw limited }
+    f.runtime.sleep = async () => {
+      if (!f.stored()?.run?.retryAttempt) return
+      entered(); await new Promise<void>(resolve => { release = resolve })
+    }
     await f.service.start(1, preview.token); await waiting
     assert.equal(f.stored()?.retryAt, f.runtime.now() + 3_600_000)
     assert.equal((await f.service.status(1))?.retryAttempt, 1)
@@ -21,7 +25,7 @@ test('Stop/close interrupts a saved pause; restart neither sends nor reads befor
     await assert.rejects(restarted.recheck(1, preview.token), /Unipile ограничил/)
     assert.equal(reads, before)
     assert.equal((await f.service.status(1))?.status, afterPost ? 'uncertain' : 'stopped')
-    assert.deepEqual(f.calls, afterPost ? ['1'] : [])
+    assert.deepEqual(f.calls, afterPost ? ['1', '2'] : [])
     assert.equal(f.service.busy(), false)
   }
 })
@@ -43,19 +47,19 @@ test('failed pause save or failed success save blocks further reads/writes, incl
     }
     await f.service.start(1, (await f.service.preview(1)).token)
     assert.equal((await finished(f.service))?.status, 'uncertain')
-    assert.deepEqual(f.calls, ['1']); assert.equal(reads, phase === 'pause' ? 1 : 2)
+    assert.deepEqual(f.calls, ['1', '2']); assert.equal(reads, phase === 'pause' ? 1 : 2)
   }
 })
 test('writer ownership lost during the pause blocks the next provider request', async () => {
   const f = fixture(), preview = await f.service.preview(1)
   let reads = 0
-  f.provider.list = async () => { reads++; throw limited }
+  f.provider.verify = async () => { reads++; throw limited }
   f.runtime.sleep = async () => { f.readonly() }
   await f.service.start(1, preview.token)
   assert.equal((await finished(f.service))?.status, 'failed')
   assert.equal(reads, 1); assert.deepEqual(f.calls, [])
 })
-test('stopped ambiguous POST can be reconciled later without losing or repeating its intent', async () => {
+test('stopped batch check can finish later without losing or repeating confirmed cancellations', async () => {
   const f = fixture(), list = f.provider.list
   f.provider.list = async () => { if (f.calls.length) throw limited; return list() }
   f.runtime.sleep = async () => { await f.service.stop(1) }
@@ -68,7 +72,7 @@ test('stopped ambiguous POST can be reconciled later without losing or repeating
 })
 test('failure to save Stop before a POST is shown explicitly, without losing the saved pause', async () => {
   const f = fixture(), preview = await f.service.preview(1), save = f.runtime.store.save
-  f.provider.list = async () => { throw limited }
+  f.provider.verify = async () => { throw limited }
   f.runtime.sleep = async () => { await f.service.stop(1) }
   f.runtime.store.save = async (id, state) => {
     if (state.run?.stopRequested) throw new Error('Save failed')

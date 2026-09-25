@@ -26,12 +26,13 @@ export async function checkWithdrawalRecheck(page: Page, f: ReturnType<typeof re
     f.runtime.store.save = save
     await page.getByTestId('withdrawal-recheck').click()
     await page.getByTestId('withdrawal-progress').getByText('Остановлено', { exact: true }).waitFor()
-    assert.match(await page.getByTestId('withdrawal-progress').innerText(), /Подтверждено отзывов: 1 из 2/)
+    assert.match(await page.getByTestId('withdrawal-progress').innerText(), /Подтверждено отзывов: 0 из 2/)
+    assert.match(await page.getByTestId('withdrawal-progress').innerText(), /Уже не ожидают: 1/)
     assert.equal(await page.getByTestId('withdrawal-recheck').count(), 0)
     await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
-    await page.getByTestId('withdrawal-summary-203').filter({ hasText: 'Отозвано: 1 из 2.' }).waitFor()
+    await page.getByTestId('withdrawal-summary-203').filter({ hasText: 'Отозвано: 0 из 2.' }).waitFor()
     assert.deepEqual(f.calls, ['1'])
     await page.getByTestId('withdrawal-open-203').click()
-    await page.screenshot({ path: '.codex-tmp/withdrawal-rechecked.png', fullPage: true })
+    await page.screenshot({ path: '.codex-tmp/withdrawal-rechecked.png', fullPage: true, animations: 'disabled' })
   } finally { await f.service.close() }
 }

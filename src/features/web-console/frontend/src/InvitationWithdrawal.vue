@@ -36,6 +36,10 @@ const reasons = { already_attempted: 'Уже была попытка: повто
       <strong>{{ status }}</strong>
       <p>Подтверждено отзывов: {{ control.run.value.withdrawn }} из {{ control.run.value.total }}.
         Пропущено: {{ control.run.value.skipped }}.</p>
+      <p v-if="control.run.value.noLongerPending?.length">Уже не ожидают: {{ control.run.value.noLongerPending.length }}.
+        Ответ отмены не получен; в число подтверждённых отзывов не включены.</p>
+      <p v-if="control.run.value.confirmed?.length && !control.run.value.checkedAt">
+        Unipile подтвердил отмены. Общая сверка списка ещё не завершена.</p>
       <p v-if="control.run.value.nextActionAt">Пауза до {{ new Date(control.run.value.nextActionAt).toLocaleTimeString('ru-RU') }}</p>
       <p v-if="control.active.value && control.run.value.retryAttempt" data-testid="withdrawal-retry">
         После паузы проверка продолжится автоматически. Уже отправленный отзыв повторять не будем.

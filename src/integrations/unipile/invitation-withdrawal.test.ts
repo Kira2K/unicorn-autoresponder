@@ -2,6 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readAllSentInvitations } from './sent-invitations.ts'
 import { createWithdrawalProvider } from './invitation-withdrawal.ts'
+import * as httpModule from './http-client.ts'
+import { fixture, finished } from '../../features/linkedin-automation/invitation-withdrawal/test-fixture.ts'
+const { createUnipileHttpClient } = httpModule as unknown as { createUnipileHttpClient(options: any): any }
 const row = (id: number) => ({ type: 'sent', id: `inv-${id}`, created_at: '2026-08-01T00:00:00Z',
   user: { display_name: `Person ${id}` } })
 test('all pages are read, including short pages; date is returned without inference', async () => {
@@ -43,4 +46,49 @@ test('provider verifies account owner before write; missing or malformed success
   const provider = createWithdrawalProvider({ async request() { return {} } })
   await assert.rejects(provider.verify({ accountId: 'acc_test', platformAccountId: 1, linkedinUrl: '' }))
   await assert.rejects(provider.cancel('acc_test', 'inv-1'))
+})
+
+test('only HTTP 200 with RelationRequestCanceled confirms; no response causes a second POST', async () => {
+  for (const status of [200, 201, 202, 204, 404, 429, 500]) for (const body of [
+    { object: 'RelationRequestCanceled' }, {}, { object: 'OperationStarted' }
+  ]) {
+    let calls = 0
+    const http = createUnipileHttpClient({ apiKey: 'mock', fetchImpl: async () => {
+      calls++; return new Response(status === 204 ? null : JSON.stringify(body), { status })
+    } })
+    const operation = createWithdrawalProvider(http).cancel('acc_test', 'inv-1')
+    if (status === 200 && body.object === 'RelationRequestCanceled') await operation
+    else await assert.rejects(operation)
+    assert.equal(calls, 1)
+  }
+})
+
+test('300 pending, 40 eligible: 48 physical requests with the same selected invitations', async () => {
+  const f = fixture(), requests: string[] = [], canceled: string[] = []
+  let rows = Array.from({ length: 300 }, (_, id) => ({ ...row(id),
+    created_at: id < 40 ? '2026-08-01T00:00:00Z' : '2026-09-16T00:00:00Z' }))
+  f.runtime.provider = () => createWithdrawalProvider(createUnipileHttpClient({ apiKey: 'mock',
+    baseUrl: 'https://unipile.test/v2', fetchImpl: async (url: string, init: any) => {
+      const path = new URL(url).pathname
+      requests.push(`${init.method} ${path}`)
+      let body: any
+      if (path === '/v2/accounts/acc_test') body = { id: 'acc_test', provider: 'linkedin', status: 'running' }
+      else if (path === '/v2/acc_test/users/me') body = { public_identifier: 'test', provider_id: 'owner' }
+      else if (init.method === 'POST') {
+        const id = path.split('/').at(-2)!
+        canceled.push(id); rows = rows.filter(row => row.id !== id)
+        body = { object: 'RelationRequestCanceled' }
+      } else {
+        const offset = Number(new URL(url).searchParams.get('offset'))
+        body = { data: rows.slice(offset, offset + 100), total_count: rows.length }
+      }
+      return new Response(JSON.stringify(body), { status: 200 })
+    } }))
+  await f.service.start(1, (await f.service.preview(1)).token)
+  const run = await finished(f.service)
+  assert.equal(run?.status, 'completed'); assert.equal(run?.withdrawn, 40)
+  assert.deepEqual(canceled, Array.from({ length: 40 }, (_, i) => `inv-${i}`))
+  assert.equal(requests.length, 48)
+  assert.equal(requests.filter(request => request.startsWith('GET')).length, 8)
+  assert.equal(requests.filter(request => request.startsWith('POST')).length, 40)
 })
