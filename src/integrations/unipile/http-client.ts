@@ -46,17 +46,18 @@ function createUnipileHttpClient(options: {
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: any
     let text: string
+    const multipart = body instanceof FormData
 
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
         method,
         headers: {
           Accept: 'application/json',
-          'Content-Type': 'application/json',
+          ...(multipart ? {} : { 'Content-Type': 'application/json' }),
           'X-API-KEY': apiKey,
           ...(requestOptions.noCache ? { 'Cache-Control': 'no-cache' } : {})
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: multipart ? body : body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal
       })
       text = await response.text()

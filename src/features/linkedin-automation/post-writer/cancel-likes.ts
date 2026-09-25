@@ -3,7 +3,7 @@ import type { PostRun } from './types.ts'
 
 export async function cancelRemainingLikes(account: number, runs: Iterable<PostRun>, e: Pick<Execution, 'save'>) {
   for (const run of runs) {
-    if (run.account !== account || !run.likesEnabled) continue
+    if (run.account !== account || !run.likesEnabled || run.engagement.requestedManually) continue
     run.likesEnabled = false
     for (const item of run.engagement.items) if (item.status === 'pending') item.status = 'cancelled'
     const unresolved = run.engagement.items.some(item => ['sending', 'uncertain'].includes(item.status))

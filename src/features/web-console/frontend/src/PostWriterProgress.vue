@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import PostWriterMeme from './PostWriterMeme.vue'
 import PostWriterMemeRecovery from './PostWriterMemeRecovery.vue'
+import PostWriterLikes from './PostWriterLikes.vue'
 import { stages, engagementLabels, dateMsk, countdown, runActive, memeNotes } from './post-writer-view'
 const props = defineProps({ run: Object, now: Number, disabled: Boolean, stopDisabled: Boolean })
 const emit = defineEmits(['action'])
@@ -36,7 +37,13 @@ function onMemeLoaded(value) { memeLoaded.value = value; if (!value) memeReviewe
     <a v-if="run.url" :href="run.url" target="_blank" rel="noreferrer">Открыть опубликованный пост</a>
     <p>Лайки: {{ engagementLabels[run.engagement.status] }}<template v-if="run.engagement.target">
       · {{ run.engagement.items.filter(item => item.status === 'sent').length }} из {{ run.engagement.target }}</template></p>
+    <p v-for="item in run.engagement.items.filter(row => row.status === 'failed' && row.errorCode === 'post_account_not_ready')"
+      :key="item.account.platformAccountId" data-testid="post-like-skipped">
+      {{ item.account.clientName }}: пропущен — аккаунт отключён или заблокирован. Лайк не отправлялся.
+    </p>
+    <small v-if="run.engagement.requestedManually && runActive(run)">Разовый запуск лайков. Остановить — кнопкой Stop.</small>
     <div class="post-actions">
+      <PostWriterLikes :key="run.id" :run="run" :disabled="disabled" @action="(...args) => emit('action', ...args)" />
       <template v-if="run.status === 'awaiting_approval'">
         <Button label="Подтвердить и опубликовать" :disabled="disabled || (run.memeEnabled && (!memeLoaded || !memeReviewed))"
           data-testid="post-approve" @click="emit('action', run, 'approve', run.memeEnabled ? run.hash : undefined)" />

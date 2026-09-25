@@ -1,5 +1,8 @@
 import { lock, unlock, type EngagementExecution } from './execution-types.ts'
+import { errorCode, retryDelay } from './errors.ts'
 import type { PostRun } from './types.ts'
+const likesAllowed = (run: PostRun, e: EngagementExecution) => !run.stop && run.likesEnabled &&
+  (run.engagement.requestedManually || e.settings(run.account).likes)
 
 export async function engage(run: PostRun, e: EngagementExecution) {
   if (e.isClosing?.()) return
@@ -23,7 +26,7 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     unlock(e, uncertain.account.platformAccountId)
     return
   }
-  if (run.stop || !run.likesEnabled || !e.settings(run.account).likes) {
+  if (!likesAllowed(run, e)) {
     run.engagement.items.forEach(item => { if (item.status === 'pending') item.status = 'cancelled' })
     run.engagement.status = 'cancelled'
     run.nextActionAt = undefined
@@ -54,7 +57,16 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     return
   }
   lock(e, item.account.platformAccountId, run.id)
-  await e.adapter.identity(item.account)
+  try { await e.adapter.identity(item.account) }
+  catch (error) {
+    if (errorCode(error) !== 'post_account_not_ready' || retryDelay(error) !== undefined) throw error
+    item.status = 'failed'
+    item.errorCode = 'post_account_not_ready'
+    run.nextActionAt = e.now() + 5000 + Math.floor(e.random() * 85_001)
+    try { await e.save(run) }
+    finally { unlock(e, item.account.platformAccountId) }
+    return
+  }
   if (await e.adapter.reacted(item.account, run.postId)) {
     item.status = 'sent'
     item.confirmedAt = e.now()
@@ -62,11 +74,11 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     unlock(e, item.account.platformAccountId)
     return
   }
-  if (run.stop || e.isClosing?.() || !e.settings(run.account).likes) { unlock(e, item.account.platformAccountId); return }
+  if (!likesAllowed(run, e) || e.isClosing?.()) { unlock(e, item.account.platformAccountId); return }
   item.status = 'sending'
   item.attemptedAt = e.now()
   await e.save(run)
-  if (run.stop || e.isClosing?.() || !e.settings(run.account).likes) {
+  if (!likesAllowed(run, e) || e.isClosing?.()) {
     item.status = 'cancelled'
     await e.save(run)
     unlock(e, item.account.platformAccountId)

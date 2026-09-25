@@ -1,9 +1,18 @@
 import { PostError, object } from '../../features/linkedin-automation/post-writer/errors.ts'
-import type { Account, Log, PostAdapter, ProviderPost } from '../../features/linkedin-automation/post-writer/types.ts'
+import type { Account, Log, PostAdapter, PostMedia, ProviderPost } from '../../features/linkedin-automation/post-writer/types.ts'
 import { reactionPresent } from './post-writer-reactions.ts'
 export type PostRequestScheduler = { run<T>(operation: () => Promise<T>): Promise<T> }
 export type PostHttp = { request<T>(method: 'GET' | 'POST', path: string, body?: unknown,
   options?: { fullRetryAfter: boolean; noCache: boolean }): Promise<T> }
+function publicationBody(text: string, image?: PostMedia) {
+  const fields = { text, can_read: 'anyone', can_comment: 'anyone' }
+  if (!image) return fields
+  const body = new FormData()
+  for (const [key, value] of Object.entries(fields)) body.set(key, value)
+  body.set('attachments[0]', new Blob([Buffer.from(image.content, 'base64')],
+    { type: image.content_type }), image.filename)
+  return body
+}
 export function parsePost(value: unknown): ProviderPost {
   const post = object(value)
   const author = object(post.author)
@@ -38,7 +47,7 @@ export function createPostAdapter(log: Log, client: PostHttp,
       if (own.id !== account.verifiedProviderId) throw new PostError('post_identity_mismatch')
     },
     async publish(account, text, image) { return parsePost(await request('POST', `${path(account)}/posts`,
-      { text, can_read: 'anyone', can_comment: 'anyone', ...(image ? { attachments: [image] } : {}) })) },
+      publicationBody(text, image))) },
     async read(account, id) { return parsePost(await request('GET', `${path(account)}/posts/${encodeURIComponent(id)}`)) },
     async recent(account) {
       const result: ProviderPost[] = []

@@ -6,6 +6,7 @@ const { checkTextWorkspace } = require('./post-text-check.ts') as typeof import(
 const { checkPreparedPosts } = require('./post-prepared-check.ts') as typeof import('./post-prepared-check.ts')
 const { checkPreparedNow } = require('./post-prepared-now-check.ts') as typeof import('./post-prepared-now-check.ts')
 const { checkMemeRecovery } = require('./post-meme-recovery-check.ts') as typeof import('./post-meme-recovery-check.ts')
+const { checkManualLikes } = require('./post-manual-likes-check.ts') as typeof import('./post-manual-likes-check.ts')
 async function main() {
   const processes = await startIsolatedPostTestProcesses()
   const { apiPort, uiPort } = processes
@@ -79,4 +80,6 @@ async function main() {
     console.log('Post Writer mock E2E passed: settings, approval, SSE, reload, read-back, no duplicate.')
   } finally { await browser?.close(); processes.close() }
 }
-main().then(checkPreparedNow).then(checkMemeRecovery).catch(error => { console.error(error); process.exitCode = 1 })
+main().then(checkPreparedNow).then(checkMemeRecovery).then(() => checkManualLikes())
+  .then(() => checkManualLikes(true)).then(() => checkManualLikes(true, true))
+  .catch(error => { console.error(error); process.exitCode = 1 })
