@@ -4,6 +4,7 @@ import PostWriterSettings from './PostWriterSettings.vue'
 import PostWriterProgress from './PostWriterProgress.vue'
 import PostWriterPolicy from './PostWriterPolicy.vue'
 import PostWriterMemeRecovery from './PostWriterMemeRecovery.vue'
+import PostWriterLikes from './PostWriterLikes.vue'
 import { dateMsk, stages } from './post-writer-view'
 const props = defineProps({ account: Object })
 const writer = usePostWriter(props.account)
@@ -35,6 +36,8 @@ const writer = usePostWriter(props.account)
         {{ dateMsk(item.createdAt) }} — {{ stages[item.status] }}
         <a v-if="item.url" :href="item.url" target="_blank" rel="noreferrer">Пост</a>
         <PostWriterMemeRecovery v-if="item.id !== writer.run.value?.id" :run="item"
+          :disabled="writer.busy.value || !writer.data.value.writable" @action="writer.action" />
+        <PostWriterLikes v-if="item.id !== writer.run.value?.id" :run="item"
           :disabled="writer.busy.value || !writer.data.value.writable" @action="writer.action" />
       </div></details>
     </template>

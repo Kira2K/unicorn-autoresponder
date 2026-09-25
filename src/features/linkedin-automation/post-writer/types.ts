@@ -17,9 +17,9 @@ export type Settings = {
 export type Account = { platformAccountId: number; clientName: string; unipileAccountId: string
   verifiedProviderId: string; linkedinUrl?: string }
 export type Like = { account: Account; status: 'pending' | 'sending' | 'uncertain' |
-  'sent' | 'failed' | 'cancelled'; attemptedAt?: number; confirmedAt?: number }
+  'sent' | 'failed' | 'cancelled'; attemptedAt?: number; confirmedAt?: number; errorCode?: string }
 export type Engagement = { status: 'off' | 'pending' | 'running' | 'partial' | 'completed' |
-  'cancelled' | 'uncertain'; target: number; items: Like[] }
+  'cancelled' | 'uncertain'; target: number; items: Like[]; requestedManually?: boolean }
 export type PostRun = {
   id: string; account: number; trigger: 'scheduled' | 'manual'; mode: ManualMode
   status: PostStatus; createdAt: number; updatedAt: number; executorId: string

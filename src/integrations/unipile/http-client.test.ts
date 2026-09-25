@@ -13,6 +13,21 @@ async function run() {
   assert.equal(calls[0].headers['Cache-Control'], undefined)
   assert.equal(calls[1].headers['Cache-Control'], 'no-cache')
   assert.equal(JSON.stringify(calls).includes('test-key'), true)
+  const json = { specifics: { linkedin: { headline: 'Developer' } } }
+  await client.request('PATCH', '/account/users/me', json)
+  assert.equal(calls[2].headers['Content-Type'], 'application/json')
+  assert.equal(calls[2].body, JSON.stringify(json))
+  assert.equal(calls[0].body, undefined)
+  const form = new FormData()
+  form.set('text', 'Post')
+  form.set('attachments[0]', new Blob(['image bytes'], { type: 'image/png' }), 'meme.png')
+  await client.request('POST', '/account/posts', form)
+  assert.equal(calls[3].body, form)
+  assert.equal(calls[3].headers['Content-Type'], undefined)
+  assert.equal(calls[3].headers['X-API-KEY'], 'test-key')
+  await client.request('POST', '/account/posts/post/reactions', { reaction: 'linkedin_like' })
+  assert.equal(calls[4].headers['Content-Type'], 'application/json')
+  assert.equal(calls[4].body, JSON.stringify({ reaction: 'linkedin_like' }))
 
   const limited = createUnipileHttpClient({ apiKey: 'test-key',
     baseUrl: 'https://unipile.test/v2', fetchImpl: async () => new Response('{}', {

@@ -35,3 +35,14 @@ export function fixture() {
     async untilPublished() { for (let i = 0; i < 5; i++) { now += 6000; await service.tick(); await setImmediate() } }
   }
 }
+
+export async function pausedLikesFixture() {
+  const f = fixture()
+  await f.service.start(203, 'automatic', 'old-partial-likes'); await f.untilPublished()
+  await f.service.action((await f.run()).id, 'start-likes')
+  await f.step(); await f.step(5000); await f.step(5000)
+  const run = await f.run()
+  run.engagement.status = 'partial'; run.errorCode = 'post_account_not_ready'
+  await f.deps.store.put('runs', run.id, run); f.restart()
+  return f
+}

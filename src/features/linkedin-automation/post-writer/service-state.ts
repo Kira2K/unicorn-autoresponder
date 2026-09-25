@@ -4,6 +4,7 @@ import { defaults, type Dependencies, type PostRun, type Settings } from './type
 import { lock, type Execution } from './execution-types.ts'
 import { createSerialQueue } from './serial.ts'
 import { canRetryMeme } from './meme-recovery.ts'
+import { canStartManualLikes, canResumeManualLikes } from './manual-likes.ts'
 export function createServiceState(deps: Dependencies) {
   const runs = new Map<string, PostRun>()
   const settings = new Map<number, Settings>()
@@ -89,7 +90,8 @@ export function createServiceState(deps: Dependencies) {
       memesAvailable: e.memes?.enabled === true,
       runs: [...runs.values()].reverse().filter(run => run.account === account)
         .sort((a, b) => b.createdAt - a.createdAt).slice(0, 30)
-        .map(run => ({ ...run, canRetryMeme: canRetryMeme(run) })) })
+        .map(run => ({ ...run, canRetryMeme: canRetryMeme(run), canStartLikes: canStartManualLikes(run),
+          canResumeLikes: canResumeManualLikes(run) })) })
   }
   return { e, runs, settings, events, hydrate, flush, snapshot,
     storageBlocked: () => storageError }
