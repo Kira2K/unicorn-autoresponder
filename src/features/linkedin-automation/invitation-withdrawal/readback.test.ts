@@ -11,7 +11,7 @@ test('delayed visibility is confirmed by bounded reads without repeating a cance
   assert.equal((await finished(f.service))?.status, 'completed')
   assert.equal((await f.service.status(1))?.withdrawn, 2)
   assert.deepEqual(f.calls, ['1', '2'])
-  assert.equal(f.delays.reduce((a, b) => a + b, 0), 13500)
+  assert.equal(f.delays.reduce((a, b) => a + b, 0), 10500)
 })
 
 test('still pending after three reads stops; non-429 read failures are not retried blindly', async () => {
@@ -28,6 +28,26 @@ test('still pending after three reads stops; non-429 read failures are not retri
     await f.service.start(1, (await f.service.preview(1)).token)
     assert.equal((await finished(f.service))?.status, 'uncertain')
     assert.equal(reads, mode === 'pending' ? 3 : 1)
-    assert.deepEqual(f.calls, ['1'])
+    assert.deepEqual(f.calls, ['1', '2'])
+    assert.deepEqual(f.stored()?.run?.confirmed, ['1', '2'])
+    assert.equal(f.stored()?.run?.checkedAt, undefined)
   }
+})
+
+test('preview is reused; successful cancellations share one final full-list check', async () => {
+  const f = fixture(), list = f.provider.list
+  const reads: number[] = []
+  f.provider.list = async () => { reads.push(f.calls.length); return list() }
+  await f.service.start(1, (await f.service.preview(1)).token)
+  const run = await finished(f.service)
+  assert.equal(run?.status, 'completed'); assert.ok(run?.checkedAt)
+  assert.deepEqual(reads, [0, 2]); assert.deepEqual(run?.confirmed, ['1', '2'])
+})
+
+test('batch check verifies every canceled ID, not just the last', async () => {
+  const f = fixture(), cancel = f.provider.cancel
+  f.provider.cancel = async (account, id) => { if (id === '1') f.calls.push(id); else await cancel(account, id) }
+  await f.service.start(1, (await f.service.preview(1)).token)
+  assert.equal((await finished(f.service))?.status, 'uncertain')
+  assert.deepEqual(f.calls, ['1', '2'])
 })

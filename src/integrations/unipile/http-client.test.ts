@@ -29,6 +29,15 @@ async function run() {
   assert.equal(calls[4].headers['Content-Type'], 'application/json')
   assert.equal(calls[4].body, JSON.stringify({ reaction: 'linkedin_like' }))
 
+  for (const status of [200, 201, 202, 204]) {
+    const custom = createUnipileHttpClient({ apiKey: 'test-key', fetchImpl: async () =>
+      new Response(status === 204 ? null : '{}', { status }) })
+    await custom.request('POST', '/unchanged-client')
+    if (status === 200) await custom.request('POST', '/cancel', undefined, { expectedStatus: 200 })
+    else await assert.rejects(custom.request('POST', '/cancel', undefined, { expectedStatus: 200 }),
+      (error: any) => error.code === 'unipile_unexpected_status' && error.details.httpStatus === status)
+  }
+
   const limited = createUnipileHttpClient({ apiKey: 'test-key',
     baseUrl: 'https://unipile.test/v2', fetchImpl: async () => new Response('{}', {
       status: 429, headers: { 'Retry-After': '600' }

@@ -25,7 +25,7 @@ export async function checkWithdrawalRateLimit(page: Page, f: ReturnType<typeof 
     await page.getByText('Всего ожидают: 2. Подходят для отзыва: 2.').waitFor()
     page.once('dialog', dialog => void dialog.accept()); await page.getByTestId('withdrawal-start').click()
     await page.getByTestId('withdrawal-retry').waitFor()
-    assert.deepEqual(f.calls, ['1'])
+    assert.deepEqual(f.calls, ['1', '2'])
     assert.ok(f.stored()?.run?.nextActionAt)
     await page.getByTestId('withdrawal-minimize').click()
     await page.getByTestId('withdrawal-summary-203').filter({ hasText: 'Пауза: Unipile' }).waitFor()
@@ -41,7 +41,7 @@ export async function checkWithdrawalRateLimit(page: Page, f: ReturnType<typeof 
     f.release()
     if (stop) {
       await page.getByTestId('withdrawal-recheck').waitFor()
-      assert.deepEqual(f.calls, ['1'])
+      assert.deepEqual(f.calls, ['1', '2'])
     } else {
       await page.getByTestId('withdrawal-progress').getByText('Очередь завершена', { exact: true }).waitFor()
       assert.deepEqual(f.calls, ['1', '2'])

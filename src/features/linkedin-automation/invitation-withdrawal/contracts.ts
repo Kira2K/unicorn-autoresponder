@@ -10,6 +10,10 @@ export type Provider = {
 export type Run = { id: string; platformAccountId: number; accountId: string;
   status: 'running' | 'completed' | 'stopped' | 'failed' | 'uncertain' | 'interrupted';
   total: number; withdrawn: number; skipped: number; current?: string;
+  // Successful API receipts, included in withdrawn; checkedAt marks the full batch read-back.
+  confirmed?: string[];
+  // Absent after an ambiguous response, included in skipped, never claimed as our cancellation.
+  noLongerPending?: string[];
   stopRequested?: boolean; error?: string; nextActionAt?: string; checkedAt?: string; retryAttempt?: number }
 export type State = { accountId: string; attempted: string[]; run?: Run; retryAt?: number }
 export type Store = { load(id: number): Promise<State | undefined>; save(id: number, state: State): Promise<void> }

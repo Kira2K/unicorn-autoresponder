@@ -64,7 +64,7 @@ function createUnipileHttpClient(options: {
   const retryAfterCapMs = options.retryAfterCapMs ?? 120_000
 
   async function request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown,
-    requestOptions: RequestOptions = {}): Promise<T> {
+    requestOptions: RequestOptions & { expectedStatus?: number } = {}): Promise<T> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: any
@@ -112,6 +112,9 @@ function createUnipileHttpClient(options: {
           ...(retryDelay !== undefined ? { retryAfterMs: retryDelay } : {}) }
       )
     }
+    if (requestOptions.expectedStatus !== undefined && response.status !== requestOptions.expectedStatus)
+      throw new LinkedInAuthError('unipile_unexpected_status',
+        `Unipile returned unexpected HTTP ${response.status}.`, { httpStatus: response.status })
     return data as T
   }
 

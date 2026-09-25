@@ -23,7 +23,8 @@ export function withdrawalError(code: string, message: string) {
   return Object.assign(new Error(message), { code })
 }
 export function withdrawalNeedsCheck(run?: Run) {
-  return Boolean(run && ['uncertain', 'interrupted', 'running'].includes(run.status))
+  return Boolean(run && (['uncertain', 'interrupted', 'running'].includes(run.status) ||
+    (run.confirmed?.length && !run.checkedAt)))
 }
 export function withdrawalRetryAt(error: any, now: number, attempt = 1) {
   const limited = error?.details?.httpStatus === 429 ||

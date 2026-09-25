@@ -42,7 +42,7 @@ try {
   await page.getByTestId('withdrawal-load').click()
   await page.getByText('Всего ожидают: 4. Подходят для отзыва: 2.').waitFor()
   assert.match(await page.getByTestId('withdrawal-list').innerText(), /30 дн\./)
-  assert.match(await page.getByTestId('withdrawal-list').innerText(), /18 дн\./)
+  assert.match(await page.getByTestId('withdrawal-list').innerText(), /28 дн\./)
   assert.match(await page.getByTestId('withdrawal-start').innerText(), /старше 14 дней/)
   assert.match(await page.getByTestId('withdrawal-list').innerText(), /Нет надёжной даты/)
   await page.screenshot({ path: '.codex-tmp/withdrawal-preview.png', fullPage: true })
