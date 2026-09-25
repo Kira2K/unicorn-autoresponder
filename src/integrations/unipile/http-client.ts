@@ -7,7 +7,7 @@ const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as
   typeof import('./error-diagnostics.ts')
 
 type FetchLike = (url: string, init: Record<string, unknown>) => Promise<any>
-type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean; expectedStatus?: number }
+type RequestOptions = { noCache?: boolean; fullRetryAfter?: boolean }
 
 function retryAfterMs(response: any, capMs: number) {
   const value = String(response?.headers?.get?.('retry-after') ?? '').trim()
@@ -41,7 +41,7 @@ function createUnipileHttpClient(options: {
   const retryAfterCapMs = options.retryAfterCapMs ?? 120_000
 
   async function request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown,
-    requestOptions: RequestOptions = {}): Promise<T> {
+    requestOptions: RequestOptions & { expectedStatus?: number } = {}): Promise<T> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: any
