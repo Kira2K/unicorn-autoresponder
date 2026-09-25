@@ -16,6 +16,7 @@ const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as 
 }
 const {
   CANONICAL_EMAIL_RU_PLATFORM_ID,
+  normalizePhoneEn,
   normalizePlatformAccountLabel,
   platformAccountLabelFromId,
   platformAccountPolicy
@@ -1496,7 +1497,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       const normalizedInput: PlatformAccountInput = {
         ...input,
         platformId: platform.id,
-        platform: platform.label
+        platform: platform.label,
+        ...(platform.label === 'phone_en' ? { phone: normalizePhoneEn(input.phone) } : {})
       }
       validatePlatformAccountFields(normalizedInput, platform.label, { allowPlatformIdentity: true })
       const record = buildAccountPatch(normalizedInput, { includeBlankSecrets: true })
@@ -1526,6 +1528,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       const fieldsOnly = { ...input }
       delete fieldsOnly.platformId
       delete fieldsOnly.platform
+      if (platform === 'phone_en') fieldsOnly.phone = normalizePhoneEn(fieldsOnly.phone)
       const githubMigration = platform === 'github'
         ? githubUrlMigrationPatch(account, fieldsOnly.linkedInUrl)
         : {}
