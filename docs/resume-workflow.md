@@ -222,11 +222,13 @@ HTML-escaped. Task cards and state/error replies use the footer
 `Все задачи: /open_my_tasks`; new-task notifications use
 `Открой /open_my_tasks, чтобы взять задачу в работу.`
 
-For EN and both-market workflows, the initial draft card shows optional
-`Email EN`, `Telegram EN`, `Phone EN`, and `LinkedIn` rows immediately after
-the status. `Telegram EN` uses only the `nickname` column; it never falls back
-to the Telegram account login. These rows are omitted from later-stage cards,
-RU-only draft cards, and the short new-task notification.
+The initial draft card shows the student's stack, real and desired locations,
+real age, English level, education, and GitHub URL when these values are
+present. For EN and both-market workflows, it also shows optional `Email EN`,
+`Telegram EN`, `Phone EN`, and `LinkedIn` rows. `Telegram EN` uses only the
+`nickname` column; it never falls back to the Telegram account login. The
+expanded student-data block is omitted from later-stage cards and the short
+new-task notification. EN contact rows remain omitted from RU-only draft cards.
 
 ### Polina message template contract
 
