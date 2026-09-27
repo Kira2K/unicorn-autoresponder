@@ -7,7 +7,8 @@ import { retryableUnipileRead } from '../../../integrations/unipile/read-retry.t
 import { unipileRateLimitSource } from './errors.ts'
 import type { UnipileResponseMetadata } from '../../../integrations/unipile/http-client.ts'
 
-const { createUnipileHttpClient } = httpClientModule as unknown as {
+// CJS exports live under default when native Node reaches this file through require().
+const { createUnipileHttpClient } = ((httpClientModule as { default?: unknown }).default ?? httpClientModule) as {
   createUnipileHttpClient(options?: any): any
 }
 // Keep consecutive requests below ten per minute, including page reads.
