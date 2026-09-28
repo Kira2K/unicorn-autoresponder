@@ -27,6 +27,7 @@ type ClientProfilePatch = import('./types.ts').ClientProfilePatch
 type EducationEntry = import('./types.ts').EducationEntry
 type ReadyForInterviewInEnglishIn2Months = import('./types.ts').ReadyForInterviewInEnglishIn2Months
 type PlatformAccountInput = import('./types.ts').PlatformAccountInput
+type PlatformAccountSecrets = import('./types.ts').PlatformAccountSecrets
 type WebClient = import('./types.ts').WebClient
 type WebConsoleRepository = import('./types.ts').WebConsoleRepository
 type WebOption = import('./types.ts').WebOption
@@ -1508,6 +1509,14 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         clients_id: Number(clientId)
       })
       return await refetchDashboard(clientId)
+    },
+
+    async getPlatformAccountSecrets(clientId: number, accountId: number): Promise<PlatformAccountSecrets> {
+      const account = await getOwnedPlatformAccount(clientId, accountId)
+      return {
+        password: normalizeText(account.password),
+        emailPassword: normalizeText(account.email_password)
+      }
     },
 
     async updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard> {

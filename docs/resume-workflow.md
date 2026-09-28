@@ -72,6 +72,11 @@ Commands:
 - Polina's Russian-version task card can show optional RU contacts: Email RU
   strictly from `email_ru.login` and Phone RU strictly from `hh_ru.phone`.
   Empty values are omitted and do not block the workflow.
+- Platform passwords remain masked as `***` in the regular client dashboard.
+  When the logged-in client edits an owned platform account, the Console loads
+  its `password` and `emailPassword` through
+  `GET /api/client/platform-accounts/:id/secrets`; the response is not cached
+  and the form hides the values until the eye icon is pressed.
 
 `CV processing` fields used by the workflow:
 

@@ -50,6 +50,9 @@ export const api = {
       body: JSON.stringify(account)
     })
   },
+  platformAccountSecrets(accountId) {
+    return request(`/api/client/platform-accounts/${encodeURIComponent(accountId)}/secrets`)
+  },
   updatePlatformAccount(accountId, account) {
     return request(`/api/client/platform-accounts/${accountId}`, {
       method: 'PATCH',

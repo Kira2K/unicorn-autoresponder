@@ -1272,6 +1272,8 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/client/platform-accounts', { method: 'POST' })
     assert.equal(result.response.status, 401)
+    result = await request(server.baseUrl, '/api/client/platform-accounts/10/secrets')
+    assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/admin/latest-client')
     assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/provider/clients')
@@ -1380,6 +1382,18 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.platformAccounts.find((account: any) => account.platform === 'linkedin')?.linkedInUrl, 'https://linkedin.com/in/client-one')
     assert.equal(result.body.platformAccounts.find((account: any) => account.platform === 'github')?.login, 'https://github.com/client-one')
     assert.equal(result.body.platformAccounts[0].password, '***')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/10/secrets', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.response.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(result.body, { password: 'secret', emailPassword: '' })
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/11/secrets', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 404)
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/not-an-id/secrets', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'invalid_account_id')
 
     result = await request(server.baseUrl, '/api/bot/status', {
       headers: { 'X-Bot-Api-Token': 'test-bot-token' }
@@ -2827,6 +2841,8 @@ async function runTests(): Promise<void> {
       body: JSON.stringify({ platform: 'linkedin' })
     }, providerLogin.cookie)
     assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/client/platform-accounts/10/secrets', {}, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, providerLogin.cookie)
     assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/admin/telegram/senders', {}, providerLogin.cookie)
@@ -2869,6 +2885,9 @@ async function runTests(): Promise<void> {
     })
     assert.equal(adminLogin.response.status, 200)
     assert.equal(adminLogin.body.role, 'admin')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/11/secrets', {}, adminLogin.cookie)
+    assert.equal(result.response.status, 403)
 
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, adminLogin.cookie)
     assert.equal(result.response.status, 200)
