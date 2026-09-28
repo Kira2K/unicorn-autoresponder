@@ -4,7 +4,8 @@ import { createUnipileRequestScheduler } from '../../../integrations/unipile/req
 import { errorLogDetails } from './errors.ts'
 import type { CommentLogger } from './types.ts'
 
-const { createUnipileHttpClient } = httpClientModule as unknown as {
+// CJS exports live under default when native Node reaches this file through require().
+const { createUnipileHttpClient } = ((httpClientModule as { default?: unknown }).default ?? httpClientModule) as {
   createUnipileHttpClient(options?: any): any
 }
 const sharedScheduler = createUnipileRequestScheduler()
