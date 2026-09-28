@@ -8,6 +8,12 @@ type ProviderStage = 'draft' | 'en' | 'ru'
 type ProviderTaskCardInput = {
   clientName: string
   market: string
+  stack?: string
+  realLocation?: string
+  desiredLocation?: string
+  realAge?: string
+  englishLevel?: string
+  education?: string
   rootFolder?: string
   sourceFolder?: string
   kirasComments?: string
@@ -16,6 +22,7 @@ type ProviderTaskCardInput = {
   telegramEn?: string
   phoneEn?: string
   linkedInUrl?: string
+  githubUrl?: string
 }
 
 type ProviderTaskListInput = {
@@ -112,10 +119,17 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
   ]
   const stageRows = stage === 'draft'
     ? [
+        input.stack ? `Стек: ${escapeTelegramHtml(input.stack)}` : undefined,
+        input.realLocation ? `Реальная локация: ${escapeTelegramHtml(input.realLocation)}` : undefined,
+        input.desiredLocation ? `Желаемая локация: ${escapeTelegramHtml(input.desiredLocation)}` : undefined,
+        input.realAge ? `Реальный возраст: ${escapeTelegramHtml(input.realAge)}` : undefined,
+        input.englishLevel ? `Уровень английского: ${escapeTelegramHtml(input.englishLevel)}` : undefined,
+        input.education ? `Образование: ${escapeTelegramHtml(input.education)}` : undefined,
         input.emailEn ? `Email EN: ${escapeTelegramHtml(input.emailEn)}` : undefined,
         input.telegramEn ? `Telegram EN: ${escapeTelegramHtml(input.telegramEn)}` : undefined,
         input.phoneEn ? `Phone EN: ${escapeTelegramHtml(input.phoneEn)}` : undefined,
         input.linkedInUrl ? `LinkedIn: ${escapeTelegramHtml(input.linkedInUrl)}` : undefined,
+        input.githubUrl ? `GitHub: ${escapeTelegramHtml(input.githubUrl)}` : undefined,
         input.rootFolder ? `Корневая папка: ${escapeTelegramHtml(input.rootFolder)}` : undefined,
         input.sourceFolder ? `Исходные данные: ${escapeTelegramHtml(input.sourceFolder)}` : undefined,
         input.kirasComments ? `Комментарии Киры: ${escapeTelegramHtml(input.kirasComments)}` : undefined

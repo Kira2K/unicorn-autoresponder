@@ -1383,6 +1383,12 @@ function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
     market: stage === 'ru' && isRuOnlyWorkflow(workflow)
       ? 'ru'
       : normalizeText(workflow.clientMarket) || 'рынок не указан',
+    stack: normalizeText(workflow.clientStack),
+    realLocation: normalizeText(workflow.realLocation),
+    desiredLocation: normalizeText(workflow.desiredLocation),
+    realAge: Number.isFinite(Number(workflow.realAge)) ? String(Number(workflow.realAge)) : '',
+    englishLevel: normalizeText(workflow.englishLevel),
+    education: educationDetails(workflow),
     rootFolder,
     sourceFolder: sourceFolder && sourceFolder !== rootFolder ? sourceFolder : sourceFolder || rootFolder,
     kirasComments: normalizeText(workflow.kirasComments),
@@ -1390,7 +1396,8 @@ function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
     emailEn: showEnContacts ? normalizeText(workflow.clientEmailEn) : '',
     telegramEn: showEnContacts ? normalizeText(workflow.clientTelegramEnNickname) : '',
     phoneEn: showEnContacts ? normalizeText(workflow.clientPhoneEn) : '',
-    linkedInUrl: showEnContacts ? normalizeText(workflow.clientLinkedInUrl) : ''
+    linkedInUrl: showEnContacts ? normalizeText(workflow.clientLinkedInUrl) : '',
+    githubUrl: normalizeText(workflow.clientGithubUrl)
   })
 }
 

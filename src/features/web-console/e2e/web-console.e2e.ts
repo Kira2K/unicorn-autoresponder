@@ -436,7 +436,7 @@ async function runTests(): Promise<void> {
 
       const values: Record<string, string> = {
         login: `all-${platformLabel}@example.com`,
-        phone: `+1555000${platformIndex + 1}`,
+        phone: platformLabel === 'phone_en' ? 'call +1 (555)-010' : `+1555000${platformIndex + 1}`,
         nickname: `all-${platformLabel}`,
         linkedInUrl: platformLabel === 'github'
           ? 'https://github.com/all-platforms'
@@ -445,6 +445,10 @@ async function runTests(): Promise<void> {
         password: `secret-${platformLabel}`
       }
       for (const field of activeFields) await fieldLocators[field].fill(values[field])
+      if (platformLabel === 'phone_en') {
+        assert.equal(await fieldLocators.phone.inputValue(), '+1555010')
+        values.phone = '+1555010'
+      }
       createdAccountValues[platformLabel] = values.linkedInUrl && activeFields.has('linkedInUrl')
         ? values.linkedInUrl
         : values.phone && activeFields.has('phone')

@@ -4,6 +4,7 @@ import { api } from './api'
 import FieldInfoLabel from './FieldInfoLabel.vue'
 import LinkedInAuthTab from './LinkedInAuthTab.vue'
 import {
+  normalizePhoneEn,
   normalizePlatformAccountLabel,
   platformAccountPolicy
 } from '../../platform-account-policy.ts'
@@ -195,6 +196,12 @@ function accountFieldEnabled(field) {
 
 function accountFieldRequired(field) {
   return selectedAccountPolicy.value?.requiredFields.includes(field) ?? false
+}
+
+function updateAccountPhone(value) {
+  accountForm.value.phone = selectedAccountPlatform.value === 'phone_en'
+    ? normalizePhoneEn(value)
+    : value
 }
 
 function accountUrl(account) {
@@ -1736,7 +1743,9 @@ function editAccount(account) {
     platform: account.platform || '',
     accountLabel: account.accountLabel || '',
     login: account.login || '',
-    phone: account.phone || '',
+    phone: normalizePlatformAccountLabel(account.platform) === 'phone_en'
+      ? normalizePhoneEn(account.phone)
+      : account.phone || '',
     email: account.email || '',
     nickname: account.nickname || '',
     linkedInUrl: accountUrl(account),
@@ -3010,7 +3019,7 @@ onUnmounted(() => {
               </label>
               <label class="field">
                 <span>Phone</span>
-                <InputText v-model="accountForm.phone" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" data-testid="account-phone" />
+                <InputText :model-value="accountForm.phone" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" data-testid="account-phone" @update:model-value="updateAccountPhone" />
               </label>
               <label class="field">
                 <span>Email</span>

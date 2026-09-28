@@ -304,17 +304,27 @@ function testYuliaMessageTemplateContract(): void {
   assertYuliaTemplate(yuliaTemplates.yuliaTaskCardMessage('draft', {
     clientName: 'Анна', market: 'EN', rootFolder: 'https://drive.test/root?a=1&b=2',
     sourceFolder: 'https://drive.test/source', kirasComments: 'Добавить <опыт>',
+    stack: 'Java & Kotlin', realLocation: 'Tbilisi <Georgia>', desiredLocation: 'Berlin & Remote',
+    realAge: '24', englishLevel: 'B2 & higher', education: 'University <Faculty>, 2024',
     emailEn: 'anna&work@example.com', telegramEn: '@anna<en>', phoneEn: '+1 555 0100',
-    linkedInUrl: 'https://linkedin.com/in/anna?a=1&b=2'
+    linkedInUrl: 'https://linkedin.com/in/anna?a=1&b=2',
+    githubUrl: 'https://github.com/anna?a=1&b=2'
   }), [
     '<b>Черновик резюме</b>',
     'Студент: Анна',
     'Рынок: EN',
     'Статус: черновик в работе',
+    'Стек: Java &amp; Kotlin',
+    'Реальная локация: Tbilisi &lt;Georgia&gt;',
+    'Желаемая локация: Berlin &amp; Remote',
+    'Реальный возраст: 24',
+    'Уровень английского: B2 &amp; higher',
+    'Образование: University &lt;Faculty&gt;, 2024',
     'Email EN: anna&amp;work@example.com',
     'Telegram EN: @anna&lt;en&gt;',
     'Phone EN: +1 555 0100',
     'LinkedIn: https://linkedin.com/in/anna?a=1&amp;b=2',
+    'GitHub: https://github.com/anna?a=1&amp;b=2',
     'Корневая папка: https://drive.test/root?a=1&amp;b=2',
     'Исходные данные: https://drive.test/source',
     'Комментарии Киры: Добавить &lt;опыт&gt;',
@@ -323,6 +333,7 @@ function testYuliaMessageTemplateContract(): void {
   ].join('\n'))
   assertYuliaTemplate(yuliaTemplates.yuliaTaskCardMessage('en', {
     clientName: 'Анна', market: 'EN', draftUrl: 'https://docs.test/draft',
+    stack: 'must-not-appear', realLocation: 'must-not-appear', githubUrl: 'must-not-appear',
     emailEn: 'must-not-appear@example.com', telegramEn: '@must_not_appear',
     phoneEn: '+1 000', linkedInUrl: 'https://linkedin.com/in/must-not-appear'
   }), [
@@ -1561,10 +1572,17 @@ async function runTests() {
     }))
     const missingDraftTask = await getProviderTaskById(98, missingDraftRepository, providerActor)
     assert.match(missingDraftTask.message, /Отправь ссылку на черновик следующим сообщением/)
+    assert.match(missingDraftTask.message, /Стек: Python/)
+    assert.match(missingDraftTask.message, /Реальная локация: Tbilisi, Georgia/)
+    assert.match(missingDraftTask.message, /Желаемая локация: Remote RU proxy/)
+    assert.match(missingDraftTask.message, /Реальный возраст: 24/)
+    assert.match(missingDraftTask.message, /Уровень английского: B1/)
+    assert.match(missingDraftTask.message, /Образование: University/)
     assert.match(missingDraftTask.message, /Email EN: student\.en@example\.com/)
     assert.match(missingDraftTask.message, /Telegram EN: @student_en/)
     assert.match(missingDraftTask.message, /Phone EN: \+1 555 0100/)
     assert.match(missingDraftTask.message, /LinkedIn: https:\/\/linkedin\.com\/in\/student-user/)
+    assert.match(missingDraftTask.message, /GitHub: https:\/\/github\.com\/student-user/)
     assert.deepEqual(
       missingDraftTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
       ['Назад к задачам']
@@ -1591,6 +1609,22 @@ async function runTests() {
     })), providerActor)
     assert.doesNotMatch(emptyEnContactsTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
 
+    const emptyProfileDetailsTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+      status: 'Draft in process',
+      clientStack: '',
+      realLocation: '',
+      desiredLocation: '',
+      realAge: undefined,
+      englishLevel: '',
+      education: '',
+      educationEntries: [],
+      clientGithubUrl: ''
+    })), providerActor)
+    assert.doesNotMatch(
+      emptyProfileDetailsTask.message,
+      /Стек:|Реальная локация:|Желаемая локация:|Реальный возраст:|Уровень английского:|Образование:|GitHub:/
+    )
+
     const bothMarketDraftTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
       status: 'Draft in process',
       clientMarket: 'both'
@@ -1603,6 +1637,8 @@ async function runTests() {
       clientMarket: 'Ru'
     })), providerActor)
     assert.doesNotMatch(ruOnlyDraftTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+    assert.match(ruOnlyDraftTask.message, /Стек: Python/)
+    assert.match(ruOnlyDraftTask.message, /GitHub: https:\/\/github\.com\/student-user/)
 
     const savedProviderDraftResult = await saveProviderLinkFromChat(
       missingDraftRepository,
@@ -1627,6 +1663,10 @@ async function runTests() {
     const missingEnglishTask = await getProviderTaskById(98, missingEnglishVersionRepository, providerActor)
     assert.match(missingEnglishTask.message, /Отправь ссылку на EN-версию следующим сообщением/)
     assert.doesNotMatch(missingEnglishTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+    assert.doesNotMatch(
+      missingEnglishTask.message,
+      /Стек:|Реальная локация:|Желаемая локация:|Реальный возраст:|Уровень английского:|Образование:|GitHub:/
+    )
     const savedProviderEnglishResult = await saveProviderLinkFromChat(
       missingEnglishVersionRepository,
       providerActor,
@@ -2030,6 +2070,10 @@ async function runTests() {
               assert.match(notification.text, /^Юля, резюме/)
               assert.equal(notification.parseMode, 'HTML')
               assert.doesNotMatch(notification.text, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+              assert.doesNotMatch(
+                notification.text,
+                /Стек:|Реальная локация:|Желаемая локация:|Реальный возраст:|Уровень английского:|Образование:|GitHub:/
+              )
               assert.match(notification.text, /Открой \/open_my_tasks, чтобы взять задачу в работу\.$/)
               if (step.after === 'Draft in process') {
                 assert.match(notification.text, /Подготовь, пожалуйста, черновик CV\./)
