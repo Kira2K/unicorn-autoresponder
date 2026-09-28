@@ -2064,6 +2064,70 @@ async function runTests(): Promise<void> {
     result = await request(server.baseUrl, '/api/client/platform-accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platformId: 28,
+        platform: 'phone_en',
+        phone: 'call +1 (555)-010'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 201, JSON.stringify(result.body))
+    const normalizedPhoneAccount = result.body.platformAccounts
+      .filter((account: any) => account.accountLabel === 'phone_en')
+      .at(-1)
+    assert(normalizedPhoneAccount)
+    assert.equal(normalizedPhoneAccount.phone, '+1555010')
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${normalizedPhoneAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '44 20-1234' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(
+      result.body.platformAccounts.find((account: any) => account.id === normalizedPhoneAccount.id)?.phone,
+      '+44201234'
+    )
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${normalizedPhoneAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: 'letters only' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_required_fields_missing')
+    assert.deepEqual(result.body.fields, ['phone'])
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${normalizedPhoneAccount.id}`, {
+      method: 'DELETE'
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platformId: 10,
+        platform: 'hh_en',
+        login: 'raw-phone-regression',
+        phone: '+44 (20) 1234',
+        password: 'raw-phone-secret'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 201, JSON.stringify(result.body))
+    const rawPhoneAccount = result.body.platformAccounts
+      .filter((account: any) => account.accountLabel === 'hh_en')
+      .at(-1)
+    assert(rawPhoneAccount)
+    assert.equal(rawPhoneAccount.phone, '+44 (20) 1234')
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${rawPhoneAccount.id}`, {
+      method: 'DELETE'
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ platformId: 29, platform: 'github' })
     }, clientLogin.cookie)
     assert.equal(result.response.status, 400)
