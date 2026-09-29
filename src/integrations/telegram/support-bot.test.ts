@@ -2098,6 +2098,10 @@ async function runTests() {
           assert.match(notification.text, /Чтобы согласовать, нажми кнопку «Согласовать» или отправь \/resume I approve/)
           assert.match(notification.text, /для того чтобы вернуть на доработку введи \/resume_reject оставил комменты в резюме или кастомный комментарий/)
           assert.match(notification.text, /После этого я переведу резюме на следующий шаг/)
+          assert.equal(
+            notification.text.endsWith('Если в драфте ты видишь информацию, которая по твоему мнению не должна быть в резюме, будь спокоен — это всего лишь черновик, а вся информация указана справочно. Сообщение с ссылкой на аппрув финального резюме ты получишь по готовности.'),
+            true
+          )
         }
         if (step.after === 'moved to filling') {
           const kiraNotification = lastResult.notifications.find((item: any) => item.kind === 'private_kira')
