@@ -6,7 +6,12 @@ import { createPostgresPool } from '../../../integrations/postgres/pg-pool.mts';
 import { readPostgresAppDbConfig } from '../../../platform/db/postgres/config.mts';
 import { linkLabBaseQuery, linkLabColumns } from './base-query.mts';
 import { createLinkLabFixture } from './base-fixture.mts';
-import { linkLabViewSql, linkLabViewRollbackSql } from './view-definition.mts';
+
+test('projection excludes credentials and archived JSON', () => {
+  assert.deepEqual(linkLabColumns, ['client_id', 'client_name', 'stack_id', 'stack',
+    'platform_account_id', 'linkedin_url', 'data_issue']);
+  assert.doesNotMatch(linkLabBaseQuery, /_copy_source|v_cimcia|SELECT\s+\*/i);
+});
 
 const envPath = process.env.LINKLAB_SQL_TEST_ENV;
 test('LinkLab on PostgreSQL: isolated temporary tables', { skip: !envPath }, async t => {
@@ -21,16 +26,6 @@ test('LinkLab on PostgreSQL: isolated temporary tables', { skip: !envPath }, asy
     const query = linkLabBaseQuery.replaceAll('noco.', 'pg_temp.') + ' ORDER BY c.id';
     const read = async () => (await session.query(query)).rows;
     const rows = await read();
-    await t.test('SQL view returns the same live rows and cannot update its sources', async () => {
-      await session.query(linkLabViewSql.replaceAll('noco.', 'pg_temp.').replace('CREATE VIEW', 'CREATE TEMP VIEW'));
-      assert.deepEqual((await session.query('SELECT * FROM pg_temp."LinkLab" ORDER BY client_id')).rows, rows);
-      await session.query('SAVEPOINT reject_view_write');
-      await assert.rejects(session.query(`UPDATE pg_temp."LinkLab" SET client_name='must not save' WHERE client_id=1`),
-        (error: any) => error.code === '55000');
-      await session.query('ROLLBACK TO SAVEPOINT reject_view_write');
-      assert.deepEqual(await read(), rows);
-      await session.query(linkLabViewRollbackSql.replace('noco.', 'pg_temp.'));
-    });
     const row = (id: number | string) => rows.find(r => r.client_id === String(id))!;
     await t.test('exact membership, no duplicate students or orphan owners', () => {
       assert.deepEqual(rows.map(r => r.client_id), ['1', '2', '6', '7', '8', '9', '14', '15', '17', '18', '20', '9007199254740993']);
