@@ -173,6 +173,7 @@ type ResumeWorkflowRepository = {
   getResumeWorkflowById?(workflowId: number): Promise<ResumeWorkflowRecord | null>
   getProviderResumeTasks?(): Promise<ResumeWorkflowRecord[]>
   patchResumeWorkflow(recordId: number, patch: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord>
+  approveEnglishResumeWorkflow?(before: ResumeWorkflowRecord, patch: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord>
 }
 
 type ResumeWorkflowOptions = {
@@ -1683,11 +1684,15 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
   const transitions: string[] = []
   if (patch) {
     const after = patch.status ?? before
-    workflow = await repository.patchResumeWorkflow(workflow.id, {
+    const savedPatch = {
       ...patch,
       lastWorkflowError: '',
       workflowTrace: appendTrace(workflow, `${before} -> ${after}`, actor)
-    })
+    }
+    workflow = before === 'English version in approve by student' && actor.role === 'student'
+      && !resumeWorkflowFakeDataMode() && repository.approveEnglishResumeWorkflow
+      ? await repository.approveEnglishResumeWorkflow(workflow, savedPatch)
+      : await repository.patchResumeWorkflow(workflow.id, savedPatch)
     transitions.push(`${before} -> ${after}`)
   }
 

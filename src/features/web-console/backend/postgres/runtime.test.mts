@@ -27,6 +27,28 @@ test('normal configured entrypoint fails closed on SQL errors; mock never opens 
   const mock = await createConfiguredApp({ APP_DB: 'postgres', WEB_CONSOLE_USE_MOCK_DATA: 'true' }, open);
   await mock.closeStorage(); assert.equal(calls, 1);
 });
+
+test('LinkLab is opt-in and missing schema stops only its enabled startup', async () => {
+  const off = runtimeFixture(), normal = await openSqlConsole(off.env, () => off.pool);
+  assert.equal(normal.options.repository.approveEnglishResumeWorkflow, undefined);
+  assert.ok(!off.calls.some(s => s.includes('linklab')));
+  await normal.close();
+  const on = runtimeFixture(), enabled = await openSqlConsole({ ...on.env, LINKLAB_ENABLED: '1' }, () => on.pool);
+  assert.equal(typeof enabled.options.repository.approveEnglishResumeWorkflow, 'function');
+  assert.ok(!on.calls.some(s => /CREATE|ALTER|INSERT|UPDATE/.test(s)));
+  await enabled.close();
+  const missing = runtimeFixture(), connect = missing.pool.connect;
+  missing.pool.connect = async () => {
+    const s = await connect(), query = s.query;
+    s.query = async (sql, values) => {
+      if (sql.includes('noco.linklab_changes')) throw Error('fixture missing migration');
+      return query(sql, values);
+    };
+    return s;
+  };
+  await assert.rejects(openSqlConsole({ ...missing.env, LINKLAB_ENABLED: '1' }, () => missing.pool), /postgres_read_failed/);
+  assert.equal(missing.state.ends, 1);
+});
 test('SQL CLI uses the SQL account repository and closes it; no ID or external provider in check setup', async () => {
   const f = runtimeFixture(), runtime = await openSqlAuth({ apply: false }, f.env, () => f.pool);
   assert.equal(runtime.dependencies.adapter, undefined);
