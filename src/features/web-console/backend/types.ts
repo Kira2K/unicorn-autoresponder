@@ -243,6 +243,7 @@ export type WebConsoleRepository = {
   getResumeWorkflowById(workflowId: number): Promise<ResumeWorkflowRecord | null>
   getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]>
   patchResumeWorkflow(recordId: number, patch: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord>
+  approveEnglishResumeWorkflow?(before: ResumeWorkflowRecord, patch: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord>
   getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null>
   getProviderClientsForStatus(statusLabel: string): Promise<ProviderClientRow[]>
   listEnglishLevels(): Promise<WebOption[]>

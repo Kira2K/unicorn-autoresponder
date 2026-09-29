@@ -23,10 +23,12 @@ export function consoleWrites(db: ConsoleSql, options?: ConsoleWrites) {
           throw new PostgresReadError('sql_console_platform_required');
         delete data.platform;
       }
-      return consoleRow(await db.transaction(tx => granted.create(tx, table, data)));
+      const save = (tx: Parameters<ConsoleWrites['create']>[0]) => granted.create(tx, table, data);
+      return consoleRow(await (table === tableIds.accounts && granted.linklab
+        ? granted.linklab.account(Number(data.clients_id), save) : db.transaction(save)));
     },
     async patchRecord(table: string, id: number, input: Readonly<Record<string, unknown>>) {
-      await allow(table, id);
+      const granted = await allow(table, id);
       if (Object.hasOwn(input, 'clients_id')) throw new PostgresReadError('sql_console_owner_immutable');
       // Noco's JSON transport omits undefined; preserve that contract without clearing SQL values.
       const data = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
@@ -38,6 +40,12 @@ export function consoleWrites(db: ConsoleSql, options?: ConsoleWrites) {
       // Clearing the date input means absence, not an empty string in a SQL date column.
       if (table === tableIds.clients && data.birth_date === '' && db.listTables().find(t => t.id === table)
         ?.columns.some(c => c.dataKey === 'birth_date' && c.sqlType === 'date')) data.birth_date = null;
+      if (table === tableIds.accounts && granted.linklab) {
+        const current = await db.getRecord(table, [String(id)]);
+        if (!current) throw new PostgresReadError('record_not_found');
+        return consoleRow(await granted.linklab.account(Number(current.data.clients_id),
+          tx => tx.patchRecord(table, [String(id)], data)));
+      }
       return consoleRow(await db.patchRecord(table, [String(id)], data));
     },
     async deleteRecord(table: string, id: number) {
