@@ -19,7 +19,8 @@ Its responsibilities are:
 4. Build the exact Telegram delivery payload.
 5. Show a clear preview before sending.
 6. Require explicit human approval after the preview.
-7. Send only through the existing shared Telegram integration.
+7. Send only through the existing shared Telegram integration, using the
+   bundled local adapter when operating inside this repository.
 8. Return a clear delivery report.
 
 The skill must never autonomously send messages, schedule messages, change workflows, or modify source code.
@@ -70,6 +71,8 @@ environment blocker and stop.
 - Joining, filtering, parsing, deduplicating, counting, grouping, and rendering data in memory.
 - Building a temporary `chatId -> message` delivery map.
 - Calling the existing Telegram `sendOne` or `sendMany` operation after explicit approval.
+- Running `scripts/send.ts` after approval; it is a thin local adapter over the
+  same shared integration and does not call the raw Bot API itself.
 
 Local combining, parsing, templating, and counting are considered read-only operations.
 
@@ -234,7 +237,14 @@ For every potential recipient, resolve at least:
   private student chat.
 - Never pass student ID, client ID, platform-account ID, or another application ID as `chatId`.
 - Trim and validate chat IDs before preview.
-- Do not invent or reconstruct missing chat IDs.
+- Canonicalize a digits-only positive value read from
+  `clients.telegram_general_chat_id` by prefixing `-` before preview and
+  delivery. This field is defined as a linked common group chat, and Telegram
+  group chat IDs are negative. Preserve an existing leading `-` unchanged.
+- Show both the stored value and the canonical destination in the preview
+  whenever this sign normalization was applied.
+- This sign rule applies only to `clients.telegram_general_chat_id`; do not
+  invent, reconstruct, or normalize missing IDs or IDs from another field.
 - A missing or invalid chat ID must be shown as an exclusion.
 
 ### Deduplication
@@ -581,8 +591,17 @@ After exact approval:
 
 - use `sendOne` when there is one destination;
 - use `sendMany` when there are multiple destinations;
-- call only `POST /api/bot/telegram/send-one` for one destination or
-  `POST /api/bot/telegram/send-many` for multiple destinations;
+- when operating locally in this repository, use the bundled adapter first:
+  `node .agents/skills/telegram-manager-messages/scripts/send.ts
+  --payload-base64=<base64-json>`;
+- encode only `{ previewId, operation, input }`; never include credentials in
+  the adapter payload;
+- the adapter calls the shared `telegram.sendOne` or `telegram.sendMany`
+  directly, performs exactly one integration call, and prints safe typed
+  evidence without the outgoing text;
+- use `POST /api/bot/telegram/send-one` or
+  `POST /api/bot/telegram/send-many` only when operating as a remote client of
+  an already running backend;
 - resolve the backend from `WEB_CONSOLE_BASE_URL`, defaulting to
   `http://127.0.0.1:4300` consistently with the existing support bot;
 - authenticate with the existing `X-Bot-Api-Token` header populated from
@@ -595,9 +614,12 @@ After exact approval:
 
 `VEU_SUPPORT_BOT` is a server-side Telegram credential and must never be read
 from the manager, placed in a payload, or sent as a header. The manager does not
-need to provide credentials. If `WEB_CONSOLE_BASE_URL` is unreachable or
+need to provide credentials. A local operation does not require the web backend
+to be running and does not require `WEB_CONSOLE_BOT_API_TOKEN`; the adapter uses
+the configured `VEU_SUPPORT_BOT` only inside the existing shared integration.
+For a remote operation, if `WEB_CONSOLE_BASE_URL` is unreachable or
 `WEB_CONSOLE_BOT_API_TOKEN` is absent, report the exact configuration blocker
-and do not send or invent an alternative route.
+and do not send or invent another remote route.
 
 The endpoint payloads are:
 
