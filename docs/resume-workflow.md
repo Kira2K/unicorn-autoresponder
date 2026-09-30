@@ -218,6 +218,14 @@ notification:
 - Main provider next: private Provider chat, usually addressed to Yulia.
 - Russian translator next: private translator chat, usually addressed to Polina.
 
+At `Draft in approve by student`, the student's draft approval message ends
+with the following fixed paragraph (also included when the approval details
+are displayed again):
+
+> Если в драфте ты видишь информацию, которая по твоему мнению не должна быть в резюме, будь спокоен — это всего лишь черновик, а вся информация указана справочно. Сообщение с ссылкой на аппрув финального резюме ты получишь по готовности.
+
+This paragraph is omitted from English- and Russian-version approval messages.
+
 Yulia, Polina, and Kira use the fixed templates described below.
 
 ### Yulia message template contract

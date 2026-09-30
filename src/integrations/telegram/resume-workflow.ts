@@ -669,7 +669,10 @@ function studentApprovalDetails(record: ResumeWorkflowRecord): string {
     'Проверь файл выше.',
     'Чтобы согласовать, нажми кнопку «Согласовать» или отправь /resume I approve.',
     'После этого я переведу резюме на следующий шаг.',
-    rejectCommandHint('/resume_reject')
+    rejectCommandHint('/resume_reject'),
+    ...(status === 'Draft in approve by student'
+      ? ['Если в драфте ты видишь информацию, которая по твоему мнению не должна быть в резюме, будь спокоен — это всего лишь черновик, а вся информация указана справочно. Сообщение с ссылкой на аппрув финального резюме ты получишь по готовности.']
+      : [])
   ].join('\n')
 }
 
