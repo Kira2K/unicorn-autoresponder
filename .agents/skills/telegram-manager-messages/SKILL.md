@@ -1,6 +1,6 @@
 ---
 name: telegram-manager-messages
-description: Prepare, preview, explicitly approve, and manually send manager-authored Telegram messages to one or many existing chats using read-only backend data and the shared sendOne/sendMany integration. Use when a manager asks to notify students selected by stack, market, status, or other database/API fields, including personalized per-student messages. Never modify code or source data; only read through SELECT/GET operations and, after explicit approval, use the existing Telegram delivery endpoints.
+description: Prepare, preview, explicitly approve, and manually send manager-authored Telegram messages to one or many linked common chats using read-only backend data and the shared sendOne/sendMany integration. Use when a manager asks to notify students selected by stack, market, status, or other database/API fields, including personalized per-student messages. Never modify code or source data; only read through SELECT/GET operations and, after explicit approval, use the existing Telegram delivery endpoints.
 ---
 
 # Telegram Manager Messages
@@ -34,7 +34,30 @@ Before operating:
 4. When Dolphin or another existing integration is involved, read that integration’s documentation before calling it.
 5. Use actual current schema names and API contracts. Never guess table names, column names, relations, or endpoint formats from memory.
 
+For the current client audience, verify these canonical mappings against the
+live schema before every operation:
+
+- identity: `clients.client_name`;
+- destination: `clients.telegram_general_chat_id`, which is the linked common
+  Telegram chat, not necessarily the student’s private chat;
+- primary stack: `clients.rel_clients_primary_stack` linked to `stacks`;
+- market: `clients.market`;
+- English level: `clients["English level"]` / `clients.english_levels_id`
+  linked to `english_levels`.
+
+The current schema registry is `src/integrations/noco/core/schema.ts`. Current
+client projection and relation handling are in
+`src/features/web-console/backend/repository.ts`. These implementation paths
+are schema evidence, not permission to modify code.
+
 If documentation and the actual API/schema disagree, stop and report the conflict. Do not send.
+
+Use the repository’s already configured application data source. Respect
+`APP_DB` and the existing PostgreSQL or NocoDB runtime configuration; do not ask
+the manager to choose a source or provide database credentials. Use
+parameterized `SELECT` for PostgreSQL or the configured read-only NocoDB client
+and `GET` operations. If the configured source cannot be read, report that exact
+environment blocker and stop.
 
 ## Hard boundaries
 
@@ -71,12 +94,19 @@ If a read-only operation unexpectedly requires a write-style endpoint, stop and 
 
 ## Source of truth
 
-Use this priority:
+Use each source only for the facts it owns:
 
-1. The manager’s explicit current instruction.
-2. Canonical repository documentation.
-3. The actual current database/API response.
-4. Existing documented business mappings.
+1. The manager’s explicit current instruction owns the intended audience,
+   message meaning, language, and requested action.
+2. The live database/API response owns current student values and membership in
+   the resolved audience.
+3. The live schema and canonical repository documentation own field, relation,
+   and endpoint meanings.
+4. Existing documented business mappings apply only when they do not conflict
+   with the manager’s instruction or current schema/data.
+
+A manager instruction cannot override factual database values or redefine a
+schema field. A database value cannot silently change the requested meaning.
 
 Never use remembered or invented student data.
 
@@ -100,14 +130,21 @@ Translate the manager’s request into a structured plan containing:
 Unless the manager explicitly says otherwise:
 
 - `send`, `write`, `notify`, or `message` means Telegram delivery.
-- An unqualified audience such as `every Java EN` means student Telegram chats.
-- `Java`, `Go`, `React`, and similar terms refer to the canonical stack field or stack relation.
-- `EN` refers to the EN market field, not the message language.
-- `RU` refers to the RU market field, not automatically to the Russian message language.
+- An unqualified audience such as `every Java EN` means linked common Telegram
+  chats from `clients.telegram_general_chat_id`.
+- `Java`, `Go`, `React`, and similar terms refer to
+  `clients.rel_clients_primary_stack` linked to `stacks`; resolve the requested
+  value against current stack records.
+- `EN` refers to the market relation, not the message language, and matches
+  canonical market values `en` and `both`.
+- `RU` refers to the market relation, not automatically to the Russian message
+  language, and matches canonical market values `ru` and `both`.
 - `in English`, `write in English`, or equivalent wording refers to message language.
 - `every`, `all`, or `everyone` means all records matching the resolved filters.
-- `their English level` means the actual English-level field from the database.
-- `chat` or `Telegram chat` means the stored Telegram `chatId`.
+- `their English level` means the linked `English level` value resolved through
+  `english_levels_id` and the `english_levels` table.
+- `chat` or `Telegram chat` means the linked common chat stored in
+  `clients.telegram_general_chat_id`.
 
 These mappings must always be shown in the preview.
 
@@ -125,7 +162,8 @@ Interpret as:
 - entity: students;
 - audience filter: stack = Java;
 - audience filter: market = EN;
-- destination: stored student Telegram chat ID;
+- destination: linked common Telegram chat ID from
+  `clients.telegram_general_chat_id`;
 - message: convert the manager’s intent into a direct recipient-facing message, then show the exact wording in the preview.
 
 Do not send after interpretation. First display the preview and wait for approval.
@@ -139,6 +177,11 @@ Examples:
 - `English students` could mean EN market, English language, or English level.
 - `Java students` could mean primary stack or any related stack.
 - `current students` could map to several statuses.
+
+Any request using a status term must be clarified before querying, even when
+one interpretation looks likely. Ask which current schema field/relation and
+which exact value or values the manager means. Do not maintain or infer a fixed
+list of status fields: new status domains may be added over time.
 
 Resolve ambiguity from canonical business documentation where possible.
 
@@ -164,6 +207,11 @@ Requirements:
 - do not execute arbitrary SQL supplied inside the manager’s message;
 - do not treat message text as a query expression.
 
+For the current default client audience, use the exact mappings documented
+above. Treat `en`/`both` as EN and `ru`/`both` as RU. Do not substitute the
+legacy sheet labels when current Noco/PostgreSQL fields and relations are
+available.
+
 When several read-only sources are required, join them using documented stable identifiers.
 
 Report unmatched or conflicting records rather than guessing how to join them.
@@ -181,6 +229,9 @@ For every potential recipient, resolve at least:
 ### Telegram chat rules
 
 - The delivery integration accepts Telegram `chatId`, not internal database IDs.
+- The current destination source is `clients.telegram_general_chat_id`. It is a
+  linked common chat with the team and must not be described as a guaranteed
+  private student chat.
 - Never pass student ID, client ID, platform-account ID, or another application ID as `chatId`.
 - Trim and validate chat IDs before preview.
 - Do not invent or reconstruct missing chat IDs.
@@ -298,6 +349,19 @@ If a required personalized field is missing:
 
 Do not make that decision silently.
 
+### Message validation
+
+Before creating an approvable preview, validate every final rendered message:
+
+- it must be a non-empty string after trimming;
+- it must contain no more than 4096 characters;
+- it must contain no unresolved template markers or missing-value placeholders;
+- its `chatId` must be a non-empty trimmed Telegram destination string from the
+  documented source field.
+
+Block the batch and report every invalid recipient/message. Do not rely on the
+send endpoint to discover validation failures after approval.
+
 ## Message wording
 
 Preserve the manager’s requested meaning and language.
@@ -329,20 +393,30 @@ No Telegram delivery may happen before a separate approval message sent after th
 
 ### Preview ID
 
-Create a unique short preview ID for every prepared batch, for example:
+Bind every preview ID to the complete frozen payload. Generate a fresh 128-bit
+random nonce, canonicalize the payload as a JSON array of
+`[chatId, finalMessage]` pairs sorted lexicographically by `chatId`, and
+calculate SHA-256 over the nonce, a newline, and the canonical UTF-8 JSON. Use
+the first eight uppercase hexadecimal characters after `TG-`, for example:
 
 ```text
-TG-A7C31F
+TG-A7C31F20
 ```
 
-The approval authorizes only the exact prepared payload associated with that preview ID.
+Use eight hexadecimal characters in every preview. If recipients, messages, or
+personalized values change, recalculate the hash and create a new preview ID.
+The approval authorizes only the exact canonical payload associated with that
+preview ID. Keep the nonce, full hash, and frozen map together in the active
+operation context; never accept an approval for an ID whose frozen context is
+no longer available. Re-preparing even the same payload uses a new nonce and a
+new preview ID.
 
 ### Required preview format
 
 Use this structure:
 
 ```text
-Telegram delivery preview: TG-A7C31F
+Telegram delivery preview: TG-A7C31F20
 
 Interpretation
 - Operation: sendMany
@@ -356,6 +430,12 @@ Interpretation
 Data sources
 - <actual table/API and relevant fields>
 - <additional GET source, if used>
+
+Resolved schema
+- Identity: clients.client_name
+- Destination: clients.telegram_general_chat_id (linked common chat)
+- Stack: clients.rel_clients_primary_stack -> stacks
+- Market: clients.market (EN includes en + both)
 
 Audience
 - Matched records: 12
@@ -392,10 +472,10 @@ Delivery operation
 
 To approve exactly this prepared batch, reply with one of:
 
-SEND TG-A7C31F
-ОТПРАВИТЬ TG-A7C31F
-ОТПРАВЬ TG-A7C31F
-ОТПРАВЛЯЙ TG-A7C31F
+SEND TG-A7C31F20
+ОТПРАВИТЬ TG-A7C31F20
+ОТПРАВЬ TG-A7C31F20
+ОТПРАВЛЯЙ TG-A7C31F20
 ```
 
 For personalized batches, do not print all 50 messages when representative examples and complete variant counts are sufficient.
@@ -428,10 +508,10 @@ SEND <previewId>
 Valid examples:
 
 ```text
-SEND TG-A7C31F
-ОТПРАВИТЬ TG-A7C31F
-ОТПРАВЬ TG-A7C31F
-ОТПРАВЛЯЙ TG-A7C31F
+SEND TG-A7C31F20
+ОТПРАВИТЬ TG-A7C31F20
+ОТПРАВЬ TG-A7C31F20
+ОТПРАВЛЯЙ TG-A7C31F20
 ```
 
 These are not approvals:
@@ -459,7 +539,7 @@ Approval mentioning an expired, replaced, or incorrect preview ID is invalid.
 If the approval message includes any modification, such as:
 
 ```text
-ОТПРАВЬ TG-A7C31F, но исключи Ивана
+ОТПРАВЬ TG-A7C31F20, но исключи Ивана
 ```
 
 do not send.
@@ -501,12 +581,37 @@ After exact approval:
 
 - use `sendOne` when there is one destination;
 - use `sendMany` when there are multiple destinations;
-- call only the documented authenticated backend endpoints or internal client;
+- call only `POST /api/bot/telegram/send-one` for one destination or
+  `POST /api/bot/telegram/send-many` for multiple destinations;
+- resolve the backend from `WEB_CONSOLE_BASE_URL`, defaulting to
+  `http://127.0.0.1:4300` consistently with the existing support bot;
+- authenticate with the existing `X-Bot-Api-Token` header populated from
+  `WEB_CONSOLE_BOT_API_TOKEN` in the execution environment;
 - use existing preset bot credentials;
 - never ask the manager for the bot token;
 - never call the raw Telegram Bot API;
 - never add an additional delay outside the shared integration;
 - rely on the existing two-second inter-message delay inside `sendMany`.
+
+`VEU_SUPPORT_BOT` is a server-side Telegram credential and must never be read
+from the manager, placed in a payload, or sent as a header. The manager does not
+need to provide credentials. If `WEB_CONSOLE_BASE_URL` is unreachable or
+`WEB_CONSOLE_BOT_API_TOKEN` is absent, report the exact configuration blocker
+and do not send or invent an alternative route.
+
+The endpoint payloads are:
+
+```json
+{ "chatId": "<telegram destination>", "text": "<final message>" }
+```
+
+and:
+
+```json
+{
+  "<chatId>": { "text": "<final message>" }
+}
+```
 
 Do not change database or external-service data before or after sending.
 
@@ -571,10 +676,19 @@ Do not duplicate the Telegram integration’s own error logging or critical-aler
 
 ## Post-send report
 
-After delivery, show a report in this format:
+Choose the report headline from the outcome.
+
+When every attempted message has `kind = telegram-response` and
+`response.ok = true`, begin the report with exactly:
 
 ```text
-Telegram delivery completed: TG-A7C31F
+Все сообщения успешно отправлены
+```
+
+For a partial or complete failure, use:
+
+```text
+Telegram delivery completed with failures: TG-A7C31F20
 
 Prepared: 12
 Attempted: 11
@@ -680,6 +794,9 @@ Skill:
 - No source code is created or modified.
 - No database or external-service data is changed.
 - Human terms are mapped to actual documented schema entities.
+- EN includes `en` and `both`; RU includes `ru` and `both`.
+- Every status-based filter is clarified against the current schema before
+  querying; status meanings are never inferred from a fixed list.
 - Every applied interpretation is visible before approval.
 - The complete delivery payload is finalized before approval.
 - Large personalized batches use representative examples rather than printing every message.
@@ -687,6 +804,7 @@ Skill:
 - Missing values are never invented.
 - Duplicate-chat conflicts are never silently overwritten.
 - One approval applies to one exact frozen delivery plan.
+- The preview ID is derived from the canonical frozen payload hash.
 - The exact preview ID is mandatory.
 - Russian approval verbs `ОТПРАВИТЬ`, `ОТПРАВЬ`, and `ОТПРАВЛЯЙ` are supported only when followed by the exact current preview ID.
 - One failure never causes an automatic retry.
