@@ -6,6 +6,12 @@ The support bot owns the user-facing `/resume` flow. The web-console backend
 owns the protected API and NocoDB writes. `CV processing` is the source of truth
 for current state.
 
+All support-bot replies and CV notifications use the typed, never-throw send
+contract in [telegram-integration.md](./telegram-integration.md). A completed CV
+transition is not rolled back or repeated when its notification fails; the API
+returns the existing notification warning while the persisted transition stays
+authoritative.
+
 The LinkedIn Profile Filler may read the newest final English CV only after the
 workflow reaches `moved to filling` or `filled`. It never changes this workflow
 or falls back to a draft. See `docs/LINKEDIN_PROFILE_GENERATION.md`.

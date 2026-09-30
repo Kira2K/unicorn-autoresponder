@@ -7,7 +7,13 @@ const { createTelegramBotApi } = require('./bot-api.ts') as {
     answerCallbackQuery(input: { callbackQueryId: string; text?: string }): Promise<unknown>
   }
 }
+const { createTelegramIntegration } = require('./integration.ts') as
+  typeof import('./integration.ts')
 const { kiraRejectPromptMessage } = require('./resume-kira-message-templates.ts')
+
+type TelegramIntegration = import('./integration.ts').TelegramIntegration
+type SendOneInput = import('./types.ts').SendOneInput
+type SendOneResult = import('./types.ts').SendOneResult
 
 type SupportBotActor = {
   userId: string
@@ -770,33 +776,115 @@ async function handleSupportBotGroupAdd(update: any, api: SupportBotApiClient): 
 }
 
 async function sendBotResponse(
-  botApi: ReturnType<typeof createTelegramBotApi>,
+  telegramIntegration: Pick<TelegramIntegration, 'sendOne'>,
   chatId: string,
   response: SupportBotResponse
-): Promise<void> {
+): Promise<SendOneResult> {
   const renderedResponse = renderSupportBotLinks(response)
   if (typeof renderedResponse === 'string') {
-    await botApi.sendMessage({ chatId, text: renderedResponse })
-    return
+    return await telegramIntegration.sendOne({ chatId, text: renderedResponse })
   }
-  await botApi.sendMessage({
+  return await telegramIntegration.sendOne({
     chatId,
     text: renderedResponse.text,
-    replyMarkup: renderedResponse.replyMarkup,
-    parseMode: renderedResponse.parseMode
+    ...(renderedResponse.replyMarkup
+      ? { replyMarkup: renderedResponse.replyMarkup as SendOneInput['replyMarkup'] }
+      : {}),
+    ...(renderedResponse.parseMode
+      ? { parseMode: renderedResponse.parseMode as SendOneInput['parseMode'] }
+      : {})
   })
 }
 
 async function sendBotResponseQuietly(
-  botApi: ReturnType<typeof createTelegramBotApi>,
+  telegramIntegration: Pick<TelegramIntegration, 'sendOne'>,
   chatId: string,
   response: SupportBotResponse
 ): Promise<void> {
   try {
-    await sendBotResponse(botApi, chatId, response)
-  } catch (error: any) {
+    const result = await sendBotResponse(telegramIntegration, chatId, response)
+    if (result.kind === 'client-failure') {
+      console.error(`Failed to send Telegram bot response: ${result.failure.stage}`)
+    }
+  } catch (error: unknown) {
     console.error(`Failed to send Telegram bot response: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+const SUPPORT_BOT_COMMANDS = [
+  '/commands',
+  '/help',
+  '/open_my_tasks',
+  '/tasks',
+  '/whoami',
+  '/backend_status',
+  '/start',
+  '/student',
+  '/change_google_folder',
+  '/resume',
+  '/resume_reject',
+  '/resume_status',
+  '/resume_reset_test'
+] as const
+
+function registerSupportBotCommands(
+  telegramIntegration: TelegramIntegration,
+  apiClient: SupportBotApiClient
+): void {
+  for (const command of SUPPORT_BOT_COMMANDS) {
+    telegramIntegration.commands.register(command, async context => {
+      const response = await handleSupportBotMessage(context.message, apiClient)
+      if (!response) return
+      const rendered = renderSupportBotLinks(response)
+      if (typeof rendered === 'string') {
+        await context.reply({ text: rendered })
+        return
+      }
+      await context.reply({
+        text: rendered.text,
+        ...(rendered.replyMarkup
+          ? { replyMarkup: rendered.replyMarkup as SendOneInput['replyMarkup'] }
+          : {}),
+        ...(rendered.parseMode
+          ? { parseMode: rendered.parseMode as SendOneInput['parseMode'] }
+          : {})
+      })
+    })
+  }
+}
+
+function createInjectedBotSendIntegration(
+  botApi: ReturnType<typeof createTelegramBotApi>
+): TelegramIntegration {
+  return createTelegramIntegration({
+    regularErrorChatId: '',
+    summaryLogsChatId: '',
+    logger() {},
+    botApi: {
+      async sendMessageResponse(input: SendOneInput) {
+        const result = await botApi.sendMessage(input)
+        if (
+          result &&
+          typeof result === 'object' &&
+          typeof (result as Record<string, unknown>).message_id === 'number'
+        ) {
+          return { ok: true, result }
+        }
+        return {
+          ok: true,
+          result: {
+            message_id: 0,
+            date: 0,
+            chat: {
+              id: Number(input.chatId) || 0,
+              type: 'private'
+            },
+            text: input.text
+          }
+        }
+      }
+    }
+  })
 }
 
 async function answerCallbackQueryQuietly(
@@ -850,9 +938,14 @@ async function runSupportBot(options: {
   stopSignal?: AbortSignal
   idleDelayMs?: number
   pollErrorDelayMs?: number
+  telegramIntegration?: TelegramIntegration
 } = {}) {
   const botApi = options.botApi ?? createTelegramBotApi()
   const apiClient = options.apiClient ?? createSupportBotApiClient()
+  const telegramIntegration = options.telegramIntegration ?? (
+    options.botApi ? createInjectedBotSendIntegration(botApi) : createTelegramIntegration()
+  )
+  registerSupportBotCommands(telegramIntegration, apiClient)
   let offset = Number(options.initialOffset ?? 0)
   const pollTimeoutSeconds = Number(options.pollTimeout ?? supportBotPollTimeoutSeconds())
   const idleDelayMs = Number(options.idleDelayMs ?? supportBotIdleDelayMs(pollTimeoutSeconds))
@@ -879,7 +972,7 @@ async function runSupportBot(options: {
       try {
         if (chatMemberUpdate?.chat?.id) {
           const response = await handleSupportBotGroupAdd(update, apiClient)
-          if (response) await sendBotResponse(botApi, String(chatMemberUpdate.chat.id), response)
+          if (response) await sendBotResponse(telegramIntegration, String(chatMemberUpdate.chat.id), response)
           continue
         }
 
@@ -887,13 +980,17 @@ async function runSupportBot(options: {
           const response = await handleSupportBotCallback(callbackQuery, apiClient)
           await answerCallbackQueryQuietly(botApi, { callbackQueryId: String(callbackQuery.id) })
           const chatId = String(callbackQuery.message?.chat?.id ?? callbackQuery.from?.id ?? '').trim()
-          if (response && chatId) await sendBotResponse(botApi, chatId, response)
+          if (response && chatId) await sendBotResponse(telegramIntegration, chatId, response)
           continue
         }
 
         if (!message?.chat?.id) continue
+        const dispatchResult = await telegramIntegration.commands.dispatch(message)
+        if (dispatchResult.kind !== 'unhandled' || dispatchResult.reason === 'unknown-command') {
+          continue
+        }
         const response = await handleSupportBotMessage(message, apiClient)
-        if (response) await sendBotResponse(botApi, String(message.chat.id), response)
+        if (response) await sendBotResponse(telegramIntegration, String(message.chat.id), response)
       } catch (error: any) {
         console.error(error instanceof Error ? error.stack || error.message : String(error))
         const chatId = String(chatMemberUpdate?.chat?.id ?? callbackQuery?.message?.chat?.id ?? callbackQuery?.from?.id ?? message?.chat?.id ?? '').trim()
@@ -906,7 +1003,7 @@ async function runSupportBot(options: {
           }).catch(() => undefined)
         }
         if (chatId) {
-          await sendBotResponseQuietly(botApi, chatId, errorResponse)
+          await sendBotResponseQuietly(telegramIntegration, chatId, errorResponse)
         }
       }
     }
@@ -935,5 +1032,6 @@ module.exports = {
   handleSupportBotMessage,
   isBackendUnavailableError,
   responseText,
+  registerSupportBotCommands,
   runSupportBot
 }

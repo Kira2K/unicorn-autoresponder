@@ -1,0 +1,4 @@
+interface:
+  display_name: "CV Bot"
+  short_description: "Work with the student CV workflow"
+  default_prompt: "Use $cv-bot to inspect or update the student CV workflow."

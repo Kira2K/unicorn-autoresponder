@@ -25,6 +25,8 @@
     "orchestrator:run-analysis:test": "node src/features/diagnostics/orchestrator-run-analysis.test.ts",
     "tg:chat-id-checker": "node src/integrations/telegram/tools/chat-id-checker.ts",
     "tg:responses": "node src/integrations/telegram/tools/responses-application/index.ts",
+    "tg:integration:test": "node src/integrations/telegram/integration.test.ts && node src/features/web-console/backend/telegram-integration-routes.test.ts",
+    "tg:integration:live-smoke": "node src/integrations/telegram/live-smoke.ts",
     "tg:support-bot": "node src/integrations/telegram/support-bot.ts",
     "tg:support-bot:test": "node src/integrations/telegram/support-bot.test.ts",
     "tg:resume:e2e:test-user": "node src/integrations/telegram/resume-visible-e2e.ts",
@@ -129,6 +131,7 @@
   "description": "",
   "dependencies": {
     "@google/genai": "^1.50.1",
+    "@grammyjs/types": "^5.0.0",
     "@primeuix/themes": "^2.0.3",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
