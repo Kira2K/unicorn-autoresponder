@@ -13,6 +13,9 @@ const { createTelegramService } = require('../../features/web-console/backend/te
 const { createTelegramBotApi } = require('./bot-api.ts') as {
   createTelegramBotApi(options?: any): any
 }
+const { createTelegramIntegration: buildTelegramIntegration } = require('./integration.ts') as {
+  createTelegramIntegration(options?: any): import('./integration.ts').TelegramIntegration
+}
 const { createDefaultTdlibAdapter } = require('./tdlib-client.ts') as {
   createDefaultTdlibAdapter(): any
 }
@@ -222,26 +225,56 @@ async function retryTransient<T>(label: string, action: () => Promise<T>): Promi
   throw Object.assign(lastError ?? new Error(`${label} failed after transient retries.`), { label })
 }
 
-function createObservedBotApi(botApi: any): { botApi: any; updates: any[]; sends: any[] } {
+function createObservedBotApi(botApi: any): {
+  botApi: any
+  createTelegramIntegration(): import('./integration.ts').TelegramIntegration
+  updates: any[]
+  sends: any[]
+} {
   const updates: any[] = []
   const sends: any[] = []
+  const createTelegramIntegration = () => buildTelegramIntegration({
+    regularErrorChatId: '',
+    summaryLogsChatId: '',
+    botApi: {
+      async sendMessageResponse(input: import('./types.ts').SendOneInput) {
+        const rawResult = typeof botApi.sendMessageResponse === 'function'
+          ? await botApi.sendMessageResponse(input)
+          : await botApi.sendMessage(input)
+        const response = rawResult && typeof rawResult === 'object' && typeof rawResult.ok === 'boolean'
+          ? rawResult
+          : {
+              ok: true,
+              result: {
+                ...(rawResult && typeof rawResult === 'object' ? rawResult : {}),
+                message_id: Number(rawResult?.message_id ?? 0),
+                date: Number(rawResult?.date ?? Math.floor(Date.now() / 1000)),
+                chat: {
+                  ...(rawResult?.chat && typeof rawResult.chat === 'object' ? rawResult.chat : {}),
+                  id: Number(rawResult?.chat?.id ?? input.chatId) || 0,
+                  type: String(rawResult?.chat?.type ?? 'private')
+                },
+                text: String(rawResult?.text ?? input.text)
+              }
+            }
+        sends.push({
+          chatId: normalizeChatId(input.chatId),
+          text: normalizeText(input.text),
+          result: response,
+          at: new Date().toISOString()
+        })
+        return response
+      }
+    }
+  })
   return {
     updates,
     sends,
+    createTelegramIntegration,
     botApi: {
       async getUpdates(offset?: number, timeout?: number) {
         const result = await botApi.getUpdates(offset, timeout)
         updates.push(...result)
-        return result
-      },
-      async sendMessage(input: any) {
-        const result = await botApi.sendMessage(input)
-        sends.push({
-          chatId: normalizeChatId(input?.chatId),
-          text: normalizeText(input?.text),
-          result,
-          at: new Date().toISOString()
-        })
         return result
       },
       async answerCallbackQuery(input: any) {
@@ -829,6 +862,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
   const discoveryController = new AbortController()
   const discoveryRunner = runSupportBot({
     botApi,
+    telegramIntegration: observed.createTelegramIntegration(),
     apiClient: createNoopSupportBotApiClient(),
     initialOffset,
     pollTimeout: Number(options.pollTimeout ?? 2),
@@ -851,15 +885,17 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
   }
 
   const appInitialOffset = Math.max(initialOffset, newestObservedUpdateId(observed.updates) + 1)
+  const workflowTelegramIntegration = observed.createTelegramIntegration()
   const app = createWebConsoleApp({
     repository,
-    telegramBotApi: botApi,
+    telegramIntegration: workflowTelegramIntegration,
     ...(options.summaryLogsChannelId !== undefined ? { summaryLogsChannelId: options.summaryLogsChannelId } : {})
   })
   const server = await listen(app)
   const controller = new AbortController()
   const botRunner = runSupportBot({
     botApi,
+    telegramIntegration: workflowTelegramIntegration,
     apiClient: createSupportBotApiClient({ baseUrl: server.baseUrl, token }),
     initialOffset: appInitialOffset,
     pollTimeout: Number(options.pollTimeout ?? 2),

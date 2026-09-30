@@ -27,7 +27,7 @@ for live HH automation unless the task explicitly asks for that path.
 | `src/platform/browser` | Browser helpers that are not HH-specific. |
 | `src/integrations/dolphin` | Dolphin Cloud/Local clients, preflight, runtime start/stop, locks, profile audit/assignment/proxy tooling. |
 | `src/integrations/noco` | Noco core API helpers, reports, backups, relation health, readiness and cleanup jobs. |
-| `src/integrations/telegram` | Telegram Bot API worker, TDLib client, resume workflow state machine, live e2e tools. |
+| `src/integrations/telegram` | Typed Telegram Bot API facade, command worker, TDLib client, resume workflow state machine, live e2e tools. See [telegram-integration.md](./telegram-integration.md). |
 | `src/integrations/google-sheets` | Legacy raw Sheets access and comparison helpers. |
 | `index.js` | Browser-side HH responder artifact injected into HH pages. It intentionally remains at repo root. |
 | `logs/` | Generated local evidence and reports. Usually read latest summaries first. |

@@ -17,7 +17,7 @@ future session needs the shortest map.
 | `src/integrations/noco` | NocoDB core helpers, operational jobs, backups, relation checks, and migration health gates. |
 | `src/integrations/unipile` | Unipile v2 authentication and LinkedIn API boundary. |
 | `src/integrations/google-sheets` | Raw Google Sheets access and legacy comparison/mapping helpers. |
-| `src/integrations/telegram` | Telegram messaging and Telegram operational tools. |
+| `src/integrations/telegram` | Typed Bot API facade, Telegram messaging, commands, and operational tools. See [telegram-integration.md](./telegram-integration.md). |
 
 Root legacy entrypoints were removed. `index.js` remains at the root because it
 is the browser responder artifact injected into HH pages.

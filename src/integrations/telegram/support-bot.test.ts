@@ -1108,6 +1108,8 @@ async function runTests() {
         return [{
           update_id: 2,
           message: {
+            message_id: 2,
+            date: 1_700_000_002,
             text: '/resume',
             chat: { id: -5216637594, type: 'supergroup' },
             from: { id: 100, username: 'student_user' }
@@ -1208,6 +1210,8 @@ async function runTests() {
         return [{
           update_id: 2,
           message: {
+            message_id: 4,
+            date: 1_700_000_004,
             text: '/backend_status',
             chat: { id: -5216637594, type: 'supergroup' },
             from: { id: 42, username: 'tester' }
@@ -1243,6 +1247,8 @@ async function runTests() {
         return [{
           update_id: 3,
           message: {
+            message_id: 5,
+            date: 1_700_000_005,
             text: '/student',
             chat: { id: -5216637594, type: 'supergroup' },
             from: { id: 42, username: 'tester' }
