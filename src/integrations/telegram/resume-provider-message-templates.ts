@@ -13,6 +13,7 @@ type ProviderTaskCardInput = {
   desiredLocation?: string
   realAge?: string
   englishLevel?: string
+  readyForInterviewInEnglishIn2Months?: string
   education?: string
   rootFolder?: string
   sourceFolder?: string
@@ -111,6 +112,8 @@ function yuliaNewTaskMessage(stage: ProviderStage, clientName: string, market: s
 
 function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput): ProviderTelegramMessage {
   const config = STAGE_CONFIG[stage]
+  const valueOrEmpty = (value: string | undefined) => String(value ?? '').trim() || 'empty'
+  const readyForInterviewInEnglishIn2Months = valueOrEmpty(input.readyForInterviewInEnglishIn2Months)
   const commonRows = [
     bold(config.heading),
     `Студент: ${escapeTelegramHtml(input.clientName)}`,
@@ -119,20 +122,21 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
   ]
   const stageRows = stage === 'draft'
     ? [
-        input.stack ? `Стек: ${escapeTelegramHtml(input.stack)}` : undefined,
-        input.realLocation ? `Реальная локация: ${escapeTelegramHtml(input.realLocation)}` : undefined,
-        input.desiredLocation ? `Желаемая локация: ${escapeTelegramHtml(input.desiredLocation)}` : undefined,
-        input.realAge ? `Реальный возраст: ${escapeTelegramHtml(input.realAge)}` : undefined,
-        input.englishLevel ? `Уровень английского: ${escapeTelegramHtml(input.englishLevel)}` : undefined,
-        input.education ? `Образование: ${escapeTelegramHtml(input.education)}` : undefined,
-        input.emailEn ? `Email EN: ${escapeTelegramHtml(input.emailEn)}` : undefined,
-        input.telegramEn ? `Telegram EN: ${escapeTelegramHtml(input.telegramEn)}` : undefined,
-        input.phoneEn ? `Phone EN: ${escapeTelegramHtml(input.phoneEn)}` : undefined,
-        input.linkedInUrl ? `LinkedIn: ${escapeTelegramHtml(input.linkedInUrl)}` : undefined,
-        input.githubUrl ? `GitHub: ${escapeTelegramHtml(input.githubUrl)}` : undefined,
-        input.rootFolder ? `Корневая папка: ${escapeTelegramHtml(input.rootFolder)}` : undefined,
-        input.sourceFolder ? `Исходные данные: ${escapeTelegramHtml(input.sourceFolder)}` : undefined,
-        input.kirasComments ? `Комментарии Киры: ${escapeTelegramHtml(input.kirasComments)}` : undefined
+        `Стек: ${escapeTelegramHtml(valueOrEmpty(input.stack))}`,
+        `Реальная локация: ${escapeTelegramHtml(valueOrEmpty(input.realLocation))}`,
+        `Желаемая локация: ${escapeTelegramHtml(valueOrEmpty(input.desiredLocation))}`,
+        `Реальный возраст: ${escapeTelegramHtml(valueOrEmpty(input.realAge))}`,
+        `Уровень английского: ${escapeTelegramHtml(valueOrEmpty(input.englishLevel))}`,
+        `Ready for interview in English in 2 months: ${escapeTelegramHtml(readyForInterviewInEnglishIn2Months)}`,
+        `Образование: ${escapeTelegramHtml(valueOrEmpty(input.education))}`,
+        `Email EN: ${escapeTelegramHtml(valueOrEmpty(input.emailEn))}`,
+        `Telegram EN: ${escapeTelegramHtml(valueOrEmpty(input.telegramEn))}`,
+        `Phone EN: ${escapeTelegramHtml(valueOrEmpty(input.phoneEn))}`,
+        `LinkedIn: ${escapeTelegramHtml(valueOrEmpty(input.linkedInUrl))}`,
+        `GitHub: ${escapeTelegramHtml(valueOrEmpty(input.githubUrl))}`,
+        `Корневая папка: ${escapeTelegramHtml(valueOrEmpty(input.rootFolder))}`,
+        `Исходные данные: ${escapeTelegramHtml(valueOrEmpty(input.sourceFolder))}`,
+        `Комментарии Киры: ${escapeTelegramHtml(valueOrEmpty(input.kirasComments))}`
       ]
     : [input.draftUrl ? `Черновик: ${escapeTelegramHtml(input.draftUrl)}` : undefined]
   return htmlMessage([
@@ -152,11 +156,17 @@ function yuliaLinkSavedMessage(stage: ProviderStage, clientName: string): Provid
   ])
 }
 
-function yuliaReworkMessage(stage: ProviderStage, clientName: string, comment: string): ProviderTelegramMessage {
+function yuliaReworkMessage(
+  stage: ProviderStage,
+  clientName: string,
+  comment: string,
+  returnedCvUrl: string
+): ProviderTelegramMessage {
   const config = STAGE_CONFIG[stage]
   return htmlMessage([
     bold(config.reworkHeading),
     `Студент: ${escapeTelegramHtml(clientName)}`,
+    `Файл на доработку: ${escapeTelegramHtml(returnedCvUrl)}`,
     `Комментарий: ${escapeTelegramHtml(comment)}`,
     config.reworkHint,
     YULIA_TASKS_FOOTER

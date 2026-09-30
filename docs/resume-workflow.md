@@ -63,6 +63,8 @@ Commands:
 - `real_age`: required before leaving `collection student's data`.
 - `real_location`: required before leaving `collection student's data`.
 - `desired_location`: required before leaving `collection student's data`.
+- `ready_for_interview_in_english_in_2_months`: optional `Yes`/`No` value shown
+  in Yulia's initial draft card; the card shows `empty` when the field is blank.
 - `English level` / `english_levels_id`: required before leaving
   `collection student's data`.
 - `google_folder`: root Google folder managed in Console/Noco; this is
@@ -71,10 +73,10 @@ Commands:
   GitHub platform `github`, a LinkedIn platform account, `telegram_ru`, and
   `telegram_en`. GitHub/LinkedIn validation checks account existence; URL
   fields are used for display when present.
-- Yulia's initial draft card can also show optional EN contacts from platform
-  accounts: Email EN from `email_en.login`, Telegram EN strictly from
-  `telegram_en.nickname`, Phone EN from `phone_en`, and the LinkedIn URL. Empty
-  values are omitted and do not block the workflow.
+- Yulia's initial draft card always shows the platform fields Email EN from
+  `email_en.login`, Telegram EN strictly from `telegram_en.nickname`, Phone EN
+  from `phone_en`, LinkedIn URL, and GitHub URL. A missing platform value is
+  shown as `empty` and does not block the workflow.
 - Polina's Russian-version task card can show optional RU contacts: Email RU
   strictly from `email_ru.login` and Phone RU strictly from `hh_ru.phone`.
   Empty values are omitted and do not block the workflow.
@@ -187,8 +189,9 @@ producer. Producer phases cannot reject themselves.
 
 При возврате ответ бота Кире содержит ссылку именно на возвращённый файл. Ссылка
 берётся до очистки поля; правила переходов не меняются. Фиксированные шаблоны
-Юли и Полины показывают студента, комментарий и действие по доработке; шаблон
-Полины дополнительно показывает актуальную ссылку на EN-версию.
+Юли показывают студента, ссылку на возвращённый файл, комментарий и действие по
+доработке. Шаблоны Полины показывают студента, комментарий и действие по
+доработке, а также актуальную ссылку на EN-версию.
 
 В контактах Telegram RU/EN бот и карточка исполнителя показывают `nickname`,
 если он заполнен. Иначе используется прежний вариант — `login` и остальные
@@ -234,13 +237,19 @@ HTML-escaped. Task cards and state/error replies use the footer
 `Все задачи: /open_my_tasks`; new-task notifications use
 `Открой /open_my_tasks, чтобы взять задачу в работу.`
 
-The initial draft card shows the student's stack, real and desired locations,
-real age, English level, education, and GitHub URL when these values are
-present. For EN and both-market workflows, it also shows optional `Email EN`,
-`Telegram EN`, `Phone EN`, and `LinkedIn` rows. `Telegram EN` uses only the
-`nickname` column; it never falls back to the Telegram account login. The
-expanded student-data block is omitted from later-stage cards and the short
-new-task notification. EN contact rows remain omitted from RU-only draft cards.
+The initial draft card always shows the student's stack, real and desired
+locations, real age, English level, readiness for an English interview in two
+months, education, root folder, source-data folder, and Kira's comments. For
+every market it also always shows `Email EN`, `Telegram EN`, `Phone EN`,
+`LinkedIn`, and `GitHub`. Every missing or whitespace-only value in this block
+is rendered as `empty`. `Telegram EN` uses only the `nickname` column; it never
+falls back to the Telegram account login. When the workflow advances from
+`collection Kira's comments` to `Draft in process`, Yulia receives the new-task
+notification followed by this full draft card in the same HTML message, for
+every market. Opening the task through `/open_my_tasks` shows the same card.
+Later-stage new-task notifications remain short, and their cards omit the
+expanded student-data block. Rework notifications retain their returned-file
+link and current rejection comment.
 
 ### Polina message template contract
 

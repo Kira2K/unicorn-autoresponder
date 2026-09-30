@@ -30,6 +30,7 @@ for (const mode of ['legacy', 'sql'] as const) test(`${mode}: Telegram contacts 
   assert.equal(workflow?.clientHhRuPhone, '+79992223344');
   assert.equal(workflow?.clientTelegramUsername, '@sql_student', 'student authorization identity is unchanged');
   assert.equal(workflow?.clientPhoneEn, '+15550100', 'other platforms retain login-first display');
+  assert.equal(workflow?.clientReadyForInterviewInEnglishIn2Months, 'Yes');
   const card = await repo.getProviderClientByIdForStatus(7, 'studying');
   assert.equal(card?.telegramRu, '@student_ru'); assert.equal(card?.telegramEn, '@student_en');
   assert.deepEqual(accounts, before); assert.equal(f.count(), writes, 'display must not write account data');

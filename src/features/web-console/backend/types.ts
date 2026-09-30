@@ -211,6 +211,7 @@ export type ResumeWorkflowRecord = {
   desiredLocation?: string
   englishLevel?: string
   englishLevelId?: number
+  clientReadyForInterviewInEnglishIn2Months?: ReadyForInterviewInEnglishIn2Months
   clientGithubUrl?: string
   clientGithubAccountExists?: boolean
   clientLinkedInUrl?: string
