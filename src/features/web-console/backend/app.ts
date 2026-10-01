@@ -1271,6 +1271,20 @@ function createWebConsoleApp(options: {
     }
   })
 
+  app.get('/api/client/platform-accounts/:id/secrets', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const accountId = Number(req.params.id)
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        res.status(400).json({ error: 'invalid_account_id' })
+        return
+      }
+      res.setHeader('Cache-Control', 'no-store')
+      res.json(await repository.getPlatformAccountSecrets(Number(req.webSession!.clientId), accountId))
+    } catch (error) {
+      next(error)
+    }
+  })
+
   app.patch('/api/client/platform-accounts/:id', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       const accountId = Number(req.params.id)

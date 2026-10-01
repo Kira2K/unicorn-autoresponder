@@ -104,6 +104,11 @@ export type PlatformAccountInput = {
   emailPassword?: string
 }
 
+export type PlatformAccountSecrets = {
+  password: string
+  emailPassword: string
+}
+
 export type ClientDashboard = {
   client: WebClient
   platformAccounts: WebPlatformAccount[]
@@ -250,6 +255,7 @@ export type WebConsoleRepository = {
   listPlatforms(): Promise<WebOption[]>
   updateClientProfile(clientId: number, patch: ClientProfilePatch): Promise<ClientDashboard>
   createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard>
+  getPlatformAccountSecrets(clientId: number, accountId: number): Promise<PlatformAccountSecrets>
   updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard>
   deletePlatformAccount(clientId: number, accountId: number): Promise<ClientDashboard>
   getTelegramPlatformAccountsForClient(clientId: number): Promise<WebPlatformAccount[]>
