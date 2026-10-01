@@ -219,12 +219,19 @@ notification:
 - Russian translator next: private translator chat, usually addressed to Polina.
 
 At `Draft in approve by student`, the student's draft approval message ends
-with the following fixed paragraph (also included when the approval details
+with the following fixed text (also included when the approval details
 are displayed again):
 
-> Если в драфте ты видишь информацию, которая по твоему мнению не должна быть в резюме, будь спокоен — это всего лишь черновик, а вся информация указана справочно. Сообщение с ссылкой на аппрув финального резюме ты получишь по готовности. Данный файл является легендой, которую нужно учить, а все правки по смыслу буллетов принимаются только на этом этапе.
+```text
+Это драфт резюме и одновременно твоя легенда. Информацию из него нужно выучить и быть готовым уверенно рассказать на собеседовании.
+Важно: не вся информация из драфта попадёт в финальную версию резюме — часть указана только для подготовки по легенде. Поэтому не нужно вносить правки только потому, что какая-то информация кажется лишней для финальной вёрстки.
 
-This paragraph is omitted from English- and Russian-version approval messages.
+Это последний этап, когда можно внести правки по смыслу и содержанию буллетов и компаний. Внимательно проверь информацию: после этого этапа смысловые правки в буллеты уже не принимаются.
+
+Финальное резюме ты получишь на аппрув отдельным сообщением.
+```
+
+This text is omitted from English- and Russian-version approval messages.
 
 Yulia, Polina, and Kira use the fixed templates described below.
 
