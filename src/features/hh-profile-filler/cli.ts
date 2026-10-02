@@ -27,7 +27,7 @@ export async function main(args = process.argv.slice(2)) {
   fatalClientName = undefined
   const deferredTelegram = args.includes('--defer-telegram')
   const reportResultPath = value(args, '--report-result')
-  suppressFatalReport = args.includes('--live-smoke') || deferredTelegram || Boolean(reportResultPath)
+  suppressFatalReport = args.includes('--live-smoke') || args.includes('--dry-run') || deferredTelegram || Boolean(reportResultPath)
   if (reportResultPath) {
     const resultFile = path.resolve(reportResultPath)
     const markerFile = `${resultFile}.telegram-sent`
@@ -46,7 +46,7 @@ export async function main(args = process.argv.slice(2)) {
   }
   if (args.includes('--pending') || args.includes('--scan-only')) {
     const output = await runPending({ scanOnly: args.includes('--scan-only'),
-      statePath: value(args, '--state') })
+      statePath: value(args, '--state'), deferTelegram: deferredTelegram })
     console.log(JSON.stringify(output, null, 2))
     if (output.results.some(result => !result.ok)) process.exitCode = 1
     return
@@ -62,8 +62,8 @@ export async function main(args = process.argv.slice(2)) {
   const orderedResumeIds = String(value(args, '--resume-ids') ?? '')
     .split(',').map(item => item.trim()).filter(Boolean)
   if (resumeFromValue &&
-      !['work-permits', 'privacy', 'delete-old', 'verify-final'].includes(resumeFromValue)) {
-    throw new Error('Expected --resume-from work-permits, privacy, delete-old or verify-final.')
+      !['experience', 'skills', 'work-permits', 'privacy', 'delete-old', 'verify-final'].includes(resumeFromValue)) {
+    throw new Error('Expected --resume-from experience, skills, work-permits, privacy, delete-old or verify-final.')
   }
   if (resumeFromValue === 'work-permits' && !resumeId) {
     throw new Error('--resume-from work-permits requires --resume-id.')
@@ -71,15 +71,26 @@ export async function main(args = process.argv.slice(2)) {
   if (resumeFromValue === 'verify-final' && !orderedResumeIds.length) {
     throw new Error('--resume-from verify-final requires ordered --resume-ids.')
   }
+  if (resumeFromValue === 'experience' && !orderedResumeIds.length) {
+    throw new Error('--resume-from experience requires ordered --resume-ids.')
+  }
+  if (resumeFromValue === 'skills' && !orderedResumeIds.length) {
+    throw new Error('--resume-from skills requires ordered --resume-ids.')
+  }
   const result = args.includes('--live-smoke')
     ? await service.runLiveSmoke(clientId, selectedMarket)
     : await service.run(clientId, selectedMarket, args.includes('--dry-run'), undefined,
         args.includes('--use-noco-identity'), resumeId,
-        resumeFromValue as 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | undefined,
+        resumeFromValue as 'experience' | 'skills' | 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | undefined,
         orderedResumeIds)
   fatalClientName = result.clientName
   console.log(JSON.stringify(result, null, 2))
-  if (!result.dryRun && !deferredTelegram) await reportProfileFillerResult(result)
+  if (!result.dryRun && !deferredTelegram && (!result.ok || result.operationComplete === true)) {
+    await reportProfileFillerResult(result).catch(error => {
+      console.error(`Profile filler final report was not confirmed: ${safeErrorMessage(error)}`)
+      process.exitCode = 1
+    })
+  }
   if (!result.ok) process.exitCode = 1
 }
 

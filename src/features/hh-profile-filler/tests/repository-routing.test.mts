@@ -21,10 +21,9 @@ export function runRepositoryRoutingTests() {
     const { createProfileFillerRepository } = await import(${JSON.stringify(url)});
     delete process.env.APP_DB;
     for (const mode of [undefined, '', 'sheets', 'noco', ' NOCO ', 'unknown']) {
-      const repo = createProfileFillerRepository(mode, async () => { throw new Error('unexpected_sql'); });
-      assert.deepEqual(await repo.listClients(), []);
+      assert.throws(() => createProfileFillerRepository(mode, async () => { throw new Error('unexpected_sql'); }), /APP_DB=postgres/);
     }
-    assert.equal(created, 6); assert.equal(reads, 6);
+    assert.equal(created, 0); assert.equal(reads, 0);
     process.env.APP_DB = ' PostgreS ';
     // Exercise the default service factory, including new recovery/smoke paths.
     // Invalid SQL configuration must stop before Drive/Dolphin or any Noco fallback.
@@ -38,20 +37,21 @@ export function runRepositoryRoutingTests() {
         extractor: { extract() { throw new Error('unexpected_extractor'); } },
         withPage() { throw new Error('unexpected_browser'); }
       });
-      for (const mode of [undefined, 'work-permits', 'privacy', 'delete-old', 'verify-final']) {
+      for (const mode of [undefined, 'experience', 'work-permits', 'privacy', 'delete-old', 'verify-final']) {
         const result = await service.run(1, 'En', false, undefined, false,
-          mode === 'work-permits' ? 'draft-0' : undefined, mode, mode === 'verify-final' ? ['draft-0'] : []);
+          mode === 'work-permits' ? 'draft-0' : undefined, mode,
+          mode === 'verify-final' || mode === 'experience' ? ['draft-0'] : []);
         assert.equal(result.ok, false); assert.match(result.message, /invalid_appdb_postgres_config/);
       }
       const dryRun = await service.run(1, 'En', true);
       assert.equal(dryRun.ok, false); assert.match(dryRun.message, /invalid_appdb_postgres_config/);
       const smoke = await service.runLiveSmoke(1, 'En');
       assert.equal(smoke.ok, false); assert.match(smoke.message, /invalid_appdb_postgres_config/);
-      assert.equal(created, 6); assert.equal(reads, 6);
+      assert.equal(created, 0); assert.equal(reads, 0);
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
     const failure = new Error('sql_failed');
     await assert.rejects(createProfileFillerRepository(undefined, async () => { throw failure; }).listClients(), e => e === failure);
-    assert.equal(created, 6); assert.equal(reads, 6);
+    assert.equal(created, 0); assert.equal(reads, 0);
   `;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', windowsHide: true });
   assert.equal(result.status, 0, result.error?.message ?? result.stderr);

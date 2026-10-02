@@ -13,7 +13,7 @@ const {
   __resetDolphinRuntimeForTests(): void
   __setDolphinRuntimeTestDependencies(overrides: Record<string, unknown>): void
   getStartedProfileIds(): number[]
-  startDolphinProfile(profileId: number): Promise<unknown>
+  startDolphinProfile(profileId: number, options?: { headless?: boolean }): Promise<unknown>
   stopDolphinProfile(profileId: number): Promise<void>
 }
 
@@ -98,6 +98,16 @@ async function testApiStopFailureCanStillCleanWithFallback(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  __resetDolphinRuntimeForTests()
+  let startBody: unknown
+  __setDolphinRuntimeTestDependencies({
+    requestLocalDolphin: async (_path: string, options: { body?: unknown }) => {
+      startBody = options.body
+      return { automation: { port: 9222 } }
+    }
+  })
+  await startDolphinProfile(999, { headless: false })
+  assert.deepEqual(startBody, { automation: true, headless: false })
   await testStopFallsBackToProcessKill()
   await testStopKeepsTrackingWhenStillRunning()
   await testApiStopFailureCanStillCleanWithFallback()

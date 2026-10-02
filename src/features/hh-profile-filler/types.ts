@@ -14,6 +14,7 @@ export type ObservedClientState = {
 }
 
 export type ProfileFillerJob = {
+  dolphinProfileName?: string
   id: string
   clientId: number
   clientName: string
@@ -97,6 +98,8 @@ export type CvProfile = {
 }
 
 export type ResolvedClient = {
+  dolphinProfileName?: string
+  sourceIdentity?: SourceIdentity
   clientId: number
   clientName: string
   currentStatus: string
@@ -106,6 +109,7 @@ export type ResolvedClient = {
   cvUrl: string
   cvRevision: string
   studentFolderUrl?: string
+  stopListCompanies: string[]
   contacts: ContactData
   fallbacks: {
     fullName?: string
@@ -127,7 +131,57 @@ export type EmployerCandidate = {
   sources: string[]
 }
 
+export type EmployerSelectionOutcome = {
+  candidate: string
+  sources: string[]
+  status: 'added' | 'existing' | 'skipped'
+  officialName?: string
+  reason?: 'not_found' | 'ambiguous' | 'employer_search_unavailable' | 'not_selected'
+}
+
+export type ResumePrivacyVerification = {
+  resumeId: string
+  blacklist: boolean
+  hiddenPhones: boolean
+  employers: EmployerSelectionOutcome[]
+  anonymous?: boolean
+  otherFieldsVisible?: boolean
+  preservedEmployers?: boolean
+}
+
+export type SourceIdentity = { host: string; port: number; database: string; readAt: string }
+export type ContractCheck = {
+  status: 'passed' | 'failed' | 'not_applicable' | 'exception'
+  reason?: string
+}
+
+export type ResumeContractVerification = {
+  contractVersion?: number
+  checks?: Record<string, ContractCheck>
+  contentFingerprint?: string
+  resumeId: string
+  title: string
+  isDraft: boolean
+  titleVerified: boolean
+  experienceVerified: boolean
+  privacy: ResumePrivacyVerification
+  complete: boolean
+  issues: string[]
+}
+
+export type ProfileFillerScope =
+  | 'dry-run'
+  | 'live-smoke'
+  | 'full'
+  | 'experience'
+  | 'skills'
+  | 'work-permits'
+  | 'privacy'
+  | 'delete-old'
+  | 'verify-final'
+
 export type PreparedProfile = {
+  operationId?: string
   client: ResolvedClient
   cv: CvProfile
   titles: string[]
@@ -137,8 +191,17 @@ export type PreparedProfile = {
 }
 
 export type ProfileFillerResult = {
+  contractVersion?: number
+  operationId?: string
+  dolphinProfileName?: string
+  sourceIdentity?: SourceIdentity
+  expectedTitles?: string[]
+  finalResumeIds?: string[]
   ok: boolean
   dryRun: boolean
+  scope: ProfileFillerScope
+  scopeComplete: boolean
+  operationComplete: boolean
   jobId?: string
   clientId: number
   clientName: string
@@ -156,4 +219,6 @@ export type ProfileFillerResult = {
     existing: string[]
     skipped: Array<{ name: string; reason: string }>
   }
+  privacyVerification?: ResumePrivacyVerification[]
+  contractVerification?: ResumeContractVerification[]
 }

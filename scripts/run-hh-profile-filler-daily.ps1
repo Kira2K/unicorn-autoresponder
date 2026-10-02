@@ -1,6 +1,6 @@
 param(
   [string]$RuntimeRepo = 'C:\Users\Administrator\Downloads\hh-autoparcer\hh-autoparcer',
-  [string]$ProfileFillerRepo = 'C:\Users\Administrator\Downloads\hh-autoparcer\hh-autoparcer\.tmp\hh-profile-filling'
+  [string]$ProfileFillerRepo = 'C:\Users\Administrator\Downloads\hh-autoparcer\hh-autoparcer'
 )
 
 $ErrorActionPreference = 'Stop'

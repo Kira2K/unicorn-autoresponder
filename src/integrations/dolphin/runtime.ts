@@ -224,9 +224,10 @@ async function startDolphinProfileWithHeadless(
 }
 
 async function startDolphinProfile(
-  profileId: number
+  profileId: number,
+  options: { headless?: boolean } = {}
 ): Promise<DolphinStartResponse> {
-  return await startDolphinProfileWithHeadless(profileId, DOLPHIN_HEADLESS)
+  return await startDolphinProfileWithHeadless(profileId, options.headless ?? DOLPHIN_HEADLESS)
 }
 
 function __setDolphinRuntimeTestDependencies(

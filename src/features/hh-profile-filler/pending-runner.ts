@@ -3,6 +3,7 @@ import { errorCode, errorStage, safeErrorMessage } from './errors.ts'
 import { deferJobWithoutAttempt, eligibleJobs, markDryRunPassed, markJobCompleted, markJobFailure,
   observeStatusTransitions, readState, writeState } from './state-store.ts'
 import { reportProfileFillerResult } from './reporter.ts'
+import { assertTerminalSuccess, PROFILE_CONTRACT_VERSION } from './contract.ts'
 import type { ProfileFillerJobStatus, ProfileFillerResult } from './types.ts'
 
 export function shouldReportProfileFillerStatus(status: ProfileFillerJobStatus): boolean {
@@ -18,7 +19,7 @@ export async function scanTransitions(options: { statePath?: string; refresh?: b
   return { state, created }
 }
 
-export async function runPending(options: { statePath?: string; scanOnly?: boolean } = {}) {
+export async function runPending(options: { statePath?: string; scanOnly?: boolean; deferTelegram?: boolean } = {}) {
   const service = createProfileFillerService()
   const state = readState(options.statePath)
   const clients = await service.repository.listClients(true)
@@ -33,7 +34,8 @@ export async function runPending(options: { statePath?: string; scanOnly?: boole
     let prepared: Awaited<ReturnType<typeof service.prepare>> | undefined
     try {
       prepared = await service.prepare(job.clientId, job.market)
-      if (job.status !== 'dry_run_passed') {
+      job.dolphinProfileName = prepared.client.dolphinProfileName
+      {
         const check = await service.dryRun(prepared, job.id)
         check.attempt = attempt
         markDryRunPassed(job, check.artifactDir)
@@ -42,11 +44,12 @@ export async function runPending(options: { statePath?: string; scanOnly?: boole
       }
       executing = true
       const result = await service.execute(prepared, job.id)
+      assertTerminalSuccess(result)
       result.attempt = attempt
       markJobCompleted(job, result.artifactDir)
       writeState(state, options.statePath)
       results.push(result)
-      await reportProfileFillerResult(result).catch(error =>
+      if (!options.deferTelegram) await reportProfileFillerResult(result).catch(error =>
         console.warn(`Profile filler Telegram result report failed: ${safeErrorMessage(error)}`))
     } catch (error) {
       const message = safeErrorMessage(error)
@@ -61,12 +64,18 @@ export async function runPending(options: { statePath?: string; scanOnly?: boole
       writeState(state, options.statePath)
       const result: ProfileFillerResult = {
         ok: false,
-        dryRun: !executing,
+        dryRun: false,
+        scope: executing ? 'full' : 'dry-run',
+        scopeComplete: false,
+        operationComplete: false,
         jobId: job.id,
         clientId: job.clientId,
         clientName: job.clientName,
         market: job.market,
-        dolphinProfileId: prepared?.client.dolphinProfileId,
+        dolphinProfileId: prepared?.client.dolphinProfileId ?? (error as any)?.details?.dolphinProfileId,
+        dolphinProfileName: prepared?.client.dolphinProfileName ?? job.dolphinProfileName ??
+          (error as any)?.details?.dolphinProfileName,
+        operationId: job.id, contractVersion: PROFILE_CONTRACT_VERSION,
         stage: errorStage(error),
         code,
         attempt: job.attemptCount,
@@ -74,7 +83,7 @@ export async function runPending(options: { statePath?: string; scanOnly?: boole
         artifactDir: String((error as any)?.details?.artifactDir ?? job.dryRunArtifact ?? '') || undefined
       }
       results.push(result)
-      if (shouldReportProfileFillerStatus(job.status)) {
+      if (!options.deferTelegram && shouldReportProfileFillerStatus(job.status)) {
         await reportProfileFillerResult(result).catch(reportError =>
           console.warn(`Profile filler Telegram final error report failed: ${safeErrorMessage(reportError)}`))
       }
