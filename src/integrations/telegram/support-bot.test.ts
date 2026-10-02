@@ -306,6 +306,7 @@ function testYuliaMessageTemplateContract(): void {
     sourceFolder: 'https://drive.test/source', kirasComments: 'Добавить <опыт>',
     stack: 'Java & Kotlin', realLocation: 'Tbilisi <Georgia>', desiredLocation: 'Berlin & Remote',
     realAge: '24', englishLevel: 'B2 & higher', education: 'University <Faculty>, 2024',
+    readyForInterviewInEnglishIn2Months: 'Yes',
     emailEn: 'anna&work@example.com', telegramEn: '@anna<en>', phoneEn: '+1 555 0100',
     linkedInUrl: 'https://linkedin.com/in/anna?a=1&b=2',
     githubUrl: 'https://github.com/anna?a=1&b=2'
@@ -319,6 +320,7 @@ function testYuliaMessageTemplateContract(): void {
     'Желаемая локация: Berlin &amp; Remote',
     'Реальный возраст: 24',
     'Уровень английского: B2 &amp; higher',
+    'Ready for interview in English in 2 months: Yes',
     'Образование: University &lt;Faculty&gt;, 2024',
     'Email EN: anna&amp;work@example.com',
     'Telegram EN: @anna&lt;en&gt;',
@@ -376,9 +378,15 @@ function testYuliaMessageTemplateContract(): void {
     ['ru', 'RU-версия отправлена на доработку', 'Отправь обновленную ссылку на RU-версию следующим сообщением.']
   ]
   for (const [stage, heading, hint] of reworkScenarios) {
-    assertYuliaTemplate(yuliaTemplates.yuliaReworkMessage(stage, 'Анна', 'Исправить <опыт>'), [
+    assertYuliaTemplate(yuliaTemplates.yuliaReworkMessage(
+      stage,
+      'Анна',
+      'Исправить <опыт>',
+      'https://example.invalid/cv?a=1&b=2'
+    ), [
       `<b>${heading}</b>`,
       'Студент: Анна',
+      'Файл на доработку: https://example.invalid/cv?a=1&amp;b=2',
       'Комментарий: Исправить &lt;опыт&gt;',
       hint,
       YULIA_TASKS_FOOTER
@@ -526,6 +534,7 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     desiredLocation: 'Remote RU proxy',
     englishLevel: 'B1',
     englishLevelId: 3,
+    clientReadyForInterviewInEnglishIn2Months: 'Yes',
     clientGoogleFolder: '',
     clientGithubUrl: 'https://github.com/student-user',
     clientGithubAccountExists: true,
@@ -1603,7 +1612,7 @@ async function runTests() {
       clientTelegramEn: '@login_must_not_appear',
       clientTelegramEnNickname: ''
     })), providerActor)
-    assert.doesNotMatch(loginOnlyTelegramTask.message, /Telegram EN:/)
+    assert.match(loginOnlyTelegramTask.message, /Telegram EN: empty/)
     assert.doesNotMatch(loginOnlyTelegramTask.message, /login_must_not_appear/)
 
     const emptyEnContactsTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
@@ -1611,9 +1620,14 @@ async function runTests() {
       clientEmailEn: '',
       clientTelegramEnNickname: '',
       clientPhoneEn: '',
-      clientLinkedInUrl: ''
+      clientLinkedInUrl: '',
+      clientGithubUrl: ''
     })), providerActor)
-    assert.doesNotMatch(emptyEnContactsTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+    assert.match(emptyEnContactsTask.message, /Email EN: empty/)
+    assert.match(emptyEnContactsTask.message, /Telegram EN: empty/)
+    assert.match(emptyEnContactsTask.message, /Phone EN: empty/)
+    assert.match(emptyEnContactsTask.message, /LinkedIn: empty/)
+    assert.match(emptyEnContactsTask.message, /GitHub: empty/)
 
     const emptyProfileDetailsTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
       status: 'Draft in process',
@@ -1622,14 +1636,25 @@ async function runTests() {
       desiredLocation: '',
       realAge: undefined,
       englishLevel: '',
+      clientReadyForInterviewInEnglishIn2Months: '',
       education: '',
       educationEntries: [],
-      clientGithubUrl: ''
+      clientGithubUrl: '',
+      clientGoogleFolder: '',
+      studentDataFolderUrl: '',
+      kirasComments: ''
     })), providerActor)
-    assert.doesNotMatch(
-      emptyProfileDetailsTask.message,
-      /Стек:|Реальная локация:|Желаемая локация:|Реальный возраст:|Уровень английского:|Образование:|GitHub:/
-    )
+    assert.match(emptyProfileDetailsTask.message, /Стек: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Реальная локация: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Желаемая локация: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Реальный возраст: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Уровень английского: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Ready for interview in English in 2 months: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Образование: empty/)
+    assert.match(emptyProfileDetailsTask.message, /GitHub: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Корневая папка: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Исходные данные: empty/)
+    assert.match(emptyProfileDetailsTask.message, /Комментарии Киры: empty/)
 
     const bothMarketDraftTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
       status: 'Draft in process',
@@ -1642,8 +1667,12 @@ async function runTests() {
       status: 'Draft in process',
       clientMarket: 'Ru'
     })), providerActor)
-    assert.doesNotMatch(ruOnlyDraftTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
+    assert.match(ruOnlyDraftTask.message, /Email EN: student\.en@example\.com/)
+    assert.match(ruOnlyDraftTask.message, /Telegram EN: @student_en/)
+    assert.match(ruOnlyDraftTask.message, /Phone EN: \+1 555 0100/)
+    assert.match(ruOnlyDraftTask.message, /LinkedIn: https:\/\/linkedin\.com\/in\/student-user/)
     assert.match(ruOnlyDraftTask.message, /Стек: Python/)
+    assert.match(ruOnlyDraftTask.message, /Ready for interview in English in 2 months: Yes/)
     assert.match(ruOnlyDraftTask.message, /GitHub: https:\/\/github\.com\/student-user/)
 
     const savedProviderDraftResult = await saveProviderLinkFromChat(
@@ -1973,6 +2002,7 @@ async function runTests() {
     assert.ok(studentRejectResult.message.includes('Возвращённое резюме: https://docs.google.com/document/d/test-draft'))
     const yuliaReworkNotification = studentRejectResult.notifications.find((n: any) => n.kind === 'private_provider')
     assert.match(yuliaReworkNotification.text, /^<b>Черновик отправлен на доработку<\/b>/)
+    assert.match(yuliaReworkNotification.text, /Файл на доработку: https:\/\/docs\.google\.com\/document\/d\/test-draft/)
     assert.match(yuliaReworkNotification.text, /Комментарий: оставил комменты в резюме/)
     assert.equal(yuliaReworkNotification.parseMode, 'HTML')
     assert.equal(yuliaReworkNotification.text.endsWith(`\n${YULIA_TASKS_FOOTER}`), true)
@@ -1994,6 +2024,10 @@ async function runTests() {
     assert.equal(kiraRejectResult.parseMode, 'HTML')
     assert.ok(kiraRejectResult.message.includes('Возвращённое резюме: https://docs.google.com/document/d/test-en'))
     assertKiraTasksFooter(kiraRejectResult.message)
+    const yuliaEnglishReworkNotification = kiraRejectResult.notifications.find((n: any) => n.kind === 'private_provider')
+    assert.match(yuliaEnglishReworkNotification.text, /^<b>EN-версия отправлена на доработку<\/b>/)
+    assert.match(yuliaEnglishReworkNotification.text, /Файл на доработку: https:\/\/docs\.google\.com\/document\/d\/test-en/)
+    assert.match(yuliaEnglishReworkNotification.text, /Комментарий: Нужно исправить формат, опыт и короткое саммари\./)
 
     const standardKiraRejectRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Draft in approve by Kira',
@@ -2022,6 +2056,33 @@ async function runTests() {
         return true
       }
     )
+
+    for (const market of ['EN', 'both', 'Ru']) {
+      const newDraftRepository = makeWorkflowRepository(makeWorkflow({
+        status: "collection Kira's comments",
+        clientMarket: market,
+        clientName: 'Анна & Ко',
+        clientEmailEn: '',
+        clientTelegramEnNickname: '   ',
+        clientReadyForInterviewInEnglishIn2Months: undefined,
+        clientGoogleFolder: '',
+        studentDataFolderUrl: '',
+        kirasComments: 'Добавить <опыт> & проекты'
+      }))
+      const result = await resumeWorkflowById(98, newDraftRepository, { actor: manualKiraActor })
+      assert.equal(result.workflow.status, 'Draft in process')
+      const notifications = result.notifications.filter((item: any) => item.kind === 'private_provider')
+      assert.equal(notifications.length, 1)
+      const notification = notifications[0]
+      const card = await getProviderTaskById(98, newDraftRepository, providerActor)
+      assert.equal(notification.text, `${yuliaTemplates.yuliaNewTaskMessage('draft', 'Анна & Ко', market).text}\n\n${card.message}`)
+      assert.equal(notification.parseMode, 'HTML')
+      assert.match(notification.text, /Студент: Анна &amp; Ко/)
+      assert.match(notification.text, /Email EN: empty\nTelegram EN: empty/)
+      assert.match(notification.text, /Ready for interview in English in 2 months: empty/)
+      assert.match(notification.text, /Корневая папка: empty\nИсходные данные: empty/)
+      assert.match(notification.text, /Комментарии Киры: Добавить &lt;опыт&gt; &amp; проекты/)
+    }
 
     process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
     assert.equal(resumeWorkflowFakeDataMode(), true)
@@ -2075,15 +2136,13 @@ async function runTests() {
             } else {
               assert.match(notification.text, /^Юля, резюме/)
               assert.equal(notification.parseMode, 'HTML')
-              assert.doesNotMatch(notification.text, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
-              assert.doesNotMatch(
-                notification.text,
-                /Стек:|Реальная локация:|Желаемая локация:|Реальный возраст:|Уровень английского:|Образование:|GitHub:/
-              )
-              assert.match(notification.text, /Открой \/open_my_tasks, чтобы взять задачу в работу\.$/)
               if (step.after === 'Draft in process') {
                 assert.match(notification.text, /Подготовь, пожалуйста, черновик CV\./)
+                const card = await getProviderTaskById(98, repository, providerActor)
+                assert.equal(notification.text, `${yuliaTemplates.yuliaNewTaskMessage('draft', 'Test', 'EN').text}\n\n${card.message}`)
               } else {
+                assert.doesNotMatch(notification.text, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:|Стек:|GitHub:/)
+                assert.match(notification.text, /Открой \/open_my_tasks, чтобы взять задачу в работу\.$/)
                 assert.match(notification.text, /Подготовь, пожалуйста, EN-версию\./)
               }
             }
@@ -2104,6 +2163,21 @@ async function runTests() {
           assert.match(notification.text, /Чтобы согласовать, нажми кнопку «Согласовать» или отправь \/resume I approve/)
           assert.match(notification.text, /для того чтобы вернуть на доработку введи \/resume_reject оставил комменты в резюме или кастомный комментарий/)
           assert.match(notification.text, /После этого я переведу резюме на следующий шаг/)
+          assert.equal(
+            notification.text.endsWith([
+              'Это драфт резюме и одновременно твоя легенда. Информацию из него нужно выучить и быть готовым уверенно рассказать на собеседовании.',
+              'Важно: не вся информация из драфта попадёт в финальную версию резюме — часть указана только для подготовки по легенде. Поэтому не нужно вносить правки только потому, что какая-то информация кажется лишней для финальной вёрстки.',
+              '',
+              'Это последний этап, когда можно внести правки по смыслу и содержанию буллетов и компаний. Внимательно проверь информацию: после этого этапа смысловые правки в буллеты уже не принимаются.',
+              '',
+              'Финальное резюме ты получишь на аппрув отдельным сообщением.'
+            ].join('\n')),
+            true
+          )
+        }
+        if (step.after === 'English version in approve by student' || step.after === 'Russian version in approve by student') {
+          const notification = lastResult.notifications.find((item: any) => item.kind === 'common_chat')
+          assert.doesNotMatch(notification.text, /Это драфт резюме и одновременно твоя легенда|Это последний этап, когда можно внести правки|Финальное резюме ты получишь на аппрув/)
         }
         if (step.after === 'moved to filling') {
           const kiraNotification = lastResult.notifications.find((item: any) => item.kind === 'private_kira')

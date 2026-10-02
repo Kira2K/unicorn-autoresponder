@@ -115,6 +115,7 @@ type ResumeWorkflowRecord = {
   desiredLocation?: string
   englishLevel?: string
   englishLevelId?: number
+  clientReadyForInterviewInEnglishIn2Months?: 'Yes' | 'No'
   clientGithubUrl?: string
   clientGithubAccountExists?: boolean
   clientLinkedInUrl?: string
@@ -668,7 +669,17 @@ function studentApprovalDetails(record: ResumeWorkflowRecord): string {
     'Проверь файл выше.',
     'Чтобы согласовать, нажми кнопку «Согласовать» или отправь /resume I approve.',
     'После этого я переведу резюме на следующий шаг.',
-    rejectCommandHint('/resume_reject')
+    rejectCommandHint('/resume_reject'),
+    ...(status === 'Draft in approve by student'
+      ? [
+          'Это драфт резюме и одновременно твоя легенда. Информацию из него нужно выучить и быть готовым уверенно рассказать на собеседовании.',
+          'Важно: не вся информация из драфта попадёт в финальную версию резюме — часть указана только для подготовки по легенде. Поэтому не нужно вносить правки только потому, что какая-то информация кажется лишней для финальной вёрстки.',
+          '',
+          'Это последний этап, когда можно внести правки по смыслу и содержанию буллетов и компаний. Внимательно проверь информацию: после этого этапа смысловые правки в буллеты уже не принимаются.',
+          '',
+          'Финальное резюме ты получишь на аппрув отдельным сообщением.'
+        ]
+      : [])
   ].join('\n')
 }
 
@@ -1225,8 +1236,17 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCv
         ? 'ru'
         : normalizeText(record.clientMarket) || 'рынок не указан'
       const message = returnedCvUrl
-        ? yuliaReworkMessage(providerStage, record.clientName, normalizeText(record.lastRejectionComment))
+        ? yuliaReworkMessage(
+            providerStage,
+            record.clientName,
+            normalizeText(record.lastRejectionComment),
+            returnedCvUrl
+          )
         : yuliaNewTaskMessage(providerStage, record.clientName, market)
+      if (providerStage === 'draft' && !returnedCvUrl) {
+        const card = yuliaTaskCardForWorkflow(record)
+        if (card) message.text += `\n\n${card.text}`
+      }
       return { kind: 'private_provider', chatId: chatIds[0], chatIds, ...message }
     }
     if (providerLaneForWorkflow(record) === 'rus_translator') {
@@ -1378,7 +1398,6 @@ function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
   if (!stage) return null
   const rootFolder = normalizeText(workflow.clientGoogleFolder)
   const sourceFolder = normalizeText(workflow.studentDataFolderUrl)
-  const showEnContacts = stage === 'draft' && isEnMarketWorkflow(workflow)
   return yuliaTaskCardMessage(stage, {
     clientName: workflow.clientName,
     market: stage === 'ru' && isRuOnlyWorkflow(workflow)
@@ -1389,15 +1408,16 @@ function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
     desiredLocation: normalizeText(workflow.desiredLocation),
     realAge: Number.isFinite(Number(workflow.realAge)) ? String(Number(workflow.realAge)) : '',
     englishLevel: normalizeText(workflow.englishLevel),
+    readyForInterviewInEnglishIn2Months: normalizeText(workflow.clientReadyForInterviewInEnglishIn2Months),
     education: educationDetails(workflow),
     rootFolder,
-    sourceFolder: sourceFolder && sourceFolder !== rootFolder ? sourceFolder : sourceFolder || rootFolder,
+    sourceFolder,
     kirasComments: normalizeText(workflow.kirasComments),
     draftUrl: normalizeText(workflow.cvDraftUrl),
-    emailEn: showEnContacts ? normalizeText(workflow.clientEmailEn) : '',
-    telegramEn: showEnContacts ? normalizeText(workflow.clientTelegramEnNickname) : '',
-    phoneEn: showEnContacts ? normalizeText(workflow.clientPhoneEn) : '',
-    linkedInUrl: showEnContacts ? normalizeText(workflow.clientLinkedInUrl) : '',
+    emailEn: normalizeText(workflow.clientEmailEn),
+    telegramEn: normalizeText(workflow.clientTelegramEnNickname),
+    phoneEn: normalizeText(workflow.clientPhoneEn),
+    linkedInUrl: normalizeText(workflow.clientLinkedInUrl),
     githubUrl: normalizeText(workflow.clientGithubUrl)
   })
 }

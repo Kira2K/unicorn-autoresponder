@@ -701,6 +701,10 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     desiredLocation: normalizeText((client as any)?.desired_location ?? (client as any)?.desiredLocation) || undefined,
     englishLevel,
     englishLevelId,
+    clientReadyForInterviewInEnglishIn2Months: parseReadyForInterviewInEnglishIn2Months(
+      (client as any)?.ready_for_interview_in_english_in_2_months ??
+      (client as any)?.readyForInterviewInEnglishIn2Months
+    ),
     clientGithubUrl: githubUrl(platformAccounts) || undefined,
     clientGithubAccountExists: hasGitHubPlatformAccount(platformAccounts),
     clientLinkedInUrl: linkedInUrl(platformAccounts) || undefined,
