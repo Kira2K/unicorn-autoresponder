@@ -13,6 +13,7 @@ export async function runPostgresRepositoryTests() {
   assert.equal((await sql.resolveClient(1, 'En')).cvRevision, '2026-09-06 12:00:00+00:00');
   assert.equal((await sql.resolveClient(1, 'En')).contacts.telegram, '@fake');
   assert.equal((await sql.resolveClient(1, 'En')).fallbacks.englishLevel, 'B2');
+  assert.deepEqual((await sql.resolveClient(1, 'En')).stopListCompanies, ['Local Ltd;']);
   assert.equal((await sql.resolveClient(2, 'Ru')).cvRevision, '22');
   const reads = f.requests.length;
   await sql.resolveClient(1, 'En'); assert.equal(f.requests.length, reads);

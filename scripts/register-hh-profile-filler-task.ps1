@@ -8,6 +8,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$warsawZone = [TimeZoneInfo]::FindSystemTimeZoneById('Central European Standard Time')
+foreach ($referenceDate in @([datetime]'2027-01-15T12:00:00', [datetime]'2027-07-15T12:00:00')) {
+  if ([TimeZoneInfo]::Local.GetUtcOffset($referenceDate) -ne $warsawZone.GetUtcOffset($referenceDate)) {
+    throw 'Daily HH task times require the Windows runtime timezone to match Europe/Warsaw in winter and summer. No tasks were changed.'
+  }
+}
 $autoresponsesScript = Join-Path $RepoRoot 'scripts\run-hh-autoresponses-daily.ps1'
 $profileFillerScript = Join-Path $RepoRoot 'scripts\run-hh-profile-filler-daily.ps1'
 foreach ($script in @($autoresponsesScript, $profileFillerScript)) {
