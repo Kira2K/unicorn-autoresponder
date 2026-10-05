@@ -10,6 +10,8 @@ import { createRequire } from 'node:module';
 import type { LinkedInAutomation } from '../linkedin-automation.ts';
 const { prepareLinkedInAutomation, unavailableLinkedInAutomation } = createRequire(import.meta.url)('../linkedin-automation.ts') as
   typeof import('../linkedin-automation.ts');
+import { openLinkLabIntake } from '../../../linkedin-automation/linklab/intake-runtime.mts';
+import { tableIds } from './tables.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const config = readPostgresAppDbConfig(env), pool = open(config);
@@ -20,7 +22,8 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const db = await createPostgresClient(pool, config.database, { writable: true });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
     const create = (tx: PostgresTransaction, table: string, data: Readonly<Record<string, unknown>>) => tx.createRecord(table, data);
-    const options = sqlAppOptions(db, { clientIds: new Set(), allClients: true, create },
+    const linklab = env.LINKLAB_ENABLED === '1' ? await openLinkLabIntake(pool, config.database, tableIds.cv) : undefined;
+    const options = sqlAppOptions(db, { clientIds: new Set(), allClients: true, create, linklab },
       { accountIds: new Set(), allAccounts: true, create });
     try { automation = await prepareLinkedInAutomation(createLinkedInAutomationStore(pool), options.linkedinStorage.repository); }
     catch (error) { automation = unavailableLinkedInAutomation(error); }

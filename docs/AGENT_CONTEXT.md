@@ -21,7 +21,7 @@ feature map, use [AI_CONTEXT_FULL.md](./AI_CONTEXT_FULL.md).
 | App data boundary and Noco/Sheets adapters | `src/platform/db` |
 | Dolphin profile start/stop/preflight/locks | `src/integrations/dolphin` |
 | Noco jobs, backups, health gates | `src/integrations/noco` |
-| Telegram reports/tools | `src/integrations/telegram` |
+| Typed Telegram Bot API, reports, and commands | `docs/telegram-integration.md`, then `src/integrations/telegram` |
 | TDLib accounts and admin dialog collection | `docs/TELEGRAM_ADMIN_DIALOG_BACKEND.md` |
 | Diagnostics | `src/features/diagnostics` |
 | Generated/local run evidence | `logs/` |

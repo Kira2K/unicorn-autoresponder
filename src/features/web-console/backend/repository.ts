@@ -16,6 +16,7 @@ const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as 
 }
 const {
   CANONICAL_EMAIL_RU_PLATFORM_ID,
+  normalizePhoneEn,
   normalizePlatformAccountLabel,
   platformAccountLabelFromId,
   platformAccountPolicy
@@ -26,6 +27,7 @@ type ClientProfilePatch = import('./types.ts').ClientProfilePatch
 type EducationEntry = import('./types.ts').EducationEntry
 type ReadyForInterviewInEnglishIn2Months = import('./types.ts').ReadyForInterviewInEnglishIn2Months
 type PlatformAccountInput = import('./types.ts').PlatformAccountInput
+type PlatformAccountSecrets = import('./types.ts').PlatformAccountSecrets
 type WebClient = import('./types.ts').WebClient
 type WebConsoleRepository = import('./types.ts').WebConsoleRepository
 type WebOption = import('./types.ts').WebOption
@@ -699,6 +701,10 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     desiredLocation: normalizeText((client as any)?.desired_location ?? (client as any)?.desiredLocation) || undefined,
     englishLevel,
     englishLevelId,
+    clientReadyForInterviewInEnglishIn2Months: parseReadyForInterviewInEnglishIn2Months(
+      (client as any)?.ready_for_interview_in_english_in_2_months ??
+      (client as any)?.readyForInterviewInEnglishIn2Months
+    ),
     clientGithubUrl: githubUrl(platformAccounts) || undefined,
     clientGithubAccountExists: hasGitHubPlatformAccount(platformAccounts),
     clientLinkedInUrl: linkedInUrl(platformAccounts) || undefined,
@@ -1496,7 +1502,8 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       const normalizedInput: PlatformAccountInput = {
         ...input,
         platformId: platform.id,
-        platform: platform.label
+        platform: platform.label,
+        ...(platform.label === 'phone_en' ? { phone: normalizePhoneEn(input.phone) } : {})
       }
       validatePlatformAccountFields(normalizedInput, platform.label, { allowPlatformIdentity: true })
       const record = buildAccountPatch(normalizedInput, { includeBlankSecrets: true })
@@ -1506,6 +1513,14 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         clients_id: Number(clientId)
       })
       return await refetchDashboard(clientId)
+    },
+
+    async getPlatformAccountSecrets(clientId: number, accountId: number): Promise<PlatformAccountSecrets> {
+      const account = await getOwnedPlatformAccount(clientId, accountId)
+      return {
+        password: normalizeText(account.password),
+        emailPassword: normalizeText(account.email_password)
+      }
     },
 
     async updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard> {
@@ -1526,6 +1541,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
       const fieldsOnly = { ...input }
       delete fieldsOnly.platformId
       delete fieldsOnly.platform
+      if (platform === 'phone_en') fieldsOnly.phone = normalizePhoneEn(fieldsOnly.phone)
       const githubMigration = platform === 'github'
         ? githubUrlMigrationPatch(account, fieldsOnly.linkedInUrl)
         : {}

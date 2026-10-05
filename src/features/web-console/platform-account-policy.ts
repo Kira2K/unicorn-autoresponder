@@ -78,6 +78,11 @@ export function normalizePlatformAccountLabel(value: unknown): string {
     .replace(/\s+/g, '_')
 }
 
+export function normalizePhoneEn(value: unknown): string {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  return digits ? `+${digits}` : ''
+}
+
 export function platformAccountPolicy(value: unknown): PlatformAccountPolicy | undefined {
   return PLATFORM_ACCOUNT_POLICIES[normalizePlatformAccountLabel(value)]
 }

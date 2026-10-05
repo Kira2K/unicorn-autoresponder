@@ -46,8 +46,8 @@ const {
   }
   safeGatewayFailure(error: unknown): { statusCode: number; body: Record<string, unknown> }
 }
-const { createTelegramBotApi } = require('../../../integrations/telegram/bot-api.ts') as {
-  createTelegramBotApi(options?: any): TelegramBotApi
+const { createTelegramIntegration } = require('../../../integrations/telegram/integration.ts') as {
+  createTelegramIntegration(options?: any): TelegramIntegration
 }
 const {
   getProviderTaskById,
@@ -73,9 +73,6 @@ const {
   resumeWorkflowById(workflowId: number, repository: WebConsoleRepository, options?: any): Promise<any>
   saveKiraCommentsFromChat(repository: WebConsoleRepository, actor?: any, comments?: string): Promise<any>
   saveResumeTaskInputFromChat(repository: WebConsoleRepository, actor?: any, text?: string, options?: any): Promise<any>
-}
-const { sendTelegramMessage } = require('../../../integrations/telegram/messenger.ts') as {
-  sendTelegramMessage(to: string, message: string, options?: { parseMode?: false | 'html' | 'md' | 'markdown' }): Promise<void>
 }
 const { SUMMARY_LOGS_CHANNEL_ID } = require('../../hh-responses/orchestrator/config.ts') as {
   SUMMARY_LOGS_CHANNEL_ID?: string
@@ -194,6 +191,9 @@ type TelegramService = {
 type TelegramBotApi = {
   sendMessage(input: { chatId: string; text: string; messageThreadId?: number; replyMarkup?: unknown; parseMode?: string }): Promise<unknown>
 }
+type TelegramIntegration = import('../../../integrations/telegram/integration.ts').TelegramIntegration
+type SendOneInput = import('../../../integrations/telegram/types.ts').SendOneInput
+type SendOneResult = import('../../../integrations/telegram/types.ts').SendOneResult
 type CvTailoringRequest = {
   fileName: string
   mimeType: string
@@ -465,10 +465,11 @@ function createWebConsoleApp(options: {
   telegramGatewayFetch?: typeof fetch
   telegramGatewayLogger?: (event: Record<string, unknown>) => void
   telegramBotApi?: TelegramBotApi
+  telegramIntegration?: TelegramIntegration
   cvTailoringService?: CvTailoringService
   cvTailoringFetch?: typeof fetch
   summaryLogsChannelId?: string
-  sendSummaryTelegramMessage?: typeof sendTelegramMessage
+  sendSummaryTelegramMessage?: (to: string, message: string, options?: { parseMode?: false | 'html' | 'md' | 'markdown' }) => Promise<unknown>
   telegramAdapter?: any
   telegramProxyResolver?: any
   linkedinAuthRuns?: import('./linkedin-auth-types.ts').LinkedInAuthRunService
@@ -585,12 +586,40 @@ function createWebConsoleApp(options: {
     env: telegramEnvironment,
     logger: options.telegramGatewayLogger
   })
-  const telegramBotApi = options.telegramBotApi ?? createTelegramBotApi()
+  const telegramIntegration = options.telegramIntegration ?? createTelegramIntegration(options.telegramBotApi
+    ? {
+        botApi: {
+          async sendMessageResponse(input: SendOneInput): Promise<unknown> {
+            const legacyResult = await options.telegramBotApi!.sendMessage(input)
+            const candidate = legacyResult && typeof legacyResult === 'object'
+              ? legacyResult as Record<string, unknown>
+              : {}
+            const candidateChat = candidate.chat && typeof candidate.chat === 'object'
+              ? candidate.chat as Record<string, unknown>
+              : {}
+            return {
+              ok: true,
+              result: {
+                ...candidate,
+                message_id: typeof candidate.message_id === 'number' ? candidate.message_id : 0,
+                date: typeof candidate.date === 'number' ? candidate.date : Math.floor(Date.now() / 1000),
+                chat: {
+                  ...candidateChat,
+                  id: typeof candidateChat.id === 'number' ? candidateChat.id : Number(input.chatId) || 0,
+                  type: typeof candidateChat.type === 'string' ? candidateChat.type : 'private'
+                },
+                text: typeof candidate.text === 'string' ? candidate.text : input.text
+              }
+            }
+          }
+        }
+      }
+    : undefined)
   const cvTailoringService = options.cvTailoringService ?? (useMockData
     ? createMockCvTailoringService()
     : createDefaultCvTailoringService(options.cvTailoringFetch))
   const summaryLogsChannelId = options.summaryLogsChannelId ?? SUMMARY_LOGS_CHANNEL_ID
-  const sendSummaryTelegramMessage = options.sendSummaryTelegramMessage ?? sendTelegramMessage
+  const sendSummaryTelegramMessage = options.sendSummaryTelegramMessage
   const sessions = createSessionStore()
   const app = express()
   app.locals.recoverProfileVerification = () => profileFiller.recoverPending?.() ?? Promise.resolve()
@@ -638,6 +667,16 @@ function createWebConsoleApp(options: {
       return
     }
     next()
+  }
+
+  function telegramClientFailureStatus(result: Extract<SendOneResult, { kind: 'client-failure' }>): number {
+    switch (result.failure.stage) {
+      case 'validation': return 400
+      case 'configuration': return 503
+      case 'transport':
+      case 'response': return 502
+      case 'internal': return 500
+    }
   }
 
   function publicTelegramClient(client: any) {
@@ -747,14 +786,40 @@ function createWebConsoleApp(options: {
       return `${notification.kind}${target}: не удалось отправить уведомление: ${message}`
     }
 
+    function telegramSendError(sendResult: SendOneResult): Error | undefined {
+      if (sendResult.kind === 'client-failure') {
+        return Object.assign(new Error(sendResult.failure.error.message), {
+          code: sendResult.failure.error.code,
+          stage: sendResult.failure.stage
+        })
+      }
+      if (!sendResult.response.ok) {
+        return Object.assign(new Error(sendResult.response.description), {
+          code: 'telegram_bot_api_failed',
+          telegramErrorCode: sendResult.response.error_code,
+          parameters: sendResult.response.parameters
+        })
+      }
+      return undefined
+    }
+
     for (const notification of notifications) {
       if (notification.kind === 'hh_summary') {
         try {
           if (summaryLogsChannelId) {
-            await withNotificationTimeout(
-              sendSummaryTelegramMessage(summaryLogsChannelId, notification.text, { parseMode: false }),
-              notification
-            )
+            if (sendSummaryTelegramMessage) {
+              await withNotificationTimeout(
+                sendSummaryTelegramMessage(summaryLogsChannelId, notification.text, { parseMode: false }),
+                notification
+              )
+            } else {
+              const sendResult = await withNotificationTimeout(
+                telegramIntegration.sendOne({ chatId: summaryLogsChannelId, text: notification.text }),
+                notification
+              )
+              const error = telegramSendError(sendResult)
+              if (error) throw error
+            }
           }
         } catch (error: any) {
           warnings.push(notificationWarning(notification, error))
@@ -773,8 +838,8 @@ function createWebConsoleApp(options: {
 
       for (const chatId of notificationChatIds) {
         try {
-          await withNotificationTimeout(
-            telegramBotApi.sendMessage({
+          const sendResult = await withNotificationTimeout(
+            telegramIntegration.sendOne({
               chatId,
               ...(notification.messageThreadId ? { messageThreadId: notification.messageThreadId } : {}),
               text: notification.text,
@@ -783,6 +848,8 @@ function createWebConsoleApp(options: {
             }),
             notification
           )
+          const error = telegramSendError(sendResult)
+          if (error) throw error
         } catch (error: any) {
           warnings.push(notificationWarning(notification, error, chatId))
         }
@@ -980,6 +1047,29 @@ function createWebConsoleApp(options: {
       service: 'web-console-backend',
       checkedAt: new Date().toISOString()
     })
+  })
+
+  app.post('/api/bot/telegram/send-one', requireBotApiToken, async (req: Request, res: Response) => {
+    const result = await telegramIntegration.sendOne(req.body as SendOneInput)
+    res.status(result.kind === 'client-failure' ? telegramClientFailureStatus(result) : 200).json(result)
+  })
+
+  app.post('/api/bot/telegram/send-many', requireBotApiToken, async (req: Request, res: Response) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      res.status(400).json({
+        kind: 'client-failure',
+        failure: {
+          stage: 'validation',
+          error: {
+            name: 'TelegramSendValidationError',
+            message: 'Telegram send-many input must be an object.',
+            code: 'telegram_send_many_input_invalid'
+          }
+        }
+      })
+      return
+    }
+    res.status(200).json(await telegramIntegration.sendMany(req.body))
   })
 
   app.get('/api/bot/telegram/chats/:chatId/client', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
@@ -1185,6 +1275,20 @@ function createWebConsoleApp(options: {
   app.post('/api/client/platform-accounts', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       res.status(201).json(await repository.createPlatformAccount(Number(req.webSession!.clientId), req.body ?? {}))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/client/platform-accounts/:id/secrets', requireRole('client'), async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const accountId = Number(req.params.id)
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        res.status(400).json({ error: 'invalid_account_id' })
+        return
+      }
+      res.setHeader('Cache-Control', 'no-store')
+      res.json(await repository.getPlatformAccountSecrets(Number(req.webSession!.clientId), accountId))
     } catch (error) {
       next(error)
     }
@@ -1701,7 +1805,22 @@ function createWebConsoleApp(options: {
         return
       }
       const text = validateTelegramMessage(req.body?.text)
-      await telegramBotApi.sendMessage({ chatId, text })
+      const sendResult = await telegramIntegration.sendOne({ chatId, text })
+      if (sendResult.kind === 'client-failure') {
+        throw Object.assign(new Error(sendResult.failure.error.message), {
+          code: sendResult.failure.stage === 'configuration'
+            ? 'telegram_bot_token_missing'
+            : 'telegram_bot_api_failed',
+          stage: sendResult.failure.stage
+        })
+      }
+      if (!sendResult.response.ok) {
+        throw Object.assign(new Error(sendResult.response.description), {
+          code: 'telegram_bot_api_failed',
+          telegramErrorCode: sendResult.response.error_code,
+          parameters: sendResult.response.parameters
+        })
+      }
       res.json({
         success: true,
         sentTo: {

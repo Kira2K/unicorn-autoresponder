@@ -104,6 +104,11 @@ export type PlatformAccountInput = {
   emailPassword?: string
 }
 
+export type PlatformAccountSecrets = {
+  password: string
+  emailPassword: string
+}
+
 export type ClientDashboard = {
   client: WebClient
   platformAccounts: WebPlatformAccount[]
@@ -211,6 +216,7 @@ export type ResumeWorkflowRecord = {
   desiredLocation?: string
   englishLevel?: string
   englishLevelId?: number
+  clientReadyForInterviewInEnglishIn2Months?: ReadyForInterviewInEnglishIn2Months
   clientGithubUrl?: string
   clientGithubAccountExists?: boolean
   clientLinkedInUrl?: string
@@ -243,12 +249,14 @@ export type WebConsoleRepository = {
   getResumeWorkflowById(workflowId: number): Promise<ResumeWorkflowRecord | null>
   getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]>
   patchResumeWorkflow(recordId: number, patch: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord>
+  approveEnglishResumeWorkflow?(before: ResumeWorkflowRecord, patch: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord>
   getProviderClientByIdForStatus(clientId: number, statusLabel: string): Promise<ProviderClientRow | null>
   getProviderClientsForStatus(statusLabel: string): Promise<ProviderClientRow[]>
   listEnglishLevels(): Promise<WebOption[]>
   listPlatforms(): Promise<WebOption[]>
   updateClientProfile(clientId: number, patch: ClientProfilePatch): Promise<ClientDashboard>
   createPlatformAccount(clientId: number, input: PlatformAccountInput): Promise<ClientDashboard>
+  getPlatformAccountSecrets(clientId: number, accountId: number): Promise<PlatformAccountSecrets>
   updatePlatformAccount(clientId: number, accountId: number, input: PlatformAccountInput): Promise<ClientDashboard>
   deletePlatformAccount(clientId: number, accountId: number): Promise<ClientDashboard>
   getTelegramPlatformAccountsForClient(clientId: number): Promise<WebPlatformAccount[]>

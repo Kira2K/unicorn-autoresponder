@@ -155,6 +155,7 @@ function makeVisibleTelegramHarness() {
         update_id: updateId++,
         message: {
           message_id: Number(message.id),
+          date: Math.floor(Date.now() / 1000),
           text: input.text,
           chat: { id: Number(input.chatId), type: 'supergroup' },
           from: { id: 343610488, username: 'Kira_arbeitet' }
@@ -198,6 +199,10 @@ function makeVisibleTelegramHarness() {
 }
 
 async function runTests() {
+  process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251'
+  process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
+  process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
+  process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
   const repository = makeRepository()
   repository.client.googleFolder = 'https://drive.google.com/drive/folders/visible-root-test'
   repository.workflow.studentDataFolderUrl = 'https://drive.google.com/drive/folders/visible-fake-test'

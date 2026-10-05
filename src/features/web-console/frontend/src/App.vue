@@ -4,6 +4,7 @@ import { api } from './api'
 import FieldInfoLabel from './FieldInfoLabel.vue'
 import LinkedInAuthTab from './LinkedInAuthTab.vue'
 import {
+  normalizePhoneEn,
   normalizePlatformAccountLabel,
   platformAccountPolicy
 } from '../../platform-account-policy.ts'
@@ -97,6 +98,8 @@ const profileSaving = ref(false)
 const profileMessage = ref('')
 const accountForm = ref({ ...emptyAccountForm })
 const accountSaving = ref(false)
+const accountSecretsLoading = ref(false)
+const accountSecretsReady = ref(false)
 const accountMessage = ref('')
 const accountError = ref('')
 const profileEditorOpen = ref('')
@@ -113,6 +116,7 @@ const adminTelegramSenderOpen = ref(false)
 const adminTelegramSenderQuery = ref('')
 const adminTelegramRecipient = ref('@')
 const adminTelegramMessage = ref('')
+let accountSecretsRequestId = 0
 const adminTelegramAttachments = ref([])
 const adminTelegramAlwaysVerify = ref(true)
 const adminTelegramLoading = ref(false)
@@ -195,6 +199,12 @@ function accountFieldEnabled(field) {
 
 function accountFieldRequired(field) {
   return selectedAccountPolicy.value?.requiredFields.includes(field) ?? false
+}
+
+function updateAccountPhone(value) {
+  accountForm.value.phone = selectedAccountPlatform.value === 'phone_en'
+    ? normalizePhoneEn(value)
+    : value
 }
 
 function accountUrl(account) {
@@ -1135,7 +1145,10 @@ function formatEducationEntries(entries, fallback = '') {
 }
 
 function resetAccountForm() {
+  accountSecretsRequestId += 1
   accountForm.value = { ...emptyAccountForm }
+  accountSecretsLoading.value = false
+  accountSecretsReady.value = false
   accountError.value = ''
 }
 
@@ -1246,6 +1259,7 @@ function toggleProfileEditor() {
 
 function openNewAccountForm() {
   resetAccountForm()
+  accountSecretsReady.value = true
   accountEditorOpen.value = true
   accountMessage.value = ''
 }
@@ -1725,10 +1739,11 @@ async function saveProfile() {
   }
 }
 
-function editAccount(account) {
+async function editAccount(account) {
   if (!canEditPlatformAccount(account)) return
+  resetAccountForm()
+  const requestId = ++accountSecretsRequestId
   accountMessage.value = ''
-  accountError.value = ''
   accountEditorOpen.value = true
   accountForm.value = {
     id: account.id,
@@ -1736,7 +1751,9 @@ function editAccount(account) {
     platform: account.platform || '',
     accountLabel: account.accountLabel || '',
     login: account.login || '',
-    phone: account.phone || '',
+    phone: normalizePlatformAccountLabel(account.platform) === 'phone_en'
+      ? normalizePhoneEn(account.phone)
+      : account.phone || '',
     email: account.email || '',
     nickname: account.nickname || '',
     linkedInUrl: accountUrl(account),
@@ -1744,6 +1761,28 @@ function editAccount(account) {
     recoveryCodes: account.recoveryCodes || '',
     password: '',
     emailPassword: ''
+  }
+  const needsSecrets = selectedAccountPolicy.value?.fields
+    .some(field => field === 'password' || field === 'emailPassword')
+  if (!needsSecrets) {
+    accountSecretsReady.value = true
+    return
+  }
+  accountSecretsLoading.value = true
+  try {
+    const secrets = await api.platformAccountSecrets(account.id)
+    if (requestId !== accountSecretsRequestId || Number(accountForm.value.id) !== Number(account.id)) return
+    accountForm.value = {
+      ...accountForm.value,
+      password: secrets.password || '',
+      emailPassword: secrets.emailPassword || ''
+    }
+    accountSecretsReady.value = true
+  } catch (caught) {
+    if (requestId !== accountSecretsRequestId) return
+    accountError.value = caught instanceof Error ? caught.message : String(caught || '')
+  } finally {
+    if (requestId === accountSecretsRequestId) accountSecretsLoading.value = false
   }
 }
 
@@ -1762,6 +1801,12 @@ function accountPayload() {
 }
 
 async function saveAccount() {
+  if (editingAccount.value && !accountSecretsReady.value) {
+    accountError.value = accountSecretsLoading.value
+      ? 'Wait until the saved password is loaded'
+      : 'The saved password could not be loaded. Close the form and try again.'
+    return
+  }
   accountSaving.value = true
   accountMessage.value = ''
   accountError.value = ''
@@ -3010,7 +3055,7 @@ onUnmounted(() => {
               </label>
               <label class="field">
                 <span>Phone</span>
-                <InputText v-model="accountForm.phone" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" data-testid="account-phone" />
+                <InputText :model-value="accountForm.phone" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" data-testid="account-phone" @update:model-value="updateAccountPhone" />
               </label>
               <label class="field">
                 <span>Email</span>
@@ -3037,14 +3082,14 @@ onUnmounted(() => {
               </label>
               <label class="field">
                 <span>Password</span>
-                <Password v-model="accountForm.password" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('password')" :required="accountFieldRequired('password')" data-testid="account-password-widget" input-class="password-input" />
+                <Password v-model="accountForm.password" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('password') || (editingAccount && !accountSecretsReady)" :required="accountFieldRequired('password')" data-testid="account-password-widget" input-class="password-input" />
               </label>
               <label class="field">
                 <span>Email password</span>
-                <Password v-model="accountForm.emailPassword" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('emailPassword')" :required="accountFieldRequired('emailPassword')" data-testid="account-email-password-widget" input-class="password-input" />
+                <Password v-model="accountForm.emailPassword" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('emailPassword') || (editingAccount && !accountSecretsReady)" :required="accountFieldRequired('emailPassword')" data-testid="account-email-password-widget" input-class="password-input" />
               </label>
               <div class="form-actions wide-field">
-                <Button type="submit" :label="editingAccount ? 'Save account' : 'Add account'" icon="pi pi-save" :loading="accountSaving" data-testid="save-account-button" />
+                <Button type="submit" :label="editingAccount ? 'Save account' : 'Add account'" icon="pi pi-save" :loading="accountSaving || accountSecretsLoading" :disabled="editingAccount && !accountSecretsReady" data-testid="save-account-button" />
                 <Button type="button" label="Cancel" icon="pi pi-times" severity="secondary" data-testid="close-account-editor-button" @click="closeAccountForm" />
               </div>
             </form>

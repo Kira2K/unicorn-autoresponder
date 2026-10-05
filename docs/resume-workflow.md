@@ -6,6 +6,12 @@ The support bot owns the user-facing `/resume` flow. The web-console backend
 owns the protected API and NocoDB writes. `CV processing` is the source of truth
 for current state.
 
+All support-bot replies and CV notifications use the typed, never-throw send
+contract in [telegram-integration.md](./telegram-integration.md). A completed CV
+transition is not rolled back or repeated when its notification fails; the API
+returns the existing notification warning while the persisted transition stays
+authoritative.
+
 The LinkedIn Profile Filler may read the newest final English CV only after the
 workflow reaches `moved to filling` or `filled`. It never changes this workflow
 or falls back to a draft. See `docs/LINKEDIN_PROFILE_GENERATION.md`.
@@ -57,6 +63,8 @@ Commands:
 - `real_age`: required before leaving `collection student's data`.
 - `real_location`: required before leaving `collection student's data`.
 - `desired_location`: required before leaving `collection student's data`.
+- `ready_for_interview_in_english_in_2_months`: optional `Yes`/`No` value shown
+  in Yulia's initial draft card; the card shows `empty` when the field is blank.
 - `English level` / `english_levels_id`: required before leaving
   `collection student's data`.
 - `google_folder`: root Google folder managed in Console/Noco; this is
@@ -65,13 +73,18 @@ Commands:
   GitHub platform `github`, a LinkedIn platform account, `telegram_ru`, and
   `telegram_en`. GitHub/LinkedIn validation checks account existence; URL
   fields are used for display when present.
-- Yulia's initial draft card can also show optional EN contacts from platform
-  accounts: Email EN from `email_en.login`, Telegram EN strictly from
-  `telegram_en.nickname`, Phone EN from `phone_en`, and the LinkedIn URL. Empty
-  values are omitted and do not block the workflow.
+- Yulia's initial draft card always shows the platform fields Email EN from
+  `email_en.login`, Telegram EN strictly from `telegram_en.nickname`, Phone EN
+  from `phone_en`, LinkedIn URL, and GitHub URL. A missing platform value is
+  shown as `empty` and does not block the workflow.
 - Polina's Russian-version task card can show optional RU contacts: Email RU
   strictly from `email_ru.login` and Phone RU strictly from `hh_ru.phone`.
   Empty values are omitted and do not block the workflow.
+- Platform passwords remain masked as `***` in the regular client dashboard.
+  When the logged-in client edits an owned platform account, the Console loads
+  its `password` and `emailPassword` through
+  `GET /api/client/platform-accounts/:id/secrets`; the response is not cached
+  and the form hides the values until the eye icon is pressed.
 
 `CV processing` fields used by the workflow:
 
@@ -100,6 +113,12 @@ Commands:
 `backend/postgres/check.mts` проверяет наличие полей; их добавление выполняется
 отдельно через SQL. При старте приложения схема не меняется. Правила статусов,
 ролей и переходов прежние. Запуск описан в [SQL_START.md](SQL_START.md).
+
+При отдельно включённом `LINKLAB_ENABLED=1` подтверждение EN-версии учеником
+сохраняет дату LinkLab в той же транзакции, что статус и история CV.
+Проверки роли остаются прежними; RU-согласование, импорт и ручная правка статуса
+дату не создают. Готовность Profile Filler по-прежнему требует `moved to filling`
+или `filled`. Настройка и миграция: [LinkLab](../src/features/linkedin-automation/linklab/README.md).
 
 ## Statuses
 
@@ -175,8 +194,9 @@ producer. Producer phases cannot reject themselves.
 
 При возврате ответ бота Кире содержит ссылку именно на возвращённый файл. Ссылка
 берётся до очистки поля; правила переходов не меняются. Фиксированные шаблоны
-Юли и Полины показывают студента, комментарий и действие по доработке; шаблон
-Полины дополнительно показывает актуальную ссылку на EN-версию.
+Юли показывают студента, ссылку на возвращённый файл, комментарий и действие по
+доработке. Шаблоны Полины показывают студента, комментарий и действие по
+доработке, а также актуальную ссылку на EN-версию.
 
 В контактах Telegram RU/EN бот и карточка исполнителя показывают `nickname`,
 если он заполнен. Иначе используется прежний вариант — `login` и остальные
@@ -203,6 +223,21 @@ notification:
 - Main provider next: private Provider chat, usually addressed to Yulia.
 - Russian translator next: private translator chat, usually addressed to Polina.
 
+At `Draft in approve by student`, the student's draft approval message ends
+with the following fixed text (also included when the approval details
+are displayed again):
+
+```text
+Это драфт резюме и одновременно твоя легенда. Информацию из него нужно выучить и быть готовым уверенно рассказать на собеседовании.
+Важно: не вся информация из драфта попадёт в финальную версию резюме — часть указана только для подготовки по легенде. Поэтому не нужно вносить правки только потому, что какая-то информация кажется лишней для финальной вёрстки.
+
+Это последний этап, когда можно внести правки по смыслу и содержанию буллетов и компаний. Внимательно проверь информацию: после этого этапа смысловые правки в буллеты уже не принимаются.
+
+Финальное резюме ты получишь на аппрув отдельным сообщением.
+```
+
+This text is omitted from English- and Russian-version approval messages.
+
 Yulia, Polina, and Kira use the fixed templates described below.
 
 ### Yulia message template contract
@@ -222,11 +257,19 @@ HTML-escaped. Task cards and state/error replies use the footer
 `Все задачи: /open_my_tasks`; new-task notifications use
 `Открой /open_my_tasks, чтобы взять задачу в работу.`
 
-For EN and both-market workflows, the initial draft card shows optional
-`Email EN`, `Telegram EN`, `Phone EN`, and `LinkedIn` rows immediately after
-the status. `Telegram EN` uses only the `nickname` column; it never falls back
-to the Telegram account login. These rows are omitted from later-stage cards,
-RU-only draft cards, and the short new-task notification.
+The initial draft card always shows the student's stack, real and desired
+locations, real age, English level, readiness for an English interview in two
+months, education, root folder, source-data folder, and Kira's comments. For
+every market it also always shows `Email EN`, `Telegram EN`, `Phone EN`,
+`LinkedIn`, and `GitHub`. Every missing or whitespace-only value in this block
+is rendered as `empty`. `Telegram EN` uses only the `nickname` column; it never
+falls back to the Telegram account login. When the workflow advances from
+`collection Kira's comments` to `Draft in process`, Yulia receives the new-task
+notification followed by this full draft card in the same HTML message, for
+every market. Opening the task through `/open_my_tasks` shows the same card.
+Later-stage new-task notifications remain short, and their cards omit the
+expanded student-data block. Rework notifications retain their returned-file
+link and current rejection comment.
 
 ### Polina message template contract
 

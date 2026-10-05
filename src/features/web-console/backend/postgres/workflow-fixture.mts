@@ -25,7 +25,8 @@ export function workflowFixture(market = 'En') {
   set(t.clients, 7, { client_name: 'SQL fixture', calendar_email: 'sql-fixture@example.invalid', client_status: 'studying',
     telegram_general_chat_id: '-7007', telegram_personal_chat_id: '@sql_student', market_id: 1, stacks_id: 1,
     english_levels_id: 1, education_entries: '[{"uni":"Test University"}]', real_age: 25,
-    real_location: 'Test city', desired_location: 'Remote', google_folder: 'https://example.invalid/root' });
+    real_location: 'Test city', desired_location: 'Remote', google_folder: 'https://example.invalid/root',
+    ready_for_interview_in_english_in_2_months: 'Yes' });
   ['github', 'linkedin', 'telegram_ru', 'telegram_en'].forEach((name, index) => {
     const platformId = [29, 16, 24, 23][index];
     set(t.platforms, platformId, { platform: name }); set(t.accounts, index + 20, {

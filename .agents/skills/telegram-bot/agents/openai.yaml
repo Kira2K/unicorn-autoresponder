@@ -1,0 +1,4 @@
+interface:
+  display_name: "Telegram Bot"
+  short_description: "Maintain the typed Telegram Bot facade"
+  default_prompt: "Use $telegram-bot to inspect or update the typed Telegram Bot integration."

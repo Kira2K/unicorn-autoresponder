@@ -1272,6 +1272,8 @@ async function runTests(): Promise<void> {
     assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/client/platform-accounts', { method: 'POST' })
     assert.equal(result.response.status, 401)
+    result = await request(server.baseUrl, '/api/client/platform-accounts/10/secrets')
+    assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/admin/latest-client')
     assert.equal(result.response.status, 401)
     result = await request(server.baseUrl, '/api/provider/clients')
@@ -1380,6 +1382,18 @@ async function runTests(): Promise<void> {
     assert.equal(result.body.platformAccounts.find((account: any) => account.platform === 'linkedin')?.linkedInUrl, 'https://linkedin.com/in/client-one')
     assert.equal(result.body.platformAccounts.find((account: any) => account.platform === 'github')?.login, 'https://github.com/client-one')
     assert.equal(result.body.platformAccounts[0].password, '***')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/10/secrets', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(result.response.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(result.body, { password: 'secret', emailPassword: '' })
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/11/secrets', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 404)
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/not-an-id/secrets', {}, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'invalid_account_id')
 
     result = await request(server.baseUrl, '/api/bot/status', {
       headers: { 'X-Bot-Api-Token': 'test-bot-token' }
@@ -2060,6 +2074,70 @@ async function runTests(): Promise<void> {
       }, clientLogin.cookie)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
     }
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platformId: 28,
+        platform: 'phone_en',
+        phone: 'call +1 (555)-010'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 201, JSON.stringify(result.body))
+    const normalizedPhoneAccount = result.body.platformAccounts
+      .filter((account: any) => account.accountLabel === 'phone_en')
+      .at(-1)
+    assert(normalizedPhoneAccount)
+    assert.equal(normalizedPhoneAccount.phone, '+1555010')
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${normalizedPhoneAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '44 20-1234' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+    assert.equal(
+      result.body.platformAccounts.find((account: any) => account.id === normalizedPhoneAccount.id)?.phone,
+      '+44201234'
+    )
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${normalizedPhoneAccount.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: 'letters only' })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 400)
+    assert.equal(result.body.error, 'platform_account_required_fields_missing')
+    assert.deepEqual(result.body.fields, ['phone'])
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${normalizedPhoneAccount.id}`, {
+      method: 'DELETE'
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platformId: 10,
+        platform: 'hh_en',
+        login: 'raw-phone-regression',
+        phone: '+44 (20) 1234',
+        password: 'raw-phone-secret'
+      })
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 201, JSON.stringify(result.body))
+    const rawPhoneAccount = result.body.platformAccounts
+      .filter((account: any) => account.accountLabel === 'hh_en')
+      .at(-1)
+    assert(rawPhoneAccount)
+    assert.equal(rawPhoneAccount.phone, '+44 (20) 1234')
+
+    result = await request(server.baseUrl, `/api/client/platform-accounts/${rawPhoneAccount.id}`, {
+      method: 'DELETE'
+    }, clientLogin.cookie)
+    assert.equal(result.response.status, 200, JSON.stringify(result.body))
 
     result = await request(server.baseUrl, '/api/client/platform-accounts', {
       method: 'POST',
@@ -2763,6 +2841,8 @@ async function runTests(): Promise<void> {
       body: JSON.stringify({ platform: 'linkedin' })
     }, providerLogin.cookie)
     assert.equal(result.response.status, 403)
+    result = await request(server.baseUrl, '/api/client/platform-accounts/10/secrets', {}, providerLogin.cookie)
+    assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, providerLogin.cookie)
     assert.equal(result.response.status, 403)
     result = await request(server.baseUrl, '/api/admin/telegram/senders', {}, providerLogin.cookie)
@@ -2805,6 +2885,9 @@ async function runTests(): Promise<void> {
     })
     assert.equal(adminLogin.response.status, 200)
     assert.equal(adminLogin.body.role, 'admin')
+
+    result = await request(server.baseUrl, '/api/client/platform-accounts/11/secrets', {}, adminLogin.cookie)
+    assert.equal(result.response.status, 403)
 
     result = await request(server.baseUrl, '/api/admin/latest-client', {}, adminLogin.cookie)
     assert.equal(result.response.status, 200)

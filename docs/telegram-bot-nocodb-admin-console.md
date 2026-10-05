@@ -157,6 +157,7 @@ Important admin/client API surfaces:
 GET /api/client/me
 PATCH /api/client/me
 POST /api/client/platform-accounts
+GET /api/client/platform-accounts/:id/secrets
 PATCH /api/client/platform-accounts/:id
 DELETE /api/client/platform-accounts/:id
 GET /api/provider/clients
@@ -179,6 +180,13 @@ POST /api/admin/cv-tailor/from-pdf
 POST /api/admin/clients/:clientId/telegram/send
 POST /api/admin/hh-responses/start
 ```
+
+`GET /api/client/platform-accounts/:id/secrets` is restricted to the logged-in
+client and one of that client's own platform accounts. It returns only
+`password` and `emailPassword` and sends `Cache-Control: no-store`. The regular
+client dashboard keeps those fields masked as `***`; the edit form fetches the
+secret separately so the password remains hidden until the user presses the
+eye icon.
 
 `/api/admin/hh-responses/start` is intentionally dry-run only: it returns the
 planned `npm run orchestrator` command and environment for the latest client,

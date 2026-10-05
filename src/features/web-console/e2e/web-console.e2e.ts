@@ -300,20 +300,44 @@ async function runTests(): Promise<void> {
     await page.getByTestId('accounts-table').getByText('https://linkedin.com/in/test', { exact: true }).waitFor()
     await page.getByTestId('edit-account-button').last().click()
     await page.getByTestId('account-platform-locked').waitFor()
+    const accountPasswordWidget = page.getByTestId('account-password-widget')
+    const accountPasswordInput = accountPasswordWidget.locator('input')
+    await page.waitForFunction(() => {
+      return (document.querySelector('[data-testid="account-password-widget"] input') as HTMLInputElement | null)?.value === 'secret-one'
+    })
+    assert.equal(await accountPasswordInput.getAttribute('type'), 'password')
+    assert.equal(await accountPasswordInput.inputValue(), 'secret-one')
+    await accountPasswordWidget.locator('.p-password-toggle-mask-icon').click()
+    assert.equal(await accountPasswordInput.getAttribute('type'), 'text')
+    assert.equal(await accountPasswordInput.inputValue(), 'secret-one')
+    await accountPasswordWidget.locator('.p-password-toggle-mask-icon').click()
+    assert.equal(await accountPasswordInput.getAttribute('type'), 'password')
     assert.equal(await page.getByTestId('account-platform-locked').isDisabled(), true)
     assert.equal(await page.getByTestId('account-label').isDisabled(), true)
     assert.equal(await page.getByTestId('account-recovery-codes').inputValue(), 'recovery-one')
     await page.getByTestId('account-login').fill('edited.linkedin@example.com')
     await page.getByTestId('account-linkedin-url').fill('https://linkedin.com/in/edited')
     await page.getByTestId('account-recovery-codes').fill('recovery-two')
-    await page.getByTestId('account-password-widget').locator('input').fill('secret-two')
     await page.getByTestId('save-account-button').click()
     await page.getByTestId('account-save-message').getByText('Account updated', { exact: false }).waitFor()
     await assertText(page, 'edited.linkedin@example.com')
     await page.getByTestId('accounts-table').getByText('https://linkedin.com/in/edited', { exact: true }).waitFor()
     await assertText(page, '***')
+    const editedLinkedInRow = page.getByTestId('accounts-table').locator('tr').filter({ hasText: 'https://linkedin.com/in/edited' })
+    await editedLinkedInRow.getByTestId('edit-account-button').click()
+    await page.waitForFunction(() => {
+      return (document.querySelector('[data-testid="account-password-widget"] input') as HTMLInputElement | null)?.value === 'secret-one'
+    })
+    await page.getByTestId('account-password-widget').locator('input').fill('secret-two')
+    await page.getByTestId('save-account-button').click()
+    await page.getByTestId('account-save-message').getByText('Account updated', { exact: false }).waitFor()
+    await editedLinkedInRow.getByTestId('edit-account-button').click()
+    await page.waitForFunction(() => {
+      return (document.querySelector('[data-testid="account-password-widget"] input') as HTMLInputElement | null)?.value === 'secret-two'
+    })
+    await page.getByTestId('close-account-editor-button').click()
     page.once('dialog', (dialog: any) => dialog.accept())
-    await page.getByTestId('delete-account-button').last().click()
+    await editedLinkedInRow.getByTestId('delete-account-button').click()
     await page.getByTestId('account-save-message').getByText('Account deleted', { exact: false }).waitFor()
     assert.equal(await page.getByText('edited.linkedin@example.com', { exact: true }).count(), 0)
 
@@ -436,7 +460,7 @@ async function runTests(): Promise<void> {
 
       const values: Record<string, string> = {
         login: `all-${platformLabel}@example.com`,
-        phone: `+1555000${platformIndex + 1}`,
+        phone: platformLabel === 'phone_en' ? 'call +1 (555)-010' : `+1555000${platformIndex + 1}`,
         nickname: `all-${platformLabel}`,
         linkedInUrl: platformLabel === 'github'
           ? 'https://github.com/all-platforms'
@@ -445,6 +469,10 @@ async function runTests(): Promise<void> {
         password: `secret-${platformLabel}`
       }
       for (const field of activeFields) await fieldLocators[field].fill(values[field])
+      if (platformLabel === 'phone_en') {
+        assert.equal(await fieldLocators.phone.inputValue(), '+1555010')
+        values.phone = '+1555010'
+      }
       createdAccountValues[platformLabel] = values.linkedInUrl && activeFields.has('linkedInUrl')
         ? values.linkedInUrl
         : values.phone && activeFields.has('phone')
