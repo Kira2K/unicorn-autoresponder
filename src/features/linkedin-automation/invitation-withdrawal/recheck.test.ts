@@ -26,7 +26,8 @@ test('recheck updates saved count once, survives restart, and does not resume re
 })
 test('last invitation resolves to completed; missing intent or changed identity cannot confirm', async () => {
   const f = await uncertain(), state = f.stored()!
-  state.run!.total = 1; await f.runtime.store.save(1, state)
+  state.run!.total = 1; state.run!.targets = state.run!.targets!.slice(0, 1)
+  await f.runtime.store.save(1, state)
   assert.equal((await f.service.recheck(1, f.run.id))?.status, 'completed')
   for (const change of ['identity', 'intent', 'token', 'readonly']) {
     const g = await uncertain(), before = g.stored()
@@ -97,6 +98,7 @@ test('pending, failed verification/read and 429 keep uncertainty; active recheck
   f.pending([{ id: '1', name: 'Pending', createdAt: '2026-08-01T00:00:00Z' }])
   assert.equal((await f.service.recheck(1, f.run.id))?.status, 'uncertain')
   assert.equal((await f.service.status(1))?.withdrawn, 0)
+  const time = f.runtime.now(); f.runtime.now = () => time + 60_000
   f.provider.verify = async () => { throw new Error('Wrong owner') }
   await assert.rejects(f.service.recheck(1, f.run.id)); f.provider.verify = async () => {}
   f.provider.list = async () => { throw { details: { httpStatus: 429, retryAfterMs: 600_000 } } }

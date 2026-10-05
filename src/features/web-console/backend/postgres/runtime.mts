@@ -5,17 +5,25 @@ import { assertGeneratedIds } from '../../../../integrations/postgres/identity-p
 import { readPostgresAppDbConfig } from '../../../../platform/db/postgres/config.mts';
 import { sqlAppOptions } from './app-options.mts';
 import { runtimeCreateTables } from './runtime-tables.mts';
+import { createLinkedInAutomationStore } from '../../../../integrations/postgres/linkedin-automation.mts';
+import { createRequire } from 'node:module';
+import type { LinkedInAutomation } from '../linkedin-automation.ts';
+const { prepareLinkedInAutomation, unavailableLinkedInAutomation } = createRequire(import.meta.url)('../linkedin-automation.ts') as
+  typeof import('../linkedin-automation.ts');
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const config = readPostgresAppDbConfig(env), pool = open(config);
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= pool.end();
+  let automation: LinkedInAutomation | undefined;
+  const close = () => closing ??= (async () => { await automation?.close(); await pool.end(); })();
   try {
     const db = await createPostgresClient(pool, config.database, { writable: true });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
     const create = (tx: PostgresTransaction, table: string, data: Readonly<Record<string, unknown>>) => tx.createRecord(table, data);
     const options = sqlAppOptions(db, { clientIds: new Set(), allClients: true, create },
       { accountIds: new Set(), allAccounts: true, create });
-    return { options, close };
+    try { automation = await prepareLinkedInAutomation(createLinkedInAutomationStore(pool), options.linkedinStorage.repository); }
+    catch (error) { automation = unavailableLinkedInAutomation(error); }
+    return { options: { ...options, linkedinAutomation: automation }, close };
   } catch (error) { await close(); throw error; }
 }

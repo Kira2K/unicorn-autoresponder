@@ -90,7 +90,7 @@ export async function verifyFinal(options: {
       logger.event('final_verification_read', 'succeeded', { attempt,
         maxAttempts: schedule.length, stepCount: checked.length })
     } catch (error) {
-      const delay = providerDelayMs(error)
+      const delay = providerDelayMs(error, clock())
       if (delay) result.verification.notBefore = scheduledAt(delay, clock)
       observations = checked.map(() => undefined)
       logger.event('final_verification_read', 'failed', { attempt,

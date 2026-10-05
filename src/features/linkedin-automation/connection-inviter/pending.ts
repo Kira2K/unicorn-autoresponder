@@ -1,11 +1,15 @@
 import { connectionError, connectionErrorCode, normalizeConnectionProviderError,
   transientConnectionError } from './errors.ts'
-import { profileIsConnected } from './relation-policy.ts'
-import { waitOrStop } from './run-control.ts'
-import { makeRetryState, withConnectionRetry } from './retry-state.ts'
+import { profileAllowsInvitation, profileIsConnected } from './relation-policy.ts'
+import { withConnectionRetry } from './retry-state.ts'
+import { beginInvitationVerification, deferInvitationVerification, clearInvitationVerification, recordInvitationFailure, expireInvitationRecovery } from './invitation-verification.ts'
+import { ACTION_SKIPPED } from '../action-recovery.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 import { readPendingInvitations, type PendingRead } from './pending-reader.ts'
+import { pendingReadIsFresh } from './pending-snapshot.ts'
+
+const HISTORY_PROFILE_TTL_MS = 2 * 60 * 60_000
 
 export async function listAllPending(runtime: ConnectionRuntime, accountId: string) {
   return (await readPendingInvitations(runtime, accountId)).items
@@ -13,14 +17,31 @@ export async function listAllPending(runtime: ConnectionRuntime, accountId: stri
 
 export async function reconcileInvitations(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun, options: { singlePass?: boolean; ignoreStopRequested?: boolean;
-    runOnly?: boolean; openHistory?: ConnectionHistoryItem[] } = {}):
+    runOnly?: boolean; openHistory?: ConnectionHistoryItem[]; snapshot?: PendingRead } = {}):
   Promise<{ unresolved: number; retryError?: unknown; snapshot?: PendingRead }> {
   const retryOptions = { allowAfterDayClose: true,
     ignoreStopRequested: options.ignoreStopRequested }
   let retryError: unknown
   const open = options.openHistory ?? await withConnectionRetry(runtime, run, save, 'storage',
     'open_history_list', () => runtime.store.listOpenHistory(run.platformAccountId, 1000), retryOptions)
-  const active = options.runOnly ? open.filter(item => item.runId === run.runId) : open
+  let active = options.runOnly ? open.filter(item => item.runId === run.runId) : open
+  await expireInvitationRecovery(runtime, run, save, active)
+  active = active.filter(item => item.reasonCode !== ACTION_SKIPPED)
+  const unknown = active.filter(item => ['sending', 'uncertain'].includes(item.status))
+  if (runtime.stopRequested(run.runId) && !options.ignoreStopRequested) return { unresolved: unknown.length }
+  if (unknown.length) {
+    if (!await beginInvitationVerification(runtime, run, save, unknown)) return { unresolved: unknown.length }
+    // During recovery, spend requests on the unknown outcomes first, not all old receipts.
+    active = unknown
+  } else clearInvitationVerification(run)
+  // Only known sent receipts may reuse a negative profile check in this same run.
+  // The current pending list and every unknown result are still checked on every recovery.
+  const checks = run.searchProgress.historyProfileChecks ??= {}
+  const activeKeys = new Set(open.map(item => item.historyKey))
+  for (const [key, check] of Object.entries(checks)) {
+    const age = runtime.now().getTime() - check?.checkedAt
+    if (!activeKeys.has(key) || !Number.isFinite(age) || age < 0 || age >= HISTORY_PROFILE_TTL_MS) delete checks[key]
+  }
   if (active.some(item => ['sending', 'uncertain'].includes(item.status))) {
     // A crash may have happened after dispatch but before its run checkpoint.
     run.searchProgress.invitationPacingStarted = true
@@ -32,7 +53,7 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
     return { unresolved: 0 }
   }
   const unipileRead = async <T>(operation: string, action: () => Promise<T>) => {
-    if (!options.singlePass) {
+    if (!options.singlePass && !unknown.length) {
       return withConnectionRetry(runtime, run, save, 'unipile', operation, action, retryOptions)
     }
     try { return await action() }
@@ -40,6 +61,7 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
       const error = normalizeConnectionProviderError('unipile', caught)
       if (!transientConnectionError(error)) throw error
       retryError = error
+      recordInvitationFailure(run, unknown, error, runtime.now().getTime())
       runtime.logger.event('invitation_reconcile', 'failed', {
         runId: run.runId, platformAccountId: run.platformAccountId,
         errorCode: connectionErrorCode(error), reasonCode: 'single_pass_read_unavailable'
@@ -49,13 +71,16 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
   }
   let accepted = 0
   let unresolved = 0
-  let snapshot = await unipileRead('pending_invitations_read', () =>
-    readPendingInvitations(runtime, run.accountId))
+  const snapshot = options.snapshot?.complete && pendingReadIsFresh(options.snapshot, run.accountId, runtime.now().getTime())
+    ? options.snapshot : await unipileRead('pending_invitations_read', () =>
+      readPendingInvitations(runtime, run.accountId, active.length === 1 ? active[0].personId : undefined,
+        options.ignoreStopRequested ? undefined : run.runId))
   if (!snapshot) {
+    if (unknown.length) await deferInvitationVerification(runtime, run, save, retryError)
     return { unresolved: active.filter(item =>
       ['sending', 'uncertain'].includes(item.status)).length, retryError }
   }
-  let pending = snapshot.personIds
+  const pending = snapshot.personIds
   for (const item of active) {
     while (true) {
       if (runtime.stopRequested(run.runId) && !options.ignoreStopRequested) {
@@ -69,6 +94,19 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
           await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
             runtime.store.updateHistory(item), retryOptions)
         }
+        if (run.searchProgress.actionRecovery) delete run.searchProgress.actionRecovery[`invite:${item.personId}`]
+        break
+      }
+      const signature = JSON.stringify([run.runId, run.accountId, item.platformAccountId,
+        item.accountId, item.personId, item.status, item.sentAt, item.requestId, item.updatedAt])
+      const cacheable = item.status === 'sent' && Number.isFinite(Date.parse(item.sentAt ?? '')) &&
+        item.accountId === run.accountId && item.platformAccountId === run.platformAccountId
+      const cached = checks[item.historyKey], checkedAt = runtime.now().getTime()
+      if (cacheable && cached?.signature === signature && checkedAt >= cached.checkedAt &&
+        checkedAt - cached.checkedAt < HISTORY_PROFILE_TTL_MS) {
+        runtime.logger.event('invitation_reconcile', 'succeeded', { runId: run.runId,
+          platformAccountId: run.platformAccountId, cacheUses: 1,
+          reasonCode: 'sent_profile_check_reused', snapshotAgeMs: checkedAt - cached.checkedAt })
         break
       }
       const profile = await unipileRead('candidate_profile_readback', async () => {
@@ -83,7 +121,13 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
         item.verifiedAt = runtime.now().toISOString()
         await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
           runtime.store.updateHistory(item), retryOptions)
+        if (run.searchProgress.actionRecovery) delete run.searchProgress.actionRecovery[`invite:${item.personId}`]
         accepted += 1; break
+      }
+      if (cacheable && profileAllowsInvitation(profile).allowed) {
+        checks[item.historyKey] = { signature, checkedAt }
+        try { await save(run, 'progress', 'critical') }
+        catch (error) { delete checks[item.historyKey]; throw error }
       }
       if (item.status === 'sent' || item.status === 'deferred') break
       if (item.status === 'sending') {
@@ -92,29 +136,16 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
         await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
           runtime.store.updateHistory(item), retryOptions)
       }
-      if (options.singlePass) {
-        unresolved += 1
-        break
-      }
-      const synthetic = connectionError('unipile_readback_pending',
-        'Invitation result is not visible yet.', { httpStatus: 503 })
-      run.status = 'running'; run.stage = 'resolving_uncertain'
-      run.retryState = makeRetryState(runtime, run, 'unipile', 'invitation_result_readback', synthetic)
-      run.nextActionAt = run.retryState.nextRetryAt
-      run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
-        nextActionAt: run.retryState.nextRetryAt }
-      await save(run, 'retry_scheduled', 'critical')
-      const continued = options.ignoreStopRequested
-        ? (await runtime.sleep(run.retryState.delayMs), true)
-        : await waitOrStop(runtime, run.runId, run.retryState.delayMs)
-      if (!continued) {
-        return { unresolved: Math.max(1, active.filter(candidate =>
-          ['sending', 'uncertain'].includes(candidate.status)).length) }
-      }
-      snapshot = await withConnectionRetry(runtime, run, save, 'unipile',
-        'pending_invitations_read', () => readPendingInvitations(runtime, run.accountId),
-        retryOptions)
-      pending = snapshot.personIds
+      unresolved += 1
+      break
+    }
+  }
+  if (unknown.length) {
+    if (unresolved) await deferInvitationVerification(runtime, run, save, retryError)
+    else {
+      clearInvitationVerification(run); await save(run, 'progress', 'critical')
+      const rest = (options.runOnly ? open.filter(i => i.runId === run.runId) : open).filter(i => !unknown.includes(i) && i.reasonCode !== ACTION_SKIPPED)
+      if (rest.length) return reconcileInvitations(runtime, run, save, { ...options, openHistory: rest, snapshot })
     }
   }
   runtime.logger.event('invitation_reconcile', 'succeeded', { platformAccountId: run.platformAccountId,

@@ -22,15 +22,6 @@ async function waitStage(service: any, runId: string, stage: string) {
   }
   throw new Error(`Connection test run did not reach ${stage}.`)
 }
-async function waitGuardedStop(service: any, runId: string) {
-  for (let count = 0; count < 100; count += 1) {
-    const run = await service.get(runId)
-    if (run?.stage === 'stop_requested' &&
-      run.errorCode === 'connection_invitation_result_pending') return run
-    await new Promise(resolve => setTimeout(resolve, 5))
-  }
-  throw new Error('Connection test run did not persist the guarded Stop state.')
-}
 async function uncertain() {
   const test = fixture({ stack: 'Frontend', sendFailure: Object.assign(new Error('timeout'),
     { code: 'unipile_timeout' }) })
@@ -54,20 +45,22 @@ async function uncertain() {
   assert.equal((await service.history(7)).some((item: any) => item.status === 'uncertain'), true)
   assert.equal((await service.get(started.runId))?.counters.sent, 0)
   await service.stopRun(started.runId); waits.shift()?.()
-  const guarded: any = await waitGuardedStop(service, started.runId)
-  assert.equal(guarded.status, 'running')
-  assert.equal(guarded.errorCode, 'connection_invitation_result_pending')
+  const guarded: any = await waitRun(service, started.runId)
+  assert.equal(guarded.status, 'stopped')
+  assert.equal(guarded.errorCode, undefined)
   assert.equal(test.metrics.sends, 1)
   service.stop()
   test.adapter.listPendingInvitations = async (_accountId: string, offset = 0) =>
     ({ items: offset ? [] : [{ user_id: attemptedPersonId }] })
-  const recoveryTime = new Date(Date.parse(guarded.nextActionAt) + 1)
+  const recoveryTime = new Date(clock().getTime() + 3600_000)
   const recovered = createConnectionInviterService({ ...test, now: () => recoveryTime,
     autoRecover: false, sleep: async () => undefined })
   await recovered.recover()
   const stopped: any = await waitRun(recovered, started.runId)
   assert.equal(stopped.status, 'stopped'); assert.equal(stopped.stage, 'stopped_by_admin')
-  assert.equal(stopped.counters.sent, 1); assert.equal(test.metrics.sends, 1)
+  assert.equal(stopped.counters.sent, 0); assert.equal(test.metrics.sends, 1)
+  assert.equal((await recovered.history(7)).some((item: any) => item.status === 'uncertain'), true)
+  recovered.stop()
 }
 async function serverErrorDoesNotRepeatPost() {
   const test = fixture({ stack: 'Frontend', sendFailure: Object.assign(new Error('unavailable'),
@@ -81,8 +74,8 @@ async function serverErrorDoesNotRepeatPost() {
     await new Promise(resolve => setTimeout(resolve, 2))
   }
   await service.stopRun(started.runId); waits.shift()?.()
-  const guarded: any = await waitStage(service, started.runId, 'stop_requested')
-  assert.equal(guarded.status, 'running'); assert.equal(test.metrics.sends, 1)
+  const guarded: any = await waitRun(service, started.runId)
+  assert.equal(guarded.status, 'stopped'); assert.equal(test.metrics.sends, 1)
   service.stop()
 }
 async function missingReadbackDoesNotRepeatPost() {
@@ -96,8 +89,8 @@ async function missingReadbackDoesNotRepeatPost() {
     await new Promise(resolve => setTimeout(resolve, 2))
   }
   await service.stopRun(started.runId); waits.shift()?.()
-  const guarded: any = await waitStage(service, started.runId, 'stop_requested')
-  assert.equal(guarded.status, 'running'); assert.equal(posts, 1)
+  const guarded: any = await waitRun(service, started.runId)
+  assert.equal(guarded.status, 'stopped'); assert.equal(posts, 1)
   service.stop()
 }
 async function missingStack() {
@@ -308,9 +301,9 @@ async function postWriteRetrySurvivesMidnightUntilReadback() {
   }
   const guarded: any = await service.get(started.runId)
   assert.equal(guarded.status, 'running')
-  assert.equal(guarded.stage, 'waiting_retry')
+  assert.equal(guarded.stage, 'resolving_uncertain')
   assert.equal(posts, 1)
-  allowReadback = true; releaseWait()
+  allowReadback = true; now = Date.parse(guarded.nextActionAt) + 1; await service.recover()
   const closed: any = await waitRun(service, started.runId)
   assert.equal(closed.status, 'partial')
   assert.equal(closed.stage, 'daily_window_closed')
@@ -334,7 +327,7 @@ async function orphanedRunStop() {
   const stopped: any = await service.stopRun(run.runId)
   assert.equal(stopped.status, 'stopped'); assert.equal(stopped.stage, 'stopped_by_admin')
   const history: any[] = await service.history(7)
-  assert.equal(history[0].status, 'sent')
+  assert.equal(history[0].status, 'sending')
   assert.equal(test.metrics.sends, 0)
 }
 async function orphanedStopDoesNotWaitThroughProviderBackoff() {
@@ -360,17 +353,17 @@ async function orphanedStopDoesNotWaitThroughProviderBackoff() {
   const service = createConnectionInviterService({ ...test, now: clock, autoRecover: false,
     sleep: async () => { slept = true } })
   const stopped: any = await service.stopRun(run.runId)
-  assert.equal(stopped.status, 'running')
-  assert.equal(stopped.stage, 'stop_requested')
+  assert.equal(stopped.status, 'stopped')
+  assert.equal(stopped.stage, 'stopped_by_admin')
   assert.equal(slept, false)
-  assert.equal(pendingCalls, 1)
+  assert.equal(pendingCalls, 0)
   assert.equal(test.metrics.sends, 0)
   service.stop()
   const recovered = createConnectionInviterService({ ...test, now: clock, autoRecover: false,
     sleep: async () => { slept = true } })
   await recovered.recover()
   await new Promise(resolve => setTimeout(resolve, 10))
-  assert.equal(pendingCalls, 1)
+  assert.equal(pendingCalls, 0)
   assert.equal(slept, false)
   recovered.stop()
 }
@@ -396,73 +389,38 @@ async function startCannotClearDurableStop() {
   await service.recover()
   const stopped: any = await waitRun(service, run.runId)
   assert.equal(stopped.status, 'stopped')
-  assert.equal(stopped.counters.sent, 1)
+  assert.equal(stopped.counters.sent, 0)
   assert.equal(test.metrics.sends, 0)
 }
-async function successfulPostReadback429DoesNotRepeatPost() {
+async function readbackErrorAcrossRestart(error: any) {
   const test = fixture({ stack: 'Frontend', connectionCount: 149 })
-  const send = test.adapter.sendInvitation
-  const listPending = test.adapter.listPendingInvitations
-  let posts = 0; let pendingReads = 0
-  test.adapter.sendInvitation = async (accountId: string, personId: string) => {
-    posts += 1
-    return send(accountId, personId)
+  const list = test.adapter.listPendingInvitations; let reads = 0, now = clock().getTime()
+  test.adapter.listPendingInvitations = async (...args: any[]) => {
+    if (++reads === 2) throw error
+    return list(...args)
   }
-  test.adapter.listPendingInvitations = async (accountId: string, offset = 0) => {
-    pendingReads += 1
-    if (pendingReads === 2) {
-      throw Object.assign(new Error('readback rate limited'), {
-        code: 'unipile_http_429', details: { httpStatus: 429 }
-      })
-    }
-    return listPending(accountId, offset)
-  }
-  const service = createConnectionInviterService({ ...test, now: clock,
+  let service = createConnectionInviterService({ ...test, now: () => new Date(now), autoRecover: false,
     sleep: async () => undefined })
   const started: any = await service.start(7)
+  const pending: any = await waitStage(service, started.runId, 'resolving_uncertain')
+  assert.equal(test.metrics.sends, 1); assert.equal(pending.counters.sent, 0)
+  assert.equal((await service.history(7)).some((i: any) => i.status === 'uncertain'), true)
+  // Let the safe step finish before simulating a process restart.
+  await new Promise(resolve => setImmediate(resolve)); service.stop()
+  now = Date.parse(pending.nextActionAt) + 1
+  service = createConnectionInviterService({ ...test, now: () => new Date(now), autoRecover: false,
+    sleep: async () => undefined })
+  await service.recover()
   const completed: any = await waitRun(service, started.runId)
-  assert.equal(completed.status, 'succeeded')
-  assert.equal(posts, 5)
-  assert.equal(test.metrics.sends, 5)
+  assert.equal(completed.status, 'succeeded'); assert.equal(test.metrics.sends, 5)
+  service.stop()
 }
-
+async function successfulPostReadback429DoesNotRepeatPost() {
+  await readbackErrorAcrossRestart(Object.assign(new Error('limited'), {
+    code: 'unipile_http_429', details: { httpStatus: 429 } }))
+}
 async function postReadbackFailurePersistsUncertainBeforeRetry() {
-  const test = fixture({ stack: 'Frontend', connectionCount: 149 })
-  const send = test.adapter.sendInvitation
-  const listPending = test.adapter.listPendingInvitations
-  let posts = 0; let pendingReads = 0; let releaseRetry!: () => void
-  let retryWaiting = false
-  test.adapter.sendInvitation = async (accountId: string, personId: string) => {
-    posts += 1
-    return send(accountId, personId)
-  }
-  test.adapter.listPendingInvitations = async (accountId: string, offset = 0) => {
-    pendingReads += 1
-    if (pendingReads === 2) {
-      throw Object.assign(new Error('readback unavailable'), {
-        code: 'unipile_unreachable'
-      })
-    }
-    return listPending(accountId, offset)
-  }
-  const service = createConnectionInviterService({ ...test, now: clock,
-    sleep: async () => posts === 1 && pendingReads === 2
-      ? new Promise<void>(resolve => { retryWaiting = true; releaseRetry = resolve })
-      : undefined })
-  const started: any = await service.start(7)
-  for (let count = 0; count < 100 && !retryWaiting; count += 1) {
-    await new Promise(resolve => setTimeout(resolve, 2))
-  }
-  assert.equal(retryWaiting, true)
-  assert.equal(posts, 1)
-  assert.equal((await service.get(started.runId))?.counters.sent, 0)
-  const waitingHistory: any[] = await service.history(7)
-  assert.equal(waitingHistory.some(item => item.status === 'uncertain' &&
-    item.reasonCode === 'unipile_unreachable'), true)
-  releaseRetry()
-  const completed: any = await waitRun(service, started.runId)
-  assert.equal(completed.status, 'succeeded')
-  assert.equal(posts, 5)
+  await readbackErrorAcrossRestart(Object.assign(new Error('unreachable'), { code: 'unipile_unreachable' }))
 }
 
 async function providerRateLimitRecoversAndCompletesRun() {

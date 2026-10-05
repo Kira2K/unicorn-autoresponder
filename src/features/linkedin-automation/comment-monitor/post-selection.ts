@@ -20,7 +20,7 @@ export async function selectPosts(options: {
     'LinkedIn provider user ID is missing.')
   const posts: TrackedPost[] = await logged(logger, 'post_selection', async () => {
     const raw = await allPages(cursor => adapter.listPosts(row.unipileAccountId, userId,
-      logger, cursor), logger, 'posts_page', 1)
+      logger, cursor), logger, 'posts_page', 1, () => true)
     return raw.map((post: any) => ({ id: String(post?.id ?? '').trim(),
       url: String(post?.share_url ?? post?.url ?? '').trim() || undefined,
       createdAt: String(post?.created_at ?? '').trim() || undefined,

@@ -1,9 +1,14 @@
-import { runFromRow, runRow, historyFromRow, historyRow } from '../connection-inviter/store-rows.ts';
-import { CONNECTION_CATALOG_COLUMNS, CONNECTION_RUN_COLUMNS, CONNECTION_HISTORY_COLUMNS } from
-  '../../../integrations/noco/linkedin-connection-inviter-schema/columns.ts';
+import { createRequire } from 'node:module';
 import type { ConnectionInviterStore, ConnectionHistoryItem } from '../connection-inviter/types.ts';
 import type { FeatureSql, FeatureRow, FeatureWrites } from './contracts.mts';
 import { createFeatureRows } from './rows.mts';
+// These .ts modules are ESM in native Node but CJS in tsx; require supports both.
+const require = createRequire(import.meta.url);
+const { runFromRow, runRow, historyFromRow, historyRow } = require('../connection-inviter/store-rows.ts') as
+  typeof import('../connection-inviter/store-rows.ts');
+const { CONNECTION_CATALOG_COLUMNS, CONNECTION_RUN_COLUMNS, CONNECTION_HISTORY_COLUMNS } =
+  require('../../../integrations/noco/linkedin-connection-inviter-schema/columns.ts') as
+  typeof import('../../../integrations/noco/linkedin-connection-inviter-schema/columns.ts');
 const newest = (rows: FeatureRow[], field: string) => rows.sort((a,b) => Number(b[field] == null) - Number(a[field] == null) ||
   String(b[field] ?? '').localeCompare(String(a[field] ?? '')));
 export function createSqlInviterStore(db: FeatureSql, grant?: FeatureWrites): ConnectionInviterStore {

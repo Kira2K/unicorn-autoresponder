@@ -14,6 +14,9 @@ function onMemeLoaded(value) { memeLoaded.value = value; if (!value) memeReviewe
   <section v-if="run" class="post-progress" data-testid="post-progress">
     <h3>{{ stages[run.status] || run.status }}</h3>
     <p>{{ run.trigger === 'scheduled' ? 'По расписанию — без подтверждения' : 'Ручной запуск' }}</p>
+    <p v-if="run.context?.warning" class="post-warning" role="status" data-testid="post-source-warning">
+      Предупреждение: {{ run.context.warning.message }}
+    </p>
     <p v-if="run.nextActionAt">Следующая операция: {{ dateMsk(run.nextActionAt) }} · {{ countdown(run.nextActionAt, now) }}</p>
     <p v-if="run.topic"><strong>{{ run.topic.title }}</strong></p>
     <pre v-if="run.draft">{{ run.draft.text }}</pre>
@@ -57,6 +60,7 @@ function onMemeLoaded(value) { memeLoaded.value = value; if (!value) memeReviewe
 </template>
 <style scoped>
 .post-progress { border-top: 1px solid #dce4ef; margin-top: 1rem; padding-top: 1rem; }
+.post-warning { padding: .75rem; background: #fff7df; color: #785300; border-radius: .5rem; }
 pre { white-space: pre-wrap; font: inherit; background: #f5f8fc; padding: 1rem; border-radius: .5rem; }
 .post-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 </style>

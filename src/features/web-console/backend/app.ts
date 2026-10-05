@@ -453,6 +453,7 @@ function createMockCvTailoringService(): CvTailoringService {
 function createWebConsoleApp(options: {
   repository?: WebConsoleRepository
   linkedinStorage?: import('./storage-options.ts').LinkedInStorageOptions
+  linkedinAutomation?: import('./linkedin-automation.ts').LinkedInAutomation
   dolphinLeaseService?: DolphinLeaseService
   dolphinProfileProvisioner?: DolphinProfileProvisioner
   dolphinProvisioningApi?: any
@@ -497,7 +498,7 @@ function createWebConsoleApp(options: {
         : undefined
     })
   const dolphinLeaseService = options.dolphinLeaseService ?? createDefaultDolphinLeaseService()
-  const linkedinOperationGate = options.linkedinOperationGate ?? createLinkedInOperationGate()
+  const linkedinOperationGate = options.linkedinOperationGate ?? options.linkedinAutomation?.gate ?? createLinkedInOperationGate()
   let linkedinRepository: any = storage?.repository
   const getLinkedInRepository = () => linkedinRepository ??= createLinkedInAuthNocoRepository()
   const lazyLinkedInRepository = new Proxy({}, {
@@ -534,7 +535,9 @@ function createWebConsoleApp(options: {
   const getLiveConnectionInviter = () => liveConnectionInviter ??= createConnectionInviterService({
     gate: linkedinOperationGate,
     store: storage?.inviter,
-    repository: lazyLinkedInRepository
+    repository: lazyLinkedInRepository,
+    assertWriterOwnership: options.linkedinAutomation?.assertAvailable,
+    withdrawal: options.linkedinAutomation ? { store: options.linkedinAutomation.withdrawals } : undefined
   })
   const lazyConnectionInviter = new Proxy({}, {
     get(_target, property) {
@@ -552,7 +555,12 @@ function createWebConsoleApp(options: {
   const postWriter = options.postWriter ?? (useMockData
     ? createMockPostWriter(linkedinOperationGate)
     : createLivePostWriter(lazyLinkedInRepository as { listAccounts(): Promise<import('../../linkedin-automation/account-connection/types.ts').LinkedInAuthAccountRow[]> },
-      linkedinOperationGate, { storage: storage?.posts }))
+      linkedinOperationGate, { storage: storage?.posts, managedShutdown: Boolean(options.linkedinAutomation),
+        unknownLockGraceMs: options.linkedinAutomation?.unknownLockGraceMs,
+        assertAutomaticLikes: options.linkedinAutomation?.assertAutomaticLikes }))
+  options.linkedinAutomation?.attach({ inviter: connectionInviter, posts: postWriter,
+    comments: commentMonitor } as unknown as import('../../linkedin-automation/orchestrator/adapters.ts').Services)
+  if (options.linkedinAutomation && !useMockData && !options.commentMonitor) getLiveCommentMonitor()
   const textRuntime = createTextRuntime(useMockData)
   const dolphinProfileProvisioner = options.dolphinProfileProvisioner ?? createDolphinProfileProvisioner({
     repository,
@@ -833,6 +841,7 @@ function createWebConsoleApp(options: {
   }
 
   app.use(attachSession)
+  options.linkedinAutomation?.routes(app, requireRole('admin'))
   registerLinkedInAuthRoutes({
     app,
     requireAdmin: requireRole('admin'),

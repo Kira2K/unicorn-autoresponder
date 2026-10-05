@@ -2,6 +2,7 @@ import { mkdir, readFile, open, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { State, Store } from './contracts.ts'
+import { assertApprovedQueue } from './policy.ts'
 export function createWithdrawalFileStore(directory: string): Store {
   function path(id: number) {
     if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid account ID')
@@ -18,6 +19,7 @@ export function createWithdrawalFileStore(directory: string): Store {
         (state.run && (state.run.platformAccountId !== id || state.run.accountId !== state.accountId ||
           typeof state.run.id !== 'string' || !['running', 'completed', 'stopped', 'failed', 'uncertain', 'interrupted'].includes(state.run.status))))
         throw new Error('Invalid withdrawal journal')
+      if (state.run) assertApprovedQueue(state.run)
       return state
     },
     async save(id, state) {

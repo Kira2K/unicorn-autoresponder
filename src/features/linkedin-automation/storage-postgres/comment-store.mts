@@ -18,10 +18,7 @@ export function createSqlCommentStore(db: FeatureSql, grant?: FeatureWrites) {
       if (!current?.recordId) throw Object.assign(Error('Comment monitor job not found.'), { code: 'comment_monitor_job_not_found' });
       await rows.patch(current.recordId, monitorJobRow(job));
     },
-    async purge(before: string) {
-      const cutoff = Date.parse(before);
-      if (!Number.isFinite(cutoff)) return;
-      for (const job of await list()) if (job.recordId && Date.parse(job.createdAt) < cutoff) await rows.remove(job.recordId);
-    }
+    // Keep the old interface without deleting recovery/deduplication state by age.
+    async purge(_before: string) {}
   };
 }

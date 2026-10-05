@@ -9,7 +9,7 @@ test('Closing a restored uncertain run releases only local locks, never retries 
   await f.deps.store.put('runs',created.id,{...created,status:'uncertain',attemptedAt:f.deps.now()})
   f.restart()
   await f.service.get(203)
-  assert.equal(f.held.size,1)
+  assert.equal(f.held.size,0)
   await f.service.close()
   assert.equal(f.held.size,0)
   assert.equal(f.counts.publish,0)

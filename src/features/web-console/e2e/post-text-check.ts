@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 export async function checkTextWorkspace(page: Page, base: string) {
@@ -26,6 +27,7 @@ export async function checkTextWorkspace(page: Page, base: string) {
   await workspace.getByRole('button', { name: 'Открыть мем крупно' }).waitFor()
   await page.reload()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page)
   await page.getByTestId('post-text-open').click()
   await page.getByRole('heading', { name: 'Текст готов — не опубликован' }).waitFor()
   assert.equal(await page.getByTestId('post-text-name').inputValue(), 'Independent test author')

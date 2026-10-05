@@ -3,6 +3,7 @@ import { deterministicSkipReason, validateModelDecision,
   type ReplyPolicyReason } from './reply-policy.ts'
 import type { AuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorItem, MonitorJob } from './types.ts'
+import { recordFailure } from '../action-recovery.ts'
 
 const batches = <T>(items: T[], size: number) =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
@@ -124,6 +125,7 @@ function queueReply(item: MonitorItem, text: string, logger: CommentLogger) {
 export async function generateReplies(options: {
   job: MonitorJob; items: MonitorItem[]; openai: any; logger: CommentLogger
   loadAuthorContext?: () => Promise<AuthorContext>
+  now?: () => number
 }) {
   const { job, openai, logger } = options
   const reserved = replyReservations(job)
@@ -183,6 +185,10 @@ export async function generateReplies(options: {
       queued.push(...batch.filter(item => item.status === 'queued'))
     } catch (error) {
       batch.forEach(markDetected)
+      for (const item of batch) {
+        const recovery = recordFailure(item.recovery, error, options.now?.() ?? Date.now())
+        if (recovery) item.recovery = recovery
+      }
       throw error
     }
   }

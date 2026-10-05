@@ -1,6 +1,6 @@
 import type { PostSource } from './types.ts'
 import type { SourceDependencies } from './source-types.ts'
-import { PostError } from './errors.ts'
+import { PostError, errorCode } from './errors.ts'
 import { digest } from './content-identity.ts'
 import { FACTS_VERSION } from './fact-instructions.ts'
 const MAX_CV_BYTES = 20 * 1024 * 1024
@@ -17,7 +17,17 @@ export function createPostSource(deps: SourceDependencies): PostSource {
     async context(account, previous) {
       const row = (await deps.accounts()).find(item => item.platformAccountId === account)
       if (!row) throw new PostError('post_account_missing')
-      const cv = deps.selectCv(await deps.cvRows(), row.clientId)
+      const rows = await deps.cvRows()
+      let cv: { url: string; revision: string }
+      try { cv = deps.selectCv(rows, row.clientId) }
+      catch (error) {
+        if (errorCode(error) !== 'profile_cv_not_ready') throw error
+        const stack = row.primaryStack?.trim()
+        if (!stack) throw new PostError('post_stack_missing')
+        return { source: 'stack', revision: `stack-v1-${digest(stack)}`, role: 'Technical discussion',
+          stack: [stack], facts: [], warning: { code: 'post_cv_missing_stack',
+            message: 'Готового английского CV нет. Пост создаётся по стеку без утверждений о личном опыте и достижениях.' } }
+      }
       // Download/read-only metadata detects in-place edits even if the Noco link did not change.
       const document = await deps.loadCv(cv.url, MAX_CV_BYTES)
       const revision = digest(`${cv.revision}:${document.revision}:${digest(document.bytes.toString('base64'))}`)

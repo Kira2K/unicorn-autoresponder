@@ -3,11 +3,12 @@ import { randomUUID } from 'node:crypto'
 import { createUnipileRequestScheduler } from '../../../integrations/unipile/request-scheduler.ts'
 import { NOOP_CONNECTION_LOGGER, type ConnectionLogger,
   captureConnectionRequestTrace, recordConnectionRequest } from './logger.ts'
-import { retryableUnipileRead } from '../../../integrations/unipile/read-retry.ts'
+import { retryableUnipileRead, listReadError } from '../../../integrations/unipile/read-retry.ts'
 import { unipileRateLimitSource } from './errors.ts'
 import type { UnipileResponseMetadata } from '../../../integrations/unipile/http-client.ts'
 
-const { createUnipileHttpClient } = httpClientModule as unknown as {
+// CJS exports live under default when native Node reaches this file through require().
+const { createUnipileHttpClient } = ((httpClientModule as { default?: unknown }).default ?? httpClientModule) as {
   createUnipileHttpClient(options?: any): any
 }
 // Keep consecutive requests below ten per minute, including page reads.
@@ -18,11 +19,16 @@ const sharedScheduler = createUnipileRequestScheduler({ minIntervalMs: connectio
 const PENDING_INVITATIONS_PAGE_LIMIT = 100
 
 export function connectionPageItems(value: any): any[] {
-  return Array.isArray(value) ? value : value?.items ?? value?.data ?? value?.list ?? []
+  const items = Array.isArray(value) ? value : value?.items ?? value?.data ?? value?.list
+  if (!Array.isArray(items)) throw listReadError('unipile_list_response_invalid', 'missing_items')
+  return items
 }
 
 export function connectionNextCursor(value: any): string {
-  return String(value?.next_cursor ?? value?.cursor ?? '').trim()
+  const cursor = value?.next_cursor ?? value?.cursor ?? ''
+  if (typeof cursor !== 'string' || (cursor && !cursor.trim()))
+    throw listReadError('unipile_list_response_invalid', 'cursor_invalid')
+  return cursor
 }
 
 export function parseConnectionPeopleSearchResponse(value: any) {
@@ -86,6 +92,8 @@ export function parseConnectionPendingResponse(value: any) {
   else if (value?.data && Array.isArray(value.data.items)) {
     items = value.data.items; responseShape = 'data.items'; envelope = value.data
   }
+  if (items?.some(item => item?.type !== undefined && item.type !== 'sent'))
+    throw listReadError('unipile_pending_response_invalid', 'wrong_direction')
   if (!items || items.some(item => !pendingPersonId(item))) {
     throw Object.assign(new Error('Unexpected Unipile pending invitations response.'), {
       code: 'unipile_pending_response_invalid', details: { httpStatus: 503 }

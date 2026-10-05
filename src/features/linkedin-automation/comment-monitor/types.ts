@@ -9,6 +9,7 @@ export type TrackedPost = {
 }
 
 export type MonitorItem = {
+  recovery?: import('../action-recovery.ts').ActionRecovery
   incomingId: string
   postId: string
   threadId: string
@@ -17,6 +18,10 @@ export type MonitorItem = {
   threadText: string
   replyText?: string
   replyId?: string
+  attemptedAt?: string
+  uncertainSince?: string
+  nextVerificationAt?: string
+  verificationChecks?: number
   status: 'detected' | 'generating' | 'queued' | 'publishing' |
     'verified' | 'ignored' | 'failed' | 'uncertain'
   reasonCode?: string
@@ -25,6 +30,12 @@ export type MonitorItem = {
 }
 
 export type MonitorState = {
+  readRecovery?: Record<string, import('../action-recovery.ts').ActionRecovery>
+  nextWorkAt?: string
+  providerNotBefore?: string
+  verificationSources?: string[]
+  automationId?: string
+  postsCheckedForPublication?: number
   posts: TrackedPost[]
   items: MonitorItem[]
   knownIds: string[]
@@ -33,6 +44,7 @@ export type MonitorState = {
   published: number
   failed: number
   threadReplies: Record<string, number>
+  checkedThreads?: Record<string, { count: number; text: string; at: number }>
 }
 
 export type MonitorJob = {

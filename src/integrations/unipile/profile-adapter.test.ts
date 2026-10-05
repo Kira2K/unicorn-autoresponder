@@ -2,6 +2,15 @@ const assert = require('node:assert/strict')
 const { createUnipileProfileAdapter } = require('./profile-adapter.ts') as any
 
 async function run() {
+  for (const malformed of [{}, { data: null }, { data: [{ name: 'PRIVATE' }] }]) {
+    let reads = 0
+    const catalog = createUnipileProfileAdapter({ async request() {
+      return ++reads === 1 ? malformed : { data: [{ id: 'skill', name: 'SQL' }] }
+    } }, { scheduler: { run: (action: any) => action() } })
+    await assert.rejects(catalog.searchParameters('acc_1', 'SKILL', 'SQL'))
+    assert.deepEqual(await catalog.searchParameters('acc_1', 'SKILL', 'SQL'), [{ id: 'skill', name: 'SQL' }])
+    assert.equal(reads, 2, 'malformed response must not be cached as empty results')
+  }
   const calls: string[] = []
   const options: any[] = []
   const adapter = createUnipileProfileAdapter({

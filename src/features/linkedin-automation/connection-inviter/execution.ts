@@ -2,20 +2,24 @@ import { verifyConnectionAccount } from './account.mts'
 import { nextConnectionAudience } from './audience-sequence.ts'
 import { createCandidateDiscovery } from './discovery.ts'
 import { confirmedQuotaExceeded, confirmedQuotaReached,
-  synchronizeConfirmedProgress } from './daily-progress.ts'
+  synchronizeConfirmedProgress, invitationCapacity } from './daily-progress.ts'
 import { connectionError, connectionErrorCode } from './errors.ts'
 import { dailyAudienceTargets, dailyInvitationLimit } from './limits.ts'
 import { reconcileInvitations } from './pending.ts'
 import { createInvitationPublisher } from './publisher.ts'
 import { finishRunStop } from './run-control.ts'
 import { waitOrStop } from './run-control.ts'
-import { makeRetryState, withConnectionRetry } from './retry-state.ts'
+import { withConnectionRetry } from './retry-state.ts'
+import { beginInvitationVerification, deferInvitationVerification, clearVerificationWait, expireInvitationRecovery } from './invitation-verification.ts'
+import { ACTION_SKIPPED, skippedActions, recoveryDeadline } from '../action-recovery.ts'
 import { safeErrorDetails, withConnectionRequestTrace } from './logger.ts'
 import { CONNECTION_NOCO_OPTIONAL_RESERVE } from './noco-budget.ts'
 import { closeConnectionRunDay, connectionRunDayIsOpen,
   requireConnectionRunDay } from './day-window.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
+import type { ExecutionStep } from '../execution-step.ts'
+import { sendDelay } from './run-model.ts'
 
 const quotaEmpty = (quota: { recruiter: number; technical: number }) =>
   quota.recruiter <= 0 && quota.technical <= 0
@@ -32,6 +36,7 @@ const progressFromCounters = (run: ConnectionRun) => ({
 async function acquireAccountGate(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun,
   allowAfterDayClose = false, ignoreStopRequested = false) {
   while (true) {
+    if (runtime.cooperative) runtime.assertWriterOwnership?.()
     try {
       return runtime.gate?.acquire('connection_inviter', run.runId,
         String(run.platformAccountId))
@@ -42,69 +47,108 @@ async function acquireAccountGate(runtime: ConnectionRuntime, run: ConnectionRun
       run.stage = 'waiting_gate'; run.nextActionAt = nextActionAt
       run.timerState = { kind: 'operation_gate_wait', delayMs, nextActionAt }
       await save(run, 'timer_started')
-      if (ignoreStopRequested) await runtime.sleep(delayMs)
-      else if (!await waitOrStop(runtime, run.runId, delayMs,
-        allowAfterDayClose ? undefined : run.localDate)) return undefined
+      if (runtime.cooperative) {
+        await save(run, 'timer_started', 'critical')
+        if (!runtime.cooperate) throw connectionError('connection_step_yield', 'Account is occupied.')
+        // Keep the same execution and its verified snapshot while yielding the
+        // account. Draining the iterator here would restart all history reads.
+        const proceed = await runtime.cooperate(async () => {
+          if (ignoreStopRequested) { await runtime.sleep(delayMs); return true }
+          return waitOrStop(runtime, run.runId, delayMs,
+            allowAfterDayClose ? undefined : run.localDate)
+        }, Date.parse(nextActionAt))
+        if (!proceed) return undefined
+      } else {
+        if (ignoreStopRequested) await runtime.sleep(delayMs)
+        else if (!await waitOrStop(runtime, run.runId, delayMs,
+          allowAfterDayClose ? undefined : run.localDate)) return undefined
+      }
       run.timerState = undefined; run.nextActionAt = undefined
     }
   }
 }
 
-async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: ConnectionRun,
-  running: Set<string>, save: SaveRun, initialOpenHistory?: ConnectionHistoryItem[]) {
+export async function* connectionSteps(...args: Parameters<typeof runConnectionSteps>): AsyncGenerator<ExecutionStep> {
+  const [runtime, run, running] = args
+  if (running.has(run.runId) || !runtime.writerEnabled) {
+    yield { status: 'needs_attention', reason: running.has(run.runId) ? 'connection_executor_active' : 'connection_writer_disabled' }
+    return
+  }
+  for await (const step of runConnectionSteps(...args)) yield { ...step, skippedActions: skippedActions(run.searchProgress.actionRecovery),
+    recoveryDeadlineAt: recoveryDeadline(run.searchProgress.actionRecovery) }
+  // Early Stop, unresolved outcomes and failures are results too. Never report
+  // a drained iterator as a completed business run just because it returned.
+  const status = run.status === 'succeeded' ? 'completed' : run.status === 'stopped' ? 'stopped' :
+    run.errorCode === 'connection_invitation_result_pending' ? 'verifying' :
+    run.status === 'running' && run.nextActionAt ? 'waiting' : 'needs_attention'
+  yield { status, reason: run.errorCode, nextActionAt: run.nextActionAt,
+    skippedActions: skippedActions(run.searchProgress.actionRecovery),
+    recoveryDeadlineAt: run.status === 'running' ? recoveryDeadline(run.searchProgress.actionRecovery) : undefined,
+    ...(['succeeded', 'partial', 'failed'].includes(run.status) ? { summary: { completed: run.counters.sent,
+      skipped: run.counters.skipped, unconfirmed: Object.keys(run.searchProgress.reservedInvitations ?? {}).length } } : {}) }
+}
+
+async function* runConnectionSteps(runtime: ConnectionRuntime, run: ConnectionRun,
+  running: Set<string>, save: SaveRun, initialOpenHistory?: ConnectionHistoryItem[],
+  yieldBetweenSteps = true): AsyncGenerator<ExecutionStep> {
   if (running.has(run.runId) || run.status !== 'running' || !runtime.writerEnabled) return
   running.add(run.runId); let release: (() => void) | undefined
+  if (runtime.cooperate) {
+    const original = runtime
+    runtime = { ...runtime, async yieldWait(until) {
+      if (until <= runtime.now().getTime()) return !runtime.stopRequested(run.runId)
+      await save(run, 'timer_started', 'critical')
+      const unknown = (await runtime.store.listOpenHistory(run.platformAccountId, 1000))
+        .some(item => ['sending', 'uncertain'].includes(item.status))
+      release?.(); release = undefined
+      const result = await original.cooperate!(() => waitOrStop(runtime, run.runId,
+        Math.max(0, until - runtime.now().getTime()), run.localDate), until, unknown)
+      runtime.assertWriterOwnership?.()
+      release = await acquireAccountGate(runtime, run, save)
+      return result
+    } }
+  }
   const details = { runId: run.runId, platformAccountId: run.platformAccountId }
   const nocoStart = runtime.store.requestStats?.()
+  const checkpoint = async function* (reason: string): AsyncGenerator<ExecutionStep> {
+    // A continuous manual run does not hand control to another feature. Keep its
+    // existing storage budget; durable extra snapshots are needed only before an actual yield.
+    if (!yieldBetweenSteps) { await save(run, 'progress'); return }
+    if (reason === 'candidate_result_saved' && !confirmedQuotaReached(progressFromCounters(run), run.audienceQuota) &&
+      run.searchProgress.invitationPacingStarted && !Number.isFinite(Date.parse(run.searchProgress.invitationNotBefore ?? ''))) {
+      run.searchProgress.invitationNotBefore = new Date(runtime.now().getTime() + sendDelay(runtime.random)).toISOString()
+      run.nextActionAt = new Date(Math.max(Date.parse(run.searchProgress.invitationNotBefore),
+        Date.parse(run.searchProgress.invitationVerification?.blockedUntil ?? '') || 0)).toISOString()
+    }
+    await save(run, 'progress', 'critical')
+    release?.(); release = undefined
+    yield { status: Date.parse(run.nextActionAt ?? '') > runtime.now().getTime() ? 'waiting' : 'ready',
+      reason, nextActionAt: run.nextActionAt }
+    runtime.assertWriterOwnership?.()
+    while (!runtime.stopRequested(run.runId)) {
+      try { release = await acquireAccountGate(runtime, run, save); break }
+      catch (error) {
+        if (connectionErrorCode(error) !== 'connection_step_yield') throw error
+        yield { status: 'waiting', reason: 'linkedin_operation_active', nextActionAt: run.nextActionAt }
+        runtime.assertWriterOwnership?.()
+      }
+    }
+  }
   const holdUnsafeTerminal = async (stage: 'resolving_uncertain' | 'stop_requested',
     knownHistory?: ConnectionHistoryItem[], retryError?: unknown) => {
     const open = knownHistory ?? await withConnectionRetry(runtime, run, save, 'storage',
       'terminal_open_history_readback', () => runtime.store.listOpenHistory(
         run.platformAccountId, 1000), { allowAfterDayClose: true, ignoreStopRequested: true })
-    const unsafe = open.filter(item => item.runId === run.runId &&
+    await expireInvitationRecovery(runtime, run, save, open)
+    const unsafe = open.filter(item => item.runId === run.runId && item.reasonCode !== ACTION_SKIPPED &&
       ['sending', 'uncertain'].includes(item.status))
     if (!unsafe.length) return false
-    const pending = retryError ?? connectionError('unipile_terminal_readback_pending',
-      'Invitation result must be resolved before a terminal run state.', { httpStatus: 503 })
-    run.status = 'running'; run.stage = stage
-    run.errorCode = 'connection_invitation_result_pending'
-    run.retryState = makeRetryState(runtime, run, 'unipile',
-      stage === 'stop_requested' ? 'stop_invitation_readback' : 'terminal_invitation_readback', pending)
-    run.nextActionAt = run.retryState.nextRetryAt
-    run.timerState = { kind: 'overload_backoff', delayMs: run.retryState.delayMs,
-      nextActionAt: run.retryState.nextRetryAt }
-    run.finishedAt = undefined
-    await save(run, 'retry_scheduled', 'critical')
+    if (!run.searchProgress.invitationVerification) await beginInvitationVerification(runtime, run, save, unsafe)
+    await deferInvitationVerification(runtime, run, save, retryError)
     return true
   }
   const finishStopSafely = async () => {
     if (!runtime.stopRequested(run.runId)) return false
-    if (!release && runtime.gate) {
-      release = await acquireAccountGate(runtime, run, save, true, true)
-    }
-    const openHistory = await withConnectionRetry(runtime, run, save, 'storage',
-      'stop_open_history_readback', () => runtime.store.listOpenHistory(
-        run.platformAccountId, 1000), { allowAfterDayClose: true, ignoreStopRequested: true })
-    const unsafe = openHistory.filter(item => item.runId === run.runId &&
-      ['sending', 'uncertain'].includes(item.status))
-    const retryDueAt = Date.parse(run.nextActionAt ?? '')
-    if (unsafe.length && Number.isFinite(retryDueAt) && retryDueAt > runtime.now().getTime()) {
-      run.status = 'running'; run.stage = 'stop_requested'
-      run.errorCode = 'connection_invitation_result_pending'; run.finishedAt = undefined
-      await save(run, 'retry_scheduled', 'critical')
-      return true
-    }
-    if (!unsafe.length) {
-      const stoppedHistory = await withConnectionRetry(runtime, run, save, 'storage',
-        'stop_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
-        { allowAfterDayClose: true, ignoreStopRequested: true })
-      synchronizeConfirmedProgress(run, stoppedHistory, run.audienceQuota)
-      return finishRunStop(runtime, run, save)
-    }
-    const reconciliation = await reconcileInvitations(runtime, run, save,
-      { singlePass: true, ignoreStopRequested: true, runOnly: true, openHistory })
-    if (reconciliation.unresolved && await holdUnsafeTerminal('stop_requested', undefined,
-      reconciliation.retryError)) return true
     const stoppedHistory = await withConnectionRetry(runtime, run, save, 'storage',
       'stop_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
       { allowAfterDayClose: true, ignoreStopRequested: true })
@@ -113,6 +157,10 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
   }
   runtime.logger.event('run', 'started', details)
   try {
+    if (await finishStopSafely()) return
+    if (Date.parse(run.searchProgress.invitationVerification?.blockedUntil ?? '') > runtime.now().getTime()) {
+      await deferInvitationVerification(runtime, run, save); return
+    }
     const recoveringClosedDay = !connectionRunDayIsOpen(runtime, run)
     runtime.logger.event('operation_gate_acquire', 'started', details)
     release = await acquireAccountGate(runtime, run, save, recoveringClosedDay)
@@ -121,7 +169,8 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
     run.executorId = runtime.writerId; run.heartbeatAt = runtime.now().toISOString()
     run.stage = run.stage === 'recovering' ? 'recovering' : 'verifying_account'
     await save(run, 'stage_changed')
-    const recoveredWait = Date.parse(run.nextActionAt ?? '') - runtime.now().getTime()
+    const recoveredWait = run.errorCode === 'connection_invitation_result_pending' ? 0 :
+      Date.parse(run.nextActionAt ?? '') - runtime.now().getTime()
     if (!recoveringClosedDay && Number.isFinite(recoveredWait) && recoveredWait > 0) {
       const preserveInvitationWriteAttempt = run.retryState?.provider === 'unipile' &&
         run.retryState.operation === 'invitation_write'
@@ -136,6 +185,8 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
     }
     const reconciliation = await reconcileInvitations(runtime, run, save, { openHistory: initialOpenHistory })
     if (await finishStopSafely()) return
+    if (reconciliation.retryError) return
+    if (reconciliation.unresolved) clearVerificationWait(run)
     requireConnectionRunDay(runtime, run)
     const frozenQuota = run.dailyQuota !== undefined &&
       run.audienceQuota.recruiter + run.audienceQuota.technical > 0
@@ -192,16 +243,29 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
     let publisher: Awaited<ReturnType<typeof createInvitationPublisher>> | undefined
     let discovery: Awaited<ReturnType<typeof createCandidateDiscovery>> | undefined
     let nocoBudgetExhausted = false
+    yield* checkpoint('history_and_quota_saved')
 
-    while (!quotaEmpty(progress.remaining)) {
+    while (!quotaEmpty(invitationCapacity(run).remaining)) {
       requireConnectionRunDay(runtime, run)
+      if (Date.parse(run.searchProgress.invitationVerification?.blockedUntil ?? '') > runtime.now().getTime()) {
+        await deferInvitationVerification(runtime, run, save); return
+      }
+      if (run.searchProgress.invitationVerification &&
+        Date.parse(run.searchProgress.invitationVerification.nextCheckAt) <= runtime.now().getTime()) {
+        const check = await reconcileInvitations(runtime, run, save, { runOnly: true, singlePass: true })
+        if (check.retryError) return
+        synchronizeConfirmedProgress(run, await runtime.store.listRunHistory(run.runId, 1000))
+        clearVerificationWait(run)
+        if (quotaEmpty(invitationCapacity(run).remaining)) break
+      }
+      const used = invitationCapacity(run).used
       const searchableQuota = {
         recruiter: run.searchProgress.exhausted.recruiter
-          ? run.counters.sentByAudience.recruiter : run.audienceQuota.recruiter,
+          ? used.recruiter : run.audienceQuota.recruiter,
         technical: run.searchProgress.exhausted.technical
-          ? run.counters.sentByAudience.technical : run.audienceQuota.technical
+          ? used.technical : run.audienceQuota.technical
       }
-      const audience = nextConnectionAudience(run.counters.sentByAudience, searchableQuota)
+      const audience = nextConnectionAudience(used, searchableQuota)
       if (!audience) break
       run.searchProgress.nextAudience = audience
       let candidates = run.searchProgress.pendingCandidates
@@ -211,7 +275,7 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
         try {
           const nextCandidates = async () => {
             discovery ??= await createCandidateDiscovery(runtime, run, save)
-            return discovery.next(audience)
+            return discovery.next(audience, yieldBetweenSteps)
           }
           candidates = runtime.store.withNocoBudgetMode
             ? await runtime.store.withNocoBudgetMode(run.runId, 'optional', nextCandidates)
@@ -222,6 +286,7 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
         }
         runtime.logger.event('candidate_discovery', 'succeeded', { ...details, audience,
           candidateCount: candidates.length })
+        yield* checkpoint('candidate_page_saved')
       }
       if (await finishStopSafely()) return
       if (!candidates.length) {
@@ -239,9 +304,9 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
       run.searchProgress.pendingCandidates = run.searchProgress.pendingCandidates
         .filter(item => !processed.has(item.personId))
       if (await finishStopSafely()) return
-      await save(run, 'progress')
       progress = progressFromCounters(run)
       runtime.emit(run, 'progress')
+      yield* checkpoint('candidate_result_saved')
     }
 
     const finalHistory = await withConnectionRetry(runtime, run, save, 'storage',
@@ -269,11 +334,15 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
       recruiterShortfall: progress.remaining.recruiter,
       technicalShortfall: progress.remaining.technical })
   } catch (error) {
+    if (['connection_writer_service_stopped', 'automation_owner_lost'].includes(connectionErrorCode(error))) throw error
     if (runtime.stopRequested(run.runId)) {
       await finishStopSafely()
       return
     }
     const errorCode = connectionErrorCode(error)
+    if (errorCode === 'connection_step_yield') {
+      run.status = 'running'; await save(run, 'progress', 'critical'); return
+    }
     if (errorCode === 'connection_daily_window_closed') {
       const closingHistory = await withConnectionRetry(runtime, run, save, 'storage',
         'day_close_history_readback', () => runtime.store.listRunHistory(run.runId, 1000),
@@ -341,7 +410,9 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
 export function executeConnectionRun(runtime: ConnectionRuntime, run: ConnectionRun,
   running: Set<string>, save: SaveRun, initialOpenHistory?: ConnectionHistoryItem[]) {
   const action = () => withConnectionRequestTrace(run, runtime.logger,
-    () => executeConnectionRunWithBudget(runtime, run, running, save, initialOpenHistory))
+    async () => { for await (const _step of connectionSteps(runtime, run, running, save, initialOpenHistory, false)) {
+      // Manual execution drives the same implementation continuously; the coordinator opts into handoffs.
+    } })
   return runtime.store.runWithNocoBudget
     ? runtime.store.runWithNocoBudget(run, action)
     : action()

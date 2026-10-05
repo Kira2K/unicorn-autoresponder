@@ -84,7 +84,8 @@ async function startRollback(options: any) {
     }
     await logAction(logger, 'job_create', () => store.create(job)); jobs.set(job.jobId, job)
     runMutation({ client, store, job, update: (patch: Partial<ProfileJob>) => Object.assign(job, patch),
-      release: acquired, executorOptions: { ...executorOptions, logger } })
+      release: acquired, acquire: () => acquire('profile_rollback', sourceJobId, original.platformAccountId),
+      executorOptions: { ...executorOptions, logger } })
     logger.event('rollback_request', 'succeeded', { stepCount: plan.steps.length })
     return publicProfileJob(job)
   } catch (error) {

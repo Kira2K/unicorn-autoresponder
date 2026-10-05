@@ -44,7 +44,8 @@ async function run() {
     status: 'publishing', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]
   const restoredStore = memoryStore([publishing])
   const restored = createCommentMonitorService({ autoStart: false, store: restoredStore, loggerFor,
-    repository: {}, adapter: {}, openai: {} })
+    repository: {}, adapter: { async listReplies() { return { items: [] } },
+      async listComments() { return { items: [] } } }, openai: {} })
   await wait()
   const paused = (await restored.list())[0]
   assert.equal(paused.status, 'paused')

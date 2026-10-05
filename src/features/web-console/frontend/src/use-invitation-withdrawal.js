@@ -2,7 +2,9 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 export function useInvitationWithdrawal(account) {
   const visible = ref(false), busy = ref(false), error = ref(''), preview = ref(null), run = ref(null)
   const active = computed(() => run.value?.status === 'running')
-  const needsCheck = computed(() => ['uncertain', 'interrupted'].includes(run.value?.status))
+  const needsCheck = computed(() => !active.value && Boolean(run.value && (
+    ['uncertain', 'interrupted'].includes(run.value.status) || run.value.current ||
+    (run.value.confirmed?.length && !run.value.checkedAt))))
   let timer, disposed = false, statusVersion = 0
   const base = `/api/admin/linkedin/accounts/${account.platformAccountId}/invitation-withdrawal`
   async function request(suffix = '', body) {

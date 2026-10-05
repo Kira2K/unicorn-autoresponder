@@ -1,10 +1,15 @@
 import { isDeepStrictEqual } from 'node:util';
-import { PostError } from '../post-writer/errors.ts';
-import { validKey, tableNames, decodePostRow } from '../post-writer/noco-rows.ts';
-import { columns } from '../../../integrations/noco/linkedin-post-writer-schema/contract.ts';
+import { createRequire } from 'node:module';
 import type { PostStore, Tables } from '../post-writer/types.ts';
 import type { FeatureSql, FeatureWrites } from './contracts.mts';
 import { createFeatureRows } from './rows.mts';
+// Match the other SQL stores: .ts modules may be CJS under tsx.
+const require = createRequire(import.meta.url);
+const { PostError } = require('../post-writer/errors.ts') as typeof import('../post-writer/errors.ts');
+const { validKey, tableNames, decodePostRow } = require('../post-writer/noco-rows.ts') as
+  typeof import('../post-writer/noco-rows.ts');
+const { columns } = require('../../../integrations/noco/linkedin-post-writer-schema/contract.ts') as
+  typeof import('../../../integrations/noco/linkedin-post-writer-schema/contract.ts');
 type Bucket = keyof Tables;
 export function createSqlPostStore(db: FeatureSql, grant?: FeatureWrites): PostStore {
   const stores = { settings: createFeatureRows(db, tableNames.settings, columns, grant, [0]),

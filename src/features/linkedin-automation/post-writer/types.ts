@@ -9,7 +9,9 @@ export type PostStatus = 'queued' | 'generating' | 'awaiting_approval' | 'ready'
 export type Slot = { date: string; at: number; state: 'planned' | 'started' | 'missed' | 'cancelled' }
 export type PreparedPost = { date: string; text: string }
 export type Settings = {
+  automationManaged?: boolean
   account: number; scheduled: boolean; days: number[]; manualMode: ManualMode; likes: boolean
+  likeAccountIds?: number[]
   slot?: Slot; lastMissedSlot?: Slot; context?: Context
   intervals?: TimeWindow[]; forbiddenTopics?: string[]; memes?: boolean
   contentMode?: 'generated' | 'prepared'; preparedPosts?: PreparedPost[]
@@ -17,10 +19,16 @@ export type Settings = {
 export type Account = { platformAccountId: number; clientName: string; unipileAccountId: string
   verifiedProviderId: string; linkedinUrl?: string }
 export type Like = { account: Account; status: 'pending' | 'sending' | 'uncertain' |
-  'sent' | 'failed' | 'cancelled'; attemptedAt?: number; confirmedAt?: number; errorCode?: string }
+  'sent' | 'failed' | 'cancelled'; attemptedAt?: number; acceptedAt?: number; confirmedAt?: number; errorCode?: string;
+  nextActionAt?: number; recovery?: import('../action-recovery.ts').ActionRecovery }
 export type Engagement = { status: 'off' | 'pending' | 'running' | 'partial' | 'completed' |
-  'cancelled' | 'uncertain'; target: number; items: Like[]; requestedManually?: boolean }
+  'cancelled' | 'uncertain'; target: number; items: Like[]; requestedManually?: boolean; accountIds?: number[]
+  readNotBefore?: number
+  reactionSnapshot?: { accountId: string; postId: string; at: number; actors: string[]; found: string[] } }
 export type PostRun = {
+  recovery?: import('../action-recovery.ts').ActionRecovery
+  automationId?: string
+  publicationNotSent?: boolean
   id: string; account: number; trigger: 'scheduled' | 'manual'; mode: ManualMode
   status: PostStatus; createdAt: number; updatedAt: number; executorId: string
   likesEnabled: boolean; target?: Account; context?: Context; topics?: Topic[]; topic?: Topic
@@ -57,14 +65,17 @@ export interface PostAdapter {
   read(account: Account, id: string): Promise<ProviderPost>
   recent(account: Account): Promise<ProviderPost[]>
   reacted(account: Account, id: string): Promise<boolean>
+  reactions?(reader: Account, id: string, actorIds: string[]): Promise<string[]>
   like(account: Account, id: string): Promise<void>
 }
 export type Gate = { acquire(kind: string, id: string, account: string): () => void }
 export type Log = (event: string, fields?: Record<string, string | number | boolean>) => void
 export type Dependencies = { store: PostStore; source: PostSource; generator: WriterModel
+  unknownLockGraceMs?: number
+  assertAutomaticLikes?(authorAccount: number): Promise<void>
   adapter: PostAdapter; gate: Gate; writerId: string; writable: boolean; now: () => number
   random: () => number; log: Log; mock?: boolean; memes?: MemeServices }
 export const defaults = (account: number): Settings => ({ account, scheduled: false, days: [],
   manualMode: 'approval_required', likes: false, memes: false, intervals: defaultWindows(), forbiddenTopics: [] })
-export const active = (run: PostRun) => !['blocked', 'stopped', 'rejected'].includes(run.status) &&
+export const active = (run: PostRun) => run.recovery?.skippedAt === undefined && !['blocked', 'stopped', 'rejected'].includes(run.status) &&
   (run.status !== 'published' || ['pending', 'running', 'uncertain'].includes(run.engagement.status))

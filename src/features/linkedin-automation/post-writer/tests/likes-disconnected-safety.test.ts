@@ -54,19 +54,23 @@ test('429 and Retry-After are not converted into skipped accounts', async () => 
     await f.step(5000); await f.step(59_999)
     assert.equal((await f.run()).engagement.items[0].status, 'pending'); assert.equal(f.counts.like, 0)
     f.deps.adapter.identity = identity
-    await f.step(1); assert.equal(f.counts.like, 1)
+    await f.step(5000); assert.equal(f.counts.like, 1)
   } finally { await f.service.close() }
 })
 
 test('not-ready error after reaction POST stays uncertain, never skips or resends', async () => {
-  const f = await queued()
+  const f = await queued(), attempts = new Set<number>()
   try {
-    f.deps.adapter.like = async () => { f.counts.like++; throw new PostError('post_account_not_ready') }
+    f.deps.adapter.like = async account => {
+      assert.ok(!attempts.has(account.platformAccountId)); attempts.add(account.platformAccountId)
+      f.counts.like++; throw new PostError('post_account_not_ready')
+    }
     await f.step(5000)
     assert.equal((await f.run()).engagement.items[0].status, 'uncertain')
     f.restart()
     for (let i = 0; i < 4; i++) await f.step(300_001)
-    assert.equal((await f.run()).engagement.status, 'uncertain'); assert.equal(f.counts.like, 1)
-    assert.equal((await f.run()).engagement.items[1].status, 'pending')
+    assert.equal((await f.run()).engagement.status, 'uncertain')
+    assert.ok(f.counts.like > 1, 'other actors are allowed to progress')
+    assert.equal((await f.run()).engagement.items[0].status, 'uncertain')
   } finally { await f.service.close() }
 })

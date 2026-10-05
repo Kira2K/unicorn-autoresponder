@@ -22,7 +22,8 @@ export async function writePost(input: WriterInput, model: WriterModel,
     catch (error) { if (!stopped()) throw error }
   }
   if (stopped()) return cancelled()
-  if (!context.facts.length) return blocked(['post_facts_missing'])
+  if (!context.facts.length && !(context.source === 'stack' && context.stack.some(s => s.trim())))
+    return blocked(['post_facts_missing'])
   if (!Number.isInteger(state.repairCount) || state.repairCount < 0 || state.repairCount > MAX_REPAIRS) {
     return blocked(['post_checkpoint_invalid'])
   }
@@ -43,7 +44,7 @@ export async function writePost(input: WriterInput, model: WriterModel,
   while (!stopped()) {
     if (state.draft && !state.issues.length) {
       const reviewedKey = digest(`${rulesKey(rules)}:${JSON.stringify(context)}:${state.topic.title}:${state.draft.text}`)
-      if (needsReview(rules) && state.reviewedKey !== reviewedKey) {
+      if (needsReview(rules, context) && state.reviewedKey !== reviewedKey) {
         state.issues = await reviewRules(model, context, state.topic, rules, state.draft.text)
         if (stopped()) return cancelled()
         if (state.issues.some(issue => /uncertain|invalid|unavailable/.test(issue))) return blocked(state.issues)

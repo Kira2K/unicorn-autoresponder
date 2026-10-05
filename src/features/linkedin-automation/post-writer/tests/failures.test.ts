@@ -3,6 +3,31 @@ import assert from 'node:assert/strict'
 import { fixture } from './helpers.ts'
 import { defaults } from '../types.ts'
 import { PostError } from '../errors.ts'
+
+for (const afterPost of [false, true]) test(`500 budget expires across restart, afterPost=${afterPost}`, async () => {
+  const f = fixture(); let reads = 0
+  const failure = () => Object.assign(new Error('server'), { code: 'unipile_http_500',
+    details: { httpStatus: 500, retryAfterMs: 300_000 } })
+  if (afterPost) f.deps.adapter.read = async () => { reads++; throw failure() }
+  else f.deps.adapter.identity = async () => { reads++; throw failure() }
+  try {
+    await f.service.start(203, 'automatic', `budget-${afterPost}`)
+    await f.step(); await f.step(6000)
+    const first = (await f.run()).recovery!.firstFailedAt
+    f.restart(); f.setNow(first + 20 * 60_000 - 1); await f.step()
+    assert.equal((await f.run()).recovery!.skippedAt, undefined)
+    const count = reads
+    f.setNow(first + 20 * 60_000); await f.step()
+    const run = await f.run()
+    assert.equal(reads, count, 'expiry must not make another provider request')
+    assert.equal(run.recovery!.firstFailedAt, first)
+    assert.ok(run.recovery!.skippedAt)
+    assert.equal(run.status, afterPost ? 'uncertain' : 'blocked')
+    assert.equal(f.counts.publish, afterPost ? 1 : 0)
+    f.restart(); await f.step(3600_000)
+    assert.equal(reads, count); assert.equal(f.counts.publish, afterPost ? 1 : 0)
+  } finally { await f.service.close() }
+})
 test('Noco intent failure prevents POST; restart reconciles saved intent without sending', async () => {
   const f = fixture()
   const put = f.deps.store.put.bind(f.deps.store)

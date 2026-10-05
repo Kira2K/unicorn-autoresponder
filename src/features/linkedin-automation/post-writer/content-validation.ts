@@ -14,7 +14,7 @@ export function parseTopics(value: unknown, context: Context, history: ContentHi
   const result = rows.map(row => {
     const item = object(row)
     if (typeof item.title !== 'string' || !item.title.trim() || typeof item.signature !== 'string' ||
-      !item.signature.trim() || !strings(item.factIds) || !item.factIds.length ||
+      !item.signature.trim() || !strings(item.factIds) || (!item.factIds.length && context.source !== 'stack') ||
       item.factIds.some(id => !known.has(id)) || typeof item.score !== 'number' ||
       !Number.isFinite(item.score)) throw new PostError('post_topics_invalid')
     return item as Topic
@@ -49,10 +49,12 @@ export function validateDraft(draft: Draft, context: Context, history: ContentHi
     issues.push('template_language')
   }
   if (/https?:|www\.|\S+@\S+|\p{Extended_Pictographic}/u.test(text)) issues.push('links_contacts_emoji')
-  if (!draft.factIds.length || new Set(draft.factIds).size !== draft.factIds.length ||
+  if ((!draft.factIds.length && context.source !== 'stack') || new Set(draft.factIds).size !== draft.factIds.length ||
     draft.factIds.some(id => !facts.has(id))) issues.push('unknown_or_duplicate_fact')
-  if (!draft.claims.length || draft.claims.some(claim => !text.includes(claim.text) ||
+  if ((!draft.claims.length && context.source !== 'stack') || draft.claims.some(claim => !text.includes(claim.text) ||
     !draft.factIds.includes(claim.factId) || !facts.has(claim.factId))) issues.push('ungrounded_claim')
+  if (context.source === 'stack' && (draft.factIds.length || draft.claims.length ||
+    /\b(i|me|my|mine|we|us|our|ours)\b/i.test(text))) issues.push('post_stack_personal_claim')
   const source = draft.factIds.map(id => facts.get(id)?.text ?? '').join(' ')
   const numbers = new Set(source.match(/\d+(?:[.,]\d+)?/g) ?? [])
   if ((text.match(/\d+(?:[.,]\d+)?/g) ?? []).some(number => !numbers.has(number))) {

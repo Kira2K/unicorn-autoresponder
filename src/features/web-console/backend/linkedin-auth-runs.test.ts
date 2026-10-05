@@ -45,6 +45,18 @@ async function run(): Promise<void> {
   assert.equal(JSON.stringify(completed).includes('SECRET_LI_AT'), false)
   assert.deepEqual(await service.listHistory(), [{ runId: 'saved-run' }])
   assert.deepEqual(writes, [['start', started.runId], ['finish', 'succeeded']])
+
+  let held = false
+  const broken = createLinkedInAuthRunService({
+    repository: { async listAccounts() { return [{ platformAccountId: 10, clientName: 'Test' }] } },
+    gate: { current: () => held, acquire() { assert.equal(held, false); held = true; return () => { held = false } } },
+    history: { start() { throw new Error('history unavailable') }, async finish() {} },
+    execute() { throw new Error('synchronous adapter failure') }
+  })
+  const failed = await broken.start(10, 'connect')
+  await nextTurn()
+  assert.equal(broken.get(failed.runId)?.status, 'failed'); assert.equal(held, false)
+  await broken.start(10, 'check'); await nextTurn(); assert.equal(held, false)
 }
 
 run()

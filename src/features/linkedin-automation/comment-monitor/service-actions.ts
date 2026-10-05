@@ -30,7 +30,7 @@ export function createServiceActions(options: any) {
         if (job.status !== 'paused') throw Object.assign(new Error('Monitor is not paused.'),
           { code: 'comment_monitor_resume_invalid' })
         job.status = 'waiting'; job.stage = 'resumed'; job.errorCode = undefined
-        job.nextCheckAt = new Date().toISOString(); await save(job, loggerFor(job)); void run(job)
+        job.nextCheckAt ??= new Date().toISOString(); await save(job, loggerFor(job)); void run(job)
         audit.event('session_resume', 'succeeded'); return publicMonitorJob(job)
       } catch (error) { audit.event('session_resume', 'failed', {
         errorCode: String((error as any)?.code ?? 'comment_monitor_internal_error') }); throw error }

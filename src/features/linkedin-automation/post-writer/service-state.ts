@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { PostError, retryDelay } from './errors.ts'
 import { defaults, type Dependencies, type PostRun, type Settings } from './types.ts'
-import { lock, type Execution } from './execution-types.ts'
+import { type Execution } from './execution-types.ts'
 import { createSerialQueue } from './serial.ts'
 import { canRetryMeme } from './meme-recovery.ts'
 import { canStartManualLikes, canResumeManualLikes } from './manual-likes.ts'
@@ -37,7 +37,7 @@ export function createServiceState(deps: Dependencies) {
       }
       catch (error) {
         storageError = true
-        storageRetryAt = Math.max(storageRetryAt, deps.now() + (retryDelay(error) ?? 30_000))
+        storageRetryAt = Math.max(storageRetryAt, deps.now() + (retryDelay(error, deps.now()) ?? 30_000))
         emit(run.account)
         throw new PostError('post_persistence_unavailable')
       }
@@ -60,11 +60,8 @@ export function createServiceState(deps: Dependencies) {
       for (const value of await deps.store.list('settings')) settings.set(value.account, value)
       for (const value of await deps.store.list('runs')) {
         runs.set(value.id, value)
-        if (!e.writable) continue
-        if (['publishing', 'verifying', 'uncertain'].includes(value.status)) lock(e, value.account, value.id)
-        for (const item of value.engagement.items) if (['sending', 'uncertain'].includes(item.status)) {
-          lock(e, item.account.platformAccountId, value.id)
-        }
+        // Restore evidence, not process locks. Reconciliation acquires the gate
+        // only when its saved deadline is due, just like a new execution step.
       }
     })().catch(error => { ready = undefined; throw error })
     await ready
@@ -77,7 +74,7 @@ export function createServiceState(deps: Dependencies) {
         if (dirty.get(id) === run) dirty.delete(id)
       }
       catch (error) {
-        storageRetryAt = deps.now() + (retryDelay(error) ?? 30_000)
+        storageRetryAt = deps.now() + (retryDelay(error, deps.now()) ?? 30_000)
         throw error
       }
     }
@@ -90,7 +87,8 @@ export function createServiceState(deps: Dependencies) {
       memesAvailable: e.memes?.enabled === true,
       runs: [...runs.values()].reverse().filter(run => run.account === account)
         .sort((a, b) => b.createdAt - a.createdAt).slice(0, 30)
-        .map(run => ({ ...run, canRetryMeme: canRetryMeme(run), canStartLikes: canStartManualLikes(run),
+        .map(run => ({ ...run, selectedLikeAccountIds: run.engagement.accountIds ?? e.settings(account).likeAccountIds,
+          canRetryMeme: canRetryMeme(run), canStartLikes: canStartManualLikes(run),
           canResumeLikes: canResumeManualLikes(run) })) })
   }
   return { e, runs, settings, events, hydrate, flush, snapshot,

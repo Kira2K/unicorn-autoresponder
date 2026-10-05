@@ -14,13 +14,14 @@ export function errorCode(error: unknown): string {
   return typeof value?.code === 'string' && /^[a-z0-9_/-]+$/i.test(value.code)
     ? value.code : 'post_writer_error'
 }
-export function retryDelay(error: unknown): number | undefined {
+export function retryDelay(error: unknown, now = Date.now()): number | undefined {
   const value = error as { httpStatus?: number; retryAfterMs?: number; details?: {
-    httpStatus?: number; retryAfterMs?: number } }
+    httpStatus?: number; retryAfterMs?: number; retryAt?: number } }
+  if (Number.isFinite(value?.details?.retryAt)) return Math.max(0, value.details!.retryAt! - now)
   const delay = value?.retryAfterMs ?? value?.details?.retryAfterMs
   if (Number.isFinite(delay)) return Math.max(1000, Number(delay))
   const status = value?.httpStatus ?? value?.details?.httpStatus
-  return status === 429 ? 30_000 : status && status >= 500 ? 60_000 : undefined
+  return status === 429 ? 90_000 : status && status >= 500 ? 60_000 : undefined
 }
 export function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PostError('invalid_shape')

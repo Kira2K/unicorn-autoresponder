@@ -28,4 +28,4 @@ export function applyAction(run: PostRun, action: string, hash?: string, memeRev
   run.status = 'ready'
 }
 export const accountActive = (runs: Iterable<PostRun>, account: number) =>
-  [...runs].find(run => run.account === account && active(run))
+  [...runs].find(run => run.account === account && run.status !== 'published' && active(run))

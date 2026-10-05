@@ -14,10 +14,11 @@ export function customTopic(value: unknown): string | undefined {
 }
 export const rulesKey = (rules: ContentRules) => digest(JSON.stringify({
   requestedTopic: rules.requestedTopic ?? '', forbiddenTopics: [...(rules.forbiddenTopics ?? [])].sort() }))
-export const needsReview = (rules: ContentRules) => Boolean(rules.requestedTopic || rules.forbiddenTopics?.length)
+export const needsReview = (rules: ContentRules, context?: Context) =>
+  Boolean(context?.source === 'stack' || rules.requestedTopic || rules.forbiddenTopics?.length)
 export async function reviewRules(model: WriterModel, context: Context, topic: Topic,
   rules: ContentRules, text?: string): Promise<string[]> {
-  if (!needsReview(rules)) return []
+  if (!needsReview(rules, context)) return []
   if (!model.review) return ['post_policy_review_unavailable']
   const raw = await model.review(structuredClone(context), structuredClone({ topic, text, rules }))
   let result: Record<string, unknown>

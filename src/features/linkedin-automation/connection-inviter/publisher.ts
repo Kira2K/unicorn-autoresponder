@@ -7,6 +7,8 @@ import { sendDelay } from './run-model.ts'
 import { waitWithRunTimer } from './retry-state.ts'
 import type { ConnectionRuntime, SaveRun } from './runtime.ts'
 import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
+import * as requestControl from '../../../integrations/unipile/request-control.ts'
+const { withRequestContext } = (requestControl as any).default ?? requestControl
 
 export async function createInvitationPublisher(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun, seed?: PendingRead) {
@@ -29,6 +31,7 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
           }
           if (run.counters.sent > 0 || run.searchProgress.invitationPacingStarted) {
             let nextSendAt = Date.parse(run.searchProgress.invitationNotBefore ?? '')
+            const savedPause = Number.isFinite(nextSendAt)
             if (!Number.isFinite(nextSendAt)) {
               nextSendAt = runtime.now().getTime() + sendDelay(runtime.random)
               run.searchProgress.invitationNotBefore = new Date(nextSendAt).toISOString()
@@ -36,7 +39,7 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
             const delayMs = Math.max(0, nextSendAt - runtime.now().getTime())
             runtime.logger.event('invitation_delay', 'succeeded', { ...details, delayMs })
             const proceed = await waitWithRunTimer(runtime, run, save, 'invitation_delay',
-              'invitation_delay', delayMs, true)
+              'invitation_delay', delayMs, !savedPause)
             if (!proceed) break
           }
           if (runtime.stopRequested(run.runId)) break
@@ -55,11 +58,12 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
           await save(run, 'stage_changed')
           runtime.logger.event('invitation_claim', 'succeeded', { ...details, audience })
 
-          const sent = await safety.send(item)
+          const sent = await withRequestContext({ actionId: `invite:${item.personId}` }, () => safety.send(item))
           processedPersonIds.push(candidate.personId)
           if (sent) {
             sentCount += 1
           }
+          if (item.status === 'uncertain' || item.status === 'sending') break
         }
         runtime.logger.event('invitation_publish', 'succeeded', {
           ...details, audience, sentCount: run.counters.sent

@@ -9,7 +9,7 @@ test('all old pending invitations, including outside our history, are withdrawn 
   await f.service.start(1, preview.token)
   assert.equal((await finished(f.service))?.withdrawn, 2)
   assert.deepEqual(f.calls, ['1', '2'])
-  assert.equal(f.delays.reduce((a, b) => a + b, 0), 7500)
+  assert.equal(f.delays.reduce((a, b) => a + b, 0), 10000)
   assert.equal((await createInvitationWithdrawal(f.runtime).status(1))?.id, run.id)
   assert.deepEqual((await f.service.preview(1)).items, [])
 })
@@ -65,7 +65,7 @@ test('simultaneous starts acquire one gate; initial save failure authorizes no w
   assert.deepEqual(g.calls, [])
 })
 
-test('each gap draws a new random delay within two to thirteen seconds', async () => {
+test('each gap draws a new random delay within five to fifteen seconds', async () => {
   const f = fixture(), random = [0, 1, 0.5], times: number[] = []
   let elapsed = 0, draws = 0
   const cancel = f.provider.cancel
@@ -76,5 +76,5 @@ test('each gap draws a new random delay within two to thirteen seconds', async (
   await f.service.start(1, (await f.service.preview(1)).token)
   assert.equal((await finished(f.service))?.withdrawn, 4)
   assert.equal(draws, 3)
-  assert.deepEqual(times, [0, 2000, 15000, 22500])
+  assert.deepEqual(times, [0, 5000, 20000, 30000])
 })

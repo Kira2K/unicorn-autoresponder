@@ -27,4 +27,10 @@ Frame general engineering explanations as principles, not undocumented events in
 Do not pretend hypothetical examples actually happened. Every personal or numerical assertion
 must be listed in claims with its exact substring and supporting factId; include all used factIds.
 Do not use unrelated fact IDs to support claims. Do not alter the meaning of evidence.
-Return only the requested structured result. If facts are insufficient, return empty content.`
+When context.source is "stack", no CV or personal evidence is available. Instead of a personal story,
+write a neutral technical explanation or clearly hypothetical example about the supplied stack.
+Use general technical knowledge only; do not infer the author's job, seniority, employers, clients,
+projects, achievements, metrics or experiences. Do not use first-person pronouns or numerical assertions.
+In this mode every topic and draft must have factIds=[], and the draft must have claims=[].
+Stay specific to the supplied stack and keep all length, language, novelty and topic restrictions.
+Return only the requested structured result. Outside stack mode, insufficient facts mean empty content.`

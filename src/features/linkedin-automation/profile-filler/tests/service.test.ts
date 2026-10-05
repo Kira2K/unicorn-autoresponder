@@ -40,6 +40,7 @@ async function run() {
   require('./stability-dates.test.ts').testDatePrecision()
   await require('./stability-recovery.test.ts').testPersistedRecovery()
   await require('./stability-recovery.test.ts').testRetryAfterPersistFailure()
+  await require('./stability-recovery.test.ts').testVerificationYieldsAccount()
   assert.equal(profileErrorCode({ response: { status: 429 } }), 'noco_rate_limited')
   const records = new Map<string, any>()
   const releases: string[] = []
@@ -108,7 +109,7 @@ async function run() {
   await service.apply(retryStart.jobId, retryPreview.planHash)
   const failed = await settled(service, retryStart.jobId, 'needs_expert_review')
   assert.equal(failed.result.steps[0].failureKind, 'write_accepted_not_visible')
-  assert.deepEqual(releases,
+  assert.deepEqual(releases.filter((kind, index) => index === 0 || kind !== releases[index - 1]),
     ['profile_preview', 'profile_fill', 'profile_rollback', 'profile_preview', 'profile_fill'])
   records.set('stale-job', {
     jobId: 'stale-job', platformAccountId: 7, clientName: 'Student', status: 'running',

@@ -79,3 +79,21 @@ export async function testRetryAfterPersistFailure() {
   assert.ok(readTimes.every(at => at >= 120_000), 'Noco outage must not discard provider cooldown')
   assert.equal(job.status, 'needs_expert_review')
 }
+
+export async function testVerificationYieldsAccount() {
+  let held = true, clock = 0, writes = 0, waits = 0, acquisitions = 0
+  const job: ProfileJob = { jobId: 'yield-verification', platformAccountId: 1, clientName: 'Mock',
+    status: 'running', phase: '', createdAt: '', updatedAt: '', plan: fixturePlan([headlineStep]) }
+  await new Promise<void>(resolve => runMutation({ job, store: { async update() {} },
+    update: patch => Object.assign(job, patch), release() { held = false },
+    acquire() { acquisitions++; assert.equal(held, false); held = true; return () => { held = false } },
+    client: { async getAccount() { return {} }, async searchParameters() { return [] },
+      async getOwnProfile() { assert.equal(held, true); return { description: writes ? 'New' : 'Old' } },
+      async updateOwnProfile() { assert.equal(held, true); writes++ } },
+    executorOptions: { timing: { ...noWait, firstWrite: { min: 1, max: 1 }, readBack: { min: 120, max: 120 } },
+      logger: silent, clock: () => clock, random: min => min,
+      wait: async ms => { if (ms > 0) { waits++; assert.equal(held, false) }; clock += ms }, onSettled: resolve }
+  }))
+  assert.equal(job.status, 'succeeded'); assert.equal(writes, 1); assert.equal(held, false)
+  assert.ok(waits >= 2); assert.equal(acquisitions, waits)
+}

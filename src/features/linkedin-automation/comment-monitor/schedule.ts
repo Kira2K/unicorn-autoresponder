@@ -1,3 +1,19 @@
+import type { MonitorJob } from './types.ts'
+import { recoveryWakeAt } from '../action-recovery.ts'
+
+export function nextMonitorActionAt(job: MonitorJob, verificationAt?: string, now = Date.now()) {
+  const pending = job.state.items.filter(item => ['publishing', 'uncertain'].includes(item.status)).length
+  const maySend = !['disabled', 'completed', 'error'].includes(job.status) && now < Date.parse(job.expiresAt) &&
+    job.state.published + pending < 30
+  const times = [maySend ? job.state.nextWorkAt : undefined, verificationAt].filter(Boolean)
+    .map(value => Date.parse(value!)).filter(Number.isFinite)
+  let next = times.length ? Math.max(Math.min(...times), Date.parse(job.state.providerNotBefore ?? '') || 0) : Infinity
+  for (const item of job.state.items) if (['detected', 'generating', 'queued', 'publishing', 'uncertain'].includes(item.status))
+    next = recoveryWakeAt(item.recovery, next)
+  for (const value of Object.values(job.state.readRecovery ?? {})) next = recoveryWakeAt(value, next)
+  return Number.isFinite(next) ? new Date(next).toISOString() : undefined
+}
+
 export const DAY_MS = 24 * 60 * 60 * 1_000
 export const SESSION_MS = 2 * DAY_MS
 

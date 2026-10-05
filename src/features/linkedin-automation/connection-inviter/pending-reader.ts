@@ -13,7 +13,7 @@ export type PendingRead = {
 // Absence requires a complete valid scan. A positive match can stop pagination early.
 // Timestamp the oldest page, so a long scan does not make old data look new.
 export async function readPendingInvitations(runtime: ConnectionRuntime, accountId: string,
-  targetPersonId?: string): Promise<PendingRead & { items: any[] }> {
+  targetPersonId?: string, runId?: string): Promise<PendingRead & { items: any[] }> {
   const refreshedAt = runtime.now().getTime()
   const result: any[] = []; let offset = 0; let cursor: string | undefined
   let expectedTotal: number | undefined
@@ -29,6 +29,7 @@ export async function readPendingInvitations(runtime: ConnectionRuntime, account
     return { accountId, personIds, complete, refreshedAt, targetPersonId, items: result }
   }
   for (let page = 0; page < 20; page += 1) {
+    if (runId && runtime.stopRequested(runId)) throw connectionError('connection_stop_requested', 'Connection run stop was requested.')
     const response = await runtime.adapter().listPendingInvitations(accountId, cursor ?? offset)
     const { items, nextCursor, totalCount, hasMore } = parseConnectionPendingResponse(response)
     if (totalCount !== undefined) {

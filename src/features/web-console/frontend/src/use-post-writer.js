@@ -4,6 +4,7 @@ import { runActive } from './post-writer-view'
 
 export function usePostWriter(account) {
   const visible = ref(false), data = ref(null), error = ref(''), busy = ref(false), now = ref(Date.now())
+  const likeAccounts = ref([]), likeAccountsError = ref('')
   const run = computed(() => data.value?.runs?.find(runActive) || data.value?.runs?.[0])
   let stream, polling, clock, key
   const id = account.platformAccountId
@@ -35,10 +36,12 @@ export function usePostWriter(account) {
   async function open() {
     visible.value = true
     await execute(refresh)
+    try { likeAccounts.value = await postApi.likeAccounts(id); likeAccountsError.value = '' }
+    catch (error) { likeAccountsError.value = error.message || 'Не удалось загрузить аккаунты для лайков.' }
     if (data.value) connect()
   }
   onUnmounted(() => { stream?.close(); clearInterval(polling); clearInterval(clock) })
-  return { visible, data, error, busy, now, run, open,
+  return { visible, data, error, busy, now, run, open, likeAccounts, likeAccountsError,
     save: settings => execute(() => postApi.settings(id, settings)),
     startPrepared: post => execute(() => postApi.startPrepared(id, post)),
     start: input => execute(async () => {

@@ -1,5 +1,6 @@
 type JsonObject = import('../../features/linkedin-automation/profile-filler/input-types.ts').JsonObject
 type CatalogType = import('../../features/linkedin-automation/profile-filler/mcp-contract.ts').CatalogType
+const { listReadError } = require('./read-retry.ts') as typeof import('./read-retry.ts')
 
 const { createUnipileHttpClient } = require('./http-client.ts') as {
   createUnipileHttpClient(options?: any): {
@@ -26,13 +27,14 @@ function createUnipileProfileAdapter(http = createUnipileHttpClient(), options: 
       const response: JsonObject = await http.request<JsonObject>('GET',
         `/${encodeURIComponent(accountId)}/linkedin/search/parameters?${query.toString()}`,
         undefined, { fullRetryAfter: true })
-      if (!Array.isArray(response.data)) return []
-      return response.data.flatMap(item => {
-        if (!item || typeof item !== 'object') return []
+      if (!response || !Array.isArray(response.data)) throw listReadError('unipile_catalog_response_invalid', 'missing_items')
+      return response.data.map((item, index) => {
+        if (!item || typeof item !== 'object') throw listReadError('unipile_catalog_response_invalid', 'invalid_item', { item: index + 1 })
         const row = item as JsonObject
         const id = String(row.id ?? '').trim()
         const name = String(row.name ?? '').trim()
-        return id && name ? [{ id, name }] : []
+        if (!id || !name) throw listReadError('unipile_catalog_response_invalid', 'invalid_item', { item: index + 1 })
+        return { id, name }
       })
     })
     parameterCache.set(cacheKey, { expiresAt: now() + parameterCacheTtlMs, request })

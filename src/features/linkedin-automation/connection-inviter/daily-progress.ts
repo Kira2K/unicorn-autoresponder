@@ -19,11 +19,21 @@ export function remainingAudienceQuota(run: ConnectionRun, history: ConnectionHi
 
 export function synchronizeConfirmedProgress(run: ConnectionRun,
   history: ConnectionHistoryItem[], target = run.audienceQuota) {
+  run.searchProgress.reservedInvitations = Object.fromEntries(history.filter(item => item.runId === run.runId &&
+    ['sending', 'uncertain'].includes(item.status)).map(item => [item.personId, item.audience]))
   const progress = remainingAudienceQuota(run, history, target)
   run.counters.sent = progress.sentTotal
   run.counters.sentByAudience = progress.sent
   run.counters.shortfallByAudience = { ...progress.remaining }
   return progress
+}
+
+// Unknown writes occupy quota without being reported as confirmed sends.
+export function invitationCapacity(run: ConnectionRun) {
+  const used = { ...run.counters.sentByAudience }
+  for (const audience of Object.values(run.searchProgress.reservedInvitations ?? {})) used[audience]++
+  return { used, remaining: { recruiter: Math.max(0, run.audienceQuota.recruiter - used.recruiter),
+    technical: Math.max(0, run.audienceQuota.technical - used.technical) } }
 }
 
 export function confirmedQuotaReached(progress: ReturnType<typeof remainingAudienceQuota>,

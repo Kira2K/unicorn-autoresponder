@@ -5,7 +5,7 @@ const { runPhysicalNocoBudgetRegression } = require('./physical-noco-budget.e2e.
   { runPhysicalNocoBudgetRegression(): Promise<void> }
 
 async function run() {
-  const test = fixture({ stack: 'GO', connectionCount: 1663, preflightRejectCount: 4 })
+  const test = fixture({ stack: 'GO', connectionCount: 1663, preflightRejectCount: 4, confirmedReceipts: true })
   const sleeps: number[] = []; const gate: any[] = []
   const events: Array<{ stage: string; status: string; details?: any }> = []
   const historyStatuses: string[] = []; const runStages: string[] = []
