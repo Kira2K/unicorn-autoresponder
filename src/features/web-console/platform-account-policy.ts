@@ -53,6 +53,10 @@ export const PLATFORM_ACCOUNT_POLICIES: Readonly<Record<string, PlatformAccountP
   phone_en: {
     fields: ['phone'],
     requiredFields: ['phone']
+  },
+  phone_ru: {
+    fields: ['phone'],
+    requiredFields: ['phone']
   }
 }
 

@@ -106,6 +106,8 @@
     "web:dev": "node src/features/web-console/dev-launcher.ts",
     "web:startup:test": "node --test src/features/web-console/backend/module-compat.test.mts",
     "web:sql:test": "node --test src/features/web-console/backend/postgres/*.test.mts",
+    "web:student-profile:test": "node --test src/features/web-console/backend/postgres/student-profile.test.mts src/features/web-console/backend/postgres/phone-ru.test.mts src/features/web-console/student-profile-validation.test.ts src/features/web-console/frontend/src/student-profile-draft.test.js src/features/web-console/frontend/src/contact-input.test.js src/features/web-console/frontend/src/username-input.test.js src/features/web-console/frontend/src/platform-display-label.test.js",
+    "web:student-profile:e2e": "node src/features/web-console/e2e/student-profile.e2e.mts",
     "linkedin:sql:test": "node --test src/features/linkedin-automation/storage-postgres/*.test.mts",
     "web:test": "npm run web:startup:test && node src/features/web-console/platform-account-policy.test.ts && node src/features/web-console/dev-launcher.test.ts && node src/features/web-console/backend/dolphin-lease.test.ts && node src/features/web-console/backend/dolphin-verification-code.test.ts && node src/features/web-console/backend/telegram-service.test.ts && node src/features/web-console/backend/telegram-gateway.test.ts && node src/integrations/telegram/tdlib-client.test.ts && node src/integrations/telegram/support-bot.test.ts && node src/integrations/telegram/resume-visible-e2e.test.ts && node src/features/web-console/backend/app.test.ts",
     "web:e2e": "node src/features/web-console/e2e/web-console.e2e.ts",

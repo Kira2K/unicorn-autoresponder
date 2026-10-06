@@ -984,7 +984,7 @@ function platformAccountInputError(
 
 function platformAccountRecordLabel(account: NocoRecord): string {
   const platformId = accountPlatformId(account)
-  if (platformId) return platformAccountLabelFromId(platformId) ?? ''
+  if (platformId) return platformAccountLabelFromId(platformId) ?? platformLabelFromRelation(account)
   const candidates = [
     account.platform,
     linkedLabel(account.rel_platformAccounts_platform),
