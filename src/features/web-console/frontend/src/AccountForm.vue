@@ -71,9 +71,9 @@ function capturePhone(event) {
   </label>
   <label class="field">
     <span>{{ preview ? 'Username' : 'Nickname' }}</span>
-    <InputText v-if="preview" :model-value="usernameDisplay(form.nickname)" :disabled="!accountFieldEnabled('nickname')" :required="accountFieldRequired('nickname')" pattern="@[A-Za-z]+" autocapitalize="none" :spellcheck="false" data-testid="account-nickname" @input.capture="form.nickname = updateUsernameInput($event)" />
+    <InputText v-if="preview" :model-value="usernameDisplay(form.nickname)" :disabled="!accountFieldEnabled('nickname')" :required="accountFieldRequired('nickname')" pattern="@[A-Za-z0-9_]+" autocapitalize="none" :spellcheck="false" data-testid="account-nickname" @input.capture="form.nickname = updateUsernameInput($event)" />
     <InputText v-else v-model="form.nickname" :disabled="!accountFieldEnabled('nickname')" :required="accountFieldRequired('nickname')" data-testid="account-nickname" />
-    <small v-if="preview && accountFieldEnabled('nickname')">Только латинские буквы A–Z, a–z. Знак @ добавляется автоматически.</small>
+    <small v-if="preview && accountFieldEnabled('nickname')">Латинские буквы A–Z, a–z, цифры 0–9 и «_». Знак @ добавляется автоматически.</small>
   </label>
   <label class="field wide-field">
     <span>
