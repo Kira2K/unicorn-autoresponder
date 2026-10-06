@@ -1,3 +1,4 @@
+const { hhLoginKind } = require('../../../../shared/hh-login.ts')
 const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
   createNocoClient(options?: any): any
 }
@@ -311,6 +312,7 @@ function toHHAuthCredentials(
   client: NocoRecord,
   market: Market
 ): ClientHHAuthCredentials {
+  const login = String(account.login ?? '').trim()
   const phone = normalizeId(account.phone || account.login)
   const password = String(account.password ?? '').trim()
   const email = String(account.email ?? '').trim()
@@ -318,12 +320,12 @@ function toHHAuthCredentials(
   const clientName = String(client.client_name ?? account.client_name ?? '').trim()
   const commonChatId = normalizeId(client.telegram_general_chat_id)
 
-  if (!phone) {
-    throw new Error(`Noco HH ${market} credentials for "${clientName}" are missing phone/login`)
+  if (!login) {
+    throw new Error(`HH ${market} credentials for "${clientName}" are missing login`)
   }
 
-  if (!email) {
-    throw new Error(`Noco HH ${market} credentials for "${clientName}" are missing email`)
+  if (!hhLoginKind(login)) {
+    throw new Error(`HH ${market} credentials for "${clientName}" have malformed login`)
   }
 
   if (!password) {
@@ -337,6 +339,7 @@ function toHHAuthCredentials(
     phone,
     rawPhone: phone,
     password,
+    login,
     email,
     emailPassword
   }

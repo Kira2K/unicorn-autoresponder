@@ -1,3 +1,4 @@
+const { hhLoginKind } = require('../../../../shared/hh-login.ts')
 require('dotenv').config({ quiet: true })
 const fs = require('node:fs')
 
@@ -467,8 +468,12 @@ function getClientReadinessError(client: ClientAutomationData): Error | null {
     return new Error(`HH password for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
   }
 
-  if (!String(client.hhAuthCredentials.email ?? '').trim()) {
-    return new Error(`HH email for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
+  if (!String(client.hhAuthCredentials.login ?? '').trim()) {
+    return new Error(`HH login for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
+  }
+
+  if (!hhLoginKind(client.hhAuthCredentials.login)) {
+    return new Error(`HH login for ${client.clientName}/${client.market ?? 'unknown'} is malformed`)
   }
 
   return null
@@ -1247,6 +1252,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  getClientReadinessError,
   assertDolphinAppRunning,
   assertPreexistingDolphinProfileLimit,
   getLocalRunLogFile: () => LOCAL_RUN_LOG_FILE,

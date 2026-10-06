@@ -84,6 +84,7 @@ type ClientAutomationMapping = ClientStackMapping & {
 }
 
 type ClientHHAuthCredentials = {
+  login: string
   clientName: string
   commonChatId?: string
   market?: 'Ru' | 'En'
@@ -895,6 +896,7 @@ function mapClientHHAuthCredentialsFromColumn(
     phone,
     rawPhone,
     password,
+    login: email,
     email,
     emailPassword: emailPassword || undefined
   }

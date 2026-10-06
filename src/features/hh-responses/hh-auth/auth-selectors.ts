@@ -8,6 +8,9 @@ const hhAuthSelectors = {
       '[data-qa="login"], [href*="/account/login"], [data-qa="mainmenu_login"]',
     accountTypeCards: '[data-qa="account-type-cards"]',
     phone: '[data-qa="magritte-phone-input-calling-code"]',
+    phoneNumber: '[data-qa="applicant-login-input-phone"], input[type="tel"]',
+    phoneCredentialType:
+      '[data-qa="credential-type-PHONE"], input[value="PHONE"], input[value="phone"]',
     emailCredentialType:
       '[data-qa="credential-type-EMAIL"], input[value="EMAIL"], input[value="email"]',
     email:

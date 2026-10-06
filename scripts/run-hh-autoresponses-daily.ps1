@@ -8,7 +8,37 @@ $originalLocation = Get-Location
 
 try {
   Set-Location -LiteralPath $AutoresponsesRepo
-  if ($env:APP_DB -ne 'postgres') { $env:APP_DB = 'noco' }
+
+  if ((Get-Date).DayOfWeek -notin @('Monday', 'Tuesday', 'Wednesday', 'Thursday')) {
+    Write-Host 'Skipping HH autoresponses: scheduled runs are allowed Monday-Thursday only.'
+    exit 0
+  }
+
+  $storage = & node (Join-Path $PSScriptRoot 'hh-autoresponses-storage.cjs')
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve HH autoresponses storage.' }
+  $env:APP_DB = $storage.Trim()
+
+  $stateCheck = Join-Path $AutoresponsesRepo 'scripts\hh-autoresponses-state-check.ps1'
+  if (Test-Path -LiteralPath $stateCheck) {
+    & $stateCheck `
+      -RepoRoot $AutoresponsesRepo `
+      -Phase 'launch-time' `
+      -CheckPrecheckTask `
+      -LaunchTaskName 'HH-Autoresponses-Daily' `
+      -PrecheckTaskName 'HH-Autoresponses-Precheck-Daily' `
+      -LaunchScriptRelative 'scripts\run-hh-autoresponses-daily.ps1' `
+      -PrecheckScriptRelative 'scripts\run-hh-autoresponses-precheck-daily.ps1' `
+      -OutLogRelative 'logs\scheduled-launch-state-check-daily.out.log' `
+      -ErrLogRelative 'logs\scheduled-launch-state-check-daily.err.log' `
+      -LaunchDisplay 'recurring Monday-Thursday 04:40 GMT+3 / 03:40 Europe/Warsaw'
+    if ($LASTEXITCODE -ne 0) {
+      throw "Launch-time HH state check failed with exit code $LASTEXITCODE."
+    }
+  }
+  else {
+    throw "Launch-time HH state check script is missing: $stateCheck"
+  }
+
   $env:ORCHESTRATOR_SUPERVISED = 'true'
   $env:ORCHESTRATOR_CONCURRENCY = '3'
   $env:ORCHESTRATOR_RESPONSE_LIMIT = '120'
