@@ -176,8 +176,7 @@ const REQUIRED_DATA_WARNING_PREFIX = 'webConsole.requiredDolphinDataWarning'
 const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
 const isClient = computed(() => session.value?.role === 'client')
-const validatedProfileEnabled = computed(() => isClient.value && dashboard.value?.client?.studentProfileEnabled === true && Boolean(import.meta.env.VITE_STUDENT_PROFILE_TEST_CLIENT_ID) &&
-  String(dashboard.value?.client?.id) === String(import.meta.env.VITE_STUDENT_PROFILE_TEST_CLIENT_ID))
+const validatedProfileEnabled = computed(() => isClient.value && dashboard.value?.client?.studentProfileEnabled === true)
 const ui = text => studentPreviewLabel(text, validatedProfileEnabled.value)
 const platformDisplayLabel = text => validatedProfileEnabled.value ? previewPlatformLabel(text) : text
 const accountRows = computed(() => dashboard.value?.platformAccounts || [])
@@ -1337,7 +1336,7 @@ async function loadDashboard() {
     } else {
       await loadClientOptions()
       dashboard.value = await api.clientDashboard()
-      if (!validatedProfileEnabled.value) await loadDolphinStatus(dashboard.value?.client?.id)
+      await loadDolphinStatus(dashboard.value?.client?.id)
       resetProfileForm()
       resetAccountForm()
       profileEditing.value = false
@@ -1353,7 +1352,7 @@ async function loadDashboard() {
     if (isAdmin.value) {
       void loadAdminDialogs()
       if (selectedTelegramAccount.value) void refreshTelegramStatus()
-    } else if (isClient.value && selectedTelegramAccount.value && !validatedProfileEnabled.value) {
+    } else if (isClient.value && selectedTelegramAccount.value) {
       void refreshTelegramStatus()
     }
   } catch (caught) {

@@ -15,12 +15,13 @@ const server = await new Promise<any>(resolve => { const s = app.listen(0, '127.
 const url = `http://127.0.0.1:${server.address().port}`;
 let browser: any;
 let clientId = 1, enabled = true, failProfile = false, failAccount = false, pendingAccount = false;
+let role = 'client', dolphinReads = 0, telegramReads = 0;
 let failSecrets = false, pendingSecrets = false, releaseAccount: (() => void) | undefined, releaseSecrets: (() => void) | undefined;
 const profileWrites: any[] = [], accountWrites: any[] = [], unexpected: string[] = [], errors: string[] = [];
 const client = () => ({ id: clientId, studentProfileEnabled: enabled, clientName: 'Тестовый ученик',
   firstName: 'Кира', lastName: 'Самсонова', middleName: '', birthDate: '2000-04-20', englishLevelId: 1,
   readyForInterviewInEnglishIn2Months: 'No', realLocation: 'Moscow, Russia', desiredLocation: 'Remote',
-  calendarEmail: 'kitsunewebdeveloper@gmail.com', telegramPersonalChatId: '@kira_test', noHigherEducation: true,
+  calendarEmail: `student${clientId}@gmail.com`, telegramPersonalChatId: '@kira_test', noHigherEducation: true,
   educationEntries: [], currentCompany: 'Alpha,Beta', previousCompanies: 'Gamma,Delta', stopListCompany: 'Alpha,Beta,Gamma,Delta' });
 let dashboard: any = { client: client(), platformAccounts: [], linkedInEmail: '' };
 const platforms = [{ id: 30, label: 'phone_ru' }, { id: 28, label: 'phone_en' }, { id: 24, label: 'telegram_ru' },
@@ -34,9 +35,13 @@ try {
     if (parsed.origin !== url) { unexpected.push(parsed.origin); return route.abort(); }
     if (!pathname.startsWith('/api/')) return route.continue();
     const reply = (body: any, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    if (pathname === '/api/auth/me') return reply({ role: 'client', email: 'kitsunewebdeveloper@gmail.com' });
+    if (pathname === '/api/auth/me') return reply({ role, email: `student${clientId}@gmail.com` });
+    if (pathname === '/api/provider/clients') return reply({ clients: [] });
+    if (pathname === '/api/admin/latest-client') return reply(dashboard);
+    if (pathname === '/api/admin/telegram/senders') return reply({ senders: [] });
+    if (pathname === '/api/telegram/status') { telegramReads++; return reply({ status: 'disconnected' }); }
     if (pathname === '/api/client/profile-options') return reply({ englishLevels: [{ id: 1, label: 'A1' }], platforms });
-    if (pathname.startsWith('/api/dolphin/profiles/status')) return reply({ action: 'open_existing' });
+    if (pathname.startsWith('/api/dolphin/profiles/status')) { dolphinReads++; return reply({ action: 'open_existing' }); }
     if (pathname === '/api/client/me') {
       if (request.method() === 'PATCH') {
         const payload = request.postDataJSON(); profileWrites.push(payload);
@@ -142,16 +147,33 @@ try {
   await page.screenshot({ path: path.join(artifacts, 'mobile-profile.png'), fullPage: true });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
 
-  clientId = 2; dashboard = { client: client(), platformAccounts: [], linkedInEmail: '' };
+  clientId = 2; dashboard = { client: client(), platformAccounts: [{ id: 2010, platformId: 24, platform: 'telegram_ru', isTelegramAccount: true }], linkedInEmail: '' };
+  const priorDolphinReads = dolphinReads;
   await page.reload(); await byId('open-account-editor-button').waitFor();
-  assert.equal(await byId('validated-student-profile').count(), 0);
+  await byId('validated-student-profile').waitFor();
+  assert.ok(dolphinReads > priorDolphinReads);
+  await page.waitForTimeout(100); assert.ok(telegramReads > 0);
+  await byId('open-profile-editor-button').click();
+  await page.locator('#student-firstName').fill('Анна');
+  await byId('profile-form').dispatchEvent('submit');
+  await byId('profile-form').waitFor({ state: 'detached' });
+  assert.equal(dashboard.client.id, 2); assert.equal(profileWrites.at(-1).firstName, 'Анна');
   await byId('open-account-editor-button').click(); await byId('account-form').waitFor();
-  assert.equal(await page.getByRole('dialog').count(), 0);
-  await byId('account-platform').selectOption('24'); await byId('account-nickname').fill('legacy_123');
-  assert.equal(await byId('account-nickname').inputValue(), 'legacy_123');
+  assert.equal(await page.getByRole('dialog').count(), 1);
+  await byId('account-platform').selectOption('24'); await byId('account-nickname').fill('@@Other123');
+  assert.equal(await byId('account-nickname').inputValue(), '@Other');
+  await byId('close-account-editor-button').click();
+  dashboard.platformAccounts = [];
+  for (const nextRole of ['provider', 'admin']) {
+    role = nextRole;
+    await page.reload(); await byId(`${role}-dashboard`).waitFor();
+    assert.equal(await byId('validated-student-profile').count(), 0);
+    assert.equal(await page.locator('.student-preview').count(), 0);
+  }
+  role = 'client';
   clientId = 1; enabled = false; dashboard.client = client();
   await page.reload(); await byId('open-account-editor-button').waitFor();
   assert.equal(await byId('validated-student-profile').count(), 0);
   assert.deepEqual(unexpected, []); assert.deepEqual(errors, []);
-  console.log('Student profile browser checks passed: mocked API, companies, modal, passwords, phone/Username, mobile and legacy scope.');
+  console.log('Student profile browser checks passed: two unrelated students, companies, modal, passwords, phone/Username, mobile, status loading and unchanged admin/provider views.');
 } finally { releaseAccount?.(); releaseSecrets?.(); await browser?.close(); await new Promise<void>(resolve => server.close(() => resolve())); }

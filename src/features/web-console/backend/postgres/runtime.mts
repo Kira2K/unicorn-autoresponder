@@ -21,13 +21,9 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const linklab = env.LINKLAB_ENABLED === '1' ? await openLinkLabIntake(pool, config.database, tableIds.cv) : undefined;
     const options = sqlAppOptions(db, { clientIds: new Set(), allClients: true, create, linklab },
       { accountIds: new Set(), allAccounts: true, create });
-    if (env.STUDENT_PROFILE_TEST_CLIENT_ID) {
-      const clientId = Number(env.STUDENT_PROFILE_TEST_CLIENT_ID);
-      if (!Number.isSafeInteger(clientId) || clientId <= 0) throw new Error('invalid_student_profile_client_id');
-      const store = studentProfileStore(pool, config.database);
-      await store.checkPilot(clientId);
-      options.repository = withStudentProfile(options.repository, store, clientId);
-    }
+    const store = studentProfileStore(pool, config.database);
+    await store.checkSchema();
+    options.repository = withStudentProfile(options.repository, store);
     return { options, close };
   } catch (error) { await close(); throw error; }
 }

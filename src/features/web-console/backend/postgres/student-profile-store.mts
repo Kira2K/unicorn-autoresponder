@@ -4,7 +4,6 @@ import { PostgresReadError } from '../../../../integrations/postgres/contracts.m
 import type { CopyDatabase, SqlPool } from '../../../../integrations/postgres/contracts.mts';
 import type { ClientProfilePatch } from '../types.ts';
 
-export const STUDENT_PROFILE_PILOT_EMAIL = 'kitsunewebdeveloper@gmail.com';
 const fields = [
   ['middleName', 'middle_name'], ['noHigherEducation', 'no_higher_education'],
   ['currentCompany', 'current_company'], ['previousCompanies', 'previous_companies']
@@ -12,12 +11,10 @@ const fields = [
 export function studentProfileStore(pool: SqlPool, database: CopyDatabase) {
   const read = createReadSession(pool, database);
   return {
-    async checkPilot(clientId: number) {
+    async checkSchema() {
       await read(async session => {
-        const { rows } = await session.query(`SELECT id, middle_name, no_higher_education,
-          current_company, previous_companies FROM noco.clients
-          WHERE id=$1 AND lower(trim(calendar_email))=$2`, [clientId, STUDENT_PROFILE_PILOT_EMAIL]);
-        if (rows.length !== 1) throw new PostgresReadError('student_profile_pilot_mismatch');
+        await session.query(`SELECT middle_name, no_higher_education,
+          current_company, previous_companies FROM noco.clients LIMIT 0`);
       });
     },
     async load(clientId: number) {
