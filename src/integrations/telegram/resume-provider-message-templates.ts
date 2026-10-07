@@ -120,7 +120,7 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
     `Рынок: ${escapeTelegramHtml(input.market)}`,
     `Статус: ${config.status}`
   ]
-  const stageRows = stage === 'draft'
+  const stageRows = stage === 'draft' || stage === 'en'
     ? [
         `Стек: ${escapeTelegramHtml(valueOrEmpty(input.stack))}`,
         `Реальная локация: ${escapeTelegramHtml(valueOrEmpty(input.realLocation))}`,
@@ -138,10 +138,12 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
         `Исходные данные: ${escapeTelegramHtml(valueOrEmpty(input.sourceFolder))}`,
         `Комментарии Киры: ${escapeTelegramHtml(valueOrEmpty(input.kirasComments))}`
       ]
-    : [input.draftUrl ? `Черновик: ${escapeTelegramHtml(input.draftUrl)}` : undefined]
+    : []
   return htmlMessage([
     ...commonRows,
     ...stageRows,
+    stage === 'en' ? `Черновик: ${escapeTelegramHtml(valueOrEmpty(input.draftUrl))}`
+      : stage === 'ru' && input.draftUrl ? `Черновик: ${escapeTelegramHtml(input.draftUrl)}` : undefined,
     config.inputHint,
     YULIA_TASKS_FOOTER
   ])

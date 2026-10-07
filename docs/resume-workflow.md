@@ -257,18 +257,21 @@ HTML-escaped. Task cards and state/error replies use the footer
 `Все задачи: /open_my_tasks`; new-task notifications use
 `Открой /open_my_tasks, чтобы взять задачу в работу.`
 
-The initial draft card always shows the student's stack, real and desired
+The draft and English-version cards always show the student's stack, real and desired
 locations, real age, English level, readiness for an English interview in two
 months, education, root folder, source-data folder, and Kira's comments. For
-every market it also always shows `Email EN`, `Telegram EN`, `Phone EN`,
+every market they also always show `Email EN`, `Telegram EN`, `Phone EN`,
 `LinkedIn`, and `GitHub`. Every missing or whitespace-only value in this block
 is rendered as `empty`. `Telegram EN` uses only the `nickname` column; it never
 falls back to the Telegram account login. When the workflow advances from
 `collection Kira's comments` to `Draft in process`, Yulia receives the new-task
 notification followed by this full draft card in the same HTML message, for
-every market. Opening the task through `/open_my_tasks` shows the same card.
-Later-stage new-task notifications remain short, and their cards omit the
-expanded student-data block. Rework notifications retain their returned-file
+every market. The transition from `Draft in approve by student` to
+`English version in progress` likewise includes the full English-version card
+in Yulia's new-task notification. Its draft CV link is kept, or shown as `empty`
+when missing. Opening either task through `/open_my_tasks` shows the same card.
+Russian-version new-task notifications remain short, and Yulia's Russian-version
+card omits the expanded student-data block. Rework notifications retain their returned-file
 link and current rejection comment.
 
 ### Polina message template contract
