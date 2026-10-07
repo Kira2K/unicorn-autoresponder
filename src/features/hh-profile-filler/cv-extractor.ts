@@ -55,15 +55,18 @@ const CV_SCHEMA = strictObject({
   },
   languages: {
     type: 'array',
-    items: strictObject({ name: { type: 'string' }, level: { type: 'string' } })
+    items: strictObject({ name: { type: 'string' }, level: nullableString })
   },
   named_organizations: stringArray
 })
 
-const EXTRACTION_INSTRUCTIONS = `Extract an HH resume profile from the attached final CV and optional
-documents from the Самопрезентация folder whose filenames contain Описание опыта. Preserve the CV language, wording, dates, metrics, responsibilities,
+const EXTRACTION_INSTRUCTIONS = `Extract an HH resume profile from the attached final CV. Optional later documents
+from Самопрезентация whose filenames contain Описание опыта are used only for organization extraction.
+Preserve the CV language, wording, dates, metrics, responsibilities,
 skills and contacts. Never invent or improve facts. The summary must contain only the CV's about/summary
 text, without contacts or the skills block. Preserve skill categories and their source wording.
+Extract every language explicitly stated in the final CV. Preserve its stated CEFR or native level;
+when the CV names a language without a level, return null instead of inferring one.
 Collect every explicitly named employer, brand owner, product organization, vendor, customer and partner
 into named_organizations; include employers from experience. A product or brand name may be included when
 it is explicitly named. Evidence is the attached files only.`
@@ -115,7 +118,7 @@ function assertProfile(value: any, market: ProfileFillerMarket): CvProfile {
     })).filter((item: any) => item.institution),
     languages: Array.isArray(value.languages) ? value.languages.map((item: any) => ({
       name: optionalText(item.name) ?? '', level: optionalText(item.level) ?? ''
-    })).filter((item: any) => item.name && item.level) : [],
+    })).filter((item: any) => item.name) : [],
     namedOrganizations: stringList(value.named_organizations)
   }
 }
@@ -153,9 +156,8 @@ export function createCvExtractor(options: {
       }
       const content: any[] = uploaded.map(fileId => ({ type: 'input_file', file_id: fileId }))
       content.push({ type: 'input_text', text:
-        `Extract the ${market === 'Ru' ? 'Russian' : 'English'} HH profile. ` +
-        'Documents after the first one come from the Самопрезентация folder, have Описание опыта in ' +
-        'their filenames, and are used for organization extraction.' })
+        `Extract the ${market === 'Ru' ? 'Russian' : 'English'} HH profile fields from the final CV only. ` +
+        'Use later experience-description documents only to add explicitly named organizations.' })
       const value = await client.respond([{ role: 'user', content }],
         'hh_profile_cv', CV_SCHEMA, EXTRACTION_INSTRUCTIONS)
       return assertProfile(value, market)

@@ -41,12 +41,12 @@ export function runRepositoryRoutingTests() {
       for (const mode of [undefined, 'work-permits', 'privacy', 'delete-old', 'verify-final']) {
         const result = await service.run(1, 'En', false, undefined, false,
           mode === 'work-permits' ? 'draft-0' : undefined, mode, mode === 'verify-final' ? ['draft-0'] : []);
-        assert.equal(result.ok, false); assert.match(result.message, /invalid_appdb_postgres_config/);
+        assert.equal(result.ok, false); assert.match(result.code, /profile_source_unverified|invalid_appdb_postgres_config/);
       }
       const dryRun = await service.run(1, 'En', true);
-      assert.equal(dryRun.ok, false); assert.match(dryRun.message, /invalid_appdb_postgres_config/);
+      assert.equal(dryRun.ok, false); assert.match(dryRun.code, /profile_source_unverified|invalid_appdb_postgres_config/);
       const smoke = await service.runLiveSmoke(1, 'En');
-      assert.equal(smoke.ok, false); assert.match(smoke.message, /invalid_appdb_postgres_config/);
+      assert.equal(smoke.ok, false); assert.match(smoke.code, /profile_source_unverified|invalid_appdb_postgres_config/);
       assert.equal(created, 6); assert.equal(reads, 6);
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
     const failure = new Error('sql_failed');

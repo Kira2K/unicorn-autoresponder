@@ -1,3 +1,9 @@
+import { runHHManualDomTests } from './hh-manual-dom.test.ts'
+import { runEmployerStopListTests } from './employer-stop-list.test.ts'
+import { runLanguagePolicyTests } from './language-policy.test.ts'
+import { runCvExtractorTests } from './cv-extractor.test.ts'
+import { runStrictInvariantTests } from './strict-invariants.test.ts'
+import { runContractDomTests } from './hh-contract-dom.test.ts'
 import { runStateStoreTests } from './state-store.test.ts'
 import { runStackTitleTests } from './stack-titles.test.ts'
 import { runProfileBuilderTests } from './profile-builder.test.ts'
@@ -22,6 +28,11 @@ import { runHHJobSearchStatusTests } from './hh-job-search-status.test.ts'
 import { runHHLiveDomTests } from './hh-live-dom.test.ts'
 
 async function main() {
+  await runStrictInvariantTests()
+  await runContractDomTests()
+  runLanguagePolicyTests()
+  await runCvExtractorTests()
+  await runEmployerStopListTests()
   runStateStoreTests()
   runStackTitleTests()
   runSkillSelectionTests()
@@ -39,6 +50,7 @@ async function main() {
   await runHHResumeLanguageTests()
   await runHHJobSearchStatusTests()
   await runHHLiveDomTests()
+  await runHHManualDomTests()
   await runHHLanguageTests()
   await runHHEmployerTests()
   await runDriveSourceTests()

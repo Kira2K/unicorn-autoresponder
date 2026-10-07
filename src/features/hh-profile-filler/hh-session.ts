@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url'
 import { chromium, type Browser, type BrowserContext, type Page,
   type Request, type Response } from 'playwright'
 import { ProfileFillerError, profileFillerError, safeErrorMessage } from './errors.ts'
+import { hhCookieConsentFailure, installHhCookieConsentForContext } from './hh-overlays.ts'
+import { acquireProfileLock } from './profile-lock.ts'
 import type { ResolvedClient } from './types.ts'
 
 const require = createRequire(import.meta.url)
@@ -164,24 +166,29 @@ async function captureFailure(page: Page, artifactDir: string, error: unknown,
 
 export async function withAuthorizedHHPage<T>(client: ResolvedClient,
   action: (page: Page, artifactDir: string) => Promise<T>): Promise<T> {
+  if (!client.dolphinProfileName?.trim()) throw profileFillerError('profile_dolphin_name_missing',
+    'Dolphin profile name is not verified; filling has not started.', 'start_dolphin')
+  const release = acquireProfileLock(client.dolphinProfileId)
   const artifactDir = artifactDirectory(client)
-  fs.mkdirSync(artifactDir, { recursive: true })
   let browser: Browser | undefined
+  let context: BrowserContext | undefined
   let started = false
   let page: Page | undefined
   let telemetry: FailureTelemetry | undefined
   try {
-    const response = await startDolphinProfile(client.dolphinProfileId, { headless: false })
+    fs.mkdirSync(artifactDir, { recursive: true })
     started = true
+    const response = await startDolphinProfile(client.dolphinProfileId, { headless: false })
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort(response)}`, {
       timeout: Number(process.env.CONNECT_OVER_CDP_TIMEOUT_MS ?? 60_000)
     })
-    const context = browser.contexts()[0]
+    context = browser.contexts()[0]
     if (!context) {
       throw profileFillerError('profile_dolphin_context_missing',
         'Dolphin CDP connection has no browser context.', 'start_dolphin')
     }
     page = await selectUsableHHPage(context)
+    await installHhCookieConsentForContext(context)
     telemetry = observeFailures(page)
     const initial = await validateAuth(page, { timeoutMs: 10_000 })
     if (initial.state === 'captcha') {
@@ -208,17 +215,22 @@ export async function withAuthorizedHHPage<T>(client: ResolvedClient,
     }
     return await action(page, artifactDir)
   } catch (error) {
+    const failure = context ? hhCookieConsentFailure(context) ?? error : error
     const diagnostic = page && telemetry
-      ? await captureFailure(page, artifactDir, error, telemetry).catch(() => undefined)
+      ? await captureFailure(page, artifactDir, failure, telemetry).catch(() => undefined)
       : undefined
-    if (error instanceof ProfileFillerError) {
-      throw new ProfileFillerError(error.code, error.message, error.stage, {
-        ...error.details, artifactDir, diagnostic
+    if (failure instanceof ProfileFillerError) {
+      throw new ProfileFillerError(failure.code, failure.message, failure.stage, {
+        ...failure.details, artifactDir, diagnostic
       })
     }
-    throw error
+    throw failure
   } finally {
     await browser?.close().catch(() => undefined)
-    if (started) await stopDolphinProfile(client.dolphinProfileId).catch(() => undefined)
+    if (started) {
+      // If Dolphin could not be stopped, keep the lock: another operation must not reuse it.
+      await stopDolphinProfile(client.dolphinProfileId)
+    }
+    release()
   }
 }

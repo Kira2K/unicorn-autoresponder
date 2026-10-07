@@ -2,6 +2,8 @@ import type { CvEducation, CvProfile, EmployerCandidate, PreparedProfile,
   ResolvedClient } from './types.ts'
 import { titlesForStack } from './stack-titles.ts'
 import { profileFillerError } from './errors.ts'
+import { resolveProfileLanguages } from './language-policy.ts'
+import { mergeEmployerCandidates } from './employer-stop-list.ts'
 
 function first<T>(...values: Array<T | undefined | null>): T | undefined {
   return values.find(value => value !== undefined && value !== null && String(value).trim() !== '') ?? undefined
@@ -52,8 +54,7 @@ function assertSourceIdentity(client: ResolvedClient, extracted: CvProfile): voi
   if (expectedFirst && expectedLast && actualFirst && actualLast &&
       !sameName(expectedFirst, actualFirst) && !sameName(expectedLast, actualLast)) {
     throw profileFillerError('profile_cv_identity_mismatch',
-      `The final CV belongs to "${[actualFirst, actualLast].join(' ')}", but Noco client ` +
-      `${client.clientId} is "${client.clientName}". No HH changes were made.`, 'validate_sources')
+      'The final CV identity does not match the selected source record. No HH changes were made.', 'validate_sources')
   }
 }
 
@@ -87,9 +88,36 @@ function nocoEducation(value?: string): CvEducation[] {
   }
   const yearMatch = value.match(/(?:19|20)\d{2}/)
   const parts = value.split(',').map(item => item.trim()).filter(Boolean)
+  const degree = parts.slice(1).find(item =>
+    /\b(?:бакалавр|магистр|специалист|кандидат|доктор)\b|\b(?:bachelor|master|specialist|candidate|doctor)\b/i
+      .test(item))
   return [{ institution: parts[0] || value.trim(),
-    specialization: parts.slice(1).filter(item => !/(?:19|20)\d{2}/.test(item)).join(', ') || undefined,
+    degree,
+    specialization: parts.slice(1).filter(item =>
+      !/(?:19|20)\d{2}/.test(item) && item !== degree).join(', ') || undefined,
     graduationYear: yearMatch ? Number(yearMatch[0]) : undefined }]
+}
+
+function normalizedInstitution(value: string): string {
+  return value.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
+function mergeEducationFallback(extracted: CvEducation[], fallbackValue?: string): CvEducation[] {
+  const fallback = nocoEducation(fallbackValue)
+  if (!extracted.length) return fallback
+  if (!fallback.length) return extracted
+  return extracted.map(item => {
+    const exact = fallback.find(candidate =>
+      normalizedInstitution(candidate.institution) === normalizedInstitution(item.institution))
+    const candidate = exact ?? (extracted.length === 1 && fallback.length === 1 ? fallback[0] : undefined)
+    if (!candidate) return item
+    return {
+      ...item,
+      degree: first(item.degree, candidate.degree),
+      specialization: first(item.specialization, candidate.specialization),
+      graduationYear: item.graduationYear ?? candidate.graduationYear
+    }
+  })
 }
 
 function contactsLine(profile: CvProfile): string {
@@ -119,7 +147,7 @@ function buildAbout(profile: CvProfile): string {
   return sections.join('\n\n')
 }
 
-function employers(profile: CvProfile): EmployerCandidate[] {
+function cvEmployers(profile: CvProfile): EmployerCandidate[] {
   const sources = new Map<string, { name: string; sources: Set<string> }>()
   const add = (name: string, source: string) => {
     const key = name.trim().toLowerCase().replace(/ё/g, 'е')
@@ -132,7 +160,7 @@ function employers(profile: CvProfile): EmployerCandidate[] {
     add(item.company, 'cv:experience')
     for (const name of item.namedOrganizations) add(name, 'cv:experience-context')
   }
-  for (const name of profile.namedOrganizations) add(name, 'cv-or-self-presentation')
+  for (const name of profile.namedOrganizations) add(name, 'cv:named-organization')
   return [...sources.values()].map(item => ({ name: item.name, sources: [...item.sources] }))
 }
 
@@ -166,8 +194,7 @@ export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfil
       linkedin: first(extracted.contacts.linkedin, client.contacts.linkedin),
       other: unique([...extracted.contacts.other, ...client.contacts.other])
     },
-    education: extracted.education.length ? extracted.education :
-      nocoEducation(client.fallbacks.education),
+    education: mergeEducationFallback(extracted.education, client.fallbacks.education),
     // Technologies explicitly named in an experience entry are source-backed
     // skills as well. Keep the CV ordering and add only missing tags so they can
     // be entered in HH without rewriting the experience description.
@@ -175,31 +202,34 @@ export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfil
       ...extracted.skills,
       ...extracted.experience.flatMap(item => item.technologies)
     ]),
-    languages: extracted.languages.some(item => /english|англий/i.test(item.name)) ||
-      !client.fallbacks.englishLevel ? extracted.languages : [...extracted.languages, {
-        name: extracted.language === 'ru' ? 'Английский' : 'English',
-        level: client.fallbacks.englishLevel
-      }]
+    languages: resolveProfileLanguages({
+      cvLanguages: extracted.languages,
+      profileLanguage: extracted.language,
+      databaseEnglishLevel: client.fallbacks.englishLevel
+    })
   }
   const prepared = {
     client,
     cv: profile,
     titles: titlesForStack(client.stack, client.market),
     about: buildAbout(profile),
-    employerCandidates: employers(profile),
+    employerCandidates: mergeEmployerCandidates(
+      client.stopListCompanies.map(name => ({ name, sources: ['noco:stop_list_company'] })),
+      cvEmployers(profile)
+    ),
     preparedAt: now
   }
   if (!profile.contacts.email) {
     throw profileFillerError('profile_email_missing',
-      `No email is available for ${client.clientName}.`, 'prepare_profile')
+      'No email is available in the approved sources.', 'prepare_profile')
   }
   if (!profile.summary || !prepared.about) {
     throw profileFillerError('profile_about_missing',
-      `The final CV has no About/Summary for ${client.clientName}.`, 'prepare_profile')
+      'The final CV has no About/Summary.', 'prepare_profile')
   }
   if (!profile.experience.length) {
     throw profileFillerError('profile_experience_missing',
-      `The final CV has no employment history for ${client.clientName}.`, 'prepare_profile')
+      'The final CV has no employment history.', 'prepare_profile')
   }
   return prepared
 }

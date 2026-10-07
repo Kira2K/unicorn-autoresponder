@@ -20,6 +20,8 @@ export async function runHHEmployerTests() {
         <label data-qa="resume-visibility-card-access-type-blacklist"><input type="radio" checked>Скрыто от выбранных работодателей</label>
         <div data-qa="cell"><span>Анонимное резюме</span><button role="switch" aria-checked="true">Анонимность</button></div>
         <label data-qa="resume-visibility-card-hidden-fields-phones"><input type="checkbox" checked>Телефоны</label>
+        ${['names_and_photo', 'email', 'other_contacts', 'experience'].map(name =>
+          '<label data-qa="resume-visibility-card-hidden-fields-' + name + '"><input type="checkbox"></label>').join('')}
         <button data-qa="applicant-employers-list-activator-blacklist"></button>
         <button data-qa="resume-partial-edit-save">Сохранить</button>
         <script>
@@ -43,6 +45,12 @@ export async function runHHEmployerTests() {
             };
             modal.querySelector('button').onclick = () => { if (selected) committed.add(selected); modal.remove(); refresh(); };
             document.body.append(modal);
+            for (const name of ['Employer A', 'Employer B']) {
+              const row = document.createElement('label'); row.dataset.qa = 'cell';
+              row.innerHTML = '<input type="checkbox">' + name;
+              row.querySelector('input').checked = committed.has(name);
+              modal.querySelector('#results').append(row);
+            }
           };
           document.querySelector('[data-qa="resume-partial-edit-save"]').onclick = () => fetch('/save', {
             method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([...committed])
@@ -50,20 +58,21 @@ export async function runHHEmployerTests() {
         </script>` })
     })
     const profile = { cv: { contacts: {} }, employerCandidates: [
-      { name: 'Employer A' }, { name: 'Employer B' }, { name: 'Missing Co' }
+      { name: 'Employer A', sources: ['cv'] }, { name: 'Employer B', sources: ['cv'] }, { name: 'Missing Co', sources: ['cv'] }
     ] } as PreparedProfile
     const resume = { id: 'draft', title: 'Draft', href: '', isDraft: true }
     const first = await configurePrivacyAndStopList(page, resume, profile)
     assert.deepEqual(stored, ['Employer A', 'Employer B'])
-    assert.deepEqual(first.added, stored)
-    assert.deepEqual(first.skipped, [{ name: 'Missing Co', reason: 'not_found' }])
+    assert.deepEqual(first.employers.filter(item => item.status === 'added').map(item => item.officialName), stored)
+    assert.deepEqual(first.employers.filter(item => item.status === 'skipped').map(item =>
+      ({ name: item.candidate, reason: item.reason })), [{ name: 'Missing Co', reason: 'not_found' }])
     const second = await configurePrivacyAndStopList(page, resume, profile)
-    assert.deepEqual(second.existing, stored)
-    assert.deepEqual(second.added, [])
+    assert.deepEqual(second.employers.filter(item => item.status === 'existing').map(item => item.officialName), stored)
+    assert.deepEqual(second.employers.filter(item => item.status === 'added'), [])
     assert.equal(stored.length, 2)
     stored = []
     ignoreWrites = true
     await assert.rejects(() => configurePrivacyAndStopList(page, resume, profile),
-      { code: 'profile_hh_employer_not_persisted' })
+      { code: 'profile_hh_employer_selection_not_persisted' })
   } finally { await browser.close() }
 }

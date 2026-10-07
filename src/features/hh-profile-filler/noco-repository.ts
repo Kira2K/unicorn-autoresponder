@@ -1,15 +1,13 @@
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
-const { createNocoClient } = require('../../integrations/noco/core/client.ts') as {
-  createNocoClient(options?: unknown): {
-    fetchRecords(tableId: string, limit?: number): Promise<NocoRecord[]>
-  }
-}
+const { createNocoClient } = require('../../integrations/noco/core/client.ts')
 const { TABLES } = require('../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { id: string }>
 }
 
 import { ProfileFillerError, profileFillerError } from './errors.ts'
+import { parseStopListCompany } from './employer-stop-list.ts'
+import { marketForStatus } from './state-store.ts'
 import type { ContactData, ProfileFillerMarket, ResolvedClient } from './types.ts'
 
 type NocoRecord = Record<string, any> & { Id: number }
@@ -129,7 +127,8 @@ function mapNocoReadError(error: unknown, source: string): never {
 }
 
 export function createProfileFillerNocoRepository(
-  client = createNocoClient({ pageDelayMs: 750, retryDelaysMs: [0, 5000, 15000, 45000] })
+  client: { fetchRecords(tableId: string, limit?: number): Promise<NocoRecord[]> } =
+    createNocoClient({ pageDelayMs: 750, retryDelaysMs: [0, 5000, 15000, 45000] })
 ) {
   let cached: Promise<NocoProfileFillerSnapshot> | undefined
   let cachedClients: Promise<NocoRecord[]> | undefined
@@ -190,13 +189,14 @@ export function createProfileFillerNocoRepository(
     }
     const clientName = text(clientRow.client_name) || `client-${expectedClientId}`
 
+
     const responseRows = data.autoresponses.filter(row =>
       clientId(row, 'rel_hhAutoresponses_client') === expectedClientId)
     const overrideValues = responseRows.flatMap(row => linkedRecords(row['Stack Override']))
     const overrideIds = [...new Set(overrideValues.map(row => Number(row.Id)).filter(Boolean))]
     if (overrideIds.length > 1) {
       throw profileFillerError('profile_stack_ambiguous',
-        `Multiple Stack Override values found for ${clientName}: ${overrideIds.join(', ')}.`,
+        'Multiple Stack Override values were found.',
         'resolve_stack')
     }
     const stackRelation = overrideValues[0] ?? linkedRecords(clientRow.rel_clients_primary_stack)[0]
@@ -205,7 +205,7 @@ export function createProfileFillerNocoRepository(
     const stack = text(stackRow?.name ?? stackRow?.stack ?? stackRelation?.name)
     if (!stack) {
       throw profileFillerError('profile_stack_missing',
-        `No stack is configured for ${clientName}.`, 'resolve_stack')
+        'No stack is configured.', 'resolve_stack')
     }
 
     const profiles = data.profiles.filter(row =>
@@ -213,13 +213,13 @@ export function createProfileFillerNocoRepository(
       localeMatches(row.locale, market))
     if (profiles.length !== 1) {
       throw profileFillerError(profiles.length ? 'profile_dolphin_ambiguous' : 'profile_dolphin_missing',
-        `${profiles.length || 'No'} Dolphin ${market} profile rows found for ${clientName}.`,
+        `${profiles.length || 'No'} Dolphin ${market} profile rows found.`,
         'resolve_dolphin', { rowIds: profiles.map(row => row.Id) })
     }
     const dolphinProfileId = Number(profiles[0].dolphin_profile_id)
     if (!Number.isInteger(dolphinProfileId) || dolphinProfileId <= 0) {
       throw profileFillerError('profile_dolphin_invalid',
-        `Dolphin profile id is invalid for ${clientName}.`, 'resolve_dolphin')
+        'Dolphin profile id is invalid.', 'resolve_dolphin')
     }
 
     const cvCandidates = data.cvRows.filter(row =>
@@ -231,14 +231,14 @@ export function createProfileFillerNocoRepository(
     const cvRow = cvCandidates[0]
     if (!cvRow) {
       throw profileFillerError('profile_cv_not_ready',
-        `A confirmed final ${market} CV is not available for ${clientName}.`, 'resolve_cv')
+        `A confirmed final ${market} CV is not available.`, 'resolve_cv')
     }
 
     const accounts = data.accounts.filter(row =>
       clientId(row, 'rel_platformAccounts_client') === expectedClientId)
     const hhAccount = uniqueAccount(accounts,
       row => platformId(row) === HH_PLATFORM_IDS[market] ||
-        accountLabel(row).includes(`hh ${market.toLowerCase()}`), `hh_${market.toLowerCase()}`)
+        accountLabel(row).includes(`hh ${market.toLowerCase()}`), `hh_${market.toLowerCase()}`, true)
     const phoneAccount = uniqueAccount(accounts, row => {
       const label = accountLabel(row)
       return label.includes('phone en') || platformId(row) === 28 || label === 'phone'
@@ -268,6 +268,7 @@ export function createProfileFillerNocoRepository(
       cvUrl: text(market === 'Ru' ? cvRow.ru_version_url : cvRow.en_version_url),
       cvRevision: text(cvRow.UpdatedAt ?? cvRow.Id),
       studentFolderUrl: text(cvRow.student_data_folder_url) || text(clientRow.google_folder) || undefined,
+      stopListCompanies: parseStopListCompany(clientRow.stop_list_company),
       contacts,
       fallbacks: {
         fullName: text(clientRow.fio) || text(clientRow.client_name) || undefined,
@@ -286,5 +287,18 @@ export function createProfileFillerNocoRepository(
     }
   }
 
-  return { listClients, resolveClient, snapshot }
+  async function revalidateClientStatus(id: number, market: ProfileFillerMarket,
+    expected?: ResolvedClient): Promise<void> {
+    await snapshot(true)
+    const current = await resolveClient(id, market)
+    if (expected) {
+      const fields = ['clientId', 'market', 'stack', 'dolphinProfileId', 'cvUrl', 'cvRevision',
+        'contacts', 'fallbacks', 'credentials', 'stopListCompanies'] as const
+      if (fields.some(key => JSON.stringify(current[key]) !== JSON.stringify(expected[key]))) {
+        throw profileFillerError('profile_sources_changed',
+          'Prepared source records changed; prepare the profile again before editing HH.', 'source_preflight')
+      }
+    }
+  }
+  return { listClients, resolveClient, snapshot, revalidateClientStatus }
 }

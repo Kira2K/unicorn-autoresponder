@@ -51,7 +51,7 @@ or automatically retry jobs based on database status or elapsed time.
 - All modes use this choice: preparation, filling, recovery and live smoke. A SQL failure must not fall back to Noco.
 - Record IDs are preserved from Noco. `--client-id` means that same ID in the selected database.
 - CV files still come from Drive. Artifacts remain local files, not SQL records; legacy queue state is not processed.
-- The legacy `--use-noco-identity` flag means identity from the selected repository; its name is kept for compatibility.
+- The legacy `--use-noco-identity` flag is rejected; correct conflicting approved source identities before filling.
 - Use the existing SQL connection settings from the runtime. Do not change the database schema or create a second client for this feature.
 
 ## Safety invariants
@@ -69,25 +69,33 @@ or automatically retry jobs based on database status or elapsed time.
   the complete target set. Publication is part of a requested production fill, including recovery of these
   same resumes; do not repeatedly request permission for that already-authorized step. Dry-run stays
   read-only and live-smoke never publishes. Preserve manual edits and skip activation for an already active ID.
-- Snapshot old resume IDs/titles before replacement. Create and verify replacements before deleting old resumes, except for the documented one-at-a-time HH limit fallback.
+- Snapshot old resume IDs/titles before replacement. Create and verify replacements before deleting old resumes, At the HH limit, stop and preserve all old resumes.
 - The user explicitly authorizes final HH Profile Filler reports to `VEU Менеджерский чатик`
   (Telegram chat ID `-1003187558078`) without per-run confirmation. This includes the resolved client's
   name and sanitized terminal failure reason in the report format below. When `summary_logs_channel_id`
   resolves to this exact ID, send the single terminal report through the existing reporting session without
   asking again. This standing authorization covers only this skill's final reports to this destination;
   a different destination requires separate authorization. It does not override tool-level approval blocks.
-- Send exactly one final Telegram report for the entire client/market skill operation through the existing reporting session to
-  `summary_logs_channel_id`. After terminal failure send `⚠️ HH Profile Filler`, a newline,
-  `Не получилось заполнить <client_name>`, another newline, and `Причина: <safe_error_message>`, using the
-  resolved client name from the selected repository and the sanitized terminal error message. Send the existing success report only
-  after verified completion. Do not include client IDs, credentials, stack/stop-list details, dry-run, retry,
-  skipped-employer, or unrelated intermediate UI errors in Telegram; keep fuller diagnostics in local artifacts.
-  A CLI process ending is not terminal while the skill will fix or retry the operation. Run such attempts with
-  `--defer-telegram`, then use `--report-result <result.json>` exactly once after the whole operation has
-  permanently succeeded or failed. Never send a Telegram report between attempts.
-  A reporting permission or delivery failure does not cancel independently authorized HH recovery.
-  Keep the unsent result locally, respect the delivery block, and continue filling when the user requests it.
-  Do not resend a previous failure after the operation has resumed; report only its new terminal outcome.
+- Send one terminal report per operation through the shared reporting session to `summary_logs_channel_id`.
+  Use the actual Dolphin API profile name, never a name constructed from client/stack fields.
+  Success requires `operationComplete=true`, contract version 2, and verified active/searchable targets.
+  The formatter rejects old/incomplete success artifacts. Failure reports include a sanitized reason;
+  keep client names separate from the actual Dolphin profile name out of the reason.
+  Supervised attempts use `--defer-telegram`; finalize with `--report-result <result.json>` once.
+  The operation journal skips sent reports and blocks retry when delivery is unknown. A reporting failure
+  never repeats HH changes. Dry-run and smoke results are not sent.
+
+## Mandatory persisted-state contract
+
+Read [contract-checks.md](references/contract-checks.md) when modifying or testing enforcement.
+Verify content, identity, contacts, experience/education membership, languages, skills, work preferences,
+privacy, employer selections and preservation before publishing or making the next native copy.
+Require active/searchable server state and `??????? ??? ??????` before whole-operation success.
+Recheck every target before deletion. A missing check, unreadable field or incomplete copy blocks progress.
+Revalidate the selected repository's client/profile/account/CV records before editing and deletion;
+client status never gates the manually requested market. SQL mode verifies the configured runtime source
+and shared pool identity, and never falls back to Noco. Keep exclusive local Dolphin-profile locks,
+immutable preservation observations and operation recovery state across attempts.
 
 ## Commands
 
@@ -123,8 +131,7 @@ or automatically retry jobs based on database status or elapsed time.
   searchable in HH server data. If one remains a draft, report incomplete activation; never return success.
 - Multi-attempt supervised fill without intermediate Telegram: add `--defer-telegram`; after the terminal
   result run `npm run profile-filler -- --report-result <artifact-result.json>` exactly once.
-- Explicitly approved cross-person CV with repository identity: add `--use-noco-identity`. Never use this
-  flag without a direct user instruction naming both people.
+- The legacy `--use-noco-identity` flag is rejected by the shared service. Resolve identity conflicts in approved sources before preparation.
 - Legacy `--pending`, `--scan-only`, `profile-filler:scan` and `profile-filler:pending` entry points are disabled.
   Use only the explicit client/market commands above; do not register scheduled Profile Filler tasks.
 - Tests: `npm run profile-filler:test && npm run typecheck`

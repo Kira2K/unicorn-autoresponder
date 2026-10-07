@@ -11,6 +11,7 @@ export async function runNocoRepositoryTests() {
   const records: Record<string, any[]> = {
     [TABLES.clients.id]: [{ Id: 7, client_name: 'Client', client_status: 'on en market',
       fio: 'Fallback Name', birth_date: '1990-01-01', desired_location: 'Anywhere',
+      stop_list_company: ' Amazon, "RBI", amazon, ,Yandex ',
       rel_clients_primary_stack: { Id: 1, name: 'Python' } }],
     [TABLES.hhAutoresponses.id]: [{ Id: 70, clients_id: 7,
       'Stack Override': { Id: 2, name: 'FullStack' } }],
@@ -44,11 +45,17 @@ export async function runNocoRepositoryTests() {
   assert.equal(resolved.contacts.phone, '+123')
   assert.equal(resolved.contacts.telegram, '@nick')
   assert.equal(resolved.credentials.login, 'login@example.com')
+  assert.deepEqual(resolved.stopListCompanies, ['Amazon', 'RBI', 'Yandex'])
   assert.equal(reads.get(TABLES.clients.id), 1)
   for (const tableId of [TABLES.hhAutoresponses.id, TABLES.dolphinProfiles.id,
     TABLES.platformAccounts.id, TABLES.cvProcessing.id, TABLES.stacks.id]) {
     assert.equal(reads.get(tableId), 1)
   }
+  await repository.revalidateClientStatus(7, 'En', resolved)
+  records[TABLES.dolphinProfiles.id][0].dolphin_profile_id = '124'
+  await assert.rejects(() => repository.revalidateClientStatus(7, 'En', resolved),
+    (error: any) => error.code === 'profile_sources_changed')
+  records[TABLES.dolphinProfiles.id][0].dolphin_profile_id = '123'
 
   for (const status of ['on ru market', 'studying', 'archived', '', null, undefined]) {
     records[TABLES.clients.id][0].client_status = status

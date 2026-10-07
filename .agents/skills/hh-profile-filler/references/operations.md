@@ -43,11 +43,11 @@
   entire supervised client/market skill operation reaches verified completion or a genuinely terminal
   failure. The end of one CLI process is not terminal when a code fix or another attempt will follow. Use
   `--defer-telegram` for every such attempt, and call `--report-result <result.json>` exactly once for the
-  final result; its marker prevents reporting the same result file twice. Never send a message for a dry-run,
+  final result; the operation journal prevents delivery under different result filenames. Never send a message for a dry-run,
   Noco 429, network error, diagnostic failure, scheduled retry, code correction, or other intermediate error.
   A terminal failure message is
-  `⚠️ HH Profile Filler\nНе получилось заполнить <client_name>\nПричина: <safe_error_message>`, using the resolved
-  client name from the selected repository and a sanitized, single-line terminal error message. IDs and fuller diagnostics stay in
+  `⚠️ HH Profile Filler\nПрофиль Dolphin: <actual_name>\nНе получилось заполнить.\nПричина: <safe_error_message>`, using the actual
+  Dolphin API profile name and a sanitized reason with separate client names removed. IDs and fuller diagnostics stay in
   local artifacts. A reporting failure must be logged but must not re-run an already completed HH mutation.
 - Set `TELEGRAM_STORAGE_ROOT` to the main runtime repository's `storage` directory so the runner
   uses `storage/telegram-reporting/.telegram-session`, not a worktree-local session path.
@@ -152,5 +152,18 @@
 - Final verification reads exact IDs/titles and publication attributes directly, even if a list redirects.
   `--resume-ids <mapped-order-ids> --resume-from verify-final` is read-only and must fail for a draft or
   non-searchable resume. Never interpret an unfinished wizard as a successfully completed production fill.
-- Resume limit: snapshot first, delete at most one old resume immediately before its replacement, and stop further deletions if replacement fails.
+- Resume limit: stop, retain existing resumes and report the blocker; never delete an old resume just to make room.
 - Final verification failure or partial replacement: stop, retain artifacts, send a critical report, and do not continue deleting.
+
+## Combined verification and reporting contract
+
+Follow `contract-checks.md`: verify persisted content and privacy before each publication/copy,
+then active/searchable state and active job-search status, and recheck every target before deletion.
+A resume limit stops without deleting an old resume to make space. Repository records are refreshed
+before mutation; manual filling remains independent of client status. PostgreSQL mode checks the
+runtime source identity without fallback. The profile lock and operation journals survive attempts.
+
+Terminal result artifacts require contract version 2, `operationComplete=true`, complete target IDs,
+and the actual Dolphin profile name. Final reporting uses the shared operation delivery journal;
+sent is skipped and unknown delivery is not retried automatically. This replaces older result formats.
+The legacy identity-override flag is rejected. No queue, timer or scheduled Profile Filler is enabled.
