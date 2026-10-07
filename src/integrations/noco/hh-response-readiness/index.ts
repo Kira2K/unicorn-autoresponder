@@ -296,7 +296,7 @@ function buildTargets(state: {
 }
 
 function printText(results: TargetReadiness[]): void {
-  console.log(`Noco HH response targets: ${results.length}`)
+  console.log(`HH response targets (${process.env.APP_DB}): ${results.length}`)
 
   for (const result of results) {
     const status = result.problems.length ? 'BLOCKED' : 'ready'
@@ -319,14 +319,23 @@ function printText(results: TargetReadiness[]): void {
 }
 
 async function main(): Promise<void> {
+  require('dotenv').config({ quiet: true })
+  const { resolveStorage } = require('../../../../scripts/hh-autoresponses-storage.cjs')
+  const { createAppDb } = require('../../../platform/db/index.ts')
+  const { hhReadinessOptions } = require('../../../platform/db/postgres/hh-readiness.mts')
+  const { closeRuntimePostgresDb } = require('../../../platform/db/postgres/runtime.mts')
+  process.env.APP_DB = resolveStorage()
   const options = parseArgs(process.argv.slice(2))
-  const results = await loadReadinessResults(options)
+  const results = await loadReadinessResults({
+    ...options, ...hhReadinessOptions(process.env.APP_DB, createAppDb())
+  }).finally(() => closeRuntimePostgresDb())
   const blocked = results.filter(result => result.problems.length)
 
   if (options.json) {
     console.log(
       JSON.stringify(
         {
+          storage: process.env.APP_DB,
           targets: results.length,
           ready: results.length - blocked.length,
           blocked: blocked.length,
@@ -386,6 +395,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  main,
   buildTargets,
   checkTarget,
   loadReadinessResults,

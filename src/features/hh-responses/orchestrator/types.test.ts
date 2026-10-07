@@ -67,6 +67,7 @@ function testClientTypeCompatibility(): void {
       phone: '9775442105',
       rawPhone: '+79775442105',
       email: 'kira@example.test',
+      login: 'kira@example.test',
       password: 'temporary-password'
     }
   }

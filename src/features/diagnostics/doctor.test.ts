@@ -50,6 +50,7 @@ function makeCredentials(patch: Record<string, unknown> = {}) {
     phone: '+10000000000',
     rawPhone: '+10000000000',
     email: 'kira@example.test',
+    login: 'kira@example.test',
     password: 'secret',
     ...patch
   }
