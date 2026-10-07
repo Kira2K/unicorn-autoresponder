@@ -334,16 +334,36 @@ function testYuliaMessageTemplateContract(): void {
     YULIA_TASKS_FOOTER
   ].join('\n'))
   assertYuliaTemplate(yuliaTemplates.yuliaTaskCardMessage('en', {
-    clientName: 'Анна', market: 'EN', draftUrl: 'https://docs.test/draft',
-    stack: 'must-not-appear', realLocation: 'must-not-appear', githubUrl: 'must-not-appear',
-    emailEn: 'must-not-appear@example.com', telegramEn: '@must_not_appear',
-    phoneEn: '+1 000', linkedInUrl: 'https://linkedin.com/in/must-not-appear'
+    clientName: 'Анна', market: 'EN', draftUrl: 'https://docs.test/draft?a=1&b=2',
+    rootFolder: 'https://drive.test/root?a=1&b=2', sourceFolder: 'https://drive.test/source',
+    kirasComments: 'Добавить <опыт>', stack: 'Java & Kotlin',
+    realLocation: 'Tbilisi <Georgia>', desiredLocation: 'Berlin & Remote',
+    realAge: '24', englishLevel: 'B2 & higher', education: 'University <Faculty>, 2024',
+    readyForInterviewInEnglishIn2Months: 'Yes',
+    emailEn: 'anna&work@example.com', telegramEn: '@anna<en>', phoneEn: '+1 555 0100',
+    linkedInUrl: 'https://linkedin.com/in/anna?a=1&b=2',
+    githubUrl: 'https://github.com/anna?a=1&b=2'
   }), [
     '<b>Английская версия</b>',
     'Студент: Анна',
     'Рынок: EN',
     'Статус: английская версия в работе',
-    'Черновик: https://docs.test/draft',
+    'Стек: Java &amp; Kotlin',
+    'Реальная локация: Tbilisi &lt;Georgia&gt;',
+    'Желаемая локация: Berlin &amp; Remote',
+    'Реальный возраст: 24',
+    'Уровень английского: B2 &amp; higher',
+    'Ready for interview in English in 2 months: Yes',
+    'Образование: University &lt;Faculty&gt;, 2024',
+    'Email EN: anna&amp;work@example.com',
+    'Telegram EN: @anna&lt;en&gt;',
+    'Phone EN: +1 555 0100',
+    'LinkedIn: https://linkedin.com/in/anna?a=1&amp;b=2',
+    'GitHub: https://github.com/anna?a=1&amp;b=2',
+    'Корневая папка: https://drive.test/root?a=1&amp;b=2',
+    'Исходные данные: https://drive.test/source',
+    'Комментарии Киры: Добавить &lt;опыт&gt;',
+    'Черновик: https://docs.test/draft?a=1&amp;b=2',
     'Отправь ссылку на EN-версию следующим сообщением — я прикреплю её к этой задаче.',
     YULIA_TASKS_FOOTER
   ].join('\n'))
@@ -1691,17 +1711,66 @@ async function runTests() {
 
     const missingEnglishVersionRepository = makeWorkflowRepository(makeWorkflow({
       status: 'English version in progress',
+      clientGoogleFolder: 'https://drive.google.com/drive/folders/root',
       studentDataFolderUrl: 'https://drive.google.com/drive/folders/manual-source',
       kirasComments: 'Please prepare the draft.',
       cvDraftUrl: 'https://drive.google.com/drive/folders/draft-from-provider'
     }))
     const missingEnglishTask = await getProviderTaskById(98, missingEnglishVersionRepository, providerActor)
     assert.match(missingEnglishTask.message, /Отправь ссылку на EN-версию следующим сообщением/)
-    assert.doesNotMatch(missingEnglishTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
-    assert.doesNotMatch(
-      missingEnglishTask.message,
-      /Стек:|Реальная локация:|Желаемая локация:|Реальный возраст:|Уровень английского:|Образование:|GitHub:/
-    )
+    const englishStudentRows = [
+      'Стек: Python',
+      'Реальная локация: Tbilisi, Georgia',
+      'Желаемая локация: Remote RU proxy',
+      'Реальный возраст: 24',
+      'Уровень английского: B1',
+      'Образование: University',
+      'Email EN: student.en@example.com',
+      'Telegram EN: @student_en',
+      'Phone EN: +1 555 0100',
+      'LinkedIn: https://linkedin.com/in/student-user',
+      'Ready for interview in English in 2 months: Yes',
+      'GitHub: https://github.com/student-user',
+      'Корневая папка: https://drive.google.com/drive/folders/root',
+      'Исходные данные: https://drive.google.com/drive/folders/manual-source',
+      'Комментарии Киры: Please prepare the draft.',
+      'Черновик: https://drive.google.com/drive/folders/draft-from-provider'
+    ]
+    for (const market of ['EN', 'both']) {
+      const englishTask = await getProviderTaskById(98, makeWorkflowRepository({
+        ...missingEnglishVersionRepository.workflowRecord,
+        clientMarket: market
+      }), providerActor)
+      for (const row of englishStudentRows) {
+        assert.equal(englishTask.message.split('\n').filter((line: string) => line === row).length, 1, row)
+      }
+      assert.equal(englishTask.parseMode, 'HTML')
+      assert.deepEqual(
+        englishTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
+        ['Назад к задачам']
+      )
+    }
+    const emptyEnglishTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+      status: 'English version in progress',
+      clientStack: '', realLocation: '', desiredLocation: '', realAge: undefined,
+      clientReadyForInterviewInEnglishIn2Months: '',
+      englishLevel: '', education: '', educationEntries: [], clientGithubUrl: '',
+      clientEmailEn: '', clientTelegramEnNickname: '', clientPhoneEn: '', clientLinkedInUrl: '',
+      clientTelegramEn: '@login_must_not_appear'
+    })), providerActor)
+    for (const label of ['Стек', 'Реальная локация', 'Желаемая локация', 'Реальный возраст',
+      'Уровень английского', 'Образование', 'Email EN', 'Telegram EN', 'Phone EN', 'LinkedIn',
+      'Ready for interview in English in 2 months',
+      'GitHub', 'Корневая папка', 'Исходные данные', 'Комментарии Киры', 'Черновик']) {
+      assert.ok(emptyEnglishTask.message.split('\n').includes(`${label}: empty`), label)
+    }
+    assert.doesNotMatch(emptyEnglishTask.message, /login_must_not_appear/)
+    for (const realAge of [null, '', ' ']) {
+      const task = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+        status: 'English version in progress', realAge
+      })), providerActor)
+      assert.match(task.message, /Реальный возраст: empty/)
+    }
     const savedProviderEnglishResult = await saveProviderLinkFromChat(
       missingEnglishVersionRepository,
       providerActor,
@@ -2141,8 +2210,8 @@ async function runTests() {
                 const card = await getProviderTaskById(98, repository, providerActor)
                 assert.equal(notification.text, `${yuliaTemplates.yuliaNewTaskMessage('draft', 'Test', 'EN').text}\n\n${card.message}`)
               } else {
-                assert.doesNotMatch(notification.text, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:|Стек:|GitHub:/)
-                assert.match(notification.text, /Открой \/open_my_tasks, чтобы взять задачу в работу\.$/)
+                const card = await getProviderTaskById(98, repository, providerActor)
+                assert.equal(notification.text, `${yuliaTemplates.yuliaNewTaskMessage('en', 'Test', 'EN').text}\n\n${card.message}`)
                 assert.match(notification.text, /Подготовь, пожалуйста, EN-версию\./)
               }
             }

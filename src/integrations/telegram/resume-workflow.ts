@@ -1243,7 +1243,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCv
             returnedCvUrl
           )
         : yuliaNewTaskMessage(providerStage, record.clientName, market)
-      if (providerStage === 'draft' && !returnedCvUrl) {
+      if ((providerStage === 'draft' || providerStage === 'en') && !returnedCvUrl) {
         const card = yuliaTaskCardForWorkflow(record)
         if (card) message.text += `\n\n${card.text}`
       }
@@ -1406,7 +1406,7 @@ function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
     stack: normalizeText(workflow.clientStack),
     realLocation: normalizeText(workflow.realLocation),
     desiredLocation: normalizeText(workflow.desiredLocation),
-    realAge: Number.isFinite(Number(workflow.realAge)) ? String(Number(workflow.realAge)) : '',
+    realAge: normalizeText(workflow.realAge) && Number.isFinite(Number(workflow.realAge)) ? String(Number(workflow.realAge)) : '',
     englishLevel: normalizeText(workflow.englishLevel),
     readyForInterviewInEnglishIn2Months: normalizeText(workflow.clientReadyForInterviewInEnglishIn2Months),
     education: educationDetails(workflow),
