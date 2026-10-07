@@ -7,6 +7,11 @@ import { createCvExtractor } from './cv-extractor.ts'
 import { buildPreparedProfile } from './profile-builder.ts'
 import { errorCode, errorStage, ProfileFillerError, safeErrorMessage } from './errors.ts'
 import { withAuthorizedHHPage } from './hh-session.ts'
+import { activateResume, readResumePublication, verifyActiveResume } from './hh-activation.ts'
+import { ensureResumeSkills, verifyResumeSkills } from './hh-skills.ts'
+import { ensureEnglishResumeLanguage, verifyEnglishResumeLanguage } from './hh-resume-language.ts'
+import { ACTIVE_JOB_SEARCH_STATUS, ensureActiveJobSearchStatus, verifyActiveJobSearchStatus } from './hh-job-search-status.ts'
+import { assertCompleteSkills, requiredSkillSet } from './skill-selection.ts'
 import { captureArtifactScreenshot, configurePrivacyAndStopList, createResumeDraft, deleteResume,
   duplicateResumeVariant, INITIAL_HH_PROFESSION,
   inspectHH, listResumes, professionForTitle, resumeDraftFromWorkPermits,
@@ -44,7 +49,7 @@ function sanitizedPlan(profile: PreparedProfile) {
       experience: profile.cv.experience.length,
       education: profile.cv.education.length,
       languages: profile.cv.languages.length,
-      skills: profile.cv.skills.length,
+      skills: requiredSkillSet(profile.cv).length,
       hasAbout: Boolean(profile.about),
       hasEmail: Boolean(profile.cv.contacts.email),
       hasPhone: Boolean(profile.cv.contacts.phone)
@@ -82,6 +87,14 @@ export function createProfileFillerService(options: {
   drive?: ReturnType<typeof createDriveSourceLoader>
   extractor?: ReturnType<typeof createCvExtractor>
   withPage?: typeof withAuthorizedHHPage
+  publication?: {
+    read: typeof readResumePublication
+    activate: typeof activateResume
+    verify: typeof verifyActiveResume
+  }
+  skills?: { ensure: typeof ensureResumeSkills; verify: typeof verifyResumeSkills }
+  resumeLanguage?: { ensure: typeof ensureEnglishResumeLanguage; verify: typeof verifyEnglishResumeLanguage }
+  jobSearchStatus?: { ensure: typeof ensureActiveJobSearchStatus; verify: typeof verifyActiveJobSearchStatus }
   ui?: {
     configurePrivacyAndStopList: typeof configurePrivacyAndStopList
     createResumeDraft: typeof createResumeDraft
@@ -97,6 +110,16 @@ export function createProfileFillerService(options: {
   const drive = options.drive ?? createDriveSourceLoader()
   let extractor = options.extractor
   const withPage = options.withPage ?? withAuthorizedHHPage
+  const publication = options.publication ?? {
+    read: readResumePublication, activate: activateResume, verify: verifyActiveResume
+  }
+  const skills = options.skills ?? { ensure: ensureResumeSkills, verify: verifyResumeSkills }
+  const resumeLanguage = options.resumeLanguage ?? {
+    ensure: ensureEnglishResumeLanguage, verify: verifyEnglishResumeLanguage
+  }
+  const jobSearchStatus = options.jobSearchStatus ?? {
+    ensure: ensureActiveJobSearchStatus, verify: verifyActiveJobSearchStatus
+  }
   const ui = options.ui ?? { configurePrivacyAndStopList, createResumeDraft, deleteResume,
     duplicateResumeVariant, inspectHH, listResumes, resumeDraftFromWorkPermits, verifyKnownDraft }
 
@@ -219,37 +242,65 @@ export function createProfileFillerService(options: {
   async function execute(profile: PreparedProfile, jobId?: string,
     executionOptions: { preserveExisting?: boolean;
       resumeIdsByTitle?: Record<string, string>;
-      resumeFrom?: 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' } = {}): Promise<ProfileFillerResult> {
+      resumeFrom?: 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | 'title-variants' | 'activate' } = {}): Promise<ProfileFillerResult> {
     const preserveExisting = executionOptions.preserveExisting === true
+    const expectedSkills = requiredSkillSet(profile.cv)
     return await withPage(profile.client, async (page, artifactDir) => {
       const oldResumes = await ui.listResumes(page)
       const snapshotFile = path.join(artifactDir, 'old-resumes.json')
       fs.writeFileSync(snapshotFile, `${JSON.stringify(oldResumes, null, 2)}\n`, { mode: 0o600 })
       const created: ResumeSnapshot[] = []
-      const duplicated: ResumeSnapshot[] = []
       const deleted: ResumeSnapshot[] = []
       const targets: ResumeSnapshot[] = []
       try {
         const baselineTitle = professionForTitle(profile.titles[0], profile.client.market).trim()
-        const baseline = oldResumes.find(item => !item.isDraft && item.title.trim() === baselineTitle)
+        let baseline = oldResumes.find(item => !item.isDraft && item.title.trim() === baselineTitle)
         const initialProfessionDrafts = oldResumes.filter(item => item.isDraft &&
           item.title.trim() === INITIAL_HH_PROFESSION)
         for (const title of profile.titles) {
           const profession = professionForTitle(title, profile.client.market).trim()
           const existing = oldResumes.find(item => !deleted.some(removed => removed.id === item.id) &&
             item.title.trim() === profession)
+          const knownTarget = (id: string): ResumeSnapshot => ({ id, title: profession,
+            href: `https://hh.ru/resume/${id}`, isDraft: true })
+          if (executionOptions.resumeFrom === 'activate') {
+            const id = executionOptions.resumeIdsByTitle?.[title] ?? existing?.id
+            if (!id) throw new ProfileFillerError('profile_hh_recovery_resume_missing',
+              `Activation requires the existing resume ID for "${profession}".`, 'activate_resume')
+            targets.push(await publication.read(page, knownTarget(id)))
+            continue
+          }
+          if (executionOptions.resumeFrom === 'title-variants') {
+            const knownId = executionOptions.resumeIdsByTitle?.[title] ?? existing?.id
+            if (profession === baselineTitle) {
+              if (!knownId) throw new ProfileFillerError('profile_hh_recovery_draft_missing',
+                'Title-variant recovery requires the verified baseline ID.', 'duplicate_resume')
+              baseline = await publication.read(page, knownTarget(knownId))
+              targets.push(baseline)
+            } else {
+              if (!baseline) throw new ProfileFillerError('profile_hh_recovery_draft_missing',
+                'Title-variant recovery requires a verified baseline.', 'duplicate_resume')
+              const variant = existing && !existing.isDraft
+                ? await publication.read(page, existing)
+                : await ui.duplicateResumeVariant(page, baseline, title,
+                profile.client.stack, profile.client.market, { artifactDir, duplicateId: knownId })
+              created.push(variant)
+              targets.push(variant)
+            }
+            continue
+          }
           if (executionOptions.resumeFrom === 'verify-final') {
             const knownId = executionOptions.resumeIdsByTitle?.[title]
             if (!knownId) throw new ProfileFillerError('profile_hh_final_resume_id_missing',
               `Final verification requires a known ID for "${profession}".`, 'verify_draft')
-            targets.push(await ui.verifyKnownDraft(page, profession, knownId, artifactDir))
+            targets.push(await publication.read(page, knownTarget(knownId)))
             continue
           }
           if (executionOptions.resumeFrom === 'privacy' ||
               executionOptions.resumeFrom === 'delete-old') {
-            if (!existing?.isDraft) throw new ProfileFillerError(
+            if (!existing) throw new ProfileFillerError(
               'profile_hh_recovery_draft_missing',
-              `Recovery requires an unpublished draft titled "${profession}".`,
+              `Recovery requires an existing resume titled "${profession}".`,
               executionOptions.resumeFrom === 'privacy' ? 'configure_privacy' : 'verify_draft')
             targets.push(existing)
             continue
@@ -269,11 +320,11 @@ export function createProfileFillerService(options: {
                   resumeDraftId)
               : baseline
                 ? await ui.duplicateResumeVariant(page, baseline, title, profile.client.stack,
-                    profile.client.market)
+                    profile.client.market, { artifactDir })
                 : await ui.createResumeDraft(page, profile, title, artifactDir)
             created.push(resume)
             targets.push(resume)
-            if (baseline && !resume.isDraft) duplicated.push(resume)
+            if (!baseline && profession === baselineTitle) baseline = resume
           } catch (error) {
             if (error instanceof ProfileFillerError && error.code === 'profile_hh_resume_limit') {
               if (preserveExisting) throw error
@@ -294,18 +345,28 @@ export function createProfileFillerService(options: {
                     retryDraftId)
                 : baseline
                   ? await ui.duplicateResumeVariant(page, baseline, title, profile.client.stack,
-                      profile.client.market)
+                      profile.client.market, { artifactDir })
                   : await ui.createResumeDraft(page, profile, title, artifactDir)
               created.push(resume)
               targets.push(resume)
-              if (baseline && !resume.isDraft) duplicated.push(resume)
+              if (!baseline && profession === baselineTitle) baseline = resume
             } else throw error
           }
+        }
+
+        // A native copy or an active status says nothing about structured skill completeness.
+        // Publication-only/read-only recovery checks skills without rewriting content.
+        for (const target of targets) {
+          const readOnly = ['activate', 'verify-final', 'delete-old'].includes(executionOptions.resumeFrom ?? '')
+          const saved = await (readOnly ? skills.verify : skills.ensure)(page, target, expectedSkills)
+          assertCompleteSkills(saved, expectedSkills)
         }
 
         const stopList = { added: [] as string[], existing: [] as string[],
           skipped: [] as Array<{ name: string; reason: string }> }
         if (executionOptions.resumeFrom !== 'delete-old' &&
+            executionOptions.resumeFrom !== 'activate' &&
+            executionOptions.resumeFrom !== 'title-variants' &&
             executionOptions.resumeFrom !== 'verify-final') {
           for (const resume of targets) {
             const result = await ui.configurePrivacyAndStopList(page, resume, profile)
@@ -315,7 +376,51 @@ export function createProfileFillerService(options: {
           }
         }
 
-        if (!preserveExisting && executionOptions.resumeFrom !== 'verify-final') {
+        // A persisted draft is an intermediate result, never production completion.
+        // Finish all targets before removing any old resume.
+        if (executionOptions.resumeFrom !== 'verify-final') {
+          for (let index = 0; index < targets.length; index += 1) {
+            const activated = await publication.activate(page, targets[index], artifactDir)
+            if (!activated.isActive || activated.isDraft || !activated.searchable) throw new ProfileFillerError(
+              'profile_hh_resume_not_active', `HH resume ${activated.id} is not active.`, 'verify_active')
+            targets[index] = activated
+            if (await jobSearchStatus.ensure(page) !== ACTIVE_JOB_SEARCH_STATUS) throw new ProfileFillerError(
+              'profile_hh_job_search_status_incomplete', 'HH job-search status was not saved as active_search.',
+              'verify_job_search_status')
+          }
+        }
+        const activeTargets = []
+        const skillVerification = []
+        for (const target of targets) {
+          if (profile.client.market === 'En') {
+            const readOnly = ['activate', 'verify-final', 'delete-old'].includes(executionOptions.resumeFrom ?? '')
+            await (readOnly ? resumeLanguage.verify : resumeLanguage.ensure)(page, target)
+          }
+          const savedSkills = await skills.verify(page, target, expectedSkills)
+          assertCompleteSkills(savedSkills, expectedSkills)
+          skillVerification.push({ resumeId: target.id, skills: savedSkills })
+          const verified = await publication.verify(page, target)
+          if (!verified.isActive || verified.isDraft || !verified.searchable) throw new ProfileFillerError(
+            'profile_hh_resume_not_active', `HH resume ${target.id} is not active.`, 'verify_active')
+          if (profile.client.market === 'En' && verified.resumeLanguage !== 'EN') throw new ProfileFillerError(
+            'profile_hh_resume_language_incomplete', `En resume ${target.id} does not have persisted language EN.`,
+            'verify_resume_language')
+          activeTargets.push(verified)
+        }
+        fs.writeFileSync(path.join(artifactDir, 'active-resumes.json'),
+          `${JSON.stringify(activeTargets, null, 2)}\n`, { mode: 0o600 })
+        fs.writeFileSync(path.join(artifactDir, 'verified-skills.json'),
+          `${JSON.stringify(skillVerification, null, 2)}\n`, { mode: 0o600 })
+        const searchStatus = await jobSearchStatus.verify(page)
+        if (searchStatus !== ACTIVE_JOB_SEARCH_STATUS) throw new ProfileFillerError(
+          'profile_hh_job_search_status_incomplete', 'HH job-search status is not active_search.',
+          'verify_job_search_status')
+        fs.writeFileSync(path.join(artifactDir, 'job-search-status.json'),
+          `${JSON.stringify({ status: searchStatus, verifiedAt: new Date().toISOString() }, null, 2)}\n`, { mode: 0o600 })
+
+        if (!preserveExisting && executionOptions.resumeFrom !== 'verify-final' &&
+            executionOptions.resumeFrom !== 'activate' &&
+            executionOptions.resumeFrom !== 'title-variants') {
           for (const resume of oldResumes) {
             if (!deleted.some(item => item.id === resume.id) &&
                 !targets.some(item => item.id === resume.id)) {
@@ -326,24 +431,18 @@ export function createProfileFillerService(options: {
         }
         const finalResumes = executionOptions.resumeFrom === 'verify-final'
           ? targets : await ui.listResumes(page)
-        const finalIds = new Set(finalResumes.map(item => item.id))
+        const finalIds = new Set([...finalResumes, ...activeTargets].map(item => item.id))
         const missing = targets.filter(item => !finalIds.has(item.id))
-        const survivors = preserveExisting ? [] : oldResumes.filter(item =>
+        const survivors = preserveExisting || executionOptions.resumeFrom === 'title-variants' ||
+          executionOptions.resumeFrom === 'activate' ? [] : oldResumes.filter(item =>
           finalIds.has(item.id) && !targets.some(target => target.id === item.id))
-        const published = finalResumes.filter(item =>
-          targets.some(target => target.id === item.id) &&
-          (executionOptions.resumeFrom === 'privacy' ||
-            executionOptions.resumeFrom === 'delete-old' ||
-            created.some(createdResume => createdResume.id === item.id)) && !item.isDraft &&
-          !duplicated.some(duplicate => duplicate.id === item.id))
-        const titles = new Set(finalResumes.filter(item =>
-          targets.some(target => target.id === item.id)).map(item => item.title.trim()))
+        const titles = new Set(activeTargets.map(item => item.title.trim()))
         const missingTitles = profile.titles.filter(title =>
           !titles.has(professionForTitle(title, profile.client.market).trim()))
-        if (missing.length || survivors.length || published.length || missingTitles.length) {
+        if (missing.length || survivors.length || missingTitles.length) {
           throw new ProfileFillerError('profile_hh_final_verification_failed',
-            `Final HH verification failed: ${missing.length} new drafts missing, ` +
-            `${survivors.length} old resumes remain, ${published.length} unexpectedly published, ` +
+            `Final HH verification failed: ${missing.length} active resumes missing, ` +
+            `${survivors.length} old resumes remain, ` +
             `${missingTitles.length} titles missing.`, 'verify')
         }
         await captureArtifactScreenshot(page, path.join(artifactDir, 'final-resumes.png'))
@@ -356,19 +455,11 @@ export function createProfileFillerService(options: {
           market: profile.client.market,
           dolphinProfileId: profile.client.dolphinProfileId,
           stage: 'completed',
-          message: executionOptions.resumeFrom === 'delete-old'
-            ? `Removed ${deleted.length} old resume(s) after verified recovery of ` +
-              `${targets.length} target draft(s).`
-            : executionOptions.resumeFrom === 'verify-final'
-              ? `Verified ${targets.length} unpublished HH draft(s) by their known IDs.`
-            : executionOptions.resumeFrom === 'privacy'
-            ? `Completed privacy for ${targets.length} HH draft(s) and removed ` +
-              `${deleted.length} old resume(s).`
-            : preserveExisting
-            ? `Created ${created.length} HH resume variant(s); existing resumes were preserved.`
-            : `Created ${created.length} HH resume variant(s) and removed ${deleted.length} old resume(s).`,
+          message: `Verified ${activeTargets.length} active, searchable HH resumes with 30 Advanced skills each; ` +
+            `created ${created.length} variant(s), removed ${deleted.length} old resume(s).`,
           artifactDir,
           createdResumeTitles: created.map(item => item.title),
+          activeResumeIds: activeTargets.map(item => item.id),
           deletedResumeIds: deleted.map(item => item.id),
           stopList: {
             added: [...new Set(stopList.added)],
@@ -398,20 +489,22 @@ export function createProfileFillerService(options: {
   async function run(clientId: number, market: ProfileFillerMarket,
     dryRunOnly = false, jobId?: string, useNocoIdentity = false,
     resumeId?: string,
-    resumeFrom?: 'work-permits' | 'privacy' | 'delete-old' | 'verify-final',
+    resumeFrom?: 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | 'title-variants' | 'activate',
     orderedResumeIds: string[] = []): Promise<ProfileFillerResult> {
     let clientName = `client-${clientId}`
     try {
       const client = await repository.resolveClient(clientId, market)
       clientName = client.clientName
       const prepared = await prepareResolved(client, useNocoIdentity)
-      if (orderedResumeIds.length && orderedResumeIds.length !== prepared.titles.length) {
+      if (orderedResumeIds.length && (orderedResumeIds.length > prepared.titles.length ||
+          (resumeFrom !== 'title-variants' && orderedResumeIds.length !== prepared.titles.length))) {
         throw new ProfileFillerError('profile_hh_final_resume_id_count',
           `Expected ${prepared.titles.length} ordered resume IDs, got ${orderedResumeIds.length}.`,
           'verify_draft')
       }
       const resumeIdsByTitle = orderedResumeIds.length
-        ? Object.fromEntries(prepared.titles.map((title, index) => [title, orderedResumeIds[index]]))
+        ? Object.fromEntries(prepared.titles.slice(0, orderedResumeIds.length)
+          .map((title, index) => [title, orderedResumeIds[index]]))
         : resumeId && prepared.titles[0]
           ? { [prepared.titles[0]]: resumeId }
           : undefined

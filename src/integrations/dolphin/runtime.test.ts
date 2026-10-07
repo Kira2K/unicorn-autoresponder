@@ -13,7 +13,7 @@ const {
   __resetDolphinRuntimeForTests(): void
   __setDolphinRuntimeTestDependencies(overrides: Record<string, unknown>): void
   getStartedProfileIds(): number[]
-  startDolphinProfile(profileId: number): Promise<unknown>
+  startDolphinProfile(profileId: number, options?: { headless?: boolean }): Promise<unknown>
   stopDolphinProfile(profileId: number): Promise<void>
 }
 
@@ -98,6 +98,19 @@ async function testApiStopFailureCanStillCleanWithFallback(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  __resetDolphinRuntimeForTests()
+  const requestedModes: boolean[] = []
+  __setDolphinRuntimeTestDependencies({
+    requestLocalDolphin: async (_path: string, options: { body: { headless: boolean } }) => {
+      requestedModes.push(options.body.headless)
+      return { automation: { port: 9222 } }
+    }
+  })
+  await startDolphinProfile(100, { headless: false })
+  await startDolphinProfile(101, { headless: true })
+  await startDolphinProfile(102)
+  assert.deepEqual(requestedModes, [false, true,
+    require('../../features/hh-responses/orchestrator/config.ts').DOLPHIN_HEADLESS])
   await testStopFallsBackToProcessKill()
   await testStopKeepsTrackingWhenStillRunning()
   await testApiStopFailureCanStillCleanWithFallback()

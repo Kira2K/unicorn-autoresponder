@@ -2,9 +2,18 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createProfileFillerService } from '../service.ts'
+import { createProfileFillerService as buildService } from '../service.ts'
+import { mockPublication, mockSkills, mockResumeLanguage, mockJobSearchStatus } from './publication-fixture.ts'
 import { ProfileFillerError } from '../errors.ts'
 import type { PreparedProfile } from '../types.ts'
+
+const createProfileFillerService = (options: Parameters<typeof buildService>[0]) =>
+  buildService({ repository: {
+    async listClients() { throw new Error('Unexpected repository read in service unit test') },
+    async resolveClient() { throw new Error('Unexpected repository read in service unit test') },
+    async snapshot() { throw new Error('Unexpected repository read in service unit test') }
+  }, publication: mockPublication(), skills: mockSkills(), resumeLanguage: mockResumeLanguage(),
+    jobSearchStatus: mockJobSearchStatus(), ...options })
 
 export async function runServiceTests() {
   const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hh-profile-filler-test-'))
@@ -21,7 +30,7 @@ export async function runServiceTests() {
       stack: 'Java', dolphinProfileId: 123, cvUrl: 'url', cvRevision: '1',
       contacts: { other: [] }, fallbacks: {}, credentials: {} },
     cv: { language: 'en', contacts: { email: 'cv@example.com', other: [] },
-      summary: 'Summary', skillGroups: [], skills: ['Java'], experience: [{ company: 'Old Co',
+      summary: 'Summary', skillGroups: [], skills: Array.from({ length: 30 }, (_, i) => `Skill ${i}`), experience: [{ company: 'Old Co',
         title: 'Engineer', current: true, description: 'Work', technologies: [],
         namedOrganizations: [] }], education: [], languages: [], namedOrganizations: [] },
     titles: ['Title A', 'Title B'], about: 'Contacts\ncv@example.com\n\nSummary\nSummary',
@@ -44,6 +53,13 @@ export async function runServiceTests() {
         created.push(resume)
         return resume
       },
+      async duplicateResumeVariant(_page: any, source: any, title: string) {
+        assert.equal(source.id, 'new-1', 'Use the newly completed draft as baseline')
+        const resume = { id: `new-${created.length + 1}`, title,
+          href: `https://hh.ru/resume/new-${created.length + 1}`, isDraft: true }
+        created.push(resume)
+        return resume
+      },
       async deleteResume(_page: any, resume: any) { deleted.push(resume.id) },
       async configurePrivacyAndStopList() { return { added: [], existing: [], skipped: [] } },
       async inspectHH() { return { resumes: old, artifact: 'artifact' } }
@@ -53,6 +69,141 @@ export async function runServiceTests() {
   assert.equal(result.ok, true)
   assert.deepEqual(result.createdResumeTitles, ['Title A', 'Title B'])
   assert.deepEqual(deleted, ['old-1', 'old-2'])
+  assert.equal(createCalls, 2, 'Only primary creation and its limit retry use the blank wizard')
+
+  const postPublicationEvents: string[] = []
+  const postPublicationService = createProfileFillerService({
+    withPage: async (_client: any, action: any) => action(fakePage, artifactDir),
+    publication: { ...mockPublication(), activate: async (page, resume) => {
+      postPublicationEvents.push(`published:${resume.title}`)
+      return mockPublication().activate(page, resume)
+    } },
+    jobSearchStatus: {
+      ensure: async () => { postPublicationEvents.push('ensure-status'); return 'active_search' },
+      verify: async () => { postPublicationEvents.push('verify-status'); return 'active_search' }
+    },
+    ui: { async listResumes() { return created },
+      async configurePrivacyAndStopList() { return { added: [], existing: [], skipped: [] } } } as any
+  })
+  await postPublicationService.execute(profile, undefined, { resumeFrom: 'privacy', preserveExisting: true })
+  assert.deepEqual(postPublicationEvents, ['published:Title A', 'ensure-status',
+    'published:Title B', 'ensure-status', 'verify-status'])
+
+  let statusWritesDuringVerification = 0
+  const missingJobStatus = createProfileFillerService({
+    withPage: async (_client: any, action: any) => action(fakePage, artifactDir),
+    jobSearchStatus: {
+      ensure: async () => { statusWritesDuringVerification += 1; return 'active_search' },
+      verify: async () => 'looking_for_offers' as any
+    },
+    ui: { async listResumes() { return created } } as any
+  })
+  await assert.rejects(missingJobStatus.execute(profile, undefined, { resumeFrom: 'verify-final',
+    resumeIdsByTitle: Object.fromEntries(created.map(resume => [resume.title, resume.id])) }),
+    { code: 'profile_hh_job_search_status_incomplete' })
+  assert.equal(statusWritesDuringVerification, 0)
+
+  let languageDeletes = 0
+  const russianMetadata = createProfileFillerService({
+    withPage: async (_client: any, action: any) => action(fakePage, artifactDir),
+    publication: { ...mockPublication(), verify: async (page, resume) => ({
+      ...await mockPublication().verify(page, resume), resumeLanguage: resume.title === 'Title B' ? 'RU' : 'EN'
+    }) },
+    ui: { async listResumes() { return [...created, old[0]] },
+      async deleteResume() { languageDeletes += 1 } } as any
+  })
+  await assert.rejects(russianMetadata.execute(profile, undefined, { resumeFrom: 'delete-old' }),
+    { code: 'profile_hh_resume_language_incomplete' })
+  assert.equal(languageDeletes, 0, 'Every En variant must have persisted EN metadata before cleanup/success')
+
+  let sourceBrowserCalls = 0
+  const insufficientSource = createProfileFillerService({
+    withPage: async () => { sourceBrowserCalls += 1; throw new Error('Must not open browser') }
+  })
+  await assert.rejects(insufficientSource.execute({ ...profile, cv: { ...profile.cv, skills: ['Java'] } }),
+    { code: 'profile_hh_skills_source_insufficient' })
+  assert.equal(sourceBrowserCalls, 0)
+
+  for (const failure of ['empty', '29', 'unset']) {
+    let deletes = 0
+    let publishes = 0
+    const targets = ['Title A', 'Title B'].map((title, i) => ({ id: `skills-${i}`, title,
+      href: `https://hh.ru/resume/skills-${i}`, isDraft: false }))
+    const readSkills = async (_page: unknown, target: any, expected: string[]) => {
+      const saved = expected.map(name => ({ name, level: 'advanced' as string | null }))
+      if (target.id === targets[0].id) return saved
+      if (failure === 'empty') return []
+      if (failure === '29') return saved.slice(0, 29)
+      saved[29].level = null
+      return saved
+    }
+    const incompleteCopy = createProfileFillerService({
+      withPage: async (_client: any, action: any) => action(fakePage, artifactDir),
+      skills: { ensure: readSkills, verify: readSkills },
+      publication: { ...mockPublication(), activate: async (...args) => {
+        publishes += 1; return mockPublication().activate(args[0], args[1])
+      } },
+      ui: { async listResumes() { return [...targets, old[0]] },
+        async deleteResume() { deletes += 1 } } as any
+    })
+    await assert.rejects(incompleteCopy.execute(profile, undefined, { resumeFrom: 'delete-old' }),
+      { code: 'profile_hh_skills_incomplete' })
+    assert.equal(deletes, 0, 'Incomplete copied skills must block old-resume deletion')
+    assert.equal(publishes, 0, 'An active baseline must not hide incomplete skills in another title')
+  }
+
+  let deletionBeforeActivation = 0
+  const inactiveTarget = { id: 'still-draft', title: 'Title A', href: 'https://hh.ru/resume/still-draft',
+    isDraft: false }
+  const inactive = async (_page: unknown, resume: any) => ({ ...resume, isDraft: true,
+    isActive: false, searchable: false, publicationStatus: 'not_finished' })
+  const incompleteService = createProfileFillerService({
+    repository: {} as any, drive: {} as any, extractor: {} as any,
+    withPage: async (_client: any, action: any) => action(fakePage, artifactDir),
+    publication: { read: inactive, activate: inactive, verify: inactive },
+    ui: {
+      async listResumes() { return [inactiveTarget, old[0]] },
+      async configurePrivacyAndStopList() { return { added: [], existing: [], skipped: [] } },
+      async deleteResume() { deletionBeforeActivation += 1 }
+    } as any
+  })
+  await assert.rejects(incompleteService.execute({ ...profile, titles: ['Title A'] }),
+    { code: 'profile_hh_resume_not_active' })
+  assert.equal(deletionBeforeActivation, 0, 'Never delete old resumes while a replacement is still a draft')
+
+  const hiddenTitles = ['Title A', 'Title B', 'Title C']
+  const hiddenIds: Record<string, string> = { 'Title A': 'known-a', 'Title B': 'known-b' }
+  let freshClones = 0
+  const recoveryServiceForHiddenList = createProfileFillerService({
+    repository: {} as any, drive: {} as any, extractor: {} as any,
+    withPage: async (_client: any, action: any) => action(fakePage, artifactDir),
+    ui: {
+      async listResumes() { return [] },
+      async verifyKnownDraft(_page: any, title: string, id: string) {
+        assert.equal(id, hiddenIds[title])
+        return { id, title, href: `https://hh.ru/resume/${id}`, isDraft: true }
+      },
+      async duplicateResumeVariant(_page: any, source: any, title: string,
+        _stack: string, _market: string, options: any) {
+        assert.equal(source.id, 'known-a')
+        if (!options.duplicateId) {
+          freshClones += 1
+          hiddenIds[title] = 'new-c'
+        }
+        return { id: options.duplicateId ?? hiddenIds[title], title,
+          href: `https://hh.ru/resume/${hiddenIds[title]}`, isDraft: true }
+      },
+      async createResumeDraft() { throw new Error('Do not restart the blank wizard') },
+      async configurePrivacyAndStopList() { throw new Error('Title-only recovery preserves privacy') },
+      async deleteResume() { throw new Error('Title-only recovery preserves existing resumes') }
+    } as any
+  })
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const recovered = await recoveryServiceForHiddenList.execute({ ...profile, titles: hiddenTitles },
+      undefined, { resumeFrom: 'title-variants', resumeIdsByTitle: { ...hiddenIds } })
+    assert.equal(recovered.ok, true)
+  }
+  assert.equal(freshClones, 1, 'Resume known copies even when the list hides every draft')
 
   const variantProfile: PreparedProfile = {
     ...profile,
@@ -80,7 +231,7 @@ export async function runServiceTests() {
         const normalized = title.includes('Backend')
           ? 'Старший бэкенд разработчик' : 'Старший фронтенд разработчик'
         const resume = { id: `variant-${variants.length}`, title: normalized,
-          href: `https://hh.ru/resume/variant-${variants.length}`, isDraft: false }
+          href: `https://hh.ru/resume/variant-${variants.length}`, isDraft: true }
         variants.push(resume)
         return resume
       },
@@ -228,6 +379,10 @@ export async function runServiceTests() {
 
   const verifiedIds: string[] = []
   const verifyFinalService = createProfileFillerService({
+    publication: { ...mockPublication(), verify: async (page, resume) => {
+      verifiedIds.push(resume.id)
+      return mockPublication().verify(page, resume)
+    } },
     repository: {} as any,
     drive: {} as any,
     extractor: {} as any,
@@ -235,7 +390,6 @@ export async function runServiceTests() {
     ui: {
       async listResumes() { return [] },
       async verifyKnownDraft(_page: any, title: string, id: string) {
-        verifiedIds.push(id)
         return { id, title, href: `https://hh.ru/resume/${id}`, isDraft: true }
       },
       async createResumeDraft() { throw new Error('Final verification must be read-only.') },

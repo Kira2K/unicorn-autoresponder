@@ -10,7 +10,6 @@ const { TABLES } = require('../../integrations/noco/core/schema.ts') as {
 }
 
 import { ProfileFillerError, profileFillerError } from './errors.ts'
-import { marketForStatus } from './state-store.ts'
 import type { ContactData, ProfileFillerMarket, ResolvedClient } from './types.ts'
 
 type NocoRecord = Record<string, any> & { Id: number }
@@ -190,12 +189,6 @@ export function createProfileFillerNocoRepository(
         `Noco client ${expectedClientId} was not found.`, 'resolve_noco')
     }
     const clientName = text(clientRow.client_name) || `client-${expectedClientId}`
-    const currentMarket = marketForStatus(clientRow.client_status)
-    if (currentMarket !== market) {
-      throw profileFillerError('profile_status_changed',
-        `Client ${clientName} is no longer in on ${market.toLowerCase()} market status.`,
-        'resolve_noco', { currentStatus: text(clientRow.client_status) })
-    }
 
     const responseRows = data.autoresponses.filter(row =>
       clientId(row, 'rel_hhAutoresponses_client') === expectedClientId)

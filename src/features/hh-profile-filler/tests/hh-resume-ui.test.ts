@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { chooseFirstSuggestion, INITIAL_HH_PROFESSION, openProfessionEditor,
+  assertNewResumeEntry,
   nextWizardStep, professionForTitle, SAVE_AND_CONTINUE_PATTERNS,
   specializationForStack } from '../hh-resume-ui.ts'
 import { formatProfileFillerReport } from '../reporter.ts'
@@ -19,6 +20,11 @@ function hiddenLocator(): any {
 }
 
 export async function runHHResumeUiTests() {
+  assert.doesNotThrow(() => assertNewResumeEntry('https://hh.ru/profile/resume/professional_role'))
+  assert.throws(() => assertNewResumeEntry('https://hh.ru/profile/resume/experience?resume=known'),
+    { code: 'profile_hh_new_resume_redirected' })
+  assert.throws(() => assertNewResumeEntry('https://hh.ru/profile/resume/common?resume=known'),
+    { code: 'profile_hh_new_resume_redirected' })
   assert.equal(SAVE_AND_CONTINUE_PATTERNS.some(pattern =>
     pattern.test('Сохранить и\u00a0продолжить')), true)
   assert.deepEqual(specializationForStack('FullStack', 'Ru'), {

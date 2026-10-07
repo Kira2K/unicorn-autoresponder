@@ -8,10 +8,11 @@ import { createProfileFillerService } from '../service.ts';
 import { professionForTitle, type ResumeSnapshot } from '../hh-resume-ui.ts';
 import { titlesForStack } from '../stack-titles.ts';
 import { makeHhFixture } from './postgres-fixture.mts';
+import { mockPublication, mockSkills, mockResumeLanguage, mockJobSearchStatus } from './publication-fixture.ts';
 import type { CvProfile, ProfileFillerMarket } from '../types.ts';
 
-type Mode = 'normal' | 'dry-run' | 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | 'smoke';
-const modes: Mode[] = ['normal', 'dry-run', 'work-permits', 'privacy', 'delete-old', 'verify-final', 'smoke'];
+type Mode = 'normal' | 'dry-run' | 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | 'activate' | 'smoke';
+const modes: Mode[] = ['normal', 'dry-run', 'work-permits', 'privacy', 'delete-old', 'verify-final', 'activate', 'smoke'];
 
 async function runScenario(repository: ReturnType<typeof createProfileFillerRepository>, id: number,
   market: ProfileFillerMarket, mode: Mode, directory: string) {
@@ -31,10 +32,14 @@ async function runScenario(repository: ReturnType<typeof createProfileFillerRepo
   };
   const cv: CvProfile = { language: market === 'En' ? 'en' : 'ru',
     fullName: id === 1 ? 'Fake Author' : 'Second', contacts: { email: 'cv@example.invalid', other: [] },
-    summary: 'Summary', skillGroups: [], skills: ['Go'], experience: [{ company: 'Fake Co',
+    summary: 'Summary', skillGroups: [], skills: Array.from({ length: 30 }, (_, i) => `Skill ${i}`), experience: [{ company: 'Fake Co',
       title: 'Engineer', current: true, description: 'Built tools.', technologies: ['SQL'], namedOrganizations: [] }],
     education: [], languages: [], namedOrganizations: [] };
   const service = createProfileFillerService({ repository,
+    publication: mockPublication(),
+    skills: mockSkills(),
+    resumeLanguage: mockResumeLanguage(),
+    jobSearchStatus: mockJobSearchStatus(),
     drive: {
       async loadCv(url) { calls.push(['cv', url]); return { bytes: Buffer.from('CV'), fileName: 'fake.pdf',
         mimeType: 'application/pdf', revision: 'cv-revision', source: 'cv' }; },
@@ -54,7 +59,9 @@ async function runScenario(repository: ReturnType<typeof createProfileFillerRepo
       async createResumeDraft(_page, profile, title, _directory, resumeId) {
         calls.push(['create', title, resumeId, profile.cv.skills]); return putDraft(title, resumeId);
       },
-      async duplicateResumeVariant() { throw new Error('unexpected_duplicate'); },
+      async duplicateResumeVariant(_page, source, title) {
+        calls.push(['duplicate', source.id, title]); return putDraft(title);
+      },
       async deleteResume(_page, resume) { calls.push(['delete', resume.id]); resumes = resumes.filter(r => r.id !== resume.id); },
       async configurePrivacyAndStopList(_page, resume) {
         calls.push(['privacy', resume.id]); return { added: [], existing: [], skipped: [] };

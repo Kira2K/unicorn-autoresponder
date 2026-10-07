@@ -21,6 +21,8 @@ Do not infer salary, citizenship, relocation, commute time, dates, employers, ed
 
 - Fill all source-supported personal, experience, education, language and skill fields.
 - About order is Contacts, Summary/About, Skills, in the CV language.
+- For En, set the resume's own language to English (`In English` / `EN`) in every title variant and
+  verify it after reloading. Keep this distinct from site UI language and spoken-language proficiency.
 - Preserve CV wording and skill categories.
 - In the initial HH wizard always enter and select the Russian profession `Программист, разработчик`,
   regardless of stack or market. Never enter the mapped English title there. After HH assigns the draft ID,
@@ -34,15 +36,20 @@ Do not infer salary, citizenship, relocation, commute time, dates, employers, ed
   country through individual browser calls; click only selected extras and missing required countries. If the
   four-country set already matches, do not change or save the field.
 - Business trips are Ready. Work formats are On-site, Remote and Hybrid.
-- Add source-supported HH skill tags up to the UI limit and set each to Advanced.
+- Apply the SKILL.md hard skill condition: exactly 30 distinct source-supported structured tags in
+  category rounds, all Advanced, persisted and independently verified for every resume.
 
 ## Resumes and visibility
+
+- After each publication, set HH's job-search status to `Активно ищу работу` and verify persistence.
+  This is independent of database workflow status and active/searchable resume publication.
 
 - Create all configured titles for the resolved stack and market with identical content. If a filled
   primary-title baseline already exists, preserve it, create only missing variants with HH's native
   `Duplicate` action, and reuse matching incomplete drafts.
-- Save ordinary builds as drafts. HH may publish a native duplicate when its profession is confirmed;
-  permit that only for a verified missing title variant copied from the filled baseline.
+- Prepare ordinary builds and native duplicates as drafts. Rename copies through the partial position editor.
+  After content/privacy verification, finish publication for every mapped title and require active, searchable
+  HH server state. Drafts are checkpoints; they are not a completed production fill.
 - Visibility is everyone except selected employers.
 - Stop-list candidates come from CV experience/context and supported files inside the exact
   `Самопрезентация` subfolder whose filename contains `Описание опыта`.

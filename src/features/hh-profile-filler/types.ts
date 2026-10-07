@@ -150,6 +150,7 @@ export type ProfileFillerResult = {
   attempt?: number
   artifactDir?: string
   createdResumeTitles?: string[]
+  activeResumeIds?: string[]
   deletedResumeIds?: string[]
   stopList?: {
     added: string[]

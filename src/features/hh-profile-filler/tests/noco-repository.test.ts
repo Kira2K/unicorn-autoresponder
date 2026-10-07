@@ -50,6 +50,14 @@ export async function runNocoRepositoryTests() {
     assert.equal(reads.get(tableId), 1)
   }
 
+  for (const status of ['on ru market', 'studying', 'archived', '', null, undefined]) {
+    records[TABLES.clients.id][0].client_status = status
+    const manual = await repository.resolveClient(7, 'En')
+    assert.equal(manual.market, 'En')
+    assert.equal(manual.dolphinProfileId, 123)
+    assert.equal(manual.cvUrl, resolved.cvUrl)
+  }
+
   const rateLimitedRepository = createProfileFillerNocoRepository({
     async fetchRecords() {
       const error: any = new Error('Request failed with status code 429')
