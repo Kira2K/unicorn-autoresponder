@@ -181,6 +181,16 @@ Validation/transport failures and non-401 Telegram API errors report to
 to `summary_logs_channel_id`. Reporting uses a no-report internal send path, so
 its own failure cannot recurse.
 
+The support bot retries only the failed `getUpdates` polling operation when the
+shared Bot API adapter reports `telegram_bot_transport_failed`. It also retains
+the last processed update offset across retries. Missing credentials, Telegram
+401/404 responses, and unknown programming errors remain fatal. Retry logs use
+the `telegram_poll_retry` event with the operation, stable error code, retry
+delay, and a sanitized serialized error including its nested transport cause.
+Logging failures cannot stop polling, and token-bearing URLs and configured bot
+credentials are redacted. Message sends and CV business actions are never
+automatically repeated by this polling recovery path.
+
 ## Checks
 
 ```powershell

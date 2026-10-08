@@ -60,3 +60,15 @@ test('Telegram and proxy reads stay in Sheets without loading SQL', async () => 
   await assert.rejects(db.getProxyRequiredClients(), e => e === failure);
   assert.deepEqual(markets, ['Ru', undefined]); assert.equal(sqlCalls, 0);
 });
+
+test('SQL HH auth reads only login, independent of contact email/phone', async () => {
+  for (const login of ['user@example.test', '+79990001122']) {
+    const f = makeFixture();
+    Object.assign(f.data.platformAccounts[0], { login, email: 'wrong@example.test', phone: '+79991112233' });
+    const db = createPostgresAppDb(async () => f.reader, unusedSheets);
+    assert.equal((await db.getHHAuthCredentialsByClientName('Fake')).login, login);
+  }
+  const f = makeFixture();
+  Object.assign(f.data.platformAccounts[0], { login: '', email: 'valid@example.test', phone: '+79991112233' });
+  await assert.rejects(createPostgresAppDb(async () => f.reader, unusedSheets).getHHAuthCredentialsByClientName('Fake'), /missing login/);
+});

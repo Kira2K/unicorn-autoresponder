@@ -9,6 +9,8 @@ const { createTelegramBotApi } = require('./bot-api.ts') as {
 }
 const { createTelegramIntegration } = require('./integration.ts') as
   typeof import('./integration.ts')
+const { serializeTelegramError } = require('./sanitize.ts') as
+  typeof import('./sanitize.ts')
 const { kiraRejectPromptMessage } = require('./resume-kira-message-templates.ts')
 
 type TelegramIntegration = import('./integration.ts').TelegramIntegration
@@ -907,6 +909,7 @@ function isTransientTelegramPollingError(error: any): boolean {
   const message = String(error?.message ?? error?.details?.data?.description ?? error?.cause?.message ?? '').toLowerCase()
   if (status === 401 || status === 404 || message.includes('unauthorized')) return false
   return (
+    code === 'telegram_bot_transport_failed' ||
     code === 'telegram_bot_api_failed' ||
     status === 409 ||
     status === 429 ||
@@ -919,6 +922,24 @@ function isTransientTelegramPollingError(error: any): boolean {
     message.includes('failed to fetch') ||
     ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'].includes(code)
   )
+}
+
+function logTelegramPollingRetry(error: unknown, retryDelayMs: number): void {
+  try {
+    const token = String(process.env.VEU_SUPPORT_BOT ?? '').trim()
+    const serializedError = serializeTelegramError(error, {
+      secrets: token ? [token] : []
+    })
+    console.error(JSON.stringify({
+      event: 'telegram_poll_retry',
+      operation: 'getUpdates',
+      errorCode: serializedError.code,
+      retryDelayMs,
+      error: serializedError
+    }))
+  } catch {
+    // Polling recovery must not depend on diagnostics succeeding.
+  }
 }
 
 function userFacingErrorResponse(error: any): SupportBotResponse {
@@ -958,7 +979,7 @@ async function runSupportBot(options: {
       updates = await botApi.getUpdates(offset || undefined, pollTimeoutSeconds, allowedUpdates)
     } catch (error: any) {
       if (!isTransientTelegramPollingError(error)) throw error
-      console.error(`Telegram polling failed temporarily: ${error instanceof Error ? error.message : String(error)}`)
+      logTelegramPollingRetry(error, pollErrorDelayMs)
       if (pollErrorDelayMs > 0) await wait(pollErrorDelayMs)
       continue
     }

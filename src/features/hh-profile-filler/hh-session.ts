@@ -202,7 +202,7 @@ export async function withAuthorizedHHPage<T>(client: ResolvedClient,
     try {
       await authorizeHHPage(page, {
         credentials: client.credentials.login && client.credentials.password ? {
-          email: client.credentials.login,
+          login: client.credentials.login,
           password: client.credentials.password
         } : undefined,
         artifactDir,

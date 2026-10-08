@@ -11,9 +11,9 @@ HH Profile Filler is operationally independent. Never invoke it from an autoresp
 ## Operating Model
 
 - Treat "all profiles" or "all HH autoresponses" as both `Ru` and `En` markets unless the user narrows the scope.
-- If the user asks to launch, run, or schedule HH autoresponses without naming profiles, clients, or exclusions, default to all enabled Noco targets that pass readiness.
+- If the user asks to launch, run, or schedule HH autoresponses without naming profiles, clients, or exclusions, default to all enabled database targets that pass readiness.
 - If the user does not name a market, default to both markets: `Ru` first, then `En`.
-- Use Noco as production source of truth: `APP_DB=noco`.
+- Use working PostgreSQL as the source of truth: `APP_DB=postgres`. Set `APP_DB_POSTGRES_*` for the working database on the runner machine. Use `npm run hh:readiness -- --market=ru` (or `--market=en`) for the same storage-aware preflight; never force Noco for SQL runs.
 - For all-profile runs, do not hardcode client IDs or names unless the user explicitly asks for a narrowed run.
 - Run markets sequentially: start `Ru` first, then start `En` only after `Ru` exits.
 - Use the production readiness flow before each market starts profiles. It must send a Telegram readiness report, skip blocked accounts before Dolphin starts, and launch only ready accounts.
@@ -23,7 +23,7 @@ HH Profile Filler is operationally independent. Never invoke it from an autoresp
 
 When the user provides a minimal prompt such as `$hh-autoresponses launch`, `$hh-autoresponses run now`, or `$hh-autoresponses schedule for 04:40 GMT+3`, assume:
 
-- scope: all enabled readiness-valid Noco targets
+- scope: all enabled readiness-valid database targets
 - markets: `Ru`, then `En`
 - response limit: `120`
 - concurrency: `3`
@@ -46,7 +46,7 @@ Ask for clarification only when the user gives conflicting scope, a schedule tim
 Use these defaults unless the user specifies otherwise:
 
 ```powershell
-$env:APP_DB = 'noco'
+$env:APP_DB = 'postgres'
 $env:ORCHESTRATOR_SUPERVISED = 'true'
 $env:ORCHESTRATOR_CONCURRENCY = '3'
 $env:ORCHESTRATOR_RESPONSE_LIMIT = '120'
@@ -68,7 +68,7 @@ Remove-Item Env:\ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES -ErrorAction SilentlyConti
 
 1. Inspect the repo docs and relevant source before changing behavior.
 2. Verify no active HH orchestrator or node run is already alive.
-3. Confirm Dolphin API/preflight readiness and Noco availability. For this extra Dolphin/client-state check, send new Telegram messages only if the check errors.
+3. Confirm Dolphin API/preflight readiness and PostgreSQL availability. For this extra Dolphin/client-state check, send new Telegram messages only if the check errors.
 4. Start `Ru` with `ORCHESTRATOR_WORK_WITH_MARKET='Ru'` and `npm run orchestrator`.
 5. Watch until a fresh `logs/orchestrator-run-*.jsonl` appears, the readiness report is sent, and the first batch is running or an auto responder has started.
 6. After `Ru` exits, start `En` with `ORCHESTRATOR_WORK_WITH_MARKET='En'` and the same runtime defaults.
@@ -92,8 +92,8 @@ For failure classification and support/escalation rules, read `references/failur
 ## Extra Dolphin And Client-State Checks
 
 - Run the extra state check at schedule time, one hour before a scheduled launch, launch preflight, and manual status/debug time.
-- Reuse existing repo mechanisms: Dolphin integration/preflight checks, Noco readiness/target inspection, process checks, local logs, and `sendTelegramMessage` from the existing Telegram messenger when an error alert is needed.
-- Check Dolphin app/API reachability, unexpected active HH orchestrator/node runs, scheduled task integrity when applicable, and whether selected Noco target state can be resolved.
+- Reuse existing repo mechanisms: Dolphin integration/preflight checks, configured database readiness/target inspection, process checks, local logs, and `sendTelegramMessage` from the existing Telegram messenger when an error alert is needed.
+- Check Dolphin app/API reachability, unexpected active HH orchestrator/node runs, scheduled task integrity when applicable, and whether selected database target state can be resolved.
 - Write every check result to local logs or the user-visible status summary.
 - Do not send new Telegram messages for OK check results.
 - For error results, immediately send one compact state alert to `summary_logs_channel_id` only.

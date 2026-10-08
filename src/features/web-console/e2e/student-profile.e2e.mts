@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { checkStudentEducation } from './student-education-check.mts';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const express = require('express');
@@ -93,6 +94,8 @@ try {
   await page.locator('#student-firstName').fill('Кира');
   await byId('profile-form').getByRole('button', { name: 'Отмена', exact: true }).click();
 
+  await checkStudentEducation(page, profileWrites);
+
   await byId('open-account-editor-button').click();
   await page.getByRole('dialog').waitFor();
   await page.locator('.p-dialog-mask').click({ position: { x: 5, y: 5 } });
@@ -107,7 +110,7 @@ try {
   }
   await byId('account-platform').selectOption('24');
   assert.match(await page.getByRole('dialog').innerText(), /Номер телефона/);
-  await byId('account-nickname').fill('@@AliceЯ12_'); assert.equal(await byId('account-nickname').inputValue(), '@Alice');
+  await byId('account-nickname').fill('@@AliceЯ12_'); assert.equal(await byId('account-nickname').inputValue(), '@Alice12_');
   await byId('account-platform').selectOption('28');
   await byId('account-phone').fill('+44 (123) abc 45'); assert.equal(await byId('account-phone').inputValue(), '+4412345');
   await byId('account-platform').selectOption('30');
@@ -161,7 +164,7 @@ try {
   await byId('open-account-editor-button').click(); await byId('account-form').waitFor();
   assert.equal(await page.getByRole('dialog').count(), 1);
   await byId('account-platform').selectOption('24'); await byId('account-nickname').fill('@@Other123');
-  assert.equal(await byId('account-nickname').inputValue(), '@Other');
+  assert.equal(await byId('account-nickname').inputValue(), '@Other123');
   await byId('close-account-editor-button').click();
   dashboard.platformAccounts = [];
   for (const nextRole of ['provider', 'admin']) {
@@ -175,5 +178,5 @@ try {
   await page.reload(); await byId('open-account-editor-button').waitFor();
   assert.equal(await byId('validated-student-profile').count(), 0);
   assert.deepEqual(unexpected, []); assert.deepEqual(errors, []);
-  console.log('Student profile browser checks passed: two unrelated students, companies, modal, passwords, phone/Username, mobile, status loading and unchanged admin/provider views.');
+  console.log('Student profile browser checks passed: education T15/T15a/T16, two unrelated students, companies, modal, passwords, phone/Username, mobile, status loading and unchanged admin/provider views.');
 } finally { releaseAccount?.(); releaseSecrets?.(); await browser?.close(); await new Promise<void>(resolve => server.close(() => resolve())); }

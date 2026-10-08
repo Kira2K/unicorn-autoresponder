@@ -8,7 +8,9 @@ $originalLocation = Get-Location
 
 try {
   Set-Location -LiteralPath $AutoresponsesRepo
-  if ($env:APP_DB -ne 'postgres') { $env:APP_DB = 'noco' }
+  $storage = & node (Join-Path $PSScriptRoot 'hh-autoresponses-storage.cjs')
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve HH autoresponses storage.' }
+  $env:APP_DB = $storage.Trim()
   $env:ORCHESTRATOR_SUPERVISED = 'true'
   $env:ORCHESTRATOR_CONCURRENCY = '3'
   $env:ORCHESTRATOR_RESPONSE_LIMIT = '120'
