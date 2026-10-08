@@ -1390,9 +1390,13 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
 
     async getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]> {
       const records = await fetchCvProcessingByStatuses(RESUME_ACTIVE_TASK_STATUSES)
+      const clients: NocoRecord[] = records.length
+        ? await nocoClient.fetchRecords(TABLES.clients.id, 1000, { fields: 'Id,client_name,market' })
+        : []
+      const clientsById = new Map(clients.map(client => [Number(client.Id), client]))
       return records
         .sort((a, b) => Number(a.Id) - Number(b.Id))
-        .map(record => toResumeWorkflow(record, undefined, []))
+        .map(record => toResumeWorkflow(record, clientsById.get(cvProcessingClientId(record) ?? 0), []))
     },
 
     async patchResumeWorkflow(recordId: number, input: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord> {

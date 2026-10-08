@@ -108,3 +108,60 @@ test('return API accepts a native Rich Message acknowledgement without warning o
     await action('status'); assert.equal(calls.length, 1);
   } finally { await server.close(); restore(); }
 });
+
+for (const market of ['Ru', 'En', 'both']) for (const version of ['Draft', 'English version', 'Russian version']) {
+  if (market === 'Ru' && version === 'English version') continue;
+  for (const reviewer of ['Kira', 'student']) {
+    test(`SQL API/${market}/${version}/${reviewer}: reopening a provider card retains the saved rejection reason`, async () => {
+      const f = workflowFixture(market), notifications: TestNotification[] = [], restore = workflowEnv([7]);
+      const server = await serveTestApp(createSqlTestConsole(f.db, f.grant, { notifications }));
+      try {
+        const initial = await f.sql.getResumeWorkflowByTelegramChatId('-7007', { ensure: true });
+        const status = `${version} in approve by ${reviewer}`;
+        const reason = ('Исправить <опыт> & "даты". ' + 'Сохранить подробности. '.repeat(250)).trim();
+        const comments = 'Исходные <замечания> & рекомендации';
+        await f.sql.patchResumeWorkflow(initial!.id, { status, kirasComments: comments,
+          lastRejectionComment: 'Старая причина возврата', cvDraftUrl: 'https://example.invalid/draft',
+          enVersionUrl: 'https://example.invalid/en', ruVersionUrl: 'https://example.invalid/ru' });
+        const actor = reviewer === 'Kira' ? { userId: '9002', chatId: '9002', chatType: 'private' }
+          : { userId: '9001', username: 'sql_student', chatId: '-7007', chatType: 'supergroup' };
+        await workflowHttp(server.base, '-7007')('reject', { actor, expectedStatus: status, rejectionComment: reason });
+        const saved = structuredClone(f.rows.get(t.cv)!.get(String(initial!.id))!);
+        assert.equal(saved.last_rejection_comment, reason);
+        assert.equal(saved.kiras_comments, comments);
+        const owner = version === 'Russian version' && market !== 'Ru' ? '9004' : '9003';
+        const headers = { 'X-Bot-Api-Token': 'sql-test-only', 'X-Telegram-User-Id': owner,
+          'X-Telegram-Chat-Id': owner, 'X-Telegram-Chat-Type': 'private' };
+        const writes = f.count(), sent = notifications.length;
+        for (const repository of [f.sql, f.legacy]) {
+          const queued = (await repository.getProviderResumeTasks()).find(task => task.id === initial!.id);
+          assert.equal(queued?.clientName, 'SQL fixture');
+          assert.equal(queued?.clientMarket, market);
+        }
+        const tasksResponse = await fetch(server.base + '/api/bot/telegram/resume/provider/tasks', { headers });
+        assert.equal(tasksResponse.status, 200);
+        const tasks = await tasksResponse.json();
+        assert.ok(tasks.tasks.some((task: { id: number }) => task.id === initial!.id));
+        const otherOwner = owner === '9003' ? '9004' : '9003';
+        const otherTasksResponse = await fetch(server.base + '/api/bot/telegram/resume/provider/tasks', {
+          headers: { ...headers, 'X-Telegram-User-Id': otherOwner, 'X-Telegram-Chat-Id': otherOwner }
+        });
+        assert.equal(otherTasksResponse.status, 200);
+        const otherTasks = await otherTasksResponse.json();
+        assert.ok(!otherTasks.tasks.some((task: { id: number }) => task.id === initial!.id));
+        const response = await fetch(`${server.base}/api/bot/telegram/resume/workflows/${initial!.id}`, { headers });
+        assert.equal(response.status, 200);
+        const card = await response.json();
+        const rendered = owner === '9003' ? reason.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;').replaceAll('"', '&quot;') : reason;
+        assert.ok(card.message.includes(`Комментарий возврата: ${rendered}`));
+        assert.equal(card.message.split(rendered).length - 1, 1);
+        assert.equal(card.parseMode, owner === '9003' ? 'HTML' : undefined);
+        assert.ok(!card.message.includes('Старая причина возврата'));
+        assert.equal(f.count(), writes, 'listing and reopening must not write');
+        assert.equal(notifications.length, sent, 'listing and reopening must not resend');
+        assert.deepEqual(f.rows.get(t.cv)!.get(String(initial!.id)), saved);
+      } finally { await server.close(); restore(); }
+    });
+  }
+}

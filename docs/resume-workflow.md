@@ -209,6 +209,11 @@ Telegram integration: более 4096 и не более 32768 символов 
 Шаблоны Полины показывают студента, комментарий и действие по
 доработке, а также актуальную ссылку на EN-версию.
 
+При повторном открытии задачи через `/open_my_tasks` карточки Юли и Полины
+также показывают непустой `last_rejection_comment` отдельной строкой
+`Комментарий возврата:` перед ссылками на резюме. Исходные комментарии Киры
+остаются отдельным полем; пустая причина не добавляет строку в карточку.
+
 В контактах Telegram RU/EN бот и карточка исполнителя показывают `nickname`,
 если он заполнен. Иначе используется прежний вариант — `login` и остальные
 запасные поля. Данные аккаунта и Telegram ID для проверки доступа не меняются.
@@ -291,6 +296,8 @@ Polina's messages are deterministic plain-text templates implemented in
 `src/integrations/telegram/resume-polina-message-templates.ts`. They apply to
 the Russian-translator lane for EN and both-market workflows; RU-only workflows
 remain in Yulia's main-provider lane.
+Provider task lists load each client's name and market before applying these
+lane rules, including when the repository uses PostgreSQL.
 
 Covered scenarios are: a new RU task; RU task card; RU rework; saved RU link;
 task list and empty list; multiple or missing link tasks; unavailable, stale,

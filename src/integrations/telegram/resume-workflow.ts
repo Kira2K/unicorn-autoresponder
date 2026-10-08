@@ -1418,6 +1418,7 @@ function yuliaTaskCardInputForWorkflow(workflow: ResumeWorkflowRecord, stage: 'd
     rootFolder,
     sourceFolder,
     kirasComments: normalizeText(workflow.kirasComments),
+    lastRejectionComment: normalizeText(workflow.lastRejectionComment),
     draftUrl: normalizeText(workflow.cvDraftUrl),
     emailEn: normalizeText(workflow.clientEmailEn),
     telegramEn: normalizeText(workflow.clientTelegramEnNickname),
@@ -1440,6 +1441,7 @@ function polinaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
     rootFolder,
     sourceFolder: sourceFolder && sourceFolder !== rootFolder ? sourceFolder : undefined,
     kirasComments: normalizeText(workflow.kirasComments),
+    lastRejectionComment: normalizeText(workflow.lastRejectionComment),
     draftUrl: normalizeText(workflow.cvDraftUrl),
     enVersionUrl: normalizeText(workflow.enVersionUrl)
   })
