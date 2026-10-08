@@ -33,6 +33,7 @@ export type ClientAutomationData = {
 }
 
 export type ClientHHAuthCredentials = {
+  login: string
   clientName: string
   commonChatId?: string
   market?: Market

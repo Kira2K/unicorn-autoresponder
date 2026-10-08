@@ -277,8 +277,8 @@ function assertTargetReadyForAuthPreflight(target: ClientAutomationData): void {
 function assertCredentialsRecordPresent(
   credentials: ClientHHAuthCredentials
 ): void {
-  if (!String(credentials.email ?? '').trim()) {
-    throw new Error('Auth preflight HH credentials record is missing email')
+  if (!String(credentials.login ?? '').trim()) {
+    throw new Error('Auth preflight HH credentials record is missing login')
   }
 
   if (!String(credentials.password ?? '').trim()) {

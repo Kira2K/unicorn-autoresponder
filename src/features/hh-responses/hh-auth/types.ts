@@ -14,7 +14,7 @@ export type HHBrowserMode = 'headless' | 'headfull'
 export type HHAuthLogger = (message: string, details?: Record<string, unknown>) => void
 
 export type HHCredentials = {
-  email: string
+  login: string
   password: string
 }
 

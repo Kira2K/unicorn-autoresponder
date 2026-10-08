@@ -1,5 +1,7 @@
+const { hhLoginKind } = require('../../../../shared/hh-login.ts')
 require('dotenv').config({ quiet: true })
 const fs = require('node:fs')
+const { resolveStorage } = require('../../../../scripts/hh-autoresponses-storage.cjs')
 
 const {
   createAppDb
@@ -87,6 +89,16 @@ const {
 } = require('../orchestrator/scraper-state.ts')
 
 type ClientAutomationData = import('../orchestrator/types.ts').ClientAutomationData
+
+function createHHAppDb(): import('../../../platform/db/types.ts').AppDb {
+  process.env.APP_DB = resolveStorage()
+  writeLocalRunLog({
+    kind: 'storage-config',
+    storage: process.env.APP_DB,
+    database: process.env.APP_DB === 'postgres' ? process.env.APP_DB_POSTGRES_DATABASE : undefined
+  })
+  return createAppDb()
+}
 type OrchestratorStatus = import('../orchestrator/types.ts').OrchestratorStatus
 type TargetReadiness = {
   clientName: string
@@ -467,8 +479,12 @@ function getClientReadinessError(client: ClientAutomationData): Error | null {
     return new Error(`HH password for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
   }
 
-  if (!String(client.hhAuthCredentials.email ?? '').trim()) {
-    return new Error(`HH email for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
+  if (!String(client.hhAuthCredentials.login ?? '').trim()) {
+    return new Error(`HH login for ${client.clientName}/${client.market ?? 'unknown'} is missing`)
+  }
+
+  if (!hhLoginKind(client.hhAuthCredentials.login)) {
+    return new Error(`HH login for ${client.clientName}/${client.market ?? 'unknown'} is malformed`)
   }
 
   return null
@@ -885,7 +901,7 @@ function makeClientPreparationErrorStatus(
 async function runSelectedClientsOrchestrator(
   clientNames: string[]
 ): Promise<OrchestratorStatus[]> {
-  const db = createAppDb()
+  const db = createHHAppDb()
   const selectedFetch = await fetchSelectedClientsByUniqueNamesBestEffort(
     db,
     clientNames
@@ -1017,7 +1033,7 @@ async function fetchSelectedClientsByUniqueNamesBestEffort(
 async function runSelectedClientIdsOrchestrator(
   clientIds: string[]
 ): Promise<OrchestratorStatus[]> {
-  const db = createAppDb()
+  const db = createHHAppDb()
   const allClients: ClientAutomationData[] =
     await db.getAutomationTargets(getConfiguredAutomationTargetOptions())
   const selection = selectClientsByCommonChatIdsBestEffort(
@@ -1079,7 +1095,7 @@ async function runSelectedClientIdsOrchestrator(
 }
 
 async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
-  const db = createAppDb()
+  const db = createHHAppDb()
   const readiness = splitPrelaunchReadinessTargets(
     await loadReadinessResults({
       market: ORCHESTRATOR_WORK_WITH_MARKET,
@@ -1247,6 +1263,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createHHAppDb,
+  getClientReadinessError,
   assertDolphinAppRunning,
   assertPreexistingDolphinProfileLimit,
   getLocalRunLogFile: () => LOCAL_RUN_LOG_FILE,
