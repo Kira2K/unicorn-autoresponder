@@ -86,8 +86,8 @@ export type ClientProfilePatch = {
   lastName?: string
   fio?: string
   birthDate?: string
-  education?: string
-  educationEntries?: EducationEntry[]
+  education?: string | null
+  educationEntries?: EducationEntry[] | null
   realAge?: number | string | null
   realLocation?: string
   desiredLocation?: string

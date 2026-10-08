@@ -13,6 +13,11 @@ export function withStudentProfile(base: WebConsoleRepository,
     async deletePlatformAccount(id, accountId) { return enrich(await base.deletePlatformAccount(id, accountId)); },
     async updateClientProfile(id, input) {
       const { middleName, noHigherEducation, currentCompany, previousCompanies, ...existing } = input;
+      if (noHigherEducation === true) {
+        // The store clears education and sets the flag in the same SQL write.
+        delete existing.education;
+        delete existing.educationEntries;
+      }
       await base.updateClientProfile(id, existing);
       await store.save(id, input);
       return enrich(await base.getClientDashboard(id, { fullAccess: false }));

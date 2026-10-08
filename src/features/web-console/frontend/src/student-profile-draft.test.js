@@ -23,6 +23,27 @@ test('old education remains incomplete rather than being marked as no higher edu
   assert.equal(draft.educationEntries[0].faculty, '')
 })
 
+test('education opt out always sends null and restores a checked checkbox with one empty row', () => {
+  const draft = studentProfileDraft({ education: 'Legacy university' })
+  const payload = studentProfileSavePayload({ ...draft, noHigherEducation: true })
+  assert.equal(payload.education, null)
+  assert.equal(payload.educationEntries, null)
+  assert.equal(payload.noHigherEducation, true)
+  const restored = studentProfileDraft(payload)
+  assert.equal(restored.noHigherEducation, true)
+  assert.deepEqual(restored.educationEntries, [{ uni: '', faculty: '', grade: '', yearOfEnd: '' }])
+  const unchecked = validateStudentProfile({ ...restored, noHigherEducation: false }, { englishLevelIds: [] })
+  assert.equal(unchecked.value.noHigherEducation, false)
+  assert.ok(unchecked.errors.educationEntries)
+  assert.equal(draft.educationEntries[0].uni, 'Legacy university')
+})
+
+test('legacy null education does not imply an explicit opt out', () => {
+  const draft = studentProfileDraft({ education: null, educationEntries: null })
+  assert.equal(draft.noHigherEducation, false)
+  assert.ok(validateStudentProfile(draft, { englishLevelIds: [] }).errors.educationEntries)
+})
+
 test('workplace selections replace both lists after toggling, deletion and clearing', () => {
   const draft = studentProfileDraft({ currentCompany: 'Alpha,Beta', previousCompanies: 'Gamma,Delta' })
   const payload = () => studentProfileSavePayload({ ...draft, noHigherEducation: true })
