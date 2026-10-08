@@ -11,6 +11,7 @@ type PolinaTaskCardInput = {
   rootFolder?: string
   sourceFolder?: string
   kirasComments?: string
+  lastRejectionComment?: string
   draftUrl?: string
   enVersionUrl?: string
 }
@@ -41,6 +42,7 @@ function polinaNewTaskMessage(clientName: string, market: string): PolinaTelegra
 }
 
 function polinaTaskCardMessage(input: PolinaTaskCardInput): PolinaTelegramMessage {
+  const lastRejectionComment = input.lastRejectionComment?.trim()
   return message([
     `Ученик: ${input.clientName}`,
     `Рынок: ${input.market}`,
@@ -51,6 +53,7 @@ function polinaTaskCardMessage(input: PolinaTaskCardInput): PolinaTelegramMessag
     input.rootFolder ? `Основная папка в Google: ${input.rootFolder}` : undefined,
     input.sourceFolder ? `Папка с исходниками: ${input.sourceFolder}` : undefined,
     input.kirasComments ? `Комментарии Киры: ${input.kirasComments}` : undefined,
+    lastRejectionComment ? `Комментарий возврата: ${lastRejectionComment}` : undefined,
     input.draftUrl ? `Черновик: ${input.draftUrl}` : undefined,
     input.enVersionUrl ? `EN: ${input.enVersionUrl}` : undefined,
     'Пришли ссылку на русскую версию следующим сообщением.',
