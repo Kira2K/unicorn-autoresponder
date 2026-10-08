@@ -2,44 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { plan, dateMsk, windowFor, reserve, canRunBesideUnknown, validateSchedule } from './planner.ts'
 import { fail, terminal, type Store, type Task, type Schedule, type Adapters, type Event, type StepContext } from './contracts.ts'
 import type { ExecutionStep } from '../execution-step.ts'
-import { listReadDiagnostic, listReadMessage } from '../../../integrations/unipile/read-retry.ts'
+import { describeFailure } from './failure.ts'
+import { listReadDiagnostic } from '../../../integrations/unipile/read-retry.ts'
 import { recordFailure, recoveryExpired, recoveryWakeAt, skipRecovery, ACTION_SKIPPED, summaryMessage } from '../action-recovery.ts'
 
 const priorities = { posts: 1, invitations: 2, comments: 3, withdrawals: 4 }
-export function describeFailure(error: any): Pick<Event, 'code' | 'message' | 'source' | 'httpStatus' | 'diagnostic'> {
-  const raw = String(error?.code ?? '')
-  const code = /^[a-zA-Z0-9_/-]{1,120}$/.test(raw) ? raw : 'automation_internal_error'
-  const status = Number(error?.details?.httpStatus ?? error?.httpStatus ?? error?.status)
-  const readDiagnostic = listReadDiagnostic(error)
-  const source = readDiagnostic ? 'Unipile' : /postgres|sql_|persistence|storage|ECONN|^[0-9]{2}[A-Z0-9]{3}$/.test(code) ? 'SQL' :
-    /unipile/.test(code) ? 'Unipile' : /dolphin/.test(code) ? 'Dolphin' : /openai/.test(code) ? 'OpenAI' : 'наш код'
-  const message = code === ACTION_SKIPPED ? 'Действие пропущено после 20 минут восстановления. Остальные действия продолжаются.' : listReadMessage(error) ?? (/owner/.test(code) ? 'Потеряно право исполнителя. Новые отправки запрещены.' :
-    /operation_active/.test(code) ? 'Аккаунт занят другой фичей. Продолжим после освобождения.' :
-    /step_yield/.test(code) ? 'Шаг сохранён. Ожидаем следующую возможность продолжить.' :
-    /stop|disabled/.test(code) ? 'Автоматизация выключена. Новые действия остановлены.' :
-    status === 429 || /429|limit|cooldown/.test(code) ? 'Провайдер ограничил запросы. Срок ожидания сохранён.' :
-    /account.*(changed|identity|unverified)|identity_mismatch/.test(code) ? 'Изменилась привязка аккаунта. Нужна проверка.' :
-    /auth|401|403/.test(code) ? 'Нужна проверка доступа к аккаунту.' :
-    /writer_disabled|read_only/.test(code) ? 'Для этой фичи на backend запрещены отправки.' :
-    /stack_required|prepared_missing|not_ready/.test(code) ? 'Не хватает данных или аккаунт не готов к запуску.' :
-    source === 'SQL' ? 'Не удалось сохранить или прочитать состояние. Отправки приостановлены.' :
-    (status >= 500 && status <= 599) || /timeout|unreachable|unavailable|http_5/.test(code) ? 'Сервис временно недоступен. Назначена повторная проверка.' :
-    'Фича остановлена с ошибкой. Проверьте код ошибки и данные запуска.')
-  // Error messages/bodies may contain SQL data, credentials or provider URLs.
-  // Keep only the error class, machine code and source locations, including causes.
-  const diagnostics: string[] = readDiagnostic ? [readDiagnostic] : []
-  let cause = error
-  for (let depth = 0; cause && depth < 3; depth++, cause = cause.cause) {
-    const kind = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'AggregateError'].includes(cause.name) ? cause.name : 'Error'
-    const causeCode = /^[a-zA-Z0-9_/-]{1,120}$/.test(String(cause.code ?? '')) ? ` (${cause.code})` : ''
-    const frames = String(cause.stack ?? '').split('\n').slice(1).flatMap(line =>
-      line.replaceAll('\\', '/').match(/(?:src|node_modules)\/[a-zA-Z0-9_./-]+\.(?:[cm]?[jt]s):\d+:\d+(?=\)?$)/)?.[0] ?? []).slice(0, 4)
-    diagnostics.push(`${depth ? 'Причина: ' : ''}${kind}${causeCode}${frames.length ? ': ' + frames.join(' ← ') : ''}`)
-  }
-  return { code, message, source, ...(Number.isInteger(status) ? { httpStatus: status } : {}),
-    ...(diagnostics.length ? { diagnostic: diagnostics.join('\n') } : {}) }
-}
-
 export function createOrchestrator(options: { store: Store; adapters: Adapters; now?: () => number;
   random?: () => number; owner?: string; version?: string; autoStart?: boolean;
   sleep?(ms: number): Promise<void>;
@@ -51,10 +18,29 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
   let epoch: number | undefined, scanning = false, closing = false, available = false, lastError: ReturnType<typeof describeFailure> | undefined
   let pruneAt = 0
   let dueAccounts = new Set<string>()
+  const unsavedIncidents = new Map<string, Event>()
   const entry = (task: Task, code: string, message: string): Event => ({ at: now(), taskId: task.id,
     runId: task.runId, initiator: task.stopped ? 'recovery' : 'schedule',
     studentId: task.account.studentId, accountId: task.account.id, feature: task.feature,
     source: 'наш код', code, message, stage: task.stageMessage ?? task.stage, operation: task.stage, nextAt: task.nextAt, version: options.version })
+  function rememberIncident(event: Event) {
+    const key = `${event.taskId ?? ''}:${event.runId ?? ''}:${event.accountId ?? ''}:${event.actionId ?? ''}:${event.operation ?? ''}:${event.code}`
+    if (unsavedIncidents.has(key)) return
+    unsavedIncidents.set(key, event)
+    // Only sanitized Event fields reach the fallback, never raw errors/SQL/response bodies.
+    try {
+      if (options.report) options.report(event)
+      else console.error('[linkedin-automation]', JSON.stringify(event))
+    } catch {
+      try { console.error('[linkedin-automation]', JSON.stringify(event)) } catch { /* Keep the SQL backlog. */ }
+    }
+  }
+  async function flushIncidents() {
+    for (const [key, event] of unsavedIncidents) {
+      await store.event(event)
+      if (unsavedIncidents.get(key) === event) unsavedIncidents.delete(key)
+    }
+  }
   async function persist(task: Task, event: Event) {
     if (epoch === undefined) throw fail('automation_owner_lost')
     const next = await store.save(task, event, owner, epoch); Object.assign(task, next)
@@ -94,7 +80,7 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
     if (!current?.enabled || !current.slots.some(s => s.features.includes(task.feature))) throw fail('automation_disabled')
     if (current.account.key !== task.account.key || current.account.unipileId !== task.account.unipileId)
       throw fail('automation_account_changed')
-    const window = windowFor(current, task.feature, now())
+    const window = windowFor(current, task.feature, now(), Boolean(task.startedAt || task.runId))
     if (task.feature === 'comments' && (!window || window.start > now())) throw fail('automation_disabled')
   }
   type Waiting = { ms: number; since?: number; depth: number; arm(): void }
@@ -190,10 +176,10 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         task.recoveryDeadlineAt = result.recoveryDeadlineAt
         if (result.publishedAt) task.publishedAt = result.publishedAt
         const waitingResult = ['waiting', 'verifying'].includes(result.status)
-        task.nextAt = result.nextActionAt ? Date.parse(result.nextActionAt) : now() + (waitingResult ? 60_000 : 0)
+        task.nextAt = task.stopped ? task.nextAt : result.nextActionAt ? Date.parse(result.nextActionAt) : now() + (waitingResult ? 60_000 : 0)
         if (!Number.isFinite(task.nextAt) || (waitingResult && task.nextAt <= now())) task.nextAt = now() + 60_000
         if (task.recoveryDeadlineAt !== undefined) task.nextAt = Math.min(task.nextAt, task.recoveryDeadlineAt)
-        task.state = result.status === 'ready' ? 'waiting' : result.status
+        task.state = task.stopped ? 'stopped' : result.status === 'ready' ? 'waiting' : result.status
         if (task.state === 'verifying') task.uncertainSince ??= now()
         else task.uncertainSince = undefined
         if (['disabled', 'deadline'].includes(controller.signal.reason) && !task.stopped) { task.stopped = true
@@ -202,8 +188,8 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         await persist(task, { ...entry(task, result.reason ?? task.state, result.summary ? summaryMessage(result.summary) :
           result.reason === ACTION_SKIPPED ? describeFailure({ code: ACTION_SKIPPED }).message : task.state === 'completed' ? 'Задание завершено.' :
           task.state === 'verifying' ? 'Результат неизвестен. Повторной отправки нет; продолжаем сверку.' :
-          task.state === 'stopped' ? 'Новые действия остановлены.' : 'Шаг сохранён. Аккаунт освобождён.'), ...detail })
-        await actionFinished(task)
+          task.state === 'stopped' ? 'Прогон остановлен. Фоновых запросов больше нет; история отправок сохранена.' : 'Шаг сохранён. Аккаунт освобождён.'), ...detail })
+        if (!task.stopped) await actionFinished(task)
       } catch (error: any) {
         const detail = describeFailure(error)
         task.updatedAt = now(); task.reason = detail.code; task.attempts++
@@ -222,6 +208,8 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         task.nextAt = recoveryWakeAt(task.preparationRecovery, task.nextAt)
         try { await persist(task, { ...entry(task, detail.code, detail.message), ...detail }) }
         catch (saveError) { lastError = describeFailure(saveError); epoch = undefined
+          rememberIncident({ ...entry(task, detail.code, detail.message), ...detail })
+          rememberIncident({ ...entry(task, lastError.code, lastError.message), ...lastError })
           for (const item of running.values()) item.signal.abort('lease_lost') }
       } finally { if (watchdog) clearTimeout(watchdog) }
     })().finally(() => running.delete(task.id))
@@ -236,7 +224,9 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
       }
       const claim = await store.claim(owner, now())
       if (claim === undefined) { epoch = undefined; for (const item of running.values()) item.signal.abort('lease_lost'); return }
-      epoch = claim; lastError = undefined
+      epoch = claim
+      await flushIncidents()
+      lastError = undefined
       let snapshot = await store.snapshot()
       for (const schedule of snapshot.schedules) {
         const planned = plan(schedule, snapshot.tasks, now(), random)
@@ -252,11 +242,10 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         task.state = 'verifying'; task.uncertainSince ??= task.updatedAt; task.nextAt = now()
         await persist(task, entry(task, 'recovery_check', 'После перезапуска сначала проверяем сохранённый результат.'))
       }
-      // Older versions terminalized Stop before inspecting a saved external outcome.
-      // Inspect those runs once through stop(), which cannot authorize new mutations.
+      // Apply local feature cleanup for legacy records once, without resurrecting read-back.
       for (const task of snapshot.tasks) if (task.state === 'stopped' && task.runId && !task.stopApplied) {
-        task.stopped = true; task.state = 'verifying'; task.updatedAt = now()
-        await persist(task, entry(task, 'stopped_recovery_check', 'Проверяем, осталось ли отправленное до остановки. Новых отправок нет.'))
+        task.stopped = true; task.state = 'waiting'; task.updatedAt = now()
+        await persist(task, entry(task, 'stop_cleanup', 'Останавливаем локальный исполнитель. История отправок сохранена.'))
       }
       for (const task of snapshot.tasks) if (task.feature === 'comments' && !terminal(task) && task.runId &&
         !running.has(task.id) && snapshot.tasks.some(next => next.feature === 'comments' && next.day > task.day &&
@@ -286,10 +275,8 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
           await finishCommentDay(task, schedule); continue
         }
         const expired = Boolean(task.deadlineAt && task.deadlineAt <= now()) || task.activeMs >= task.activeLimitMs
-        // Stop is applied once immediately. Read-only recovery keeps its own deadline afterwards.
-        if (task.stopped && task.stopApplied && task.nextAt > now()) continue
         if (!disabled && !expired && !task.stopped && task.state === 'verifying' && task.nextAt > now()) continue
-        if (!disabled && !expired && task.nextAt > now()) continue
+        if (!disabled && !expired && !task.stopped && task.nextAt > now()) continue
         if (!task.runId && recoveryExpired(task.preparationRecovery, now())) {
           skipRecovery(task.preparationRecovery!, now()); task.state = 'completed'; task.reason = ACTION_SKIPPED
           task.summary = { completed: 0, skipped: 1, unconfirmed: 0 }; task.updatedAt = now()
@@ -306,7 +293,7 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         actionPauses.set(task.account.key, actionUntil)
         // Wake for a local expiry decision; request policy still forbids provider calls during cooldown.
         const recoveryDue = task.recoveryDeadlineAt !== undefined && task.recoveryDeadlineAt <= now()
-        if (!recoveryDue && ((!disabled && !expired) || task.stopApplied) &&
+        if (!recoveryDue && !disabled && !expired && !task.stopped &&
           Math.max(actionUntil, await store.blockedUntil(task.account.key, '*', now())) > now()) continue
         if (!disabled && !expired && !task.stopped && task.state !== 'verifying' && !snapshot.tasks.every(p => canRunBesideUnknown(task, p, now()))) continue
         if (!disabled && !expired && task.state !== 'verifying' && !task.stopped) {
@@ -325,7 +312,7 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
             }
             continue
           }
-          const window = windowFor(schedule!, task.feature, now())
+          const window = windowFor(schedule!, task.feature, now(), Boolean(task.startedAt || task.runId))
           // The slot restricts new starts. A saved continuation keeps its original
           // deadline and provider wait; ending the slot must not park it for a week.
           if ((!task.startedAt || task.feature === 'comments') && (!window || window.start > now())) {
@@ -340,19 +327,21 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
       if (now() >= pruneAt) { await store.pruneLogs(now() - 30 * 86_400_000); pruneAt = now() + 86_400_000 }
     } catch (error) { lastError = describeFailure(error); epoch = undefined; available = false
       for (const item of running.values()) item.signal.abort('lease_lost')
-      options.report?.({ at: now(), ...lastError })
+      rememberIncident({ at: now(), ...lastError })
     } finally { scanning = false }
   }
   const timer = options.autoStart === false ? undefined : setInterval(() => void tick(), 5000)
   timer?.unref()
   return {
-    tick, assertOwner,
+    tick, assertOwner, recordEvent: rememberIncident,
     backgroundAllowed(key: string) {
       if ((actionPauses.get(key) ?? 0) > now()) return false
       if ([...running.values()].some(r => r.task.account.key === key && !r.released)) return false
       return !dueAccounts.has(key) || [...running.values()].some(r => r.task.account.key === key && r.released)
     },
-    suspend(error: unknown) { lastError = describeFailure(error); epoch = undefined
+    suspend(error: unknown, stage = 'Внешний цикл оркестратора') {
+      lastError = describeFailure(error); epoch = undefined; available = false
+      rememberIncident({ at: now(), ...lastError, operation: 'orchestrator_suspend', stage, version: options.version })
       for (const item of running.values()) item.signal.abort('lease_lost') },
     async idle() { await Promise.all([...running.values()].map(r => r.work)) },
     async status() {
@@ -394,6 +383,9 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         const fresh = plan(saved, tasks.filter(t => !movable.some(m => m.id === t.id)), now(), random)
         for (const old of movable) {
           const next = fresh.find(t => t.id === old.id)
+          if (next && previous && JSON.stringify(previous.slots) === JSON.stringify(saved.slots) && old.plannedAt >= now()) {
+            next.plannedAt = old.plannedAt; next.nextAt = Math.max(old.plannedAt, old.nextAt)
+          }
           if (next) await persist({ ...next, version: old.version }, entry(next, 'rescheduled', 'Время обновлено после изменения расписания.'))
         }
       }

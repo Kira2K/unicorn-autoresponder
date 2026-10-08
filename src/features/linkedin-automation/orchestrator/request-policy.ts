@@ -2,7 +2,7 @@ import type { RequestPolicy, RequestContext, RequestInfo } from '../../../integr
 import type { Store, Task, Event, Feature } from './contracts.ts'
 import { fail } from './contracts.ts'
 import { canRunBesideUnknown } from './planner.ts'
-import { describeFailure } from './service.ts'
+import { describeFailure } from './failure.ts'
 import { createAccountRequestQueue } from '../../../integrations/unipile/request-scheduler.ts'
 import { safeUnipileDiagnostics, safeUnipileResponseShape } from '../../../integrations/unipile/error-diagnostics.ts'
 
@@ -30,7 +30,7 @@ export function createRequestPolicy(options: { store: Store; assertOwner(): Prom
   function scope(info: RequestInfo, ctx?: RequestContext) { return info.account ?? ctx?.account ?? '*' }
   function audit(info: RequestInfo, ctx: RequestContext | undefined, code: string, message: string): Event {
     return { at: now(), ...options.accountInfo?.(scope(info, ctx)), taskId: ctx?.taskId, feature: ctx?.feature ?? info.operation,
-      operation: `${info.method} ${info.operation}`, requestId: info.requestId, runId: ctx?.runId,
+      operation: info.route ?? `${info.method} ${info.operation}`, requestId: info.requestId, runId: ctx?.runId,
       stage: info.stage ? stages[info.stage] ?? info.stage : undefined,
       actionId: ctx?.actionId, initiator: ctx?.initiator, version: options.version,
       durationMs: info.startedAt === undefined ? undefined : Math.max(0, now() - info.startedAt), source: 'Unipile', code,
@@ -44,15 +44,17 @@ export function createRequestPolicy(options: { store: Store; assertOwner(): Prom
     }),
     async before(info, ctx) {
       if (ctx?.signal?.aborted) throw Object.assign(fail('automation_stop_requested'), { notSent: true })
+      await ctx?.assertRequest?.()
       const account = scope(info, ctx)
       if (info.write || ctx?.taskId) await guarded(options.assertOwner)
-      const until = await guarded(() => store.blockedUntil(options.resolveKey?.(account) ?? account, '*', now()))
+      const until = await guarded(() => store.blockedUntil(options.resolveKey?.(account) ?? account, info.route ?? '*', now()))
       if (until > now()) throw Object.assign(fail('unipile_shared_cooldown', 'Сохранённое ожидание Unipile.', until),
         { notSent: true, details: { retryAt: until, retryAfterMs: until - now(), observedAt: now(), httpStatus: 429 } })
       if (!info.write) {
         if (ctx?.signal?.aborted) throw Object.assign(fail('automation_stop_requested'), { notSent: true })
         await guarded(() => store.event(audit(info, ctx, 'request_prepared', 'Чтение подготовлено; запрос ещё не отправлен.')))
         if (ctx?.signal?.aborted) throw Object.assign(fail('automation_stop_requested'), { notSent: true })
+        await ctx?.assertRequest?.()
         return
       }
       if (ctx?.signal?.aborted) throw Object.assign(fail('automation_stop_requested'), { notSent: true })
@@ -70,6 +72,7 @@ export function createRequestPolicy(options: { store: Store; assertOwner(): Prom
       await guarded(options.assertOwner)
       if (ctx?.signal?.aborted) throw Object.assign(fail('automation_stop_requested'), { notSent: true })
       await ctx?.assertWrite?.()
+      await ctx?.assertRequest?.()
     },
     async dispatched(info, ctx) {
       await guarded(() => store.event(audit(info, ctx, 'request_started', 'Запрос передан HTTP-клиенту Unipile.')))
@@ -106,11 +109,15 @@ export function createRequestPolicy(options: { store: Store; assertOwner(): Prom
       }
       const providerDeadline = Number.isFinite(deadline)
       const until = providerDeadline ? deadline : now() + 90_000
+      // V2 counts every Methods API route independently, including its "All methods" rule.
+      // Provider/unknown errors retain the conservative account-wide cooldown.
+      const routeLimited = status === 429 && provider.errorType === 'api/too_many_requests' && Boolean(info.route)
       await guarded(async () => {
         const account = scope(info, ctx)
-        await store.cooldown({ account: options.resolveKey?.(account) ?? account, method: '*', until,
+        await store.cooldown({ account: options.resolveKey?.(account) ?? account, method: routeLimited ? info.route! : '*', until,
           observedAt: Number(error?.details?.observedAt) || now(), code: String(error?.code ?? 'unipile_rate_limit') })
         await store.event({ ...audit(info, ctx, detail.code, failureText + ' ' + (
+          routeLimited ? 'Срок ожидания сохранён для этого API-метода. Остальные методы работают независимо.' :
           error?.details?.retryAfterSource === 'fallback' ?
             'Наша пауза после сбоя сервиса. Все фичи аккаунта ждут указанного времени.' :
           providerDeadline ? 'Unipile назначил ожидание. Новые запросы этого аккаунта ждут общего срока.' :

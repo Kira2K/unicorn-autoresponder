@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createOrchestrator, describeFailure } from './service.ts'
+import { createOrchestrator } from './service.ts'
+import { describeFailure } from './failure.ts'
 import { plan, windowFor, reserve, validateSchedule, canRunBesideUnknown, dateMsk } from './planner.ts'
 import { accountKey, fail, type Schedule, type Store, type Task, type Event, type Adapters, type Cooldown } from './contracts.ts'
 import { createRequestPolicy } from './request-policy.ts'
@@ -21,6 +22,106 @@ const { createUnipileHttpClient } = (httpModule as any).default ?? httpModule
 const { installRequestPolicy, withRequestContext, requestInfo } = (controlModule as any).default ?? controlModule
 
 const noon = Date.parse('2026-09-28T12:00:00+03:00')
+
+test('failed error checkpoint survives SQL recovery with task attribution and no secret values', async () => {
+  const f = fixture(), reports: Event[] = []; f.schedules.push(schedule(1, ['posts']))
+  let failSaves = false, steps = 0
+  const save = f.store.save
+  f.store.save = async (...args) => { if (failSaves) throw Object.assign(Error('password=PRIVATE'), { code: 'sql_unavailable' }); return save(...args) }
+  f.adapters.posts.step = async ctx => {
+    steps++; await ctx.bind('saved-post'); await ctx.stage?.('post_read', 'Проверка поста')
+    failSaves = true; throw Object.assign(Error('private response'), { code: 'unipile_http_500', details: { httpStatus: 500 } })
+  }
+  const engine = createOrchestrator({ store: f.store, adapters: f.adapters, now: f.now, random: () => 0,
+    autoStart: false, owner: 'test', report: event => reports.push(clone(event)) })
+  try {
+    await engine.tick(); await engine.idle()
+    assert.equal((await engine.status()).error?.code, 'sql_unavailable')
+    assert.ok(reports.some(event => event.code === 'unipile_http_500'))
+    const sql = reports.find(event => event.code === 'sql_unavailable')!
+    assert.equal(sql.accountId, 1); assert.equal(sql.studentId, 101); assert.equal(sql.feature, 'posts')
+    assert.equal(sql.runId, 'saved-post'); assert.equal(sql.operation, 'post_read')
+    assert.doesNotMatch(JSON.stringify(reports), /PRIVATE|private response/)
+    const event = f.store.event
+    f.store.event = async () => { throw fail('sql_unavailable') }
+    await engine.tick(); await engine.idle(); assert.equal(steps, 1)
+    f.store.event = event; failSaves = false
+    f.adapters.posts.step = async () => { steps++; return { status: 'completed' } }
+    await engine.tick(); await engine.idle()
+    assert.ok(f.events.some(event => event.code === 'unipile_http_500' && event.runId === 'saved-post'))
+    assert.equal(f.events.filter(event => event.code === 'sql_unavailable' && event.runId === 'saved-post').length, 1)
+    assert.equal((await engine.status()).error, undefined)
+    const count = f.events.filter(event => event.code === 'sql_unavailable').length
+    await engine.tick(); await engine.idle()
+    assert.equal(f.events.filter(event => event.code === 'sql_unavailable').length, count)
+  } finally { await engine.close() }
+})
+
+test('stopped verification is terminal across restart, regardless of its old timer', async () => {
+  const f = fixture(), s = schedule(), task = plan(s, [], noon, () => 0)[0]
+  Object.assign(task, { stopped: true, stopApplied: true, state: 'verifying', runId: 'old',
+    nextAt: noon + 86400_000, startedAt: noon - 86400_000, deadlineAt: noon - 1 })
+  f.tasks.push(task); f.schedules.push(s)
+  let steps = 0, stops = 0
+  f.adapters.invitations.step = async () => { steps++; return { status: 'completed' } }
+  f.adapters.invitations.stop = async () => { stops++; return { status: 'stopped', summary: { completed: 0, skipped: 0, unconfirmed: 1 } } }
+  let engine = f.create()
+  await engine.tick(); await engine.idle()
+  assert.equal(f.tasks[0].state, 'stopped'); assert.equal(stops, 1); assert.equal(steps, 0)
+  assert.equal(f.tasks[0].summary?.unconfirmed, 1)
+  await engine.close(); engine = f.create('restart'); f.advance(2 * 86400_000)
+  await engine.tick(); await engine.idle()
+  assert.equal(stops, 1); assert.equal(steps, 0); await engine.close()
+})
+
+test('disabling and re-enabling unchanged future slots preserves their random planned times', async () => {
+  const f = fixture(), s = schedule(1, ['posts', 'invitations', 'comments', 'withdrawals'])
+  s.slots[0].start = 18 * 60; s.slots[0].end = 21 * 60
+  f.schedules.push(s)
+  const planned = plan(s, [], noon, () => .73); f.tasks.push(...planned)
+  const before = new Map(planned.map(task => [task.id, task.plannedAt]))
+  const engine = f.create(); await engine.tick(); await engine.idle()
+  const paused = await engine.saveSchedule({ ...s, enabled: false }, 1)
+  await engine.tick(); await engine.idle()
+  await engine.saveSchedule({ ...paused, enabled: true }, paused.version)
+  for (const task of f.tasks) { assert.equal(task.plannedAt, before.get(task.id)); assert.equal(task.state, 'planned') }
+  await engine.close()
+})
+
+test('API 429 belongs to one normalized route; provider and unknown limits remain account-wide', async () => {
+  for (const type of ['api/too_many_requests', 'provider/too_many_requests', 'unknown']) {
+    const f = fixture(), options = { store: f.store, now: f.now, resolveKey: () => 'linkedin:1', assertOwner: async () => {}, onFailure() {} }
+    let p = createRequestPolicy(options)
+    const info = requestInfo('GET', '/u1/users/me/posts?limit=100&cursor=secret')
+    const error = { code: `unipile_${type.replaceAll('/', '_')}`, details: { httpStatus: 429, errorType: type,
+      retryAt: noon + 86400_000, observedAt: noon } }
+    await p.failed(info, error); f.advance(60_000); await p.failed(info, error)
+    p = createRequestPolicy(options)
+    assert.equal(f.cooldowns[0].until, noon + 86400_000)
+    await assert.rejects(p.before(requestInfo('GET', '/u2/users/person/posts?limit=20')))
+    const other = requestInfo('GET', '/u2/users/me/relation-requests')
+    if (type.startsWith('api/')) { await p.before(other); assert.notEqual(f.cooldowns[0].method, '*') }
+    else { await assert.rejects(p.before(other)); assert.equal(f.cooldowns[0].method, '*') }
+    assert.ok(!JSON.stringify(f.cooldowns).includes('secret'))
+  }
+})
+
+test('Stop adapters are fenced from GET as well as POST, before any provider request', async () => {
+  const f = fixture(), p = createRequestPolicy({ store: f.store, now: f.now, assertOwner: async () => {}, onFailure() {} })
+  const dispose = installRequestPolicy(p); let sent = 0
+  const client = createUnipileHttpClient({ apiKey: 'mock', fetchImpl: async () => { sent++; return new Response('{}') } })
+  const stop = async () => { await client.request('GET', '/u1/users/me/posts'); return { status: 'stopped' } }
+  const adapters = createFeatureAdapters({ inviter: { stepManaged: stop, withdrawals: { startAutomatic() {}, stepManaged: stop } },
+    posts: { stepManaged: stop }, comments: { stepManaged: stop } } as any)
+  try {
+    for (const feature of ['posts', 'invitations', 'comments', 'withdrawals'] as const) {
+      const task = { ...plan(schedule(1, [feature]), [], noon, () => 0)[0], runId: 'stopped', stopped: true }
+      await assert.rejects(adapters[feature].stop({ task, now: f.now, signal: new AbortController().signal,
+        assertWrite: async () => {}, bind: async () => {}, cooperate: async action => action() }), { notSent: true })
+    }
+    assert.equal(sent, 0)
+  } finally { dispose() }
+})
 
 test('preparation 500 expires across restart; dependent comments are skipped and independent work finishes', async () => {
   const f = fixture(); f.schedules.push(schedule(1, ['posts', 'comments', 'invitations']))
@@ -176,7 +277,7 @@ test('expired verification stops new work once, then respects the saved deadline
   } finally { await engine.close() }
 })
 
-test('legacy stopped runs regain only read-back ownership; shared provider wait still wins', async () => {
+test('legacy stopped runs receive local cleanup once and never regain read-back ownership', async () => {
   const f = fixture(), s = schedule(1, ['posts']), task = plan(s, [], f.now(), () => 0)[0]
   Object.assign(task, { state: 'stopped', runId: 'saved-post', stopped: true, startedAt: noon - 86400_001,
     deadlineAt: noon - 1, nextAt: noon + 60_000, day: '2026-09-27' })
@@ -191,8 +292,8 @@ test('legacy stopped runs regain only read-back ownership; shared provider wait 
     await engine.close(); engine = f.create(); f.advance(3600_000)
     for (let i = 0; i < 12; i++) { await engine.tick(); await engine.idle(); f.advance(5000) }
     assert.equal(checks, 1)
-    f.advance(noon + 7200_000 - f.now()); await engine.tick(); await engine.idle(); assert.equal(checks, 2)
-    f.advance(30_000); await engine.tick(); await engine.idle(); assert.equal(checks, 2)
+    f.advance(noon + 7200_000 - f.now()); await engine.tick(); await engine.idle(); assert.equal(checks, 1)
+    f.advance(30_000); await engine.tick(); await engine.idle(); assert.equal(checks, 1)
     assert.equal(f.tasks[0].state, 'stopped')
   } finally { await engine.close() }
 })
@@ -261,6 +362,28 @@ test('next daily comment task takes the real saved session; the old task retires
     assert.equal(records.size, 1); assert.equal(records.get(job.jobId).state.items[0].replyId, 'reply'); assert.equal(reads, 0)
   } finally { restored.stop(); await engine.close() }
 })
+test('failure presentation preserves source and status precedence without raw messages', () => {
+  const cases = [
+    { error: { code: 'unipile_storage_failed', status: 500 }, source: 'SQL', status: 500 },
+    { error: { code: 'unipile_api_too_many_requests', details: { httpStatus: 429 }, status: 500 }, source: 'Unipile', status: 429 },
+    { error: { code: 'dolphin_unavailable', httpStatus: 503 }, source: 'Dolphin', status: 503 },
+    { error: { code: 'openai_timeout' }, source: 'OpenAI', status: undefined },
+  ]
+  for (const { error, source, status } of cases) {
+    const result = describeFailure({ ...error, message: 'private raw response' })
+    assert.equal(result.code, error.code)
+    assert.equal(result.source, source)
+    assert.equal(result.httpStatus, status)
+    assert.doesNotMatch(JSON.stringify(result), /private raw response/)
+  }
+  for (const error of [undefined, null, false, 'private raw response']) {
+    const result = describeFailure(error)
+    assert.equal(result.code, 'automation_internal_error')
+    assert.equal(result.source, 'наш код')
+    assert.doesNotMatch(JSON.stringify(result), /private raw response/)
+  }
+})
+
 test('generic error preserves code and source location without provider payloads or secrets', () => {
   const error = Object.assign(new TypeError('password=secret https://user:pass@host/private'), {
     cause: Object.assign(new Error('SELECT secret FROM private'), { code: 'ECONNRESET' }) })
@@ -321,7 +444,7 @@ test('explicit continuation applies to every stopped feature without resetting b
     Object.assign(task, { state: 'stopped', stopped: true, runId: 'saved-run', startedAt: f.now() - 1000,
       nextAt: f.now() + 60_000, deadlineAt: f.now() + 3600_000, activeMs: 1234 })
     f.tasks.push(task)
-    const engine = f.create(); await engine.tick()
+    const engine = f.create(); await engine.tick(); await engine.idle()
     await engine.resume(task.id)
     const saved = f.tasks.find(t => t.id === task.id)!
     assert.equal(saved.retryRequested, true, feature); assert.equal(saved.stopped, false)
@@ -580,11 +703,30 @@ test('a feature which never started cannot begin after the slot closed', async (
   assert.equal(calls, 0); assert.equal(f.tasks[0].startedAt, undefined)
   assert.equal(f.tasks[0].state, 'stopped'); assert.equal(f.tasks[0].reason, 'automation_window_missed'); await c.close()
 })
-test('comments use active days, including before and after slots, but not empty days', () => {
+test('new comments wait for their slot; started comments retain the active day', () => {
   const s = schedule(1, ['comments']); s.slots[0].start = 780; s.slots[0].end = 840
-  assert.equal(windowFor(s, 'comments', noon)?.start, noon)
-  assert.equal(windowFor(s, 'comments', noon + 4 * 3600_000)?.start, noon + 4 * 3600_000)
-  assert.ok(windowFor(s, 'comments', noon + 86400_000)!.start > noon + 86400_000)
+  assert.equal(plan(s, [], noon, () => 0)[0].plannedAt, noon + 3600_000)
+  assert.equal(windowFor(s, 'comments', noon)?.start, noon + 3600_000)
+  assert.equal(windowFor(s, 'comments', noon + 4 * 3600_000, true)?.start, noon + 4 * 3600_000)
+  assert.ok(windowFor(s, 'comments', noon + 86400_000, true)!.start > noon + 86400_000)
+  assert.deepEqual(plan(s, [], noon + 4 * 3600_000, () => 0), [])
+})
+
+test('new comment task waits across restart, then continues beyond its slot', async () => {
+  const f = fixture(), s = schedule(1, ['comments'])
+  s.slots[0].start = 780; s.slots[0].end = 840; f.schedules.push(s)
+  let calls = 0
+  f.adapters.comments.step = async ctx => {
+    calls++; await ctx.assertWrite(); await ctx.bind('saved-comment-session')
+    return { status: 'waiting', nextActionAt: new Date(f.now() + 2 * 3600_000).toISOString() }
+  }
+  let engine = f.create()
+  await engine.tick(); await engine.idle(); assert.equal(calls, 0)
+  await engine.close(); engine = f.create('restart')
+  await engine.tick(); await engine.idle(); assert.equal(calls, 0)
+  f.advance(3600_000); await engine.tick(); await engine.idle(); assert.equal(calls, 1)
+  f.advance(2 * 3600_000); await engine.tick(); await engine.idle(); assert.equal(calls, 2)
+  assert.equal(f.tasks[0].runId, 'saved-comment-session'); await engine.close()
 })
 test('repeated ticks execute one persisted daily task', async () => {
   const f = fixture(); f.schedules.push(schedule()); let writes = 0
@@ -1139,6 +1281,60 @@ test('request audit records correlated failures and refuses a POST if its first 
     await assert.rejects(client.request('POST', '/posts', { account_id: 'u' }), (e: any) => e.notSent === true)
     assert.equal(requests, 1)
   } finally { dispose() }
+})
+
+test('outer-cycle SQL failures survive recovery in the journal, with no repeated fallback spam', async () => {
+  const f = fixture(), reports: Event[] = []
+  const engine = createOrchestrator({ store: f.store, adapters: f.adapters, now: f.now,
+    autoStart: false, report: event => reports.push(event) })
+  try {
+    await engine.tick()
+    engine.suspend(fail('sql_unavailable')); engine.suspend(fail('sql_unavailable'))
+    assert.equal(reports.length, 1)
+    await engine.tick()
+    assert.equal((await engine.status()).error, undefined)
+    assert.equal(f.events.filter(e => e.code === 'sql_unavailable').length, 1)
+    assert.equal(f.events[0].source, 'SQL'); assert.ok(f.events[0].stage)
+  } finally { await engine.close() }
+})
+
+test('automatic read permission is checked before any provider GET', async () => {
+  const f = fixture(); let requests = 0
+  const dispose = installRequestPolicy(createRequestPolicy({ store: f.store, now: f.now,
+    assertOwner: async () => {}, onFailure() {}, sleep: async ms => f.advance(ms) }))
+  const client = createUnipileHttpClient({ apiKey: 'mock', fetchImpl: async () => { requests++; throw Error('must not call') } })
+  try {
+    await assert.rejects(withRequestContext({ taskId: 'old:likes', assertRequest: async () => { throw fail('automation_disabled') } },
+      () => client.request('GET', '/u1/posts/p/reactions')), { code: 'automation_disabled', notSent: true })
+    assert.equal(requests, 0)
+  } finally { dispose() }
+})
+
+test('console bridges like domain failures into SQL with the author and distinct actors', async () => {
+  const f = fixture(); let offline = false
+  const save = f.store.event
+  const storage = Object.assign(f.store, { withdrawals: { async load() { return undefined }, async save() {} },
+    async importWithdrawal() {}, async event(event: Event) { if (offline) throw fail('sql_unavailable'); await save(event) } })
+  const automation = (await prepareLinkedInAutomation(storage, { async listAccounts() { return [
+    { platformAccountId: 1, clientId: 101, clientName: 'Mock author', unipileAccountId: 'u1', verifiedProviderId: 'p1' }
+  ] as any } }, { now: f.now, autoStart: false, version: 'test-source' }))!
+  automation.attach({ inviter: { stop() {} }, comments: { stop() {} }, posts: { async close() {} } } as any)
+  try {
+    const event = { runId: 'post-run', taskId: 'completed-post', authorAccountId: 1, actorAccountId: 2,
+      code: 'post_identity_mismatch', stage: 'like_preflight' as const }
+    automation.reportLikeEvent(event)
+    automation.reportLikeEvent({ ...event, actorAccountId: 3 })
+    offline = true
+    await automation.tick()
+    offline = false; await automation.tick()
+    const events = f.events.filter(row => row.code === 'post_identity_mismatch')
+    assert.equal(events.length, 2)
+    assert.equal(events[0].accountId, 1); assert.equal(events[0].studentId, 101)
+    assert.equal(events[0].runId, 'post-run'); assert.equal(events[0].taskId, 'completed-post')
+    assert.equal(events[0].feature, 'likes'); assert.equal(events[0].stage, 'Проверка аккаунта перед лайком')
+    assert.match(events[0].message, /Исполнитель: аккаунт 2/)
+    assert.match(events[1].message, /Исполнитель: аккаунт 3/)
+  } finally { await automation.close() }
 })
 
 test('admin API preserves server-owned account identity and reports each bulk result', async () => {

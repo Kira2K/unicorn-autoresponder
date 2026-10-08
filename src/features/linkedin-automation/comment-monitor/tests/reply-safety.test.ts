@@ -6,12 +6,80 @@ import type { MonitorItem, MonitorJob } from '../types.ts'
 import { pollMonitorJob } from '../poll-job.ts'
 import { restoreMonitorJobs } from '../restore.ts'
 import { generateReplies } from '../reply-generation.ts'
+import { discoverComments } from '../discovery.ts'
 import * as serviceModule from '../service.ts'
 const { createCommentMonitorService } = (serviceModule as any).default ?? serviceModule
 
 const start = Date.parse('2026-09-28T10:00:00Z')
 
-test('managed Stop cannot hide a 20 minute local expiry behind a two-hour provider wait', async () => {
+for (const checkingReply of [false, true]) test(`Stop between list pages prevents the next GET (reply=${checkingReply})`, async () => {
+  const f = fixture(); let reads = 0
+  f.job.state.knownIds = []
+  f.job.state.posts = [{ id: f.item.postId, text: 'Mock' }]
+  const page = async () => { reads++; f.job.status = 'disabled'; return {
+    items: [{ id: `other-${reads}`, text: 'Question', reply_counter: 0 }], total_count: 2 } }
+  const adapter = { ...f.adapter, listComments: page, listReplies: page }
+  await assert.rejects(checkingReply ? readVerified({ ...f.options, adapter }, f.item) :
+    discoverComments({ ...f.options, adapter }), { code: 'comment_monitor_disabled' })
+  assert.equal(reads, 1); assert.equal(f.counts().posts, 0)
+})
+
+test('large comment history keeps durable dedupe through discovery and reload', async () => {
+  const f = fixture(); f.item.status = 'uncertain'; f.item.attemptedAt = new Date(start).toISOString()
+  f.job.state.knownIds = [f.item.incomingId]; f.job.state.posts = [{ id: f.item.postId, text: 'Mock' }]
+  const rows = [...Array.from({ length: 1000 }, (_, i) => ({ id: `new-${i}`, text: 'Question', reply_counter: 0 })),
+    { id: f.item.incomingId, text: 'Question', reply_counter: 0 }]
+  const adapter = { ...f.adapter, async listComments(_a: string, _p: string, _l: unknown, cursor?: string) {
+    return { items: rows.slice(Number(cursor ?? 0), Number(cursor ?? 0) + 100), total_count: rows.length }
+  } }
+  await discoverComments({ ...f.options, adapter })
+  const restored = structuredClone(f.job)
+  assert.ok(restored.state.knownIds.includes(f.item.incomingId))
+  await discoverComments({ ...f.options, adapter, job: restored })
+  assert.equal(restored.state.items.filter(item => item.incomingId === f.item.incomingId).length, 1)
+  assert.equal(f.counts().posts, 0)
+})
+
+test('publisher rejects a legacy queued duplicate of an unknown or verified reply', async () => {
+  for (const status of ['uncertain', 'verified'] as const) {
+    const f = fixture(), previous = { ...f.item, status, attemptedAt: new Date(start).toISOString() }
+    f.job.state.items.unshift(previous)
+    await publishReplies(f.options)
+    assert.equal(f.counts().posts, 0); assert.equal(f.item.status, 'ignored')
+    assert.equal(previous.status, status); assert.equal(f.item.reasonCode, 'comment_duplicate_reply')
+  }
+})
+
+test('disable stops all error/completed sessions with pending results, including after restart', async () => {
+  const f = fixture(); let reads = 0
+  const jobs = ['error', 'completed'].map((status, i) => ({ ...structuredClone(f.job), jobId: `job-${i}`,
+    status, state: { ...structuredClone(f.job.state), items: [{ ...f.item, status: 'uncertain', attemptedAt: new Date(start).toISOString(),
+      nextVerificationAt: new Date(start + 60_000).toISOString() }] } })) as MonitorJob[]
+  const store = { async list() { return structuredClone(jobs) }, async update(job: MonitorJob) {
+    jobs[jobs.findIndex(row => row.jobId === job.jobId)] = structuredClone(job)
+  }, async purge() {} }
+  const create = () => createCommentMonitorService({ ...f.options, store, autoStart: false, openai: {}, repository: {},
+    loggerFor: () => f.options.logger, adapter: { async listReplies() { reads++; return { items: [] } } } })
+  let service = create()
+  try {
+    await service.list(); await service.disable(f.job.platformAccountId)
+    assert.ok(jobs.every(job => job.status === 'disabled'))
+    service.stop(); service = create(); f.time(start + 60_000); await service.tick()
+    assert.equal(reads, 0); assert.ok(jobs.every(job => job.state.items[0].status === 'uncertain'))
+  } finally { service.stop() }
+})
+
+test('Stop during POST saves its returned ID and never starts a follow-up GET', async () => {
+  const f = fixture(); let reads = 0
+  f.adapter.reply = async () => { f.job.status = 'disabled'; return { id: 'accepted-id' } }
+  f.adapter.listReplies = async () => { reads++; throw Error('must not verify after Stop') }
+  await publishReplies(f.options)
+  assert.equal(reads, 0); assert.equal(f.item.replyId, 'accepted-id'); assert.equal(f.item.status, 'uncertain')
+  await pollMonitorJob({ ...f.options, store: { async update() {} }, openai: {} })
+  assert.equal(reads, 0)
+})
+
+test('managed Stop retains unknown results without waiting for provider or recovery deadlines', async () => {
   const f = fixture(); f.job.state.automationId = 'auto'
   f.item.status = 'uncertain'; f.item.attemptedAt = new Date(start).toISOString()
   f.item.recovery = { firstFailedAt: start, httpStatus: 500, stage: 'comments_read' }
@@ -22,12 +90,12 @@ test('managed Stop cannot hide a 20 minute local expiry behind a two-hour provid
       async update(value: MonitorJob) { saved = structuredClone(value) }, async purge() {} } })
   try {
     const stopped = await service.stepManaged(f.job.jobId, true)
-    assert.equal(stopped.recoveryDeadlineAt, start + 20 * 60_000)
+    assert.equal(stopped.status, 'stopped'); assert.equal(stopped.summary?.unconfirmed, 1)
     f.time(start + 20 * 60_000)
     const result = await service.stepManaged(f.job.jobId, true)
-    assert.equal(result.status, 'stopped'); assert.equal(result.skippedActions.length, 1)
+    assert.equal(result.status, 'stopped'); assert.equal(result.summary?.unconfirmed, 1)
     assert.equal(saved.state.items[0].status, 'uncertain')
-    assert.equal(saved.state.items[0].recovery?.skippedAt, start + 20 * 60_000)
+    assert.equal(saved.state.items[0].recovery?.skippedAt, undefined)
     assert.deepEqual(f.counts(), { posts: 0, reads: 0 })
   } finally { service.stop() }
 })
@@ -78,19 +146,21 @@ test('500 recovery expires for one reply; durable unknown still reserves quota a
   assert.equal(f.counts().posts, 2)
 })
 
-test('disabled read-back preserves Retry-After without resuming discovery or sending', async () => {
+test('disabled monitor does not read before or after the preserved Retry-After', async () => {
   const f = fixture(); await assert.rejects(publishReplies(f.options)); f.job.status = 'disabled'
   f.time(start + 60_000); let reads = 0
   const deadline = start + 2 * 3600_000
+  f.job.state.providerNotBefore = new Date(deadline).toISOString()
   f.adapter.listReplies = async () => { reads++; throw Object.assign(Error('limited'), {
     code: 'unipile_rate_limit', details: { httpStatus: 429, retryAt: deadline } }) }
   const options = { ...f.options, store: { async update() {} }, openai: {} }
-  assert.equal((await pollMonitorJob(options)).status, 'verifying')
-  assert.equal(f.job.status, 'disabled'); assert.equal(Date.parse(f.job.nextCheckAt!), deadline)
-  f.time(deadline - 1); await pollMonitorJob(options); assert.equal(reads, 1)
+  assert.equal((await pollMonitorJob(options)).status, 'stopped')
+  assert.equal(f.job.status, 'disabled'); assert.equal(Date.parse(f.job.state.providerNotBefore), deadline)
+  f.time(deadline - 1); await pollMonitorJob(options); assert.equal(reads, 0)
   f.adapter.listReplies = async () => { reads++; return { data: [{ id: 'sent', is_sender: true }] } }
   f.time(deadline); await pollMonitorJob(options); await pollMonitorJob(options)
-  assert.equal(reads, 2); assert.equal(f.job.state.published, 1); assert.equal(f.counts().posts, 1)
+  assert.equal(reads, 0); assert.equal(f.job.state.published, 0); assert.equal(f.counts().posts, 1)
+  assert.equal(f.item.status, 'uncertain')
   assert.equal(f.job.status, 'disabled')
 })
 
@@ -251,7 +321,7 @@ test('unknown survives negative reads with durable increasing verification inter
 })
 
 for (const status of ['disabled', 'completed'] as const) {
-  test(`restart of ${status} monitor checks the saved ID after the deadline without a new reply`, async () => {
+  test(`restart of ${status} monitor preserves Stop separately from natural completion`, async () => {
     const f = fixture()
     await assert.rejects(publishReplies(f.options))
     f.job.status = status
@@ -267,7 +337,8 @@ for (const status of ['disabled', 'completed'] as const) {
     assert.equal(reads, 0)
     f.time(start + 60_000)
     await pollMonitorJob({ ...f.options, job, store, openai: {} })
-    assert.equal(job.state.published, 1); assert.equal(job.status, status)
+    assert.equal(reads, status === 'disabled' ? 0 : 1)
+    assert.equal(job.state.published, status === 'disabled' ? 0 : 1); assert.equal(job.status, status)
     assert.equal(f.counts().posts, 1)
   })
 }

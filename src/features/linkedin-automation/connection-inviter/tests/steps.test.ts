@@ -4,8 +4,45 @@ import { connectionSteps } from '../execution.ts'
 import { fixture } from './fixtures.ts'
 import { invitationRuntime, invitationRun, invitationCandidate, INVITATION_TEST_STARTED_AT } from './invitation-test-fixtures.ts'
 import { createConnectionInviterService } from '../service.ts'
+import { reconcileInvitations } from '../pending.ts'
 
-test('managed Stop preserves quota and checks only the unknown invitation at its saved deadline after restart', async () => {
+test('rejected candidates yield one by one without restarting account verification', async () => {
+  const f = fixture({ stack: 'GO', connectionCount: 149, preflightRejectCount: 4 }), run = invitationRun()
+  run.searchProgress.pendingCandidates = Array.from({ length: 4 }, (_, i) => invitationCandidate(run, `mock-${i}`))
+  let profiles = 0, accounts = 0, held = false
+  const profile = f.adapter.getProfile, account = f.adapter.getAccount
+  f.adapter.getProfile = async (...args: any[]) => { profiles++; return profile(...args) }
+  f.adapter.getAccount = async (...args: any[]) => { accounts++; return account(...args) }
+  const runtime = { ...invitationRuntime(f), cooperative: true, gate: { acquire() {
+    assert.equal(held, false); held = true; return () => { held = false }
+  } } }
+  const steps = connectionSteps(runtime, run, new Set(), async () => {})
+  try {
+    assert.equal((await steps.next()).value?.reason, 'history_and_quota_saved')
+    const accountReads = accounts
+    for (let i = 1; i <= 4; i++) {
+      assert.equal((await steps.next()).value?.reason, 'candidate_result_saved')
+      assert.equal(profiles, i); assert.equal(run.searchProgress.pendingCandidates.length, 4 - i)
+      assert.equal(held, false); assert.equal(accounts, accountReads); assert.equal(f.metrics.sends, 0)
+    }
+  } finally { await steps.return(undefined) }
+})
+
+test('a new run never rechecks a stopped run but retains its unknown duplicate reservation', async () => {
+  const f = fixture(), previous = invitationRun(), current = invitationRun()
+  current.runId = 'new-run'; current.runKey = 'new-key'
+  previous.status = 'stopped'
+  const item = { ...invitationCandidate(previous, 'unknown'), status: 'uncertain' as const, sentAt: previous.createdAt }
+  await f.store.createRun(previous); await f.store.createRun(current); await f.store.claimHistory(item)
+  let reads = 0
+  f.adapter.listPendingInvitations = async () => { reads++; throw Error('stopped history must not be read') }
+  const result = await reconcileInvitations(invitationRuntime(f), current, async () => {})
+  assert.equal(result.unresolved, 0); assert.equal(reads, 0)
+  assert.equal((await f.store.listRunHistory(previous.runId, 1000))[0].status, 'uncertain')
+  assert.equal(await f.store.claimHistory({ ...item, runId: current.runId }), false)
+})
+
+test('managed Stop preserves quota and unknown history without provider checks after restart', async () => {
   const f = fixture(), run = invitationRun(); let now = Date.parse(run.createdAt), reads = 0
   run.searchProgress.automationId = 'task'; run.dailyQuota = 5
   const item = { ...invitationCandidate(run, 'unknown'), status: 'uncertain' as const, sentAt: run.createdAt }
@@ -16,15 +53,16 @@ test('managed Stop preserves quota and checks only the unknown invitation at its
   let service = create()
   try {
     const stopped = await service.stepManaged(run.runId, true)
-    assert.equal(stopped.status, 'verifying'); assert.equal(reads, 0)
-    service.stop(); service = create(); now = Date.parse(stopped.nextActionAt!) - 1
-    assert.equal((await service.stepManaged(run.runId)).status, 'verifying'); assert.equal(reads, 0)
+    assert.equal(stopped.status, 'stopped'); assert.equal(stopped.summary?.unconfirmed, 1); assert.equal(reads, 0)
+    service.stop(); service = create(); now += 86400_000
+    assert.equal((await service.stepManaged(run.runId)).status, 'stopped'); assert.equal(reads, 0)
     now++; assert.equal((await service.stepManaged(run.runId)).status, 'stopped')
-    assert.equal(reads, 1); assert.equal(f.metrics.sends, 0)
+    assert.equal(reads, 0); assert.equal(f.metrics.sends, 0)
     const saved = (await f.store.getRun(run.runId))!
-    assert.equal(saved.dailyQuota, 5); assert.equal(saved.counters.sent, 1)
-    await service.stepManaged(run.runId); assert.equal(reads, 1)
-    assert.equal((await f.store.getRun(run.runId))!.counters.sent, 1)
+    assert.equal(saved.dailyQuota, 5); assert.equal(saved.counters.sent, 0)
+    await service.stepManaged(run.runId); assert.equal(reads, 0)
+    assert.equal((await f.store.listRunHistory(run.runId, 1000))[0].status, 'uncertain')
+    assert.equal((await f.store.getRun(run.runId))!.counters.sent, 0)
   } finally { service.stop() }
 })
 

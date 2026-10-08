@@ -13,7 +13,7 @@ import * as httpModule from '../../../integrations/unipile/http-client.ts'
 import { acquirePostWriterLease } from './writer-lease.ts'
 import { registerWriterShutdown } from './shutdown-signals.ts'
 import { PostError, errorCode } from './errors.ts'
-import type { Gate, PostStore } from './types.ts'
+import type { Gate, PostStore, LikeEvent } from './types.ts'
 import type { LinkedInAuthAccountRow } from '../account-connection/types.ts'
 import { createJsonFiles } from './json-files.ts'
 import { createCvFiles } from './cv-files.ts'
@@ -29,7 +29,8 @@ export type PostWriterStorage = { store: PostStore; cvRows(): Promise<Record<str
 
 export function createLivePostWriter(repository: { listAccounts(): Promise<LinkedInAuthAccountRow[]> },
   gate: Gate, control: { env?: NodeJS.ProcessEnv; storage?: PostWriterStorage;
-    managedShutdown?: boolean; unknownLockGraceMs?: number; assertAutomaticLikes?(account: number): Promise<void> } = {}): PostWriterService {
+    managedShutdown?: boolean; unknownLockGraceMs?: number; assertAutomaticLikes?(account: number): Promise<void>;
+    reportLikeEvent?(event: LikeEvent): void } = {}): PostWriterService {
   const env = control.env ?? process.env
   const log = createPostLogger()
   let service: Promise<PostWriterService> | undefined
@@ -67,7 +68,7 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
       generator: model, memes: createMemeServices(files, model.respond, log, env),
       adapter: createPostAdapter(log, unipile, scheduler), gate, writable,
       writerId, now: Date.now, random: Math.random, log, unknownLockGraceMs: control.unknownLockGraceMs,
-      assertAutomaticLikes: control.assertAutomaticLikes })
+      assertAutomaticLikes: control.assertAutomaticLikes, reportLikeEvent: control.reportLikeEvent })
   })().catch(error => { removeSignals?.(); release?.(); service = undefined; throw error })
   function close() {
     closing = true

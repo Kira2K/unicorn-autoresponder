@@ -104,7 +104,7 @@ export function createLinkedInAutomationStore(pool: SqlPool): Store & { withdraw
           AND ($5::text IS NULL OR state->>'source'=$5)
           AND ($6::text IS NULL OR state->>'feature'=$6)
           AND (NOT $7::boolean OR COALESCE((state->>'httpStatus')::int,0)>=400
-            OR state->>'code' ~ 'error|failed|blocked|lost|uncertain|needs_attention|unavailable|timeout|invalid|conflict|comments_post_not_published|comments_not_started|post_account_not_ready|unipile_action_skipped|comments_post_skipped')
+            OR state->>'code' ~ 'error|failed|blocked|lost|uncertain|needs_attention|unavailable|timeout|invalid|conflict|identity_mismatch|automation_likes_expired|comments_post_not_published|comments_not_started|post_account_not_ready|unipile_action_skipped|comments_post_skipped')
           AND ($8::double precision IS NULL OR at>=to_timestamp($8/1000.0))
           AND ($9::double precision IS NULL OR at<to_timestamp($9/1000.0))
         ORDER BY id ${filter.latest ? 'DESC' : 'ASC'} LIMIT $3`, [account ?? null,after,Math.min(1000,limit),

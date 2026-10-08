@@ -1,5 +1,5 @@
 import { allPages } from './pagination.ts'
-import { commentErrorCode } from './errors.ts'
+import { commentError, commentErrorCode } from './errors.ts'
 import type { CommentLogger, MonitorItem, MonitorJob } from './types.ts'
 import { recordFailure, recoveryExpired, recoveryWakeAt, skipRecovery, ACTION_SKIPPED } from '../action-recovery.ts'
 import * as requestControl from '../../../integrations/unipile/request-control.ts'
@@ -8,8 +8,10 @@ const { withRequestContext } = (requestControl as any).default ?? requestControl
 const textOf = (value: any) => String(value?.text ?? '').trim()
 
 async function readReplies(options: any, item: MonitorItem, replyId?: string) {
-  return withRequestContext({ actionId: `reply:${item.incomingId}` }, () => allPages(cursor => options.adapter.listReplies(options.job.accountId, item.postId,
-    item.parentId, options.logger, cursor, true), options.logger, 'reply_verification_page', 20,
+  return withRequestContext({ actionId: `reply:${item.incomingId}` }, () => allPages(cursor => {
+    if (options.job.status === 'disabled') throw commentError('comment_monitor_disabled', 'Monitor is disabled.')
+    return options.adapter.listReplies(options.job.accountId, item.postId, item.parentId, options.logger, cursor, true)
+  }, options.logger, 'reply_verification_page', 20,
     rows => Boolean(replyId && rows.some(row => row?.is_sender && row.id === replyId))))
 }
 
@@ -50,7 +52,22 @@ export function markVerified(job: MonitorJob, item: MonitorItem, row: any, logge
 export const pendingReplies = (job: MonitorJob) => job.state.items.filter(item =>
   item.status === 'uncertain' || item.status === 'publishing')
 
-export const activePendingReplies = (job: MonitorJob) => pendingReplies(job).filter(item => item.recovery?.skippedAt === undefined)
+export const reservesSessionQuota = (item: MonitorItem) => !item.quotaReleased
+export const sessionPendingReplies = (job: MonitorJob) => pendingReplies(job).filter(reservesSessionQuota)
+
+export function releaseHistoricalQuota(job: MonitorJob, now: number) {
+  let changed = false
+  for (const item of pendingReplies(job)) if (item.verificationStopped && !item.quotaReleased &&
+    Date.parse(item.quotaUntil ?? '') <= now) { item.quotaReleased = true; changed = true }
+  return changed
+}
+export function nextQuotaReleaseAt(job: MonitorJob, now: number) {
+  const deadlines = sessionPendingReplies(job).filter(item => item.verificationStopped)
+    .map(item => Date.parse(item.quotaUntil ?? '')).filter(at => at > now)
+  return deadlines.length ? new Date(Math.min(...deadlines)).toISOString() : undefined
+}
+
+export const activePendingReplies = (job: MonitorJob) => pendingReplies(job).filter(item => !item.verificationStopped && item.recovery?.skippedAt === undefined)
 
 export function expireReplyRecovery(job: MonitorJob, now: number, logger: CommentLogger) {
   let changed = false
@@ -89,6 +106,7 @@ export async function reconcileUncertain(options: {
 }) {
   if (expireReplyRecovery(options.job, options.now?.() ?? Date.now(), options.logger)) await options.save()
   for (const item of activePendingReplies(options.job)) {
+    if (options.job.status === 'disabled') break
     if (Date.parse(item.nextVerificationAt ?? '') > (options.now?.() ?? Date.now())) continue
     // Flush a possibly failed ID save before reading or allowing any new write.
     item.status = 'uncertain'; await options.save()

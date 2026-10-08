@@ -1,9 +1,10 @@
 import type { AsyncLocalStorage as Context } from 'node:async_hooks'
 const { AsyncLocalStorage } = require('node:async_hooks') as typeof import('node:async_hooks')
 const { randomUUID } = require('node:crypto') as typeof import('node:crypto')
-export type RequestInfo = { method: string; operation: string; stage?: string; account?: string; write: boolean; requestId?: string; startedAt?: number; dispatched?: boolean }
+const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as typeof import('./error-diagnostics.ts')
+export type RequestInfo = { method: string; operation: string; route?: string; stage?: string; account?: string; write: boolean; requestId?: string; startedAt?: number; dispatched?: boolean }
 export type RequestContext = { taskId?: string; runId?: string; actionId?: string; initiator?: 'schedule' | 'manual' | 'recovery'; account?: string; feature?: string;
-  assertWrite?(): Promise<void>; signal?: AbortSignal;
+  assertWrite?(): Promise<void>; assertRequest?(): Promise<void>; signal?: AbortSignal;
   waitForRequest?<T>(action: () => Promise<T>): Promise<T> }
 export type RequestPolicy = { before(info: RequestInfo, context?: RequestContext): Promise<void>;
   queue?<T>(info: RequestInfo, context: RequestContext | undefined, prepare: () => Promise<void>, action: () => Promise<T>): Promise<T>;
@@ -34,7 +35,10 @@ function requestInfo(method: string, path: string, body?: any): RequestInfo {
     parts.includes('posts') ? (method === 'GET' ? 'posts_read' : 'post_send') :
     parts.includes('users') ? (method !== 'GET' ? 'profile_write' : parts.includes('me') ? 'own_profile_read' : 'profile_read') :
     parts.includes('accounts') ? 'account_check' : undefined
-  return { method, write: method !== 'GET', account: account ? String(account) : undefined, requestId: randomUUID(), startedAt: Date.now(),
+  const template = safeUnipileDiagnostics(0, {}, { requestPath: path }).requestPath?.split('?')[0]
+    .replace(/\/me(?=\/|$)/g, '/:id')
+  return { method, route: template ? `${method} ${template}` : undefined,
+    write: method !== 'GET', account: account ? String(account) : undefined, requestId: randomUUID(), startedAt: Date.now(),
     stage,
     operation: parts.includes('reactions') ? 'likes' : parts.includes('comments') ? 'comments' : parts[prefixed ? 1 : 0] || 'root' }
 }

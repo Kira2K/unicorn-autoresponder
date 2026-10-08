@@ -16,13 +16,13 @@ export async function createInvitationPublisher(runtime: ConnectionRuntime, run:
   const safety = await createInvitationSafety(runtime, run, save, seed)
 
   return {
-    async publish(audience: SearchAudience, candidates: ConnectionHistoryItem[], sentLimit = 1) {
-      runtime.logger.event('invitation_publish', 'started', { ...details, audience, sentLimit })
+    async publish(audience: SearchAudience, candidates: ConnectionHistoryItem[], candidateLimit = 1) {
+      runtime.logger.event('invitation_publish', 'started', { ...details, audience, candidateLimit })
       const processedPersonIds: string[] = []
       let sentCount = 0
       try {
         for (const candidate of candidates) {
-          if (sentCount >= sentLimit || runtime.stopRequested(run.runId)) break
+          if (processedPersonIds.length >= candidateLimit || runtime.stopRequested(run.runId)) break
           requireConnectionRunDay(runtime, run)
           if (safety.candidateIsPending(candidate.personId)) {
             safety.countSkip(candidate, 'pending_invitation')

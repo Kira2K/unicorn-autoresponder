@@ -1,13 +1,10 @@
 import { validateReply } from './reply-validation.ts'
-import { deterministicSkipReason, validateModelDecision,
+import { deterministicSkipReason, validateModelDecision, SESSION_REPLY_LIMIT, THREAD_REPLY_LIMIT,
   type ReplyPolicyReason } from './reply-policy.ts'
 import type { AuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorItem, MonitorJob } from './types.ts'
 import { recordFailure } from '../action-recovery.ts'
-
-const batches = <T>(items: T[], size: number) =>
-  Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
-    items.slice(index * size, index * size + size))
+import { reservesSessionQuota } from './reply-verification.ts'
 
 function context(job: MonitorJob, item: MonitorItem) {
   return { incoming_id: item.incomingId,
@@ -37,16 +34,16 @@ function replyReservations(job: MonitorJob): ReplyReservations {
   for (const item of pending) {
     existingThreads[item.threadId] = (existingThreads[item.threadId] ?? 0) + 1
   }
-  return { existingTotal: pending.length, existingThreads, total: 0, threads: {} }
+  return { existingTotal: pending.filter(reservesSessionQuota).length, existingThreads, total: 0, threads: {} }
 }
 
 function replyLimitReason(job: MonitorJob, item: MonitorItem, reserved: ReplyReservations,
   includeNew = true) {
   const newTotal = includeNew ? reserved.total : 0
   const newInThread = includeNew ? (reserved.threads[item.threadId] ?? 0) : 0
-  return job.state.published + reserved.existingTotal + newTotal >= 30
+  return job.state.published + reserved.existingTotal + newTotal >= SESSION_REPLY_LIMIT
     ? 'comment_session_limit_reached' : (job.state.threadReplies[item.threadId] ?? 0) +
-      (reserved.existingThreads[item.threadId] ?? 0) + newInThread >= 7
+      (reserved.existingThreads[item.threadId] ?? 0) + newInThread >= THREAD_REPLY_LIMIT
       ? 'comment_thread_limit_reached' : ''
 }
 
@@ -126,8 +123,12 @@ export async function generateReplies(options: {
   job: MonitorJob; items: MonitorItem[]; openai: any; logger: CommentLogger
   loadAuthorContext?: () => Promise<AuthorContext>
   now?: () => number
+  canContinue?: () => boolean
 }) {
   const { job, openai, logger } = options
+  const stopped = () => ['disabled', 'completed', 'error'].includes(job.status) ||
+    options.canContinue?.() === false || (options.now?.() ?? Date.now()) >= Date.parse(job.expiresAt)
+  if (stopped()) return []
   const reserved = replyReservations(job)
   const candidates = options.items.filter(item => {
     const reason = deterministicSkipReason(item.incomingText)
@@ -139,7 +140,18 @@ export async function generateReplies(options: {
   const queued: MonitorItem[] = []
   const authorContext = candidates.length && options.loadAuthorContext
     ? await options.loadAuthorContext() : {}
-  for (const batch of batches(candidates, 5)) {
+  let remaining = candidates
+  while (remaining.length && !stopped()) {
+    const batch: MonitorItem[] = [], deferred: MonitorItem[] = []
+    const planned = { ...reserved, threads: { ...reserved.threads } }
+    for (const item of remaining) {
+      const reason = replyLimitReason(job, item, reserved)
+      if (reason) { markLimitIgnored(item, reason, logger); continue }
+      if (batch.length >= 5 || replyLimitReason(job, item, planned)) { deferred.push(item); continue }
+      batch.push(item); planned.total++; planned.threads[item.threadId] = (planned.threads[item.threadId] ?? 0) + 1
+    }
+    remaining = deferred
+    if (!batch.length) break
     batch.forEach(item => {
       clearReply(item); item.reasonCode = undefined
       item.status = 'generating'; item.updatedAt = new Date().toISOString()
@@ -154,7 +166,7 @@ export async function generateReplies(options: {
       const initial = resolveOutputs(job, batch, await openai.generate(initialInput, logger), logger)
       const resolutions = initial.resolutions
       let invalid = initial.invalid
-      if (invalid.length) {
+      if (invalid.length && !stopped()) {
         logger.event('reply_repair', 'started', { attempt: 1, itemCount: invalid.length })
         logger.event('author_context_attach', 'started', { operation: 'repair',
           count: Object.keys(authorContext).length })
@@ -173,7 +185,7 @@ export async function generateReplies(options: {
       }
       const invalidItems = new Set(invalid)
       for (const item of batch) {
-        if (invalidItems.has(item)) { markFailed(job, item); continue }
+        if (invalidItems.has(item)) { if (stopped()) markDetected(item); else markFailed(job, item); continue }
         const resolution = resolutions.get(item)
         if (!resolution) { markFailed(job, item); continue }
         if (resolution.action === 'skip') {

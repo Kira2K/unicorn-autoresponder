@@ -4,7 +4,8 @@ import { randomUUID, createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Express, RequestHandler } from 'express'
-import { createOrchestrator, describeFailure } from '../../linkedin-automation/orchestrator/service.ts'
+import { createOrchestrator } from '../../linkedin-automation/orchestrator/service.ts'
+import { describeFailure } from '../../linkedin-automation/orchestrator/failure.ts'
 import { createFeatureAdapters, type Services } from '../../linkedin-automation/orchestrator/adapters.ts'
 import { createRequestPolicy } from '../../linkedin-automation/orchestrator/request-policy.ts'
 import { accountKey, fail, type Schedule } from '../../linkedin-automation/orchestrator/contracts.ts'
@@ -13,6 +14,7 @@ import { registerWriterShutdown } from '../../linkedin-automation/post-writer/sh
 import { createWithdrawalFileStore } from '../../linkedin-automation/invitation-withdrawal/file-store.ts'
 import type { createLinkedInAutomationStore } from '../../../integrations/postgres/linkedin-automation.mts'
 import type { LinkedInAuthAccountRow } from '../../linkedin-automation/account-connection/types.ts'
+import type { LikeEvent } from '../../linkedin-automation/post-writer/types.ts'
 const { createLinkedInOperationGate } = (gateModule as any).default ?? gateModule
 const { installRequestPolicy, requestContext, drainWrites } = (requestControl as any).default ?? requestControl
 
@@ -38,6 +40,21 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
   let leaseObservedAt = now(), runtime: ReturnType<typeof createOrchestrator> | undefined
   const aliases = new Map<string, string>(), providerKeys = new Map<string, string>()
   const accountInfo = new Map<string, { accountId: number; studentId: number }>()
+  const pendingLikeEvents: LikeEvent[] = []
+  const likeStages = { like_preflight: 'Проверка аккаунта перед лайком', like_readback: 'Проверка результата лайка',
+    like_send: 'Отправка лайка', likes_stopped: 'Остановка автоматических лайков' }
+  function reportLikeEvent(event: LikeEvent) {
+    if (!runtime) { pendingLikeEvents.push(event); return }
+    const author = [...accountInfo.values()].find(row => row.accountId === event.authorAccountId)
+    const detail = describeFailure({ code: event.code, httpStatus: event.httpStatus })
+    const stage = likeStages[event.stage]
+    const reason = event.code === 'automation_likes_expired'
+      ? 'Истекли 24 часа прогона. Проверки прекращены, неизвестные результаты сохранены.' : detail.message
+    runtime.recordEvent({ at: now(), ...detail, version, taskId: event.taskId, runId: event.runId,
+      accountId: event.authorAccountId, studentId: author?.studentId, feature: 'likes', operation: event.stage, stage,
+      initiator: event.taskId ? 'schedule' : 'manual', actionId: `like:${event.runId}:${event.actorAccountId ?? 'all'}`,
+      message: `${stage}. Автор: аккаунт ${event.authorAccountId}.${event.actorAccountId === undefined ? '' : ` Исполнитель: аккаунт ${event.actorAccountId}.`} ${reason}` })
+  }
   async function refreshAccounts() {
     const rows = await repository.listAccounts()
     for (const row of rows.filter(a => a.unipileAccountId)) {
@@ -80,7 +97,7 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
         await repository.recordFailure?.(row.platformAccountId, { errorCode: code })
       }
     },
-    onFailure(error) { connected = false; runtime?.suspend(error) } }))
+    onFailure(error) { connected = false; runtime?.suspend(error, 'Контроль запроса и запись журнала') } }))
   const files = createWithdrawalFileStore(options.withdrawalDirectory ?? resolve('storage/linkedin-invitation-withdrawal'))
   const imports = new Map<number, Promise<void>>()
   const withdrawals = {
@@ -103,7 +120,9 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
     if (!runtime || ticking) return
     ticking = true
     try {
-      await refreshAccounts()
+      try { await refreshAccounts() } catch (error) {
+        connected = false; runtime.suspend(error, 'Обновление списка аккаунтов'); return
+      }
       await runtime.tick()
       const status = await runtime.status()
       connected = status.isOwner; epoch = status.owner?.id === owner ? status.owner.epoch : undefined
@@ -131,6 +150,7 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
         if (!schedule.enabled || !schedule.slots.some(s => s.features.includes('posts')))
           await value.posts.stopAutomaticLikes(schedule.account.id)
       }, report: event => console.error('[linkedin-automation]', JSON.stringify(event)) })
+    for (const event of pendingLikeEvents.splice(0)) reportLikeEvent(event)
     const safeTick = () => tick().catch(error => { connected = false; runtime?.suspend(error) })
     if (options.autoStart !== false) { heartbeat = setInterval(() => void safeTick(), 5000); heartbeat.unref(); void safeTick() }
     return runtime
@@ -167,7 +187,10 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
           const counts = (state: string) => run.engagement.items.filter(item => item.status === state).length
           postResults[run.id] = { publishedAt: run.publishedAt, likes: { status: run.engagement.status,
             confirmed: counts('sent'), pending: counts('pending'), uncertain: counts('sending') + counts('uncertain'),
-            failed: counts('failed'), target: run.engagement.target, nextAt: run.nextActionAt } }
+            failed: counts('failed'), target: run.engagement.target, nextAt: run.nextActionAt,
+            errors: run.engagement.items.filter(item => item.errorCode).map(item => ({ accountId: item.account.platformAccountId,
+              name: item.account.clientName, code: item.errorCode,
+              stage: item.errorStage ? likeStages[item.errorStage] : item.attemptedAt !== undefined ? likeStages.like_readback : likeStages.like_preflight })) } }
         }
       }))
       return { ...status, postResults }
@@ -224,7 +247,7 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
   }
   if (options.autoStart !== false) removeSignals = registerWriterShutdown(close,
     (code, fields) => console.error('[linkedin-automation]', code, fields))
-  return { gate, assertAvailable, withdrawals, attach, routes, tick, close, unknownLockGraceMs,
+  return { gate, assertAvailable, withdrawals, attach, routes, tick, close, unknownLockGraceMs, reportLikeEvent,
     async assertAutomaticLikes(account: number) {
       await assertOwner()
       const schedule = (await store.snapshot()).schedules.find(s => s.account.id === account)
@@ -249,6 +272,7 @@ export function unavailableLinkedInAutomation(error: unknown): LinkedInAutomatio
 export type LinkedInAutomation = {
   unknownLockGraceMs?: number;
   assertAutomaticLikes?(account: number): Promise<void>;
+  reportLikeEvent?(event: LikeEvent): void;
   gate: any; assertAvailable(): void;
   withdrawals: import('../../linkedin-automation/invitation-withdrawal/contracts.ts').Store;
   attach(value: Services): unknown; routes(app: Express, auth: RequestHandler): void;

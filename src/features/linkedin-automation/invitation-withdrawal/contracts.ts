@@ -21,7 +21,7 @@ export type Run = { id: string; platformAccountId: number; accountId: string;
   unconfirmed?: string[]; verificationAt?: string; verificationChecks?: number;
   targets?: Candidate[]; cursor?: number; approvedAccount?: Account;
   stopRequested?: boolean; error?: string; nextActionAt?: string; checkedAt?: string; retryAttempt?: number }
-export type State = { accountId: string; attempted: string[]; run?: Run; retryAt?: number }
+export type State = { accountId: string; attempted: string[]; run?: Run; retryAt?: number; previousRuns?: Run[] }
 export type Store = { load(id: number): Promise<State | undefined>; save(id: number, state: State): Promise<void> }
 export type Preview = { token: string; account: Account; expiresAt: number; items: Candidate[] }
 export type Runtime = {

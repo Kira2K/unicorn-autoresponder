@@ -37,7 +37,7 @@ export interface Store {
   owned(owner: string, epoch: number, now: number): Promise<void>
   release(owner: string, epoch: number): Promise<void>
   cooldown(value: Cooldown): Promise<void>
-  // 'action' is the local handoff pause only; '*' controls external provider requests.
+  // 'action' is local pacing; '*' pauses the account; other keys are normalized HTTP routes.
   blockedUntil(account: string, method: string, now: number): Promise<number>
   cooldowns?(): Promise<Cooldown[]>
   event(event: Event): Promise<void>

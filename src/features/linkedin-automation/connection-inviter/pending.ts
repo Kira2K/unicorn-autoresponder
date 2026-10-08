@@ -25,6 +25,13 @@ export async function reconcileInvitations(runtime: ConnectionRuntime, run: Conn
   const open = options.openHistory ?? await withConnectionRetry(runtime, run, save, 'storage',
     'open_history_list', () => runtime.store.listOpenHistory(run.platformAccountId, 1000), retryOptions)
   let active = options.runOnly ? open.filter(item => item.runId === run.runId) : open
+  // A new run inherits duplicate protection, not permission to poll stopped runs.
+  const stoppedRuns = new Set<string>()
+  for (const id of new Set(active.map(item => item.runId).filter(id => id !== run.runId))) {
+    const previous = await runtime.store.getRun(id)
+    if (previous?.status === 'stopped' || previous?.stage === 'stop_requested') stoppedRuns.add(id)
+  }
+  active = active.filter(item => !stoppedRuns.has(item.runId))
   await expireInvitationRecovery(runtime, run, save, active)
   active = active.filter(item => item.reasonCode !== ACTION_SKIPPED)
   const unknown = active.filter(item => ['sending', 'uncertain'].includes(item.status))

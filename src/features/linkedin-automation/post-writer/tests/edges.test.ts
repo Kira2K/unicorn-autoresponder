@@ -6,7 +6,7 @@ import { defaults } from '../types.ts'
 import { mockDraft } from '../mock-content.ts'
 import { publicationCheckAt } from '../publication.ts'
 
-test('stopped managed publication confirms once after restart without sending again', async () => {
+test('stopped managed publication keeps its ID after restart without reading or sending again', async () => {
   const f = fixture(), read = f.deps.adapter.read; let reads = 0, available = false
   f.deps.adapter.read = async (...args) => {
     reads++; if (!available) throw Object.assign(Error('offline'), { code: 'unipile_unreachable' }); return read(...args)
@@ -19,9 +19,9 @@ test('stopped managed publication confirms once after restart without sending ag
     await f.service.stepManaged(run.id, true); const due = (await f.run()).nextActionAt!
     f.restart(); f.setNow(due - 1); await f.service.stepManaged(run.id); assert.equal(reads, 0)
     available = true; f.setNow(due)
-    assert.equal((await f.service.stepManaged(run.id)).status, 'completed')
+    assert.equal((await f.service.stepManaged(run.id)).status, 'stopped')
     await f.service.stepManaged(run.id)
-    assert.equal(reads, 1); assert.equal(f.counts.publish, 1); assert.equal((await f.run()).postId, id)
+    assert.equal(reads, 0); assert.equal(f.counts.publish, 1); assert.equal((await f.run()).postId, id)
     assert.equal((await f.run()).engagement.status, 'off')
   } finally { await f.service.close() }
 })
@@ -87,7 +87,7 @@ test('old unknown publication checks back off across restart without losing its 
   assert.equal(f.counts.publish, 1); await f.service.close()
 })
 
-test('negative publication readback uses age backoff and can still confirm after Stop', async () => {
+test('negative publication readback uses age backoff and terminates on Stop', async () => {
   const f = fixture(); let scans = 0
   await f.service.start(203, 'automatic', 'negative-old-check'); await f.step()
   const run = await f.run(); run.postId = undefined; run.status = 'uncertain'
@@ -97,10 +97,9 @@ test('negative publication readback uses age backoff and can still confirm after
   await f.step(); const next = (await f.run()).nextActionAt!
   assert.equal(next - f.deps.now(), 6 * 3600_000)
   await f.service.action(run.id, 'stop'); f.restart(); await f.step(3600_000); assert.equal(scans, 1)
-  f.deps.adapter.recent = async () => [{ id: 'confirmed', authorId: run.target!.verifiedProviderId,
-    text: run.draft!.text, createdAt: run.attemptedAt!, url: 'https://linkedin.com/post/confirmed' }]
+  f.deps.adapter.recent = async () => { scans++; return [] }
   f.setNow(next); await f.step()
-  assert.equal((await f.run()).status, 'published'); assert.equal(f.counts.publish, 1)
+  assert.equal((await f.run()).status, 'uncertain'); assert.equal(scans, 1); assert.equal(f.counts.publish, 1)
   await f.service.close()
 })
 
@@ -230,7 +229,7 @@ test('failed history confirmation cannot mark post published; recovery never rep
 })
 
 test('full Retry-After reaches every client; no-cache remains opt-in', async () => {
-  const { createUnipileHttpClient } = httpModule as unknown as {
+  const { createUnipileHttpClient } = ((httpModule as any).default ?? httpModule) as {
     createUnipileHttpClient(options: Record<string, unknown>): {
       request(method: string, path: string, body?: unknown, options?: Record<string, boolean>): Promise<unknown> }
   }

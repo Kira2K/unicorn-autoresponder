@@ -11,6 +11,8 @@ import * as requestControl from '../../../integrations/unipile/request-control.t
 const { withRequestContext } = (requestControl as any).default ?? requestControl
 
 export async function processRun(run: PostRun, e: Execution, singleStep = false): Promise<ExecutionStep> {
+  if (run.stop) return { status: 'stopped', summary: { completed: run.status === 'published' ? 1 : 0,
+    skipped: 0, unconfirmed: run.attemptedAt && run.status !== 'published' ? 1 : 0 } }
   try { await withRequestContext({ actionId: `post:${run.id}` }, () => processRunStep(run, e, singleStep)) }
   finally {
     // A returned request is no longer in flight. Durable intents protect against
@@ -31,7 +33,7 @@ export async function processRun(run: PostRun, e: Execution, singleStep = false)
 }
 
 async function processRunStep(run: PostRun, e: Execution, singleStep: boolean) {
-  if (!e.writable) return
+  if (!e.writable || run.stop) return
   if (run.status !== 'published' && recoveryExpired(run.recovery, e.now())) {
     skipRecovery(run.recovery!, e.now()); run.errorCode = ACTION_SKIPPED; run.nextActionAt = undefined
     // Keep a dispatched publication uncertain and its history claim intact.

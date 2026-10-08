@@ -558,7 +558,8 @@ function createWebConsoleApp(options: {
     : createLivePostWriter(lazyLinkedInRepository as { listAccounts(): Promise<import('../../linkedin-automation/account-connection/types.ts').LinkedInAuthAccountRow[]> },
       linkedinOperationGate, { storage: storage?.posts, managedShutdown: Boolean(options.linkedinAutomation),
         unknownLockGraceMs: options.linkedinAutomation?.unknownLockGraceMs,
-        assertAutomaticLikes: options.linkedinAutomation?.assertAutomaticLikes }))
+        assertAutomaticLikes: options.linkedinAutomation?.assertAutomaticLikes,
+        reportLikeEvent: options.linkedinAutomation?.reportLikeEvent }))
   options.linkedinAutomation?.attach({ inviter: connectionInviter, posts: postWriter,
     comments: commentMonitor } as unknown as import('../../linkedin-automation/orchestrator/adapters.ts').Services)
   if (options.linkedinAutomation && !useMockData && !options.commentMonitor) getLiveCommentMonitor()

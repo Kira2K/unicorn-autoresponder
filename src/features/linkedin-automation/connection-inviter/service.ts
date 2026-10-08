@@ -14,8 +14,6 @@ import { connectionError, connectionErrorCode, normalizeConnectionProviderError,
 import { connectionRetryDelay, makeRetryState, retryAfterMilliseconds } from './retry-state.ts'
 import { closeConnectionRunDay } from './day-window.ts'
 import { createConnectionRunEvents, type ConnectionRunEvent } from './run-events.ts'
-import { reconcileInvitations } from './pending.ts'
-import { expireInvitationRecovery } from './invitation-verification.ts'
 import { ACTION_SKIPPED, skippedActions } from '../action-recovery.ts'
 import { synchronizeConfirmedProgress } from './daily-progress.ts'
 import { withConnectionRetry } from './retry-state.ts'
@@ -490,34 +488,15 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
         const run = current?.run ?? await runtime.store.getRun(runId)
         if (!run?.searchProgress.automationId) throw connectionError('connection_managed_run_missing', 'Automatic run was not found.')
         if (stop || run.status === 'stopped') {
-          const firstStop = run.status !== 'stopped'
           stopRequests.add(runId)
           if (current) { await current.steps.return(undefined); managed.delete(runId) }
-            const history = await runtime.store.listRunHistory(runId, 1000)
-            await expireInvitationRecovery(runtime, run, save, history)
-            const pending = history.filter(item => item.reasonCode !== ACTION_SKIPPED && ['sending', 'uncertain'].includes(item.status))
+          const history = await runtime.store.listRunHistory(runId, 1000)
+          const pending = history.filter(item => ['sending', 'uncertain'].includes(item.status))
           run.status = 'stopped'; run.stage = 'stopped_by_admin'
           synchronizeConfirmedProgress(run, history, run.audienceQuota)
-          const until = Math.max(Date.parse(run.nextActionAt ?? '') || 0,
-            Date.parse(run.searchProgress.invitationVerification?.nextCheckAt ?? '') || 0,
-            Date.parse(run.searchProgress.invitationVerification?.blockedUntil ?? '') || 0,
-            firstStop ? runtime.now().getTime() + 60_000 : 0)
-          if (!pending.length || until > runtime.now().getTime()) {
-            if (pending.length) run.nextActionAt = new Date(until).toISOString()
-            await save(run, 'stopped', 'critical')
-            return pending.length ? { status: 'verifying', nextActionAt: run.nextActionAt,
-              reason: 'connection_invitation_result_pending' } : { status: 'stopped' }
-          }
-          const release = runtime.gate?.acquire('connection_inviter', runId, String(run.platformAccountId))
-          try {
-            const result = await withConnectionRequestTrace(run, runtime.logger, () =>
-              reconcileInvitations(runtime, run, save, { singlePass: true, runOnly: true,
-              ignoreStopRequested: true, openHistory: pending }))
-            synchronizeConfirmedProgress(run, await runtime.store.listRunHistory(runId, 1000), run.audienceQuota)
-            run.status = 'stopped'; run.stage = 'stopped_by_admin'; await save(run, 'stopped', 'critical')
-            return result.unresolved ? { status: 'verifying', nextActionAt: run.nextActionAt,
-              reason: 'connection_invitation_result_pending' } : { status: 'stopped' }
-          } finally { release?.() }
+          await save(run, 'stopped', 'critical')
+          return { status: 'stopped', summary: { completed: run.counters.sent,
+            skipped: run.counters.skipped, unconfirmed: pending.length } }
         }
           if (!current && ['succeeded', 'partial', 'failed', 'paused'].includes(run.status))
             return { status: run.status === 'succeeded' ? 'completed' : 'needs_attention', reason: run.errorCode,

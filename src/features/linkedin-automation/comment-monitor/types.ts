@@ -20,6 +20,10 @@ export type MonitorItem = {
   replyId?: string
   attemptedAt?: string
   uncertainSince?: string
+  verificationStopped?: boolean
+  /** Archived stopped intent carried into a later session, never sendable again. */
+  quotaReleased?: boolean
+  quotaUntil?: string
   nextVerificationAt?: string
   verificationChecks?: number
   status: 'detected' | 'generating' | 'queued' | 'publishing' |

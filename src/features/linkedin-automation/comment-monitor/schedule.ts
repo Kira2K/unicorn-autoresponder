@@ -1,10 +1,12 @@
+import { SESSION_REPLY_LIMIT } from './reply-policy.ts'
 import type { MonitorJob } from './types.ts'
 import { recoveryWakeAt } from '../action-recovery.ts'
+import { sessionPendingReplies } from './reply-verification.ts'
 
 export function nextMonitorActionAt(job: MonitorJob, verificationAt?: string, now = Date.now()) {
-  const pending = job.state.items.filter(item => ['publishing', 'uncertain'].includes(item.status)).length
+  const pending = sessionPendingReplies(job).length
   const maySend = !['disabled', 'completed', 'error'].includes(job.status) && now < Date.parse(job.expiresAt) &&
-    job.state.published + pending < 30
+    job.state.published + pending < SESSION_REPLY_LIMIT
   const times = [maySend ? job.state.nextWorkAt : undefined, verificationAt].filter(Boolean)
     .map(value => Date.parse(value!)).filter(Number.isFinite)
   let next = times.length ? Math.max(Math.min(...times), Date.parse(job.state.providerNotBefore ?? '') || 0) : Infinity

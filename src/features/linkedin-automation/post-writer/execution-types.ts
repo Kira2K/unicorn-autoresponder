@@ -21,6 +21,7 @@ export type PublicationExecution = GateExecution & Pick<Execution, 'save' | 'now
 }
 export type EngagementExecution = GateExecution & Pick<Execution, 'save' | 'now' | 'random' | 'settings' | 'isClosing' | 'unknownLockGraceMs'> & {
   log?: Execution['log']
+  reportLikeEvent?: Execution['reportLikeEvent']
   source: Pick<PostSource, 'accounts'>
   adapter: Pick<PostAdapter, 'identity' | 'reacted' | 'reactions' | 'like'>
 }

@@ -30,8 +30,8 @@ export function createFeatureAdapters(services: Services): Adapters {
     return withRequestContext({
     taskId: ctx.task.id, runId: ctx.task.runId, account: ctx.task.account.unipileId, feature: ctx.task.feature,
     initiator: stopping ? 'recovery' : 'schedule',
-    // Stop forbids mutations; saved read-back still has an owner and its own timer.
-    signal: stopping ? undefined : ctx.signal, waitForRequest: ctx.waitForRequest,
+    // Stop is local cleanup only. Even accidental read-back is fenced at HTTP dispatch.
+    signal: stopping ? AbortSignal.abort('disabled') : ctx.signal, waitForRequest: ctx.waitForRequest,
     assertWrite: async () => { await identity(ctx); await ctx.assertWrite() } }, action) as Promise<T>
   }
   const estimates = async (task: StepContext['task']) => {

@@ -37,9 +37,14 @@ test('500 before invitation POST skips only that candidate and sends the next on
     return profile(account, id)
   }
   const publisher = await createInvitationPublisher(runtime, run, async () => {})
-  const result = await publisher.publish('recruiter', [invitationCandidate(run, 'broken'), invitationCandidate(run, 'next')], 1)
-  assert.equal(result.sentCount, 1); assert.equal(f.metrics.sends, 1)
+  const skipped = await publisher.publish('recruiter', [invitationCandidate(run, 'broken')], 1)
+  assert.deepEqual(skipped.processedPersonIds, ['broken'])
+  assert.equal(skipped.sentCount, 0); assert.equal(f.metrics.sends, 0)
   assert.equal(failedReads, 4); assert.ok(run.searchProgress.actionRecovery!['invite:broken'].skippedAt)
+  // One call is one saved candidate step; the driver then gives the next one a turn.
+  const result = await publisher.publish('recruiter', [invitationCandidate(run, 'next')], 1)
+  assert.equal(result.sentCount, 1); assert.equal(f.metrics.sends, 1)
+  assert.equal(failedReads, 4, 'the skipped candidate must not be read again')
   const history = await f.store.listRunHistory(run.runId, 1000)
   assert.equal(history.find(item => item.personId === 'broken')?.status, 'failed')
 })

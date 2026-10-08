@@ -1,6 +1,7 @@
+import { SESSION_REPLY_LIMIT } from './reply-policy.ts'
 import { replyDelay } from './schedule.ts'
 import { commentError, commentErrorCode } from './errors.ts'
-import { markVerified, scheduleVerification, verifyWithRetry, pendingReplies, expireReplyRecovery } from './reply-verification.ts'
+import { markVerified, scheduleVerification, verifyWithRetry, sessionPendingReplies, expireReplyRecovery } from './reply-verification.ts'
 import { recordFailure } from '../action-recovery.ts'
 import { clearAuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorItem, MonitorJob } from './types.ts'
@@ -22,7 +23,13 @@ export async function publishReplies(options: {
   for (const item of options.items) {
     if (expireReplyRecovery(job, now(), logger)) await options.save()
     if (item.status !== 'queued') continue
-    if (job.state.published + pendingReplies(job).length >= 30) break
+    if (job.state.items.some(other => other !== item && other.postId === item.postId &&
+      other.incomingId === item.incomingId && (other.attemptedAt || other.replyId ||
+        ['publishing', 'uncertain', 'verified'].includes(other.status)))) {
+      item.status = 'ignored'; item.reasonCode = 'comment_duplicate_reply'
+      await options.save(); continue
+    }
+    if (job.state.published + sessionPendingReplies(job).length >= SESSION_REPLY_LIMIT) break
     if (options.isClosing?.()) break
     if (!['checking', 'replying'].includes(job.status)) break
     if (sent) {
@@ -65,6 +72,9 @@ export async function publishReplies(options: {
     }
     // A save failure escapes before verification; the durable intent forbids resending on restart.
     await options.save()
+    if (job.status === 'disabled' || options.isClosing?.()) {
+      scheduleVerification(item, now(), sendError); await options.save(); break
+    }
     let match: any, verificationError: any = sendError
     if (!sendError?.details?.retryAfterMs && !/too_many|rate_limit/.test(commentErrorCode(sendError))) {
       try { match = await verifyWithRetry({ ...options, sleep }, item) }

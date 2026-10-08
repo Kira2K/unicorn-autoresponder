@@ -1,3 +1,6 @@
+export const SESSION_REPLY_LIMIT = 30
+export const THREAD_REPLY_LIMIT = 7
+
 export type ReplyPolicyReason = 'reply' | 'too_short' | 'ai_authorship_question' |
   'provocation' | 'insult' | 'irrelevant_to_context'
 

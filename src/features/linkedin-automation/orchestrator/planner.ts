@@ -1,4 +1,5 @@
 import { features, fail, terminal, type Feature, type Schedule, type Task } from './contracts.ts'
+import { AUTOMATIC_RUN_MAX_AGE_MS } from '../execution-step.ts'
 
 const minute = 60_000, day = 86_400_000, moscow = 3 * 60 * minute
 export const unknownLockGraceMs = 10 * minute
@@ -38,12 +39,12 @@ export function reserve(feature: Feature, estimate = 0, durations: number[] = []
   const p90 = sorted[Math.max(0, Math.ceil(sorted.length * .9) - 1)] ?? 0
   return Math.ceil(Math.max(initial[feature], estimate, p90) * 1.3 + 10 * minute)
 }
-export function windowFor(schedule: Schedule, feature: Feature, now: number) {
+export function windowFor(schedule: Schedule, feature: Feature, now: number, continuing = false) {
   for (let offset = 0; offset < 8; offset++) {
     const date = dateMsk(now + offset * day), start = dayStart(date)
     const slots = schedule.slots.filter(s => s.day === weekday(date) &&
-      (feature === 'comments' || s.features.includes(feature))).sort((a, b) => a.start - b.start)
-    if (feature === 'comments' && schedule.slots.some(s => s.features.includes('comments')) && slots.length)
+      (feature === 'comments' && continuing || s.features.includes(feature))).sort((a, b) => a.start - b.start)
+    if (feature === 'comments' && continuing && schedule.slots.some(s => s.features.includes('comments')) && slots.length)
       return { start: Math.max(start, now), end: start + day }
     for (const slot of slots) if (start + slot.end * minute > now)
       return { start: Math.max(now, start + slot.start * minute), end: start + slot.end * minute }
@@ -56,7 +57,6 @@ export function plan(schedule: Schedule, previous: Task[], now: number, random: 
   if (!schedule.enabled) return []
   const date = dateMsk(now), midnight = dayStart(date), today = weekday(date)
   const known = new Set(previous.map(t => t.id)), result: Task[] = []
-  const hasComments = schedule.slots.some(s => s.features.includes('comments'))
   const slots = schedule.slots.filter(s => s.day === today && midnight + s.end * minute > now)
     .sort((a, b) => a.start - b.start)
   for (const slot of slots) {
@@ -73,9 +73,11 @@ export function plan(schedule: Schedule, previous: Task[], now: number, random: 
     }
   }
   // A daily task links to a persistent 48-hour session; it does not create another session at the limit.
-  if (hasComments && schedule.slots.some(s => s.day === today)) {
+  const commentSlot = slots.find(s => s.features.includes('comments'))
+  if (commentSlot) {
     const id = `${schedule.account.key}:${date}:comments:daily`
-    if (!known.has(id)) result.push(make(id, 'comments', 'active-day', now, midnight + day))
+    if (!known.has(id)) result.push(make(id, 'comments', 'active-day',
+      Math.max(now, midnight + commentSlot.start * minute), midnight + day))
   }
   return result
 
@@ -84,7 +86,7 @@ export function plan(schedule: Schedule, previous: Task[], now: number, random: 
       scheduleVersion: schedule.version, plannedAt: at, nextAt: at, windowEnd: end, postPolicy: schedule.postPolicy,
       state: 'planned', createdAt: now, updatedAt: now, activeMs: 0,
       activeLimitMs: Math.min(12 * 60 * minute, Math.max(15 * minute, 2 * reserve(feature))),
-      elapsedLimitMs: feature === 'comments' ? day : 24 * 60 * minute, attempts: 0, version: 0 }
+      elapsedLimitMs: AUTOMATIC_RUN_MAX_AGE_MS, attempts: 0, version: 0 }
   }
 }
 

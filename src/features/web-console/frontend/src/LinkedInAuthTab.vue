@@ -149,6 +149,9 @@ function openLog(account) { if (canLeave()) { logAccount.value = account?.platfo
                     <p>Лайки: {{ engagementLabels[postResult(task).likes.status] }} · подтверждено {{ postResult(task).likes.confirmed }} из {{ postResult(task).likes.target }}.
                       Ожидают отправки: {{ postResult(task).likes.pending }}; проверки: {{ postResult(task).likes.uncertain }}; пропущено: {{ postResult(task).likes.failed }}.</p>
                     <p v-if="postResult(task).likes.nextAt">Следующий шаг лайков: {{ dateMsk(postResult(task).likes.nextAt) }} · МСК</p>
+                    <p v-for="error in postResult(task).likes.errors || []" :key="error.accountId">
+                      {{ error.name }} · аккаунт {{ error.accountId }} · {{ error.stage }}: {{ error.code }}
+                    </p>
                   </template>
                 </template>
                 <p v-if="task.stageMessage">{{ task.stageMessage }}</p>

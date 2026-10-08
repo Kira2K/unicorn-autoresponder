@@ -42,7 +42,8 @@ const store: Store = {
   async cooldown() { check() }, async blockedUntil(_account, method) { return method === 'action' ? 0 : providerUntil }, async event(e) { check(); events.push({ ...copy(e), id: events.length + 1 }) }, async pruneLogs() {}
 }
 const sqlStore = { ...store, withdrawals: { async load() { return undefined }, async save() {} }, async importWithdrawal() {} }
-const automation = (await prepareLinkedInAutomation(sqlStore as any, { listAccounts: () => auth.listAccounts() }, { autoStart: false }))!
+// No heartbeat in this fixture: keep its lease clock controlled during slow browser startup.
+const automation = (await prepareLinkedInAutomation(sqlStore as any, { listAccounts: () => auth.listAccounts() }, { autoStart: false, now: () => at }))!
 const posts = createMockPostWriter(automation.gate)
 const inviter = Object.assign(createMockConnectionInviterService(), { stop() {} })
 const backend = createWebConsoleApp({ useMockData: true, linkedinAuthRuns: auth, linkedinAutomation: automation, postWriter: posts, connectionInviter: inviter }).listen(0, '127.0.0.1')
@@ -130,7 +131,8 @@ try {
   const getPosts = posts.get
   posts.get = async (account: number) => ({ ...await getPosts(account), runs: [{ id: 'published-with-pending-likes',
     publishedAt: at, engagement: { status: 'uncertain', target: 3,
-      items: [{ status: 'sent' }, { status: 'uncertain' }, { status: 'pending' }] } } as any] })
+      items: [{ status: 'sent' }, { status: 'uncertain', errorCode: 'post_identity_mismatch', errorStage: 'like_readback',
+        account: { platformAccountId: 901, clientName: 'Mock actor' } }, { status: 'pending' }] } } as any] })
   tasks.push({ id: 'post-proof', account: schedules[0].account, feature: 'posts', state: 'completed',
     runId: 'published-with-pending-likes', updatedAt: at } as Task)
   await page.getByRole('button', { name: 'Обновить статус' }).click()
@@ -138,6 +140,7 @@ try {
   const postCard = page.locator('details.task').filter({ hasText: 'Посты' })
   assert.match(await postCard.innerText(), /Пост опубликован/)
   assert.match(await postCard.innerText(), /подтверждено 1 из 3[\s\S]*Ожидают отправки: 1; проверки: 1/)
+  assert.match(await postCard.innerText(), /Mock actor · аккаунт 901 · Проверка результата лайка: post_identity_mismatch/)
   posts.get = getPosts
   tasks.length = 0; providerUntil = 0
   await page.getByRole('button', { name: 'Свернуть карточку' }).click()

@@ -486,7 +486,9 @@ test('skipping a candidate consumes only the remaining shared invitation pause',
   }
   t.run.counters.sent = 1
   const publisher = await createInvitationPublisher(t.runtime, t.run, save)
-  const result = await publisher.publish('recruiter', ['connected', 'target'].map(id => invitationCandidate(t.run, id)))
+  const first = await publisher.publish('recruiter', ['connected', 'target'].map(id => invitationCandidate(t.run, id)))
+  assert.equal(first.sentCount, 0); assert.deepEqual(first.processedPersonIds, ['connected'])
+  const result = await publisher.publish('recruiter', [invitationCandidate(t.run, 'target')])
   assert.equal(result.sentCount, 1)
   assert.equal(t.posts[0].at - INVITATION_TEST_STARTED_AT.getTime(), 100_000)
 })
@@ -494,7 +496,9 @@ test('skipping a candidate consumes only the remaining shared invitation pause',
 test('a rejected actual POST still starts a new invitation pause', async () => {
   const t = receiptFixture({ mode: 'reject-first' })
   const publisher = await createInvitationPublisher(t.runtime, t.run, save)
-  const result = await publisher.publish('recruiter', ['rejected', 'target'].map(id => invitationCandidate(t.run, id)))
+  const first = await publisher.publish('recruiter', ['rejected', 'target'].map(id => invitationCandidate(t.run, id)))
+  assert.equal(first.sentCount, 0); assert.deepEqual(first.processedPersonIds, ['rejected'])
+  const result = await publisher.publish('recruiter', [invitationCandidate(t.run, 'target')])
   assert.equal(result.sentCount, 1); assert.equal(t.posts.length, 2)
   assert.equal(t.posts[1].at - t.posts[0].at, 100_000)
 })

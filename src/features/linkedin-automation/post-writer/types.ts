@@ -20,7 +20,7 @@ export type Account = { platformAccountId: number; clientName: string; unipileAc
   verifiedProviderId: string; linkedinUrl?: string }
 export type Like = { account: Account; status: 'pending' | 'sending' | 'uncertain' |
   'sent' | 'failed' | 'cancelled'; attemptedAt?: number; acceptedAt?: number; confirmedAt?: number; errorCode?: string;
-  nextActionAt?: number; recovery?: import('../action-recovery.ts').ActionRecovery }
+  nextActionAt?: number; verificationStopped?: boolean; errorStage?: LikeEvent['stage']; recovery?: import('../action-recovery.ts').ActionRecovery }
 export type Engagement = { status: 'off' | 'pending' | 'running' | 'partial' | 'completed' |
   'cancelled' | 'uncertain'; target: number; items: Like[]; requestedManually?: boolean; accountIds?: number[]
   readNotBefore?: number
@@ -70,9 +70,12 @@ export interface PostAdapter {
 }
 export type Gate = { acquire(kind: string, id: string, account: string): () => void }
 export type Log = (event: string, fields?: Record<string, string | number | boolean>) => void
+export type LikeEvent = { runId: string; taskId?: string; authorAccountId: number; actorAccountId?: number;
+  code: string; stage: 'like_preflight' | 'like_send' | 'like_readback' | 'likes_stopped'; httpStatus?: number }
 export type Dependencies = { store: PostStore; source: PostSource; generator: WriterModel
   unknownLockGraceMs?: number
   assertAutomaticLikes?(authorAccount: number): Promise<void>
+  reportLikeEvent?(event: LikeEvent): void
   adapter: PostAdapter; gate: Gate; writerId: string; writable: boolean; now: () => number
   random: () => number; log: Log; mock?: boolean; memes?: MemeServices }
 export const defaults = (account: number): Settings => ({ account, scheduled: false, days: [],

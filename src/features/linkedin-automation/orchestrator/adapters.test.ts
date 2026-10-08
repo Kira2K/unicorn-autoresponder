@@ -185,7 +185,7 @@ test('managed posts preserve daily key, separate generation from publishing and 
   await f.service.close()
 })
 
-test('managed post Stop preserves its ID and schedules read-only recovery across restart', async () => {
+test('managed post Stop preserves its ID without read-back across restart and a later day', async () => {
   const f = postFixture(), run = await f.service.prepareManaged(203, '2026-09-07', 'task')
   const saved = await f.deps.store.get('runs', run.id)
   Object.assign(saved!, { status: 'uncertain', attemptedAt: f.deps.now(), postId: 'known-id' })
@@ -194,9 +194,10 @@ test('managed post Stop preserves its ID and schedules read-only recovery across
   let reads = 0
   f.deps.adapter.read = async () => { reads++; throw Error('provider offline') }
   const stopped = await f.service.stepManaged(run.id, true)
-  assert.equal(stopped.status, 'verifying')
+  assert.equal(stopped.status, 'stopped'); assert.equal(stopped.summary?.unconfirmed, 1)
   await f.service.close(); f.restart()
-  assert.equal((await f.service.stepManaged(run.id)).status, 'verifying')
+  f.setNow(f.deps.now() + 2 * 86400_000)
+  assert.equal((await f.service.stepManaged(run.id)).status, 'stopped')
   assert.equal(reads, 0); assert.equal(f.counts.publish, 0)
   assert.equal((await f.deps.store.get('runs', run.id))?.postId, 'known-id')
   await f.service.close()
@@ -314,11 +315,19 @@ test('managed comments have no hidden timer and respect the original 48-hour cap
   records.set(next.jobId, uncertain)
   service = createCommentMonitorService(options)
   const before = checks
-  assert.equal((await service.stepManaged(next.jobId, true)).status, 'verifying')
+  assert.equal((await service.stepManaged(next.jobId, true)).status, 'stopped')
   service.stop(); service = createCommentMonitorService(options)
-  assert.equal((await service.stepManaged(next.jobId)).status, 'verifying')
+  assert.equal((await service.stepManaged(next.jobId)).status, 'stopped')
   assert.equal(records.get(next.jobId).state.items[0].replyId, 'saved-reply')
   assert.equal(checks, before); service.stop()
+  // A new daily task may work, but must not inherit permission to poll stopped replies.
+  const recordsCopy = new Map([...records].map(([id, value]) => [id, structuredClone(value)]))
+  service = createCommentMonitorService(options)
+  const replacement = await service.prepareManaged(1, 'new-day')
+  assert.notEqual(replacement.jobId, next.jobId)
+  assert.equal(records.get(replacement.jobId).state.items[0].replyId, 'saved-reply')
+  assert.equal(records.get(replacement.jobId).state.items[0].verificationStopped, true)
+  service.stop(); records.clear(); for (const [id, value] of recordsCopy) records.set(id, value)
   service = createCommentMonitorService(options)
   await service.resumeManaged(next.jobId)
   assert.equal(records.get(next.jobId).status, 'waiting')

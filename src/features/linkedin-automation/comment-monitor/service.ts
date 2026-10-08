@@ -1,5 +1,7 @@
 import type { MonitorJob } from './types.ts'
 
+const { SESSION_REPLY_LIMIT } = require('./reply-policy.ts') as typeof import('./reply-policy.ts')
+
 const { randomUUID } = require('node:crypto') as typeof import('node:crypto')
 const { withRequestContext } = require('../../../integrations/unipile/request-control.ts')
 const { createCommentLogger } = require('./logger.ts') as typeof import('./logger.ts')
@@ -47,6 +49,7 @@ function createCommentMonitorService(options: any = {}) {
   }
   async function run(job: MonitorJob, cooperate?: <T>(action: () => Promise<T>) => Promise<T>, verifyOnly = false) {
     if (closing) return
+    if (job.status === 'disabled') return { status: 'stopped' as const }
     if (running.has(job.jobId)) return
     if ([...jobs.values()].some(other => other.state.verificationSources?.includes(job.jobId))) return
     const pending = activePendingReplies(job).length > 0
@@ -109,7 +112,7 @@ function createCommentMonitorService(options: any = {}) {
     logger.event('session_enable', 'started')
     const current = [...jobs.values()].find(job => job.platformAccountId === platformAccountId &&
       now() < Date.parse(job.expiresAt) &&
-      (activeStatus(job.status) || activePendingReplies(job).length > 0))
+      job.status !== 'disabled' && (activeStatus(job.status) || activePendingReplies(job).length > 0))
     if (current) {
       logger.event('session_enable', 'succeeded', { reasonCode: 'existing_active_session' })
       return publicMonitorJob(current)
@@ -121,7 +124,12 @@ function createCommentMonitorService(options: any = {}) {
       const previous = [...jobs.values()].filter(job => job.accountId === row.unipileAccountId)
       const transferred = new Set(previous.flatMap(job => job.state.verificationSources ?? []))
       const sources = previous.filter(job => !transferred.has(job.jobId) && pendingReplies(job).length)
-      const carried = structuredClone(sources.flatMap(job => pendingReplies(job)))
+      const carried = structuredClone(sources.flatMap(job => pendingReplies(job).map(item => {
+        if (job.status !== 'disabled' && !item.verificationStopped && item.recovery?.skippedAt === undefined) return item
+        const quotaUntil = item.quotaUntil ?? job.expiresAt
+        return { ...item, verificationStopped: true, quotaUntil,
+          quotaReleased: item.quotaReleased || Date.parse(quotaUntil) <= now() }
+      })))
       const threadReplies: Record<string, number> = {}
       for (const old of previous) for (const [id, count] of Object.entries(old.state.threadReplies))
         threadReplies[id] = Math.max(threadReplies[id] ?? 0, count)
@@ -130,7 +138,8 @@ function createCommentMonitorService(options: any = {}) {
         clientName: row.clientName, status: 'starting', stage: 'queued',
         state: { posts, items: carried, nextWorkAt: timestamp, verificationSources: [...transferred, ...sources.map(job => job.jobId)],
           providerNotBefore: sources.map(job => job.state.providerNotBefore).filter(Boolean).sort().at(-1),
-          ...(automationId ? { automationId } : {}), knownIds: [...new Set([...previous.flatMap(job => job.state.knownIds),
+          ...(automationId ? { automationId } : {}), knownIds: [...new Set([...previous.flatMap(job => [...job.state.knownIds,
+            ...pendingReplies(job).map(item => item.incomingId)]),
             ...carried.map(item => item.incomingId)])],
           checks: 0, discovered: 0, published: 0, failed: 0, threadReplies }, nextCheckAt: timestamp,
         expiresAt: new Date(now() + SESSION_MS).toISOString(), createdAt: timestamp, updatedAt: timestamp }
@@ -155,15 +164,13 @@ function createCommentMonitorService(options: any = {}) {
       await assertReady()
       const previous = [...jobs.values()].filter(job => job.platformAccountId === platformAccountId)
         .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-      const current = previous.find(job => now() < Date.parse(job.expiresAt) && (activePendingReplies(job).length ||
-        activeStatus(job.status) || (job.state.automationId && job.status !== 'disabled')))
+      const current = previous.find(job => job.status !== 'disabled' && now() < Date.parse(job.expiresAt) && (activePendingReplies(job).length ||
+        activeStatus(job.status) || job.state.automationId))
       if (current) {
         if (!current.state.automationId) throw Object.assign(new Error('Ручной монитор ещё работает.'), { code: 'linkedin_operation_active' })
-        // A new permitted daily task can reuse the same session; its reply IDs and
-        // provider deadlines survive, while the old stopped daily task stays stopped.
-        if (current.status === 'disabled') { current.status = 'waiting'; await save(current) }
+        // An active session may continue; a disabled session is never revived here.
         if (publishedAt > (current.state.postsCheckedForPublication ?? Date.parse(current.createdAt)) &&
-          !activePendingReplies(current).length && current.state.published < 30) {
+          !activePendingReplies(current).length && current.state.published < SESSION_REPLY_LIMIT) {
           const selected = await selectPosts({ platformAccountId, repository, adapter: getAdapter(), logger: loggerFor(current) })
           current.state.posts = selected.posts; current.state.postsCheckedForPublication = publishedAt
           current.nextCheckAt = new Date(now()).toISOString(); await save(current)
@@ -183,13 +190,14 @@ function createCommentMonitorService(options: any = {}) {
         await save(job)
       }
       const pending = activePendingReplies(job).length > 0
-      if ((stop || job.status === 'disabled') && !pending) return { status: 'stopped' as const }
+      if (stop || job.status === 'disabled') return { status: 'stopped' as const,
+        summary: { completed: job.state.published, skipped: job.state.failed, unconfirmed: pendingReplies(job).length } }
       if ([...jobs.values()].some(other => other.state.verificationSources?.includes(job.jobId)))
         return { status: 'completed' as const }
       if (!pending && ['error', 'paused'].includes(job.status)) return { status: 'needs_attention' as const, reason: job.errorCode }
-      if (!pending && now() < Date.parse(job.expiresAt) && job.state.published >= 30)
+      if (!pending && now() < Date.parse(job.expiresAt) && job.state.published >= SESSION_REPLY_LIMIT)
         return { status: 'waiting' as const, reason: 'session_limit', nextActionAt: job.expiresAt }
-      const result = await run(job, cooperate, verifyOnly || stop || job.status === 'disabled')
+      const result = await run(job, cooperate, verifyOnly)
         if (verifyOnly && !activePendingReplies(job).length) return { ...result, status: 'completed' as const, ...monitorRecovery(job) }
         return result ?? { status: pending ? 'verifying' as const : 'waiting' as const,
           nextActionAt: job.nextCheckAt ?? (pending ? nextVerificationAt(job) : job.expiresAt), ...monitorRecovery(job) }

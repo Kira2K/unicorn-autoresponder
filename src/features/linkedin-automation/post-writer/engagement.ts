@@ -1,8 +1,10 @@
 import { lock, unlock, type EngagementExecution } from './execution-types.ts'
 import { errorCode, retryDelay } from './errors.ts'
-import type { Like, PostRun } from './types.ts'
+import type { Like, PostRun, LikeEvent } from './types.ts'
 import { recordFailure, recoveryExpired, recoveryWakeAt, skipRecovery, ACTION_SKIPPED, summaryMessage } from '../action-recovery.ts'
 import * as requestControl from '../../../integrations/unipile/request-control.ts'
+import { AUTOMATIC_RUN_MAX_AGE_MS } from '../execution-step.ts'
+import { applyAction } from './run-actions.ts'
 const { withRequestContext } = (requestControl as any).default ?? requestControl
 const actorAction = <T>(run: PostRun, item: Like, action: () => Promise<T>): Promise<T> =>
   withRequestContext({ actionId: `like:${run.id}:${item.account.platformAccountId}` }, action)
@@ -12,10 +14,33 @@ const actorAllowed = (run: PostRun, id: number, e: EngagementExecution) => {
   const ids = run.engagement.requestedManually ? run.engagement.accountIds : e.settings(run.account).likeAccountIds
   return ids === undefined || ids.includes(id)
 }
-const unknown = (item: Like) => item.recovery?.skippedAt === undefined && ['sending', 'uncertain'].includes(item.status)
+const unknown = (item: Like) => !item.verificationStopped && item.recovery?.skippedAt === undefined && ['sending', 'uncertain'].includes(item.status)
 const due = (item: Like, now: number) => !item.nextActionAt || item.nextActionAt <= now
+export const automaticLikesExpired = (run: PostRun, now: number) =>
+  Boolean(run.automationId && !run.engagement.requestedManually && now >= run.createdAt + AUTOMATIC_RUN_MAX_AGE_MS)
+function reportLike(run: PostRun, e: EngagementExecution, code: string,
+  stage: LikeEvent['stage'], item?: Like, httpStatus?: number) {
+  try { e.reportLikeEvent?.({ runId: run.id, taskId: run.automationId, authorAccountId: run.account,
+    actorAccountId: item?.account.platformAccountId, code, stage,
+    ...(Number.isInteger(httpStatus) ? { httpStatus } : {}) }) }
+  catch { e.log?.('like_journal_failed', { runId: run.id, code }) }
+}
+export async function stopAutomaticEngagement(run: PostRun, e: EngagementExecution, code: string) {
+  applyAction(run, 'stop'); run.nextActionAt = undefined; run.errorCode = code
+  for (const item of run.engagement.items) {
+    if (['sending', 'uncertain'].includes(item.status)) {
+      item.verificationStopped = true
+      if (!item.errorCode) { item.errorCode = code; item.errorStage = 'likes_stopped' }
+    }
+    delete item.nextActionAt
+  }
+  await e.save(run)
+  e.log?.('automatic_likes_stopped', { runId: run.id, account: run.account, code })
+  reportLike(run, e, code, 'likes_stopped')
+}
 const confirmed = (item: Like, now: number) => {
   item.status = 'sent'; item.confirmedAt = now; delete item.nextActionAt; delete item.errorCode
+  delete item.errorStage
   delete item.recovery
 }
 function deferConfirmation(item: Like, now: number) {
@@ -29,20 +54,35 @@ function failureDeadline(error: unknown, now: number) {
   if (code === 'post_persistence_unavailable' || code.startsWith('automation_')) throw error
   return now + (retryDelay(error, now) ?? (code === 'linkedin_operation_active' ? 15_000 : 300_000))
 }
+function permanentActorFailure(error: any, now: number) {
+  if (retryDelay(error, now) !== undefined) return false
+  const status = Number(error?.details?.httpStatus ?? error?.httpStatus)
+  return errorCode(error) === 'post_identity_mismatch' || [400, 401, 403, 404, 410, 422].includes(status)
+}
 
-async function failActor(run: PostRun, e: EngagementExecution, item: Like, error: unknown) {
+async function failActor(run: PostRun, e: EngagementExecution, item: Like, error: unknown, stage: LikeEvent['stage']) {
   const until = failureDeadline(error, e.now()), code = errorCode(error)
   const recovery = recordFailure(item.recovery, error, e.now())
   if (recovery) item.recovery = recovery
-  item.errorCode = code; run.errorCode = code
+  item.errorCode = code; item.errorStage = stage; run.errorCode = code
   if (unknown(item)) {
     item.status = 'uncertain'
     if (e.now() - (item.attemptedAt ?? e.now()) >= 15 * 60_000) deferConfirmation(item, e.now())
   }
-  if (item.status === 'pending' && code === 'post_account_not_ready' && retryDelay(error, e.now()) === undefined) {
+  if (permanentActorFailure(error, e.now())) {
+    // A permanent access/identity rejection cannot heal through timed polling.
+    // Preserve an already dispatched intent as unknown; never make it sendable again.
+    item.status = item.attemptedAt !== undefined ? 'uncertain' : 'failed'
+    item.verificationStopped = true; delete item.nextActionAt
+    e.log?.('like_blocked', { runId: run.id, account: item.account.platformAccountId, code,
+      stage,
+      message: 'Действие остановлено: проверьте привязку и доступ к аккаунту. Автоматических повторов нет.' })
+  } else if (item.status === 'pending' && code === 'post_account_not_ready' && retryDelay(error, e.now()) === undefined) {
     item.status = 'failed'; delete item.nextActionAt
   } else item.nextActionAt = recoveryWakeAt(item.recovery, Math.max(item.nextActionAt ?? 0, until))
   await e.save(run)
+  if (code !== 'linkedin_operation_active') reportLike(run, e, code, stage, item,
+    Number((error as any)?.details?.httpStatus ?? (error as any)?.httpStatus))
 }
 
 // The run timer is only the earliest runnable item, never one actor's provider deadline.
@@ -56,7 +96,7 @@ async function finishStep(run: PostRun, e: EngagementExecution, paced = false) {
     run.engagement.status = !likesAllowed(run, e) ? 'cancelled' :
       run.engagement.items.filter(item => item.status === 'sent').length >= run.engagement.target ? 'completed' : 'partial'
     run.nextActionAt = undefined
-    run.errorCode = undefined
+    run.errorCode = run.engagement.items.find(item => item.verificationStopped)?.errorCode
     e.log?.('likes_summary', { runId: run.id, message: summaryMessage({
       completed: run.engagement.items.filter(item => item.status === 'sent').length,
       skipped: run.engagement.items.filter(item => ['failed', 'cancelled'].includes(item.status)).length,
@@ -82,6 +122,7 @@ async function readReactions(run: PostRun, e: EngagementExecution, actors: strin
       if (item.recovery && item.nextActionAt) item.nextActionAt = recoveryWakeAt(item.recovery, item.nextActionAt)
     }
     run.errorCode = errorCode(error); await e.save(run)
+    if (run.errorCode !== 'linkedin_operation_active') reportLike(run, e, run.errorCode, 'like_readback')
     return undefined
   } finally { if (held) unlock(e, run.target!.platformAccountId) }
 }
@@ -95,6 +136,7 @@ const canReadBatch = (run: PostRun, e: EngagementExecution) => e.adapter.reactio
   !(run.engagement.readNotBefore && run.engagement.readNotBefore > e.now())
 
 async function confirmLikes(run: PostRun, e: EngagementExecution, items: Like[]) {
+  if (run.stop) return
   const snapshot = freshSnapshot(run, e.now())
   for (const item of items) if (snapshot && snapshot.at >= (item.acceptedAt ?? item.attemptedAt ?? Infinity) &&
     snapshot.found.includes(item.account.verifiedProviderId)) confirmed(item, e.now())
@@ -106,18 +148,19 @@ async function confirmLikes(run: PostRun, e: EngagementExecution, items: Like[])
     for (const item of remaining) if (found.includes(item.account.verifiedProviderId)) confirmed(item, e.now())
     else deferConfirmation(item, e.now())
   } else for (const item of remaining) {
+    if (run.stop) break
     let held = false
     try {
       lock(e, item.account.platformAccountId, run.id, 'post_likes_check'); held = true
       if (await actorAction(run, item, () => e.adapter.reacted(item.account, run.postId!))) confirmed(item, e.now())
       else deferConfirmation(item, e.now())
-    } catch (error) { await failActor(run, e, item, error) }
+    } catch (error) { await failActor(run, e, item, error, 'like_readback') }
     finally { if (held) unlock(e, item.account.platformAccountId) }
   }
 }
 
 export async function engage(run: PostRun, e: EngagementExecution) {
-  if (e.isClosing?.() || !run.postId || !['pending', 'running', 'uncertain'].includes(run.engagement.status)) return
+  if (run.stop || e.isClosing?.() || !run.postId || !['pending', 'running', 'uncertain'].includes(run.engagement.status)) return
   for (const item of run.engagement.items) if (item.status !== 'sent' && item.recovery?.skippedAt === undefined && recoveryExpired(item.recovery, e.now())) {
     skipRecovery(item.recovery!, e.now()); item.errorCode = ACTION_SKIPPED; item.nextActionAt = undefined
     item.status = item.attemptedAt ? 'uncertain' : 'failed'
@@ -161,7 +204,8 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     try {
       lock(e, item.account.platformAccountId, run.id, run.engagement.requestedManually ? 'post_likes_manual' : 'post_likes'); held = true
       await actorAction(run, item, () => e.adapter.identity(item.account))
-    } catch (error) { await failActor(run, e, item, error); await finishStep(run, e, true); return }
+    } catch (error) { await failActor(run, e, item, error, 'like_preflight'); await finishStep(run, e, true); return }
+    if (run.stop) return
     let reacted: boolean
     if (canReadBatch(run, e)) {
       let snapshot = freshSnapshot(run, e.now())
@@ -178,7 +222,7 @@ export async function engage(run: PostRun, e: EngagementExecution) {
       reacted = snapshot.found.includes(actorId)
     } else {
       try { reacted = await actorAction(run, item, () => e.adapter.reacted(item.account, run.postId!)) }
-      catch (error) { await failActor(run, e, item, error); await finishStep(run, e, true); return }
+      catch (error) { await failActor(run, e, item, error, 'like_readback'); await finishStep(run, e, true); return }
     }
     if (reacted) { confirmed(item, e.now()); await finishStep(run, e, true); return }
     if (!likesAllowed(run, e) || !actorAllowed(run, item.account.platformAccountId, e) || e.isClosing?.()) {
@@ -192,7 +236,7 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     try { await actorAction(run, item, () => e.adapter.like(item.account, run.postId!)) }
     catch (error: any) {
       if (error?.notSent === true) { item.status = 'pending'; item.attemptedAt = undefined }
-      await failActor(run, e, item, error); await finishStep(run, e, true); return
+      await failActor(run, e, item, error, 'like_send'); await finishStep(run, e, true); return
     }
     item.acceptedAt = e.now()
     await finishStep(run, e, true)

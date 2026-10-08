@@ -48,6 +48,10 @@ export function withdrawalNeedsCheck(run?: Run) {
   return Boolean(run && !run.recoveryClosed && (['uncertain', 'interrupted', 'running'].includes(run.status) ||
     run.current || run.unconfirmed?.length || (run.confirmed?.length && !run.checkedAt)))
 }
+// An explicit Stop ends execution, not the lifetime protection of its attempted IDs.
+export function withdrawalBlocksNewRun(run?: Run) {
+  return run?.status !== 'stopped' && !run?.stopRequested && withdrawalNeedsCheck(run)
+}
 export function withdrawalPendingResults(run: Run) {
   return !run.recoveryClosed && Boolean(run.current ||
     run.unconfirmed?.some(id => run.recovery?.[`cancel:${id}`]?.skippedAt === undefined) ||

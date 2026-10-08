@@ -1,6 +1,7 @@
 import { logged } from './logger.ts'
 import { activeStatus, publicMonitorJob, type MonitorJob } from './types.ts'
 import { clearAuthorContext } from './author-context.ts'
+import { pendingReplies } from './reply-verification.ts'
 
 export function createServiceActions(options: any) {
   const { assertReady, jobs, loggerFor, run, save, store } = options as {
@@ -11,13 +12,18 @@ export function createServiceActions(options: any) {
     async disable(platformAccountId: number) {
       await assertReady(); const audit = loggerFor({ jobId: `disable-${platformAccountId}`,
         platformAccountId }); audit.event('session_disable', 'started')
-      const job = [...jobs.values()].find(row => row.platformAccountId === platformAccountId &&
-        activeStatus(row.status))
-      if (!job) { audit.event('session_disable', 'succeeded', { reasonCode: 'not_enabled' }); return }
-      job.status = 'disabled'; job.stage = 'disabled_by_admin'; job.nextCheckAt = undefined
-      job.finishedAt = new Date().toISOString(); const logger = loggerFor(job)
-      clearAuthorContext(job, logger); await save(job, logger)
-      audit.event('session_disable', 'succeeded'); return publicMonitorJob(job)
+      const targets = [...jobs.values()].filter(row => row.platformAccountId === platformAccountId &&
+        row.status !== 'disabled' && (activeStatus(row.status) || pendingReplies(row).length))
+      if (!targets.length) { audit.event('session_disable', 'succeeded', { reasonCode: 'not_enabled' }); return }
+      // Stop every executor in memory before the first asynchronous checkpoint.
+      for (const job of targets) {
+        job.status = 'disabled'; job.stage = 'disabled_by_admin'; job.nextCheckAt = undefined
+        job.finishedAt = new Date().toISOString(); clearAuthorContext(job, loggerFor(job))
+      }
+      const results = await Promise.allSettled(targets.map(job => save(job, loggerFor(job))))
+      const failed = results.find(result => result.status === 'rejected')
+      if (failed?.status === 'rejected') throw failed.reason
+      audit.event('session_disable', 'succeeded'); return publicMonitorJob(targets[0])
     },
     async resume(jobId: string) {
       await assertReady(); const audit = loggerFor({ jobId, platformAccountId: 0 })

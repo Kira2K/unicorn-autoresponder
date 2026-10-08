@@ -16,6 +16,7 @@ import { assertPreparedEdits } from './prepared-posts.ts'
 import { startPreparedPost } from './prepared-start.ts'
 import { retryMeme } from './meme-recovery.ts'
 import { canStartManualLikes, canResumeManualLikes, startManualLikes } from './manual-likes.ts'
+import { automaticLikesExpired, stopAutomaticEngagement } from './engagement.ts'
 import * as requestControl from '../../../integrations/unipile/request-control.ts'
 const { withRequestContext } = (requestControl as any).default ?? requestControl
 export function createPostWriterService(deps: Dependencies, autoStart = true) {
@@ -43,15 +44,30 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
       if (state.storageBlocked() || work.isClosing()) return
       for (const value of settings.values()) await serial(value.account,
         () => schedulePosts(e.settings(value.account), runs, e))
-      for (const run of runs.values()) if (!work.isClosing() && active(run) && !busy.has(run.id)) {
+      for (const run of runs.values()) if (!work.isClosing() && !run.stop && active(run) && !busy.has(run.id)) {
         if (run.automationId && run.status !== 'published') continue
+        if (!automaticLikesExpired(run, e.now()) && run.nextActionAt && run.nextActionAt > e.now()) continue
         busy.add(run.id)
         const process = () => withRequestContext({ runId: run.id, account: run.target?.unipileAccountId,
           feature: run.status === 'published' ? 'likes' : 'posts',
           initiator: run.automationId || run.trigger === 'scheduled' ? 'schedule' : 'manual' }, () => processRun(run, e))
-        void work.run(() => run.automationId && !run.engagement.requestedManually
-          ? withRequestContext({ taskId: `${run.automationId}:likes`, feature: 'likes',
-            assertWrite: () => e.assertAutomaticLikes?.(run.account) }, process) : process()).catch(error => {
+        const assertAutomatic = async () => {
+          if (run.stop) throw new PostError('automation_disabled')
+          if (automaticLikesExpired(run, e.now())) throw new PostError('automation_likes_expired')
+          await e.assertAutomaticLikes?.(run.account)
+        }
+        void work.run(async () => {
+          if (!run.automationId || run.engagement.requestedManually) return process()
+          try {
+            await assertAutomatic()
+            return await withRequestContext({ taskId: `${run.automationId}:likes`, feature: 'likes',
+              assertRequest: assertAutomatic }, process)
+          } catch (error) {
+            const code = errorCode(error)
+            if (!['automation_disabled', 'automation_likes_expired'].includes(code)) throw error
+            await stopAutomaticEngagement(run, e, code)
+          }
+        }).catch(error => {
           suspendedUntil = e.now() + 30_000
           e.log('execution_suspended', { code: errorCode(error) })
         }).finally(() => busy.delete(run.id))
@@ -80,7 +96,7 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
       await writable()
       for (const run of runs.values()) if (run.account === account && run.automationId &&
         !run.engagement.requestedManually && run.status === 'published') {
-        run.stop = true; await e.save(run)
+        applyAction(run, 'stop'); await e.save(run)
       }
     },
     async transferAutomation(account: number) {
@@ -122,13 +138,14 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
       busy.add(id)
       try {
         if (stop && !run.stop) {
-          run.stop = true; e.generationControllers.get(id)?.abort()
+          applyAction(run, 'stop'); e.generationControllers.get(id)?.abort()
           if (run.attemptedAt && ['publishing', 'verifying', 'uncertain'].includes(run.status))
             run.nextActionAt = Math.max(run.nextActionAt ?? 0, e.now() + 60_000)
           await e.save(run)
         }
         const unconfirmed = !!run.attemptedAt && ['publishing', 'verifying', 'uncertain'].includes(run.status)
-        if (run.stop && !unconfirmed) return { status: 'stopped' as const }
+        if (run.stop) return { status: 'stopped' as const,
+          summary: { completed: run.status === 'published' ? 1 : 0, skipped: 0, unconfirmed: unconfirmed ? 1 : 0 } }
         // Engagement runs against its actors in the existing worker, outside the author's task.
         if (run.status === 'published') return { status: 'completed' as const, publishedAt: run.publishedAt,
           summary: { completed: 1, skipped: 0, unconfirmed: 0 } }

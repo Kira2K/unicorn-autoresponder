@@ -1,5 +1,44 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+
+test('new day archives a stopped withdrawal and never cancels its unknown ID again', async () => {
+  const f = fixture(); let now = f.runtime.now()
+  f.runtime.now = () => now
+  await f.service.startAutomatic!(1, 'day-one')
+  await f.service.stepManaged!(1, 'day-one')
+  await f.service.stepManaged!(1, 'day-one', true)
+  const previous = f.stored()!.run!
+  assert.deepEqual(previous.confirmed, ['1']); assert.equal(previous.checkedAt, undefined)
+  // Even if the provider still shows the old ID, it is not a new cancellation.
+  f.pending([1, 2].map(id => ({ id: String(id), name: 'Mock', createdAt: '2026-08-01T00:00:00Z' })))
+  await f.service.close(); now += 86400_000
+  const next = createInvitationWithdrawal(f.runtime)
+  try {
+    const run = await next.startAutomatic!(1, 'day-two')
+    assert.deepEqual(run.targets!.map(item => item.id), ['2'])
+    assert.deepEqual(f.stored()!.previousRuns, [previous])
+    await next.stepManaged!(1, 'day-two')
+    assert.deepEqual(f.calls, ['1', '2'])
+    assert.deepEqual(f.stored()!.previousRuns, [previous])
+    assert.equal((await next.startAutomatic!(1, 'day-one')).status, 'stopped')
+    assert.equal(f.stored()!.run!.id, 'day-two')
+  } finally { await next.close() }
+})
+
+test('new withdrawal preserves provider wait and cannot proceed if archiving fails', async () => {
+  const f = fixture()
+  await f.service.startAutomatic!(1, 'old'); await f.service.stepManaged!(1, 'old')
+  await f.service.stepManaged!(1, 'old', true)
+  const stopped = f.stored()!, until = f.runtime.now() + 3600_000
+  await f.runtime.store.save(1, { ...stopped, retryAt: until })
+  await assert.rejects(f.service.startAutomatic!(1, 'new'), { code: 'withdrawal_cooldown' })
+  await f.runtime.store.save(1, stopped)
+  const save = f.runtime.store.save
+  f.runtime.store.save = async (_id, state) => { if (state.run?.id === 'new') throw Error('archive failed'); await save(_id, state) }
+  await assert.rejects(f.service.startAutomatic!(1, 'new'), /archive failed/)
+  assert.equal(f.stored()!.run!.id, 'old'); assert.deepEqual(f.calls, ['1'])
+  await f.service.close()
+})
 import { fixture, finished } from './test-fixture.ts'
 import { createInvitationWithdrawal } from './service.ts'
 import { withdrawalSteps } from './execution.ts'
@@ -125,7 +164,7 @@ test('automatic pacing is not reported as a backend restart', async () => {
   assert.equal(status?.status, 'running'); assert.equal(status?.error, undefined)
 })
 
-test('Stop after restart preserves unverified cancellation and defers provider read-back', async () => {
+test('Stop after restart preserves unverified cancellation and forbids provider read-back', async () => {
   const f = fixture(), run = await f.service.startAutomatic!(1, 'automatic')
   await f.service.stepManaged!(1, run.id)
   let reads = 0
@@ -134,13 +173,13 @@ test('Stop after restart preserves unverified cancellation and defers provider r
   const restarted = createInvitationWithdrawal(f.runtime)
   await restarted.stop(1)
   const stopped = await restarted.stepManaged!(1, run.id)
-  assert.equal(stopped.status, 'verifying')
+  assert.equal(stopped.status, 'stopped')
   assert.equal(reads, 0); assert.equal(f.stored()?.run?.stopRequested, true)
   assert.deepEqual(f.stored()?.run?.confirmed, ['1']); assert.equal(f.stored()?.run?.checkedAt, undefined)
   assert.deepEqual(f.calls, ['1'])
-  f.runtime.now = () => Date.parse(stopped.nextActionAt!)
+  const later = f.runtime.now() + 86400_000; f.runtime.now = () => later
   assert.equal((await restarted.stepManaged!(1, run.id)).status, 'stopped')
-  assert.ok(reads > 0); assert.deepEqual(f.calls, ['1'], 'remaining approved targets must not be withdrawn after Stop')
+  assert.equal(reads, 0); assert.deepEqual(f.calls, ['1'], 'remaining approved targets must not be withdrawn after Stop')
 })
 
 test('SQL object key order does not change the approved account during continuation', async () => {
@@ -288,6 +327,6 @@ test('managed Stop retains an unknown attempt and its provider deadline without 
   await f.runtime.store.save(1, state)
   f.runtime.gate.acquire = () => { throw new Error('must wait without gate') }
   const result = await f.service.stepManaged!(1, run.id, true)
-  assert.equal(result.status, 'verifying'); assert.equal(Date.parse(f.stored()!.run!.nextActionAt!), deadline)
+  assert.equal(result.status, 'stopped'); assert.equal(Date.parse(f.stored()!.run!.nextActionAt!), deadline)
   assert.equal(f.stored()?.run?.current, state.run!.current); assert.deepEqual(f.calls, [])
 })

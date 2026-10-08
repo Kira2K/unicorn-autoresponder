@@ -11,8 +11,11 @@ export function newRun(id: string, account: number, trigger: 'manual' | 'schedul
 export function applyAction(run: PostRun, action: string, hash?: string, memeReviewedHash?: string) {
   if (action === 'stop') {
     run.stop = true
-    // The processor still reconciles any operation that has already started.
-    if (!run.attemptedAt && !run.engagement.items.some(item => item.status === 'sending')) {
+    for (const item of run.engagement.items) if (item.status === 'pending') item.status = 'cancelled'
+    if (['pending', 'running', 'uncertain'].includes(run.engagement.status)) run.engagement.status = 'cancelled'
+    if (run.attemptedAt && ['publishing', 'verifying'].includes(run.status)) run.status = 'uncertain'
+    // Keep a started intent/ID, but Stop never schedules further provider checks.
+    if (run.status !== 'published' && !run.attemptedAt && !run.engagement.items.some(item => item.status === 'sending')) {
       run.status = 'stopped'
     }
     return
@@ -28,4 +31,4 @@ export function applyAction(run: PostRun, action: string, hash?: string, memeRev
   run.status = 'ready'
 }
 export const accountActive = (runs: Iterable<PostRun>, account: number) =>
-  [...runs].find(run => run.account === account && run.status !== 'published' && active(run))
+  [...runs].find(run => run.account === account && !run.stop && run.status !== 'published' && active(run))

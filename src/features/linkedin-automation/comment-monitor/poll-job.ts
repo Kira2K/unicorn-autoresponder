@@ -1,3 +1,4 @@
+import { SESSION_REPLY_LIMIT } from './reply-policy.ts'
 import { randomUUID } from 'node:crypto'
 import { discoverComments } from './discovery.ts'
 import { commentErrorCode, errorLogDetails, commentExecutionInterrupted } from './errors.ts'
@@ -5,13 +6,16 @@ import { saveJob } from './job-save.ts'
 import { nextCheckAt, randomBetween, replyDelay, nextMonitorActionAt } from './schedule.ts'
 import { generateReplies } from './reply-generation.ts'
 import { publishReplies } from './reply-publisher.ts'
-import { reconcileUncertain, pendingReplies, activePendingReplies, expireReplyRecovery, nextVerificationAt } from './reply-verification.ts'
+import { reconcileUncertain, pendingReplies, sessionPendingReplies, releaseHistoricalQuota, nextQuotaReleaseAt,
+  activePendingReplies, expireReplyRecovery, nextVerificationAt } from './reply-verification.ts'
 import { clearAuthorContext, resolveAuthorContext } from './author-context.ts'
 import type { CommentLogger, MonitorJob } from './types.ts'
 import { providerRetryAt } from '../../../integrations/unipile/retry-after.ts'
 import type { ExecutionStep } from '../execution-step.ts'
 import { listReadDiagnostic } from '../../../integrations/unipile/read-retry.ts'
 import { summaryMessage, recoveryExpired, skipRecovery, ACTION_SKIPPED, skippedActions, recoveryDeadline } from '../action-recovery.ts'
+import * as requestControl from '../../../integrations/unipile/request-control.ts'
+const { requestContext } = (requestControl as any).default ?? requestControl
 function retryAt(error: any, random = Math.random, now = Date.now()) {
   const supplied = Number(error?.details?.retryAfterMs)
   const limited = error?.details?.httpStatus === 429 || /too_many|rate_limit|cooldown/.test(commentErrorCode(error))
@@ -35,6 +39,7 @@ export function monitorRecovery(job: MonitorJob) {
   return { skippedActions: skippedActions(actions), recoveryDeadlineAt: recoveryDeadline(actions) }
 }
 async function monitorResult(options: Parameters<typeof pollMonitorStep>[0]): Promise<ExecutionStep> {
+  if (options.job.status === 'disabled') return { status: 'stopped' }
   await pollMonitorStep(options)
   const job = options.job, nextActionAt = job.nextCheckAt
   if (activePendingReplies(job).length) return { status: 'verifying', nextActionAt, reason: job.errorCode }
@@ -59,6 +64,7 @@ async function pollMonitorStep(options: {
   cooperate?<T>(action: () => Promise<T>): Promise<T>
 }) {
   const { job, logger } = options
+  if (job.status === 'disabled') return
   const now = options.now ?? Date.now
   if (expireReplyRecovery(job, now(), logger)) await saveJob(options.store, job, logger)
   for (const [actionId, value] of Object.entries(job.state.readRecovery ?? {})) {
@@ -70,10 +76,11 @@ async function pollMonitorStep(options: {
   const schedule = () => {
     job.nextCheckAt = nextMonitorActionAt(job, nextVerificationAt(job), now())
   }
-  const canSend = () => !options.isClosing?.() && !['disabled', 'completed', 'error'].includes(job.status) &&
+  const canSend = () => !requestContext()?.signal?.aborted && !options.isClosing?.() && !['disabled', 'completed', 'error'].includes(job.status) &&
     now() < Date.parse(job.expiresAt)
+  if (releaseHistoricalQuota(job, now())) await saveJob(options.store, job, logger)
   let release: undefined | (() => void)
-  if (now() >= Date.parse(job.expiresAt) && job.status !== 'disabled') {
+  if (now() >= Date.parse(job.expiresAt)) {
     job.status = 'completed'; job.stage = 'expired'; job.finishedAt = new Date().toISOString()
     clearAuthorContext(job, logger)
     await saveJob(options.store, job, logger); logger.event('session_expire', 'succeeded')
@@ -91,7 +98,7 @@ async function pollMonitorStep(options: {
     const verificationError = await reconcileUncertain({ job, adapter: options.adapter, logger,
       now, save: () => saveJob(options.store, job, logger) })
     if (verificationError) throw verificationError
-    if (activePendingReplies(job).length && (!canSend() || job.state.published + pendingReplies(job).length >= 30)) {
+    if (activePendingReplies(job).length && (!canSend() || job.state.published + sessionPendingReplies(job).length >= SESSION_REPLY_LIMIT)) {
       if (canSend()) { job.status = 'paused'; job.stage = 'reply_outcome_uncertain' }
       job.nextCheckAt = nextVerificationAt(job); await saveJob(options.store, job, logger); return
     }
@@ -99,7 +106,13 @@ async function pollMonitorStep(options: {
     if (Date.parse(job.state.nextWorkAt ?? '') > now()) {
       schedule(); await saveJob(options.store, job, logger); return
     }
-    if (job.state.published + pendingReplies(job).length >= 30) {
+    if (job.state.published + sessionPendingReplies(job).length >= SESSION_REPLY_LIMIT) {
+      const quotaAt = job.state.published < SESSION_REPLY_LIMIT ? nextQuotaReleaseAt(job, now()) : undefined
+      if (quotaAt) {
+        job.status = 'waiting'; job.stage = 'waiting_previous_session_quota'
+        job.nextCheckAt = quotaAt; job.state.nextWorkAt = quotaAt
+        await saveJob(options.store, job, logger); return
+      }
       job.status = 'completed'; job.stage = 'limit_reached'; job.nextCheckAt = undefined
       clearAuthorContext(job, logger); await saveJob(options.store, job, logger); return
     }
@@ -113,7 +126,7 @@ async function pollMonitorStep(options: {
       await saveJob(options.store, job, logger)
       // Text generation does not mutate LinkedIn; other features may use the account.
       release?.(); release = undefined
-      const generate = () => generateReplies({ job, items: detected, openai: options.openai, logger, now,
+      const generate = () => generateReplies({ job, items: detected, openai: options.openai, logger, now, canContinue: canSend,
         loadAuthorContext: () => resolveAuthorContext({ job, adapter: options.adapter, logger, now,
           save: () => saveJob(options.store, job, logger) }) })
       generated = options.cooperate ? await options.cooperate(generate) : await generate()
@@ -129,7 +142,7 @@ async function pollMonitorStep(options: {
     await publishReplies({ ...options, items: queued.slice(0, 1), save: () => saveJob(options.store, job, logger) })
     if (['disabled', 'completed'].includes(job.status as string)) return
     job.lastCheckAt = new Date(now()).toISOString()
-    if (job.state.published >= 30) {
+    if (job.state.published >= SESSION_REPLY_LIMIT) {
       job.status = 'completed'; job.stage = 'limit_reached'; job.finishedAt = job.lastCheckAt
       job.nextCheckAt = undefined; clearAuthorContext(job, logger)
       logger.event('session_limit', 'succeeded', {

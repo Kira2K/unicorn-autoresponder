@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Preview, Run, Runtime, State, WithdrawalService } from './contracts.ts'
-import { classifyInvitations, sameWithdrawalAccount, withdrawalError, withdrawalNeedsCheck, withdrawalPendingResults } from './policy.ts'
+import { classifyInvitations, sameWithdrawalAccount, withdrawalError, withdrawalNeedsCheck, withdrawalBlocksNewRun, withdrawalPendingResults } from './policy.ts'
 import { executeWithdrawal, withdrawalSteps } from './execution.ts'
 import type { ExecutionStep } from '../execution-step.ts'
 import { recheckWithdrawal } from './recheck.ts'
@@ -32,7 +32,16 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
     if (state?.retryAt && state.retryAt > runtime.now()) throw Object.assign(withdrawalError('withdrawal_cooldown',
       `Unipile ограничил запросы. Повторите после ${new Date(state.retryAt).toISOString()}.`),
       { nextAt: state.retryAt, details: { retryAt: state.retryAt } })
+    if (state?.run) state.attempted = [...new Set([...state.attempted, ...(state.run.confirmed ?? []),
+      ...(state.run.unconfirmed ?? []), ...(state.run.noLongerPending ?? []), ...(state.run.current ? [state.run.current] : [])])]
     return state ?? { accountId, attempted: [] }
+  }
+  async function replaceRun(id: number, state: State, run: Run) {
+    const old = managed.get(id)
+    if (old) { await old.steps.return(undefined); managed.delete(id) }
+    if (state.run && state.run.id !== run.id) (state.previousRuns ??= []).push(copy(state.run))
+    state.run = run
+    await runtime.store.save(id, state)
   }
   const service: WithdrawalService = {
     async resumeManaged(id, runId) {
@@ -55,13 +64,15 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
       if (tasks.has(id) || stepping.has(id)) throw busy()
       const account = await runtime.account(id), state = await stateFor(id, account.accountId)
       if (state.run?.id === key) return copy(state.run)
-      if (withdrawalNeedsCheck(state.run)) throw withdrawalError('withdrawal_check_required', 'Сначала проверьте предыдущий отзыв.')
+      const previous = state.previousRuns?.find(run => run.id === key)
+      if (previous) return copy(previous)
+      if (withdrawalBlocksNewRun(state.run)) throw withdrawalError('withdrawal_check_required', 'Сначала проверьте предыдущий отзыв.')
       const preview = await service.preview(id)
       const targets = preview.items.filter(item => item.eligible)
       const run: Run = { id: key, automationId: key, platformAccountId: id, accountId: account.accountId,
         status: targets.length ? 'running' : 'completed', total: targets.length, withdrawn: 0, skipped: 0,
         targets, cursor: 0, approvedAccount: account }
-      state.run = run; await runtime.store.save(id, state); latest.set(id, run); previews.delete(id)
+      await replaceRun(id, state, run); latest.set(id, run); previews.delete(id)
       return copy(run)
     },
     async stepManaged(id, runId, stop = false) {
@@ -87,21 +98,10 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
         if (state.run.status === 'completed') return { status: 'completed', summary: withdrawalSummary(state) }
         if (state.run.stopRequested) {
           if (current) { await current.steps.return(undefined); managed.delete(id) }
-          const due = Math.max(state.retryAt ?? 0, Date.parse(state.run.nextActionAt ?? '') || 0,
-            Date.parse(state.run.verificationAt ?? '') || 0, firstStop ? runtime.now() + 60_000 : 0)
-          if (unconfirmed && due <= runtime.now()) {
-            release = runtime.gate.acquire('invitation_withdrawal_check', runId, String(id))
-            await recheckWithdrawal(runtime, id, runId); state = (await runtime.store.load(id))!
-          }
-          const pending = withdrawalPendingResults(state.run!)
           state.run!.status = 'stopped'
-          if (pending) state.run!.nextActionAt = new Date(Math.max(due,
-            Date.parse(state.run!.verificationAt ?? '') || runtime.now() + 60_000)).toISOString()
           await runtime.store.save(id, state)
-          latest.set(id, state.run!); return pending ? { status: 'verifying',
-            nextActionAt: state.run!.nextActionAt, reason: 'withdrawal_result_pending',
-            recoveryDeadlineAt: recoveryDeadline(state.run!.recovery), skippedActions: skippedActions(state.run!.recovery) }
-            : { status: 'stopped', summary: withdrawalSummary(state), skippedActions: skippedActions(state.run!.recovery) }
+          latest.set(id, state.run!)
+          return { status: 'stopped', summary: withdrawalSummary(state), skippedActions: skippedActions(state.run!.recovery) }
         }
         const due = Date.parse(state.run.nextActionAt ?? '') || state.retryAt || 0
         if (due > runtime.now()) return { status: unconfirmed ? 'verifying' : 'waiting',
@@ -164,7 +164,7 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
       try {
         const account = await runtime.account(id), state = await stateFor(id, account.accountId)
         if (state.run?.id === token) return copy(await service.status(id) as Run)
-        if (withdrawalNeedsCheck(state.run)) throw withdrawalError('withdrawal_check_required',
+        if (withdrawalBlocksNewRun(state.run)) throw withdrawalError('withdrawal_check_required',
           'Проверьте результат предыдущего отзыва перед новым запуском.')
         const preview = previews.get(id)
         if (!preview || preview.token !== token || preview.expiresAt <= runtime.now() ||
@@ -175,8 +175,7 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
         const run: Run = { id: token, platformAccountId: id, accountId: account.accountId,
           status: 'running', total, withdrawn: 0, skipped: 0,
           targets: copy(preview.items.filter(item => item.eligible)), cursor: 0, approvedAccount: copy(account) }
-        state.run = run
-        await runtime.store.save(id, copy(state))
+        await replaceRun(id, state, run)
         assertOpen(); runtime.assertWrite(id)
         latest.set(id, run); activeStates.set(id, state); previews.delete(id); release()
         const task = executeWithdrawal(runtime, preview, state).finally(() => { tasks.delete(id); activeStates.delete(id) })

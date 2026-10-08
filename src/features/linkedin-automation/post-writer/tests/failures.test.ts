@@ -60,7 +60,7 @@ test('post accepted but state persistence fails: recovery only reads', async () 
   assert.equal((await f.run()).status, 'published')
   assert.equal(f.counts.publish, 1)
 })
-test('lost reaction reply and Stop reconcile the same account without another POST', async () => {
+test('lost reaction reply stays unknown after Stop without another POST or read-back', async () => {
   const f = fixture()
   await f.service.update(203, { ...defaults(203), likes: true })
   const like = f.deps.adapter.like
@@ -70,12 +70,14 @@ test('lost reaction reply and Stop reconcile the same account without another PO
   assert.equal(f.counts.like, 1)
   assert.equal((await f.run()).engagement.status, 'uncertain')
   await f.service.action(started.id, 'stop')
+  f.deps.adapter.reacted = async () => { throw Error('must not read after Stop') }
   f.restart()
   await f.step(30_000)
   await f.step(6000)
   assert.equal(f.counts.like, 1)
   assert.equal((await f.run()).status, 'published')
-  assert.equal((await f.run()).engagement.items.filter(item => item.status === 'sent').length, 1)
+  assert.equal((await f.run()).engagement.items.filter(item => item.status === 'uncertain').length, 1)
+  assert.equal((await f.run()).engagement.status, 'cancelled')
 })
 test('likes disabled mid-run cancel only pending actions; shortage stays separate', async () => {
   const f = fixture()

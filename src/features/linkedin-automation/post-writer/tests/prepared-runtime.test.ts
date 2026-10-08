@@ -14,23 +14,25 @@ test('live runtime forwards the complete managed preparation policy and continua
     import { mock } from 'node:test';
     import assert from 'node:assert/strict';
     const calls = [];
+    const reported = [], reportLikeEvent = event => reported.push(event);
     mock.module(${moduleUrl('service.ts')}, {
-      namedExports: { createPostWriterService: () => ({
+      namedExports: { createPostWriterService: deps => { deps.reportLikeEvent({ code: 'post_identity_mismatch' }); return ({
         prepareManaged: async (...args) => { calls.push(args); return { id: 'daily' }; },
         stepManaged: async (...args) => { calls.push(args); return { status: 'ready' }; },
         close: async () => {}
-      }) }
+      }); } }
     });
     const { createLivePostWriter } = await import(${moduleUrl('runtime.ts')});
     const service = createLivePostWriter({ listAccounts: async () => { throw Error('unexpected accounts'); } },
       { acquire() { throw Error('unexpected write'); } }, { env: { LINKEDIN_POST_WRITER_ENABLED: 'false' },
-        storage: { store: {}, cvRows: async () => { throw Error('unexpected CV'); } } });
+        reportLikeEvent, storage: { store: {}, cvRows: async () => { throw Error('unexpected CV'); } } });
     const policy = { contentMode: 'prepared', generateIfMissing: true }, cooperate = async action => action();
     try {
       await service.prepareManaged(105, '2026-09-29', 'scheduled-task', policy);
       assert.deepEqual(calls[0], [105, '2026-09-29', 'scheduled-task', policy]);
       await service.stepManaged('daily', false, cooperate);
       assert.deepEqual(calls[1], ['daily', false, cooperate]);
+      assert.deepEqual(reported, [{ code: 'post_identity_mismatch' }]);
     } finally { await service.close(); }
   `
   execFileSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', source],
