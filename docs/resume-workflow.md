@@ -296,6 +296,8 @@ Polina's messages are deterministic plain-text templates implemented in
 `src/integrations/telegram/resume-polina-message-templates.ts`. They apply to
 the Russian-translator lane for EN and both-market workflows; RU-only workflows
 remain in Yulia's main-provider lane.
+Provider task lists load each client's name and market before applying these
+lane rules, including when the repository uses PostgreSQL.
 
 Covered scenarios are: a new RU task; RU task card; RU rework; saved RU link;
 task list and empty list; multiple or missing link tasks; unavailable, stale,

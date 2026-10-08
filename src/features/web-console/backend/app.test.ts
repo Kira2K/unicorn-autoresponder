@@ -78,7 +78,7 @@ const {
 
 function createFixtureNocoClient() {
   const calls: string[] = []
-  const fetchCalls: Array<{ tableId: string; where: string }> = []
+  const fetchCalls: Array<{ tableId: string; where: string; fields?: string }> = []
   const clients: Array<Record<string, any> & { Id: number }> = [
     {
       Id: 1,
@@ -570,7 +570,8 @@ function createFixtureNocoClient() {
     },
     async fetchRecords(tableId: string, _limit?: number, query?: Record<string, any>) {
       calls.push(tableId)
-      fetchCalls.push({ tableId, where: String(query?.where ?? '') })
+      fetchCalls.push({ tableId, where: String(query?.where ?? ''),
+        ...(query?.fields ? { fields: String(query.fields) } : {}) })
       if (tableId === 'mxza381054ldlza') return applyWhere(clients, query)
       if (tableId === 'm8zej2vsv4iypl8') return applyWhere(platformAccounts, query)
       if (tableId === 'mg3ovkendur1kpo') return platforms
@@ -1027,7 +1028,7 @@ async function runTests(): Promise<void> {
   noco.fetchCalls.length = 0
   assert.equal((await repository.findClientByCalendarEmail('CLIENT@example.com'))?.id, 1)
   assert.deepEqual(noco.fetchCalls, [
-    { tableId: 'mxza381054ldlza', where: '' },
+    { tableId: 'mxza381054ldlza', where: '', fields: 'Id,calendar_email' },
     { tableId: 'mxza381054ldlza', where: '(Id,eq,1)' }
   ])
 
@@ -1628,6 +1629,7 @@ async function runTests(): Promise<void> {
       })
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
       assert.deepEqual(result.body.tasks.map((task: any) => task.clientName), ['Client One'])
+      assert.ok(result.body.message.includes('Client One [En]'))
       assert.equal(result.body.tasks[0].expectedStatus, 'Draft in process')
       assert.equal(noco.calls.slice(taskListCallsStart).includes('m8zej2vsv4iypl8'), false)
       const taskListFetchCalls = noco.fetchCalls.slice(taskListFetchCallsStart)
@@ -1638,7 +1640,9 @@ async function runTests(): Promise<void> {
         `provider task list should not fetch cv_processing without a status filter: ${JSON.stringify(cvTaskListFetchCalls)}`
       )
       const clientTaskListFetchCalls = taskListFetchCalls.filter(call => call.tableId === 'mxza381054ldlza')
-      assert.equal(clientTaskListFetchCalls.length, 0, `provider task list should not fetch clients: ${JSON.stringify(clientTaskListFetchCalls)}`)
+      assert.deepEqual(clientTaskListFetchCalls, [
+        { tableId: 'mxza381054ldlza', where: '', fields: 'Id,client_name,market' }
+      ], 'provider task list should read client names and markets once')
       const workflowId = result.body.tasks[0].id
 
       result = await request(server.baseUrl, '/api/bot/telegram/resume/task-input', {
