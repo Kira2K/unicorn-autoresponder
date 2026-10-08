@@ -18,6 +18,11 @@ export type ReadyForInterviewInEnglishIn2Months = 'Yes' | 'No'
 
 export type WebClient = {
   id: number
+  studentProfileEnabled?: true
+  middleName?: string
+  noHigherEducation?: boolean
+  currentCompany?: string
+  previousCompanies?: string
   clientName: string
   firstName: string
   lastName: string
@@ -73,12 +78,16 @@ export type WebOption = {
 }
 
 export type ClientProfilePatch = {
+  middleName?: string
+  noHigherEducation?: boolean
+  currentCompany?: string
+  previousCompanies?: string
   firstName?: string
   lastName?: string
   fio?: string
   birthDate?: string
-  education?: string
-  educationEntries?: EducationEntry[]
+  education?: string | null
+  educationEntries?: EducationEntry[] | null
   realAge?: number | string | null
   realLocation?: string
   desiredLocation?: string

@@ -12,6 +12,8 @@ const { prepareLinkedInAutomation, unavailableLinkedInAutomation } = createRequi
   typeof import('../linkedin-automation.ts');
 import { openLinkLabIntake } from '../../../linkedin-automation/linklab/intake-runtime.mts';
 import { tableIds } from './tables.mts';
+import { studentProfileStore } from './student-profile-store.mts';
+import { withStudentProfile } from './student-profile-repository.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const config = readPostgresAppDbConfig(env), pool = open(config);
@@ -25,6 +27,9 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const linklab = env.LINKLAB_ENABLED === '1' ? await openLinkLabIntake(pool, config.database, tableIds.cv) : undefined;
     const options = sqlAppOptions(db, { clientIds: new Set(), allClients: true, create, linklab },
       { accountIds: new Set(), allAccounts: true, create });
+    const store = studentProfileStore(pool, config.database);
+    await store.checkSchema();
+    options.repository = withStudentProfile(options.repository, store);
     try { automation = await prepareLinkedInAutomation(createLinkedInAutomationStore(pool), options.linkedinStorage.repository); }
     catch (error) { automation = unavailableLinkedInAutomation(error); }
     return { options: { ...options, linkedinAutomation: automation }, close };

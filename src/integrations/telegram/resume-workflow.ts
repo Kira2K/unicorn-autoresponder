@@ -1235,15 +1235,16 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCv
       const market = providerStage === 'ru' && isRuOnlyWorkflow(record)
         ? 'ru'
         : normalizeText(record.clientMarket) || 'рынок не указан'
-      const message = returnedCvUrl
+      const isRework = returnedCvUrl !== undefined
+      const message = isRework
         ? yuliaReworkMessage(
             providerStage,
-            record.clientName,
+            yuliaTaskCardInputForWorkflow(record, providerStage),
             normalizeText(record.lastRejectionComment),
             returnedCvUrl
           )
         : yuliaNewTaskMessage(providerStage, record.clientName, market)
-      if (providerStage === 'draft' && !returnedCvUrl) {
+      if ((providerStage === 'draft' || providerStage === 'en') && !isRework) {
         const card = yuliaTaskCardForWorkflow(record)
         if (card) message.text += `\n\n${card.text}`
       }
@@ -1396,9 +1397,13 @@ function providerTaskMessage(workflow: ResumeWorkflowRecord): string {
 function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
   const stage = providerStageForWorkflow(workflow)
   if (!stage) return null
+  return yuliaTaskCardMessage(stage, yuliaTaskCardInputForWorkflow(workflow, stage))
+}
+
+function yuliaTaskCardInputForWorkflow(workflow: ResumeWorkflowRecord, stage: 'draft' | 'en' | 'ru') {
   const rootFolder = normalizeText(workflow.clientGoogleFolder)
   const sourceFolder = normalizeText(workflow.studentDataFolderUrl)
-  return yuliaTaskCardMessage(stage, {
+  return {
     clientName: workflow.clientName,
     market: stage === 'ru' && isRuOnlyWorkflow(workflow)
       ? 'ru'
@@ -1406,7 +1411,7 @@ function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
     stack: normalizeText(workflow.clientStack),
     realLocation: normalizeText(workflow.realLocation),
     desiredLocation: normalizeText(workflow.desiredLocation),
-    realAge: Number.isFinite(Number(workflow.realAge)) ? String(Number(workflow.realAge)) : '',
+    realAge: normalizeText(workflow.realAge) && Number.isFinite(Number(workflow.realAge)) ? String(Number(workflow.realAge)) : '',
     englishLevel: normalizeText(workflow.englishLevel),
     readyForInterviewInEnglishIn2Months: normalizeText(workflow.clientReadyForInterviewInEnglishIn2Months),
     education: educationDetails(workflow),
@@ -1419,7 +1424,7 @@ function yuliaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {
     phoneEn: normalizeText(workflow.clientPhoneEn),
     linkedInUrl: normalizeText(workflow.clientLinkedInUrl),
     githubUrl: normalizeText(workflow.clientGithubUrl)
-  })
+  }
 }
 
 function polinaTaskCardForWorkflow(workflow: ResumeWorkflowRecord) {

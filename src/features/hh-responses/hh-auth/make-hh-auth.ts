@@ -1,6 +1,7 @@
 import type { AuthorizeHHPageOptions, HHAuthResult, HHAuthStepResult, HHCredentials, MakeHHAuthOptions, StartedProfile } from './types.js'
 
 const { hhAuthSelectors } = require('./auth-selectors.ts')
+const { hhLoginKind } = require('../../../../shared/hh-login.ts')
 const { validateAuth } = require('./validate-auth.ts')
 const {
   collectDataQa,
@@ -114,44 +115,47 @@ async function fillAuthField(
   return container
 }
 
-async function ensureEmailLoginMode(
+async function ensureLoginMode(
   page: any,
+  kind: 'email' | 'phone',
   options: AuthorizeHHPageOptions
 ): Promise<void> {
-  if (await selectorExists(page, hhAuthSelectors.loginForm.email)) {
+  const input = kind === 'email' ? hhAuthSelectors.loginForm.email : hhAuthSelectors.loginForm.phoneNumber
+  const type = kind === 'email' ? hhAuthSelectors.loginForm.emailCredentialType : hhAuthSelectors.loginForm.phoneCredentialType
+  if (await selectorExists(page, input)) {
     return
   }
 
-  if (await selectorExists(page, hhAuthSelectors.loginForm.emailCredentialType)) {
-    const emailCredentialType = await waitForAuthSelector(
+  if (await selectorExists(page, type)) {
+    const credentialType = await waitForAuthSelector(
       page,
-      hhAuthSelectors.loginForm.emailCredentialType,
-      'email-credential-type',
+      type,
+      `${kind}-credential-type`,
       options
     )
-    await emailCredentialType.check({
+    await credentialType.check({
       force: true,
       timeout: options.timeoutMs
     }).catch(async () => {
-      await emailCredentialType.click({
+      await credentialType.click({
         force: true,
         timeout: options.timeoutMs
       })
     })
     await page.waitForTimeout(500)
   } else {
-    const emailTab = page.getByText?.('Почта', { exact: true }).first()
+    const loginTab = page.getByText?.(kind === 'email' ? 'Почта' : 'Телефон', { exact: true }).first()
 
-    if (emailTab && (await emailTab.count().catch(() => 0))) {
-      await emailTab.click({ timeout: options.timeoutMs })
+    if (loginTab && (await loginTab.count().catch(() => 0))) {
+      await loginTab.click({ timeout: options.timeoutMs })
       await page.waitForTimeout(500)
     }
   }
 
   await waitForAuthSelector(
     page,
-    hhAuthSelectors.loginForm.email,
-    'email-input',
+    input,
+    `${kind}-input`,
     options
   )
 }
@@ -182,6 +186,7 @@ async function ensureLoginFormOpen(
   }
   const loginFormVisible = async () =>
     (await selectorExists(page, hhAuthSelectors.loginForm.phone)) ||
+    (await selectorExists(page, hhAuthSelectors.loginForm.phoneNumber)) ||
     (await selectorExists(page, hhAuthSelectors.loginForm.email)) ||
     (await selectorExists(page, hhAuthSelectors.loginForm.password)) ||
     (await selectorExists(page, hhAuthSelectors.loginForm.emailCredentialType)) ||
@@ -328,6 +333,9 @@ async function performLoginOnPage(
   credentials: HHCredentials,
   options: AuthorizeHHPageOptions
 ): Promise<HHAuthResult> {
+  const login = String(credentials.login ?? '').trim()
+  const kind = hhLoginKind(login)
+  if (!kind) throw new HHAuthError('invalid_credentials', 'HH login is missing or malformed')
   await ensureLoginFormOpen(page, options)
 
   if (!await selectorExists(page, hhAuthSelectors.loginForm.phone)) {
@@ -346,16 +354,16 @@ async function performLoginOnPage(
     }
   }
 
-  await ensureEmailLoginMode(page, options)
+  await ensureLoginMode(page, kind, options)
 
   await fillAuthField(
     page,
-    hhAuthSelectors.loginForm.email,
-    'email-input',
-    credentials.email,
+    kind === 'email' ? hhAuthSelectors.loginForm.email : hhAuthSelectors.loginForm.phoneNumber,
+    'login-input',
+    login,
     options
   )
-  await takeScreenshot(page, options.artifactDir, '02-auth-email-entered.png')
+  await takeScreenshot(page, options.artifactDir, '02-auth-login-entered.png')
   await page.keyboard.press('Escape').catch(() => undefined)
   await page.waitForTimeout(500)
 

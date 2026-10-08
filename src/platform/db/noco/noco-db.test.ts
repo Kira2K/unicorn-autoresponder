@@ -416,6 +416,7 @@ async function runTests(): Promise<void> {
         phone: '+79990001122',
         password: 'canonical-secret',
         email: 'ivan@example.com',
+        login: 'ivan-login@example.com',
         email_password: 'mail-secret'
       }
     ]
@@ -435,6 +436,7 @@ async function runTests(): Promise<void> {
   assert.equal(credentials.market, 'Ru')
   assert.equal(credentials.phone, '+79990001122')
   assert.equal(credentials.email, 'ivan@example.com')
+  assert.equal(credentials.login, 'ivan-login@example.com')
   assert.equal(credentials.password, 'canonical-secret')
 
   const missingEmailDb = createNocoDb({
@@ -458,7 +460,7 @@ async function runTests(): Promise<void> {
 
   await assert.rejects(
     () => missingEmailDb.getHHAuthCredentialsByCommonChatId('-1003794953830', 'Ru'),
-    /missing email/
+    /missing login/
   )
 
   const duplicateDb = createNocoDb({

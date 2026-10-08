@@ -12,6 +12,17 @@ visible CV runner. It deliberately exposes only four runtime operations:
 Telegram types come from type-only imports of `@grammyjs/types`. The integration
 does not install or run grammY or Telegraf.
 
+Plain text and HTML longer than 4096 rendered Unicode characters use one
+`sendRichMessage` request. HTML links and formatting are retained; card line
+breaks become `<br>` without changing newlines inside `pre`/`code`. Literal plain
+text uses a paragraph block, not Markdown parsing. Short messages keep their
+existing `sendMessage` payload. Markdown/MarkdownV2 delivery remains unchanged.
+Nothing is split or truncated, and failure never triggers a second delivery.
+More than 32768 rendered characters returns a `validation` failure before send.
+The selection is implemented in `prepare-message.ts`; HTTP remains in
+`bot-api.ts`. Explicit link-preview options apply only to ordinary messages,
+because `sendRichMessage` has no equivalent parameter.
+
 The integration assumes exactly one bot. It reads `VEU_SUPPORT_BOT` from server
 configuration; callers cannot choose a bot or provide a token. It owns Bot API
 HTTP, send validation, result classification, batching, the small command
@@ -45,7 +56,7 @@ default; an explicit `linkPreviewOptions` object takes precedence.
 rejects its promise.
 
 - `kind: 'telegram-response'` contains the complete, unchanged Telegram
-  `ApiResponse<Message.TextMessage>`. This includes both `ok: true` and every
+  `ApiResponse<Message.TextMessage | Message.RichMessageMessage>`. This includes both `ok: true` and every
   valid `ok: false` Bot API response, including `parameters` and unknown future
   fields.
 - `kind: 'client-failure'` means that no valid Telegram response was available.
@@ -54,7 +65,9 @@ rejects its promise.
 
 The minimum accepted success body has `ok: true`, an object `result`, numeric
 `message_id` and `date`, an object `chat` with numeric `id` and string `type`,
-and string `text`. The minimum accepted API error has `ok: false`, numeric
+and either string `text` or `rich_message.blocks` containing typed blocks.
+Native Rich Message responses are retained unchanged, without fabricating a
+`text` field. The minimum accepted API error has `ok: false`, numeric
 `error_code`, and string `description`. Extra fields are retained without
 mapping. HTML, non-JSON, primitives, arrays, `null`, invalid `ok`, and partial
 bodies become a `response` client failure.
@@ -93,7 +106,7 @@ if (result.kind === 'client-failure') {
       break
   }
 } else if (result.response.ok) {
-  const sentMessage: Message.TextMessage = result.response.result
+  const sentMessage: Message.TextMessage | Message.RichMessageMessage = result.response.result
   recordTelegramMessageId(sentMessage.message_id)
 } else {
   const apiError: ApiError = result.response
@@ -180,6 +193,16 @@ Validation/transport failures and non-401 Telegram API errors report to
 `-5216637594`. Configuration/response/internal failures and Telegram 401 report
 to `summary_logs_channel_id`. Reporting uses a no-report internal send path, so
 its own failure cannot recurse.
+
+The support bot retries only the failed `getUpdates` polling operation when the
+shared Bot API adapter reports `telegram_bot_transport_failed`. It also retains
+the last processed update offset across retries. Missing credentials, Telegram
+401/404 responses, and unknown programming errors remain fatal. Retry logs use
+the `telegram_poll_retry` event with the operation, stable error code, retry
+delay, and a sanitized serialized error including its nested transport cause.
+Logging failures cannot stop polling, and token-bearing URLs and configured bot
+credentials are redacted. Message sends and CV business actions are never
+automatically repeated by this polling recovery path.
 
 ## Checks
 

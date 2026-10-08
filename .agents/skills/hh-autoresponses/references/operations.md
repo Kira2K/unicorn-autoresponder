@@ -20,8 +20,8 @@ This reference expands the launch, scheduling, and monitoring routines for the H
 ## Scope Parsing
 
 - "All" means both `Ru` and `En`.
-- "All profiles" means all enabled Noco targets that pass readiness for each requested market.
-- If the user asks to launch or schedule HH autoresponses without profile/client details, use all enabled Noco targets that pass readiness.
+- "All profiles" means all enabled database targets that pass readiness for each requested market.
+- If the user asks to launch or schedule HH autoresponses without profile/client details, use all enabled database targets that pass readiness.
 - A market name narrows only that market.
 - A client name narrows with `ORCHESTRATOR_CLIENT_NAMES`; prefer names over IDs when the user gives human-readable names.
 - Exclusions use `ORCHESTRATOR_EXCLUDE_CLIENT_NAMES` or IDs only when the user explicitly asks.
@@ -68,7 +68,7 @@ Reportable error states include Dolphin closed/unreachable, an unexpected active
 Run `Ru`, wait for exit, then run `En`.
 
 ```powershell
-$env:APP_DB = 'noco'
+$env:APP_DB = 'postgres'
 $env:ORCHESTRATOR_SUPERVISED = 'true'
 $env:ORCHESTRATOR_CONCURRENCY = '3'
 $env:ORCHESTRATOR_RESPONSE_LIMIT = '120'

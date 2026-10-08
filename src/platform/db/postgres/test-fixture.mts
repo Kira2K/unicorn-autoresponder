@@ -18,8 +18,8 @@ export function makeFixture() {
       Сопровод_Ru: ' Привет ', Сопровод_En: ' Hello ' }, { Id: 6, clients_id: 2, stacks_id1: 3, Делаем_отклики_Ru: true }],
     dolphinProfiles: [{ Id: 7, clients_id: 1, locale: 'Ru', dolphin_profile_id: '101' },
       { Id: 8, clients_id: 1, locale: 'En', dolphin_profile_id: '201' }, { Id: 9, clients_id: 2, locale: 'Ru', dolphin_profile_id: '301' }],
-    platformAccounts: [{ Id: 10, clients_id: 1, platforms_id: 11, phone: '123', email: 'fake@example.invalid', password: ' fixture ' },
-      { Id: 11, clients_id: 1, platforms_id: 10, login: '456', email: 'fake-en@example.invalid', password: ' fixture-en ' }],
+    platformAccounts: [{ Id: 10, clients_id: 1, platforms_id: 11, phone: '123', login: 'fake@example.invalid', email: 'fake@example.invalid', password: ' fixture ' },
+      { Id: 11, clients_id: 1, platforms_id: 10, login: '+79990001122', email: 'fake-en@example.invalid', password: ' fixture-en ' }],
     restrictions: [{ Id: 12, clients_id: 1, market: 'En' }],
     companies: [{ Id: 13, company_name: 'Blocked One' }, { Id: 14, company_name: 'Blocked Two' }]
   };

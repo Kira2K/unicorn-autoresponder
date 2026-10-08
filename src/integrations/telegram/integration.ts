@@ -6,6 +6,7 @@ import type {
   SendManyResult,
   SendOneInput,
   SendOneResult,
+  TelegramSentMessage,
   TelegramCommandContext,
   TelegramCommandDispatchResult,
   TelegramCommandHandler,
@@ -16,6 +17,7 @@ import {
   serializeTelegramError
 } from './sanitize.ts'
 import { createTelegramBotApi } from './bot-api.ts'
+import { prepareTelegramRichMessage } from './prepare-message.ts'
 
 type HttpResponseLike = {
   ok: boolean
@@ -150,11 +152,15 @@ function validateSendOneInput(input: unknown):
     }
   }
   try {
+    prepareTelegramRichMessage({ text: input.text, parseMode: input.parseMode as SendOneInput['parseMode'] })
     JSON.stringify({
       replyMarkup: input.replyMarkup,
       linkPreviewOptions: input.linkPreviewOptions
     })
   } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'telegram_rich_message_too_long') {
+      return { ok: false, error }
+    }
     return {
       ok: false,
       error: namedError(
@@ -186,7 +192,7 @@ function validateSendOneInput(input: unknown):
 
 function validTelegramResponse(
   value: unknown
-): value is ApiResponse<Message.TextMessage> {
+): value is ApiResponse<TelegramSentMessage> {
   if (!isObject(value)) return false
   if (value.ok === false) {
     return typeof value.error_code === 'number' && typeof value.description === 'string'
@@ -199,7 +205,12 @@ function validTelegramResponse(
     isObject(result.chat) &&
     typeof result.chat.id === 'number' &&
     typeof result.chat.type === 'string' &&
-    typeof result.text === 'string'
+    (typeof result.text === 'string' || (
+      isObject(result.rich_message) &&
+      Array.isArray(result.rich_message.blocks) &&
+      result.rich_message.blocks.length > 0 &&
+      result.rich_message.blocks.every(block => isObject(block) && typeof block.type === 'string')
+    ))
   )
 }
 

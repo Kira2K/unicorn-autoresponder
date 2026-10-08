@@ -1799,6 +1799,24 @@ async function runTests(): Promise<void> {
       assert.equal(result.body.workflow.lastRejectionComment, 'оставил комменты в резюме')
       assert.match(result.body.workflow.rejectionHistory, /Draft in approve by student -> Draft in process/)
 
+      const reworkMessages = telegramBotMessages.slice(-2)
+      assert.deepEqual(reworkMessages.map((message: any) => message.chatId), ['8222949251', '315110920'])
+      const reworkMessage = reworkMessages[0]
+      assert.equal(reworkMessage.chatId, '8222949251')
+      assert.equal(reworkMessage.parseMode, 'HTML')
+      assert.match(reworkMessage.text, /^<b>Черновик отправлен на доработку<\/b>/)
+      for (const row of ['Студент: Client One', 'Стек: FRONTEND',
+        'Файл на доработку: https://docs.google.com/document/d/reject-draft',
+        'Комментарий: оставил комменты в резюме']) {
+        assert.ok(reworkMessage.text.split('\n').includes(row), row)
+      }
+      for (const label of ['Рынок', 'Статус', 'Реальная локация', 'Желаемая локация',
+        'Реальный возраст', 'Уровень английского', 'Ready for interview in English in 2 months',
+        'Образование', 'Email EN', 'Telegram EN', 'Phone EN', 'LinkedIn', 'GitHub',
+        'Корневая папка', 'Исходные данные', 'Комментарии Киры']) {
+        assert.ok(reworkMessage.text.split('\n').some((row: string) => row.startsWith(`${label}: `)), label)
+      }
+
       result = await request(server.baseUrl, '/api/bot/telegram/chats/1001/resume/reset-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' },

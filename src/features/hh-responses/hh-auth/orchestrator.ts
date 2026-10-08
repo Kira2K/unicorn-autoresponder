@@ -465,7 +465,7 @@ async function ensureHHAuthOnCurrentPage(
           ))
 
         return {
-          email: credentials.email,
+          login: credentials.login,
           password: credentials.password
         }
       },

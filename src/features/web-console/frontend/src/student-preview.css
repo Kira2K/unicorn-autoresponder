@@ -1,0 +1,67 @@
+/* Local student preview only, including the dialog teleported to document.body. */
+.app-shell.student-preview { padding: 20px 16px 60px; color: #1e293b; font: 14px/1.45 Inter, 'Segoe UI', sans-serif; }
+.student-preview *, .student-account-dialog * { box-sizing: border-box; }
+.student-preview .dashboard { width: min(1180px, 100%); min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.student-preview .dashboard-grid { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.student-preview .dashboard-grid > * { width: 100%; min-width: 0; }
+.student-preview .p-card, .student-preview .topbar { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 1px 3px rgb(15 23 42 / 6%); }
+.student-preview .p-card-body { padding: 20px; gap: 6px; }
+.student-preview .p-card-title { font-size: 18px; font-weight: 600; }
+.student-preview .p-card-subtitle, .student-preview .topbar p { color: #64748b; }
+.student-preview .topbar { padding: 20px; align-items: flex-start; }
+.student-preview .topbar h1 { font-size: 30px; font-weight: 800; }
+.student-preview .p-button, .student-account-dialog .p-button, .student-preview .student-button { border-radius: 6px; font: inherit; font-weight: 600; padding: 8px 14px; }
+.student-preview .p-button:not(.p-button-secondary):not(.p-button-danger), .student-account-dialog .p-button:not(.p-button-secondary), .student-preview .student-button.primary { background: #0ea5e9; border-color: #0ea5e9; color: #fff; }
+.student-preview .p-button:not(.p-button-secondary):not(.p-button-danger):enabled:hover, .student-account-dialog .p-button:not(.p-button-secondary):enabled:hover, .student-preview .student-button.primary:enabled:hover { background: #0284c7; border-color: #0284c7; }
+.student-preview .p-button-secondary, .student-account-dialog .p-button-secondary, .student-preview .student-button:not(.primary) { background: #f1f5f9; border-color: transparent; color: #334155; }
+.student-preview .p-button-secondary:enabled:hover, .student-account-dialog .p-button-secondary:enabled:hover { background: #e2e8f0; }
+.student-preview .student-profile { border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 14px; padding: 14px 16px 18px; }
+.student-preview .student-profile.student-workplaces { border: 0; padding: 0; margin-top: 12px; }
+.student-preview .student-profile-heading { margin: 0 0 14px; }
+.student-preview .student-incomplete { margin-bottom: 14px; }
+.student-preview .student-grid { gap: 14px 16px; }
+.student-preview .student-name-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.student-preview .student-details-grid { margin-top: 14px; }
+.student-preview .student-field > label { font-size: 14px; color: #334155; }
+.student-preview .student-profile input:not([type=checkbox]), .student-preview .student-profile select { border-radius: 6px; padding: 9px 12px; }
+.student-preview .student-profile input[readonly] { background: #f8fafc; }
+.student-preview .student-read-grid, .student-preview .compact-info { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 20px; }
+.student-preview .student-read-grid > div, .student-preview .compact-info > div { min-width: 0; }
+.student-preview .compact-info > div { border: 0; padding: 0; }
+.student-preview .compact-info dd { overflow-wrap: anywhere; }
+.student-preview .student-education-row { grid-template-columns: repeat(3, minmax(0, 1fr)) 150px 38px; gap: 10px; }
+.student-preview .student-icon-button { width: 38px; height: 38px; }
+.student-preview .feature-toolbar { margin: 10px 0 12px; flex-wrap: wrap; }
+.student-preview .p-datatable-table-container { overflow-x: auto; }
+.student-preview .p-datatable-table { min-width: 860px; }
+.student-preview .p-datatable-thead > tr > th { color: #334155; background: #fff; padding: 12px 14px; font-size: 14px; }
+.student-preview .p-datatable-tbody > tr > td { padding: 12px 14px; vertical-align: top; }
+.student-preview .p-datatable-tbody > tr:nth-child(even) { background: #f8fafc; }
+.student-preview .row-actions { flex-wrap: nowrap; }
+.student-preview .telegram-panel, .student-preview .telegram-chat, .student-preview .telegram-workspace { min-width: 0; }
+.student-preview .p-inputtext, .student-account-dialog .p-inputtext { min-width: 0; font: inherit; border-color: #cbd5e1; border-radius: 6px; }
+.student-account-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; color: #1e293b; font: 14px/1.45 Inter, 'Segoe UI', sans-serif; }
+.student-account-dialog .p-dialog-header { padding: 20px 20px 14px; }
+.student-account-dialog .p-dialog-title { font-size: 18px; }
+.student-account-dialog .p-dialog-content { padding: 0 20px 20px; overflow-y: auto; }
+.student-account-dialog .account-form { grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+.student-account-dialog .field { min-width: 0; color: #334155; }
+.student-account-dialog .field small { font-weight: 400; }
+.student-account-dialog .p-password, .student-account-dialog .p-password-input { min-width: 0; width: 100%; }
+.student-account-dialog .form-actions { justify-content: flex-end; margin-top: 8px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+.student-account-dialog .p-inputtext:disabled { background: #f1f5f9; color: #94a3b8; }
+.student-account-dialog .phone-ru-invalid { border-color: #dc2626 !important; background: #fef2f2 !important; }
+@media (max-width: 760px) {
+  .student-preview .topbar h1 { font-size: 24px; }
+  .student-preview .topbar { gap: 14px; }
+  .student-preview .student-grid { grid-template-columns: 1fr; }
+  .student-preview .student-read-grid, .student-preview .compact-info { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .student-preview .student-education-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .student-preview .student-education-row .student-icon-button { grid-column: 2; justify-self: end; }
+  .student-preview .p-card-body { padding: 16px; }
+  .student-account-dialog .account-form { grid-template-columns: 1fr; }
+}
+@media (max-width: 420px) {
+  .student-preview .student-read-grid, .student-preview .compact-info { grid-template-columns: 1fr; }
+  .student-preview .student-profile { padding: 12px; }
+}

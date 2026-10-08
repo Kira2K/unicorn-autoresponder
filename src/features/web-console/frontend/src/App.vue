@@ -3,6 +3,15 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
 import FieldInfoLabel from './FieldInfoLabel.vue'
 import LinkedInAuthTab from './LinkedInAuthTab.vue'
+import StudentProfile from './StudentProfile.vue'
+import StudentWorkPlaces from './StudentWorkPlaces.vue'
+import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
+import { usernamePayload } from './username-input.js'
+import AccountForm from './AccountForm.vue'
+import StudentDashboardLayout from './StudentDashboardLayout.vue'
+import { studentPreviewLabel } from './student-preview-labels.js'
+import './student-preview.css'
+import { isRussianPhone, normalizeRussianPhone, russianPhoneError } from '../../student-profile-validation.ts'
 import {
   normalizePhoneEn,
   normalizePlatformAccountLabel,
@@ -104,6 +113,9 @@ const accountMessage = ref('')
 const accountError = ref('')
 const profileEditorOpen = ref('')
 const profileEditing = ref(false)
+const profileWorkPlaces = ref([])
+const workplaceEditor = ref({ editing: false, saving: false, error: '' })
+const workPlacesSection = ref(null)
 const accountEditorOpen = ref(false)
 const selectedTelegramAccountId = ref(null)
 const telegramStateByAccount = ref({})
@@ -164,6 +176,9 @@ const REQUIRED_DATA_WARNING_PREFIX = 'webConsole.requiredDolphinDataWarning'
 const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
 const isClient = computed(() => session.value?.role === 'client')
+const validatedProfileEnabled = computed(() => isClient.value && dashboard.value?.client?.studentProfileEnabled === true)
+const ui = text => studentPreviewLabel(text, validatedProfileEnabled.value)
+const platformDisplayLabel = text => validatedProfileEnabled.value ? previewPlatformLabel(text) : text
 const accountRows = computed(() => dashboard.value?.platformAccounts || [])
 function platformKey(account) {
   return String(account?.platform || account?.accountLabel || '').trim().replace(/\s+/g, '_').toLowerCase()
@@ -191,15 +206,11 @@ const selectedAccountPlatform = computed(() =>
 )
 const selectedAccountPolicy = computed(() => platformAccountPolicy(selectedAccountPlatform.value))
 const accountDisplayLabel = computed(() => selectedAccountPlatform.value || accountForm.value.accountLabel)
-const accountUrlInfoVisible = computed(() => ['github', 'linkedin'].includes(selectedAccountPlatform.value))
+const phoneRuAttempted = ref(false)
+const phoneRuSelected = computed(() => validatedProfileEnabled.value && selectedAccountPlatform.value === 'phone_ru')
+const phoneRuExists = computed(() => accountRows.value.some(account => platformKey(account) === 'phone_ru'))
+const phoneRuValidationMessage = computed(() => phoneRuSelected.value && phoneRuAttempted.value && !isRussianPhone(accountForm.value.phone) ? russianPhoneError : '')
 
-function accountFieldEnabled(field) {
-  return selectedAccountPolicy.value?.fields.includes(field) ?? false
-}
-
-function accountFieldRequired(field) {
-  return selectedAccountPolicy.value?.requiredFields.includes(field) ?? false
-}
 
 function updateAccountPhone(value) {
   accountForm.value.phone = selectedAccountPlatform.value === 'phone_en'
@@ -1150,6 +1161,7 @@ function resetAccountForm() {
   accountSecretsLoading.value = false
   accountSecretsReady.value = false
   accountError.value = ''
+  phoneRuAttempted.value = false
 }
 
 function createTelegramState(account = null) {
@@ -1265,6 +1277,7 @@ function openNewAccountForm() {
 }
 
 function closeAccountForm() {
+  if (accountSaving.value) return
   resetAccountForm()
   accountEditorOpen.value = false
 }
@@ -1743,6 +1756,7 @@ async function editAccount(account) {
   if (!canEditPlatformAccount(account)) return
   resetAccountForm()
   const requestId = ++accountSecretsRequestId
+  phoneRuAttempted.value = false
   accountMessage.value = ''
   accountEditorOpen.value = true
   accountForm.value = {
@@ -1792,6 +1806,7 @@ function accountPayload() {
   const fields = Object.fromEntries(
     (policy?.fields || []).map(field => [field, accountForm.value[field]])
   )
+  if (validatedProfileEnabled.value && policy?.fields.includes('nickname')) fields.nickname = usernamePayload(fields.nickname)
   if (editingAccount.value) return fields
   return {
     platformId: accountForm.value.platformId ? Number(accountForm.value.platformId) : null,
@@ -1807,19 +1822,29 @@ async function saveAccount() {
       : 'The saved password could not be loaded. Close the form and try again.'
     return
   }
+  if (accountSaving.value) return
   accountSaving.value = true
   accountMessage.value = ''
   accountError.value = ''
   try {
     const payload = accountPayload()
     if (!selectedAccountPolicy.value) {
-      accountError.value = 'Choose a platform'
+      accountError.value = ui('Choose a platform')
       return
+    }
+    if (phoneRuSelected.value) {
+      phoneRuAttempted.value = true
+      if (!isRussianPhone(payload.phone)) return
+      if (!editingAccount.value && phoneRuExists.value) {
+        accountError.value = 'Уже добавлен — отредактируйте существующий'
+        return
+      }
+      payload.phone = normalizeRussianPhone(payload.phone)
     }
     const missingFields = selectedAccountPolicy.value.requiredFields
       .filter(field => !String(payload[field] || '').trim())
     if (missingFields.length) {
-      accountError.value = `Fill required fields: ${missingFields.map(field => ACCOUNT_FIELD_LABELS[field]).join(', ')}`
+      accountError.value = `${validatedProfileEnabled.value ? 'Заполните обязательные поля' : 'Fill required fields'}: ${missingFields.map(field => ui(ACCOUNT_FIELD_LABELS[field])).join(', ')}`
       return
     }
     const previousTelegramIds = new Set(telegramAccounts.value.map(account => Number(account.id)))
@@ -1831,7 +1856,8 @@ async function saveAccount() {
     syncTelegramAccounts(newTelegramAccount?.id ?? selectedTelegramAccountId.value)
     resetAccountForm()
     accountEditorOpen.value = false
-    accountMessage.value = wasEditing ? 'Account updated' : 'Account added'
+    phoneRuAttempted.value = false
+    accountMessage.value = ui(wasEditing ? 'Account updated' : 'Account added')
   } catch (caught) {
     accountError.value = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
@@ -1840,7 +1866,7 @@ async function saveAccount() {
 }
 
 async function deleteAccount(account) {
-  if (!window.confirm(`Delete ${account.accountLabel || account.platform}?`)) return
+  if (!window.confirm(`${validatedProfileEnabled.value ? 'Удалить аккаунт' : 'Delete'} ${platformDisplayLabel(account.accountLabel || account.platform)}?`)) return
   accountSaving.value = true
   accountMessage.value = ''
   accountError.value = ''
@@ -1856,7 +1882,7 @@ async function deleteAccount(account) {
       resetAccountForm()
       accountEditorOpen.value = false
     }
-    accountMessage.value = 'Account deleted'
+    accountMessage.value = ui('Account deleted')
   } catch (caught) {
     accountError.value = caught instanceof Error ? caught.message : String(caught || '')
   } finally {
@@ -1976,18 +2002,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="app-shell">
+  <main class="app-shell" :class="{ 'student-preview': validatedProfileEnabled }">
     <Card v-if="!session" class="auth-card" data-testid="login-page">
       <template #title>HH Web Console</template>
       <template #subtitle>Sign in with your account login</template>
       <template #content>
         <form class="auth-form" @submit.prevent="login">
           <label class="field">
-            <span>Login</span>
+            <span>{{ ui('Login') }}</span>
             <InputText v-model="email" type="text" autocomplete="username" data-testid="email-input" />
           </label>
           <label class="field">
-            <span>Password</span>
+            <span>{{ ui('Password') }}</span>
             <Password
               v-model="password"
               :feedback="false"
@@ -1998,7 +2024,7 @@ onUnmounted(() => {
               input-class="password-input"
             />
           </label>
-          <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+          <Message v-if="error" severity="error" :closable="false">{{ ui(error) }}</Message>
           <Button type="submit" label="Sign in" icon="pi pi-sign-in" :loading="loading" data-testid="login-button" />
         </form>
       </template>
@@ -2020,7 +2046,7 @@ onUnmounted(() => {
           <div class="topbar-actions">
             <Button v-if="isAdmin" icon="pi pi-sparkles" severity="help" data-testid="admin-ai-tailor-open-button" aria-label="CV AI-tailoring" @click="openAdminAiTailorModal" />
             <Button v-if="isAdmin" icon="pi pi-telegram" severity="info" data-testid="admin-telegram-open-button" aria-label="Write in Telegram" @click="openAdminTelegramModal" />
-            <Button label="Logout" icon="pi pi-sign-out" severity="secondary" data-testid="logout-button" @click="logout" />
+            <Button :label="ui('Logout')" icon="pi pi-sign-out" severity="secondary" data-testid="logout-button" @click="logout" />
           </div>
         </template>
       </Toolbar>
@@ -2030,20 +2056,20 @@ onUnmounted(() => {
         <Button label="LinkedIn" :severity="adminSection === 'linkedin' ? 'primary' : 'secondary'" :outlined="adminSection !== 'linkedin'" data-testid="admin-linkedin-tab" @click="adminSection = 'linkedin'" />
       </nav>
 
-      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <Message v-if="error" severity="error" :closable="false">{{ ui(error) }}</Message>
       <Message v-if="dolphinLeaseError" severity="error" :closable="false" data-testid="dolphin-lease-error">
-        {{ dolphinLeaseError }}
+        {{ ui(dolphinLeaseError) }}
       </Message>
       <Message v-if="dolphinProvisionMessage" severity="info" :closable="false" data-testid="dolphin-provision-message">
-        {{ dolphinProvisionMessage }}
+        {{ ui(dolphinProvisionMessage) }}
       </Message>
-      <Dialog v-model:visible="secureDnsWarningVisible" modal header="Before opening LinkedIn" data-testid="secure-dns-warning">
-        <p class="dialog-text">Are you sure you have switched secure DNS off before opening LinkedIn?</p>
+      <Dialog v-model:visible="secureDnsWarningVisible" modal :header="ui('Before opening LinkedIn')" data-testid="secure-dns-warning">
+        <p class="dialog-text">{{ ui('Are you sure you have switched secure DNS off before opening LinkedIn?') }}</p>
         <template #footer>
-          <Button label="Confirm" icon="pi pi-check" data-testid="confirm-secure-dns-warning-button" @click="confirmSecureDnsWarning" />
+          <Button :label="ui('Confirm')" icon="pi pi-check" data-testid="confirm-secure-dns-warning-button" @click="confirmSecureDnsWarning" />
         </template>
       </Dialog>
-      <Dialog v-model:visible="requiredDataDialogVisible" modal header="Required profile data" class="required-data-dialog" data-testid="required-data-dialog">
+      <Dialog v-model:visible="requiredDataDialogVisible" modal :header="ui('Required profile data')" class="required-data-dialog" data-testid="required-data-dialog">
         <p class="required-data-dialog-text" data-testid="required-data-dialog-text">
           pls contact your mentor to add {{ requiredDataDialogField?.fieldLabel || 'required data' }}.
         </p>
@@ -2126,7 +2152,7 @@ onUnmounted(() => {
             <InputText v-model="adminTelegramRecipient" placeholder="@username" data-testid="admin-telegram-recipient" @blur="normalizeAdminTelegramRecipient" />
           </label>
           <label class="field wide-field">
-            <span>Message</span>
+            <span>{{ ui('Message') }}</span>
             <textarea v-model="adminTelegramMessage" class="native-textarea" rows="7" data-testid="admin-telegram-message"></textarea>
           </label>
           <div class="admin-telegram-attachments wide-field">
@@ -2160,7 +2186,7 @@ onUnmounted(() => {
               {{ adminTelegramStatus }}
             </Message>
             <span v-else class="admin-telegram-footer-spacer" aria-hidden="true"></span>
-            <Button label="Refresh" icon="pi pi-refresh" severity="secondary" outlined :loading="adminTelegramLoading" data-testid="admin-telegram-refresh-button" @click="loadAdminTelegramSenders" />
+            <Button :label="ui('Refresh')" icon="pi pi-refresh" severity="secondary" outlined :loading="adminTelegramLoading" data-testid="admin-telegram-refresh-button" @click="loadAdminTelegramSenders" />
             <Button label="Write" icon="pi pi-send" :loading="adminTelegramLoading" data-testid="admin-telegram-send-button" @click="sendAdminTelegramMessage" />
           </div>
         </template>
@@ -2176,17 +2202,17 @@ onUnmounted(() => {
           <section class="provider-detail-section">
             <h3>Client data</h3>
             <dl class="info-list">
-              <div><dt>Market</dt><dd>{{ selectedProviderClient.market || 'empty' }}</dd></div>
-              <div><dt>Primary stack</dt><dd>{{ selectedProviderClient.primaryStack || 'empty' }}</dd></div>
+              <div><dt>Market</dt><dd>{{ selectedProviderClient.market || ui('empty') }}</dd></div>
+              <div><dt>Primary stack</dt><dd>{{ selectedProviderClient.primaryStack || ui('empty') }}</dd></div>
               <div><dt>Education</dt><dd>{{ formatEducationEntries(selectedProviderClient.educationEntries, selectedProviderClient.education) }}</dd></div>
               <div><dt>Real age</dt><dd>{{ selectedProviderClient.realAge ?? 'empty' }}</dd></div>
-              <div><dt>Real location</dt><dd>{{ selectedProviderClient.realLocation || 'empty' }}</dd></div>
-              <div><dt>Desired location</dt><dd>{{ selectedProviderClient.desiredLocation || 'empty' }}</dd></div>
-              <div><dt>GitHub</dt><dd><a v-if="selectedProviderClient.githubUrl" :href="selectedProviderClient.githubUrl" target="_blank" rel="noopener noreferrer">{{ selectedProviderClient.githubUrl }}</a><span v-else>empty</span></dd></div>
-              <div><dt>LinkedIn</dt><dd><a v-if="selectedProviderClient.linkedInUrl" :href="selectedProviderClient.linkedInUrl" target="_blank" rel="noopener noreferrer">{{ selectedProviderClient.linkedInUrl }}</a><span v-else>empty</span></dd></div>
-              <div><dt>LinkedIn email</dt><dd>{{ selectedProviderClient.linkedInEmail || 'empty' }}</dd></div>
-              <div><dt>Telegram RU</dt><dd>{{ selectedProviderClient.telegramRu || 'empty' }}</dd></div>
-              <div><dt>Telegram EN</dt><dd>{{ selectedProviderClient.telegramEn || 'empty' }}</dd></div>
+              <div><dt>Real location</dt><dd>{{ selectedProviderClient.realLocation || ui('empty') }}</dd></div>
+              <div><dt>Desired location</dt><dd>{{ selectedProviderClient.desiredLocation || ui('empty') }}</dd></div>
+              <div><dt>GitHub</dt><dd><a v-if="selectedProviderClient.githubUrl" :href="selectedProviderClient.githubUrl" target="_blank" rel="noopener noreferrer">{{ selectedProviderClient.githubUrl }}</a><span v-else>{{ ui('empty') }}</span></dd></div>
+              <div><dt>LinkedIn</dt><dd><a v-if="selectedProviderClient.linkedInUrl" :href="selectedProviderClient.linkedInUrl" target="_blank" rel="noopener noreferrer">{{ selectedProviderClient.linkedInUrl }}</a><span v-else>{{ ui('empty') }}</span></dd></div>
+              <div><dt>LinkedIn email</dt><dd>{{ selectedProviderClient.linkedInEmail || ui('empty') }}</dd></div>
+              <div><dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_ru') : 'Telegram RU' }}</dt><dd>{{ selectedProviderClient.telegramRu || ui('empty') }}</dd></div>
+              <div><dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_en') : 'Telegram EN' }}</dt><dd>{{ selectedProviderClient.telegramEn || ui('empty') }}</dd></div>
             </dl>
           </section>
           <section class="provider-detail-section">
@@ -2208,11 +2234,11 @@ onUnmounted(() => {
                     <span>{{ credential.market }}</span>
                   </div>
                   <div class="provider-response-field">
-                    <span class="provider-detail-label">Email</span>
-                    <span>{{ credential.email || 'empty' }}</span>
+                    <span class="provider-detail-label">{{ ui('Email') }}</span>
+                    <span>{{ credential.email || ui('empty') }}</span>
                   </div>
                   <div class="provider-response-field provider-hh-password-field">
-                    <span class="provider-detail-label">Password</span>
+                    <span class="provider-detail-label">{{ ui('Password') }}</span>
                     <div class="provider-hh-password-row">
                       <InputText
                         :type="providerCredentialVisible(credential) ? 'text' : 'password'"
@@ -2253,7 +2279,7 @@ onUnmounted(() => {
                   <div v-for="field in response.fields" :key="field.label" class="provider-response-field">
                     <span class="provider-detail-label">{{ field.label }}</span>
                     <a v-if="field.kind === 'url' && field.value" :href="field.value" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>
-                    <span v-else>{{ field.value || 'empty' }}</span>
+                    <span v-else>{{ field.value || ui('empty') }}</span>
                   </div>
                 </div>
               </article>
@@ -2398,13 +2424,13 @@ onUnmounted(() => {
         <template #subtitle>Use this when Dolphin asks for the email code</template>
         <template #content>
           <div class="verification-panel">
-            <Button label="Get verification code" icon="pi pi-envelope" size="small" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
+            <Button :label="ui('Get verification code')" icon="pi pi-envelope" size="small" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
             <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
-              {{ verificationCodeError }}
+              {{ ui(verificationCodeError) }}
             </Message>
             <div v-if="verificationCode" class="verification-code-row">
-              <span data-testid="verification-code-value">Code: {{ verificationCode.code }}</span>
-              <Button label="Copy" icon="pi pi-copy" size="small" severity="secondary" data-testid="copy-verification-code-button" @click="copyVerificationCode" />
+              <span data-testid="verification-code-value">{{ ui('Code') }}: {{ verificationCode.code }}</span>
+              <Button :label="ui('Copy')" icon="pi pi-copy" size="small" severity="secondary" data-testid="copy-verification-code-button" @click="copyVerificationCode" />
             </div>
           </div>
         </template>
@@ -2417,7 +2443,7 @@ onUnmounted(() => {
       <div v-else-if="isProvider" class="dashboard-grid provider-grid">
         <Card class="provider-card">
           <template #title>Clients on English market</template>
-          <template #subtitle>{{ providerClients.length }} visible clients. Shared Dolphin login: {{ providerDolphinEmail || 'empty' }}</template>
+          <template #subtitle>{{ providerClients.length }} visible clients. Shared Dolphin login: {{ providerDolphinEmail || ui('empty') }}</template>
           <template #content>
             <div class="dolphin-action-panel">
               <div>
@@ -2425,40 +2451,40 @@ onUnmounted(() => {
                 <p>Use the code button if Dolphin asks for email verification.</p>
               </div>
               <div class="verification-panel">
-                <Button label="Get verification code" icon="pi pi-envelope" size="small" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
+                <Button :label="ui('Get verification code')" icon="pi pi-envelope" size="small" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
                 <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
-                  {{ verificationCodeError }}
+                  {{ ui(verificationCodeError) }}
                 </Message>
                 <div v-if="verificationCode" class="verification-code-row">
-                  <span data-testid="verification-code-value">Code: {{ verificationCode.code }}</span>
-                  <Button label="Copy" icon="pi pi-copy" size="small" severity="secondary" data-testid="copy-verification-code-button" @click="copyVerificationCode" />
+                  <span data-testid="verification-code-value">{{ ui('Code') }}: {{ verificationCode.code }}</span>
+                  <Button :label="ui('Copy')" icon="pi pi-copy" size="small" severity="secondary" data-testid="copy-verification-code-button" @click="copyVerificationCode" />
                 </div>
               </div>
             </div>
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
-              <h3>Dolphin access</h3>
-              <p>Open Dolphin Anty and enter the credentials below.</p>
+              <h3>{{ ui('Dolphin access') }}</h3>
+              <p>{{ ui('Open Dolphin Anty and enter the credentials below.') }}</p>
               <p>{{ dolphinLease.targetClientName }}</p>
               <dl class="info-list lease-info-list">
                 <div>
-                  <dt>Dolphin login</dt>
+                  <dt>{{ ui('Dolphin login') }}</dt>
                   <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
                 </div>
                 <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
-                  <dt>Client email</dt>
+                  <dt>{{ ui('Client email') }}</dt>
                   <dd>{{ dolphinLease.sourceEmail }}</dd>
                 </div>
                 <div>
-                  <dt>Password</dt>
+                  <dt>{{ ui('Password') }}</dt>
                   <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
                 </div>
                 <div>
-                  <dt>Profiles</dt>
-                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
+                  <dt>{{ ui('Profiles') }}</dt>
+                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || ui('empty') }}</dd>
                 </div>
                 <div>
-                  <dt>Guaranteed authorization time left</dt>
-                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
+                  <dt>{{ ui('Guaranteed authorization time left') }}</dt>
+                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} {{ validatedProfileEnabled ? 'сек.' : 'sec' }}</dd>
                 </div>
               </dl>
             </section>
@@ -2480,13 +2506,14 @@ onUnmounted(() => {
         </Card>
       </div>
 
-      <div v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" class="dashboard-grid">
+      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled">
+        <template #profile>
         <Card class="profile-card">
           <template #title>
             <div class="profile-card-title-row">
               <span>{{ dashboard.client.clientName }}</span>
               <Button
-                v-if="isClient"
+                v-if="isClient && !validatedProfileEnabled"
                 :label="profileEditing ? 'View' : 'Edit'"
                 :icon="profileEditing ? 'pi pi-eye' : 'pi pi-pencil'"
                 severity="secondary"
@@ -2496,9 +2523,25 @@ onUnmounted(() => {
               />
             </div>
           </template>
-          <template #subtitle>{{ isAdmin ? 'Latest created client' : 'Your profile' }}</template>
+          <template #subtitle>{{ isAdmin ? 'Latest created client' : ui('Your profile') }}</template>
           <template #content>
-            <Accordion v-if="isClient" v-model:value="profileEditorOpen" class="profile-accordion" data-testid="profile-accordion">
+            <StudentProfile v-if="validatedProfileEnabled" v-model:work-places="profileWorkPlaces" :client="dashboard.client" :english-levels="englishLevels" :save="api.updateClientProfile" @saved="dashboard = $event" @editor-state="workplaceEditor = $event" @focus-workplaces="workPlacesSection?.focusError()">
+              <dl class="info-list compact-info student-section">
+                <div><dt>GitHub</dt><dd>{{ githubUrl || '—' }}</dd></div>
+                <div><dt>LinkedIn</dt><dd>{{ linkedInProfileUrl || '—' }}</dd></div>
+                <div><dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_ru') : 'Telegram RU' }}</dt><dd>{{ telegramRuContact || '—' }}</dd></div>
+                <div><dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_en') : 'Telegram EN' }}</dt><dd>{{ telegramEnContact || '—' }}</dd></div>
+                <div><dt>{{ ui('Client Id') }}</dt><dd>{{ dashboard.client.id }}</dd></div>
+                <div><dt>Стэк</dt><dd>{{ dashboard.client.primaryStack || '—' }}</dd></div>
+                <div><dt>Рынок</dt><dd>{{ dashboard.client.market || '—' }}</dd></div>
+                <div><dt>Статус</dt><dd>{{ dashboard.client.clientStatus || '—' }}</dd></div>
+                <div><dt>{{ ui('Common Chat') }}</dt><dd>{{ dashboard.client.commonChatId || '—' }}</dd></div>
+                <div><dt>{{ ui('Mentors') }}</dt><dd>{{ (dashboard.client.mentors || []).join(', ') || '—' }}</dd></div>
+                <div><dt>{{ ui('Resume status') }}</dt><dd>{{ dashboard.client.resumeStatus || '—' }}</dd></div>
+                <div><dt>{{ ui('LinkedIn status') }}</dt><dd>{{ dashboard.client.linkedInStatus || '—' }}</dd></div>
+              </dl>
+            </StudentProfile>
+            <Accordion v-else-if="isClient" v-model:value="profileEditorOpen" class="profile-accordion" data-testid="profile-accordion">
               <AccordionPanel value="details">
                 <AccordionHeader data-testid="profile-details-accordion-header">
                   <span class="accordion-title">
@@ -2579,17 +2622,17 @@ onUnmounted(() => {
                     </label>
                     <div class="form-actions wide-field">
                       <Button type="submit" label="Save profile" icon="pi pi-save" :loading="profileSaving" data-testid="save-profile-button" />
-                      <Button type="button" label="Cancel" icon="pi pi-times" severity="secondary" data-testid="close-profile-editor-button" @click="closeProfileEditor" />
+                      <Button type="button" :label="ui('Cancel')" icon="pi pi-times" severity="secondary" data-testid="close-profile-editor-button" @click="closeProfileEditor" />
                     </div>
                   </form>
                   <dl v-else class="info-list compact-info">
                     <div>
                       <dt>Имя</dt>
-                      <dd>{{ dashboard.client.firstName || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.firstName || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>Фамилия</dt>
-                      <dd>{{ dashboard.client.lastName || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.lastName || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>Образование</dt>
@@ -2601,71 +2644,71 @@ onUnmounted(() => {
                     </div>
                     <div>
                       <dt>Реальная локация</dt>
-                      <dd>{{ dashboard.client.realLocation || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.realLocation || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>Желаемая локация</dt>
-                      <dd>{{ dashboard.client.desiredLocation || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.desiredLocation || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt><FieldInfoLabel label="GitHub" tooltip="ссылка без https://" test-id="profile-github-info" /></dt>
-                      <dd>{{ githubUrl || 'empty' }}</dd>
+                      <dd>{{ githubUrl || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt><FieldInfoLabel label="LinkedIn" tooltip="ссылка без https://" test-id="profile-linkedin-info" /></dt>
-                      <dd>{{ linkedInProfileUrl || 'empty' }}</dd>
+                      <dd>{{ linkedInProfileUrl || ui('empty') }}</dd>
                     </div>
                     <div>
-                      <dt>Telegram RU</dt>
-                      <dd>{{ telegramRuContact || 'empty' }}</dd>
+                      <dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_ru') : 'Telegram RU' }}</dt>
+                      <dd>{{ telegramRuContact || ui('empty') }}</dd>
                     </div>
                     <div>
-                      <dt>Telegram EN</dt>
-                      <dd>{{ telegramEnContact || 'empty' }}</dd>
+                      <dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_en') : 'Telegram EN' }}</dt>
+                      <dd>{{ telegramEnContact || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>Стоп-лист компаний</dt>
-                      <dd>{{ dashboard.client.stopListCompany || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.stopListCompany || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>English level</dt>
-                      <dd>{{ dashboard.client.englishLevel || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.englishLevel || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>Ready for interview in English in 2 months</dt>
-                      <dd data-testid="profile-ready-for-interview-in-english-in-2-months-value">{{ dashboard.client.readyForInterviewInEnglishIn2Months || 'empty' }}</dd>
+                      <dd data-testid="profile-ready-for-interview-in-english-in-2-months-value">{{ dashboard.client.readyForInterviewInEnglishIn2Months || ui('empty') }}</dd>
                     </div>
                     <div>
-                      <dt>Client Id</dt>
+                      <dt>{{ ui('Client Id') }}</dt>
                       <dd>{{ dashboard.client.id }}</dd>
                     </div>
                     <div>
                       <dt>Стэк</dt>
-                      <dd>{{ dashboard.client.primaryStack || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.primaryStack || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>Рынок</dt>
-                      <dd>{{ dashboard.client.market || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.market || ui('empty') }}</dd>
                     </div>
                     <div>
                       <dt>Статус</dt>
-                      <dd>{{ dashboard.client.clientStatus || 'empty' }}</dd>
+                      <dd>{{ dashboard.client.clientStatus || ui('empty') }}</dd>
                     </div>
                     <div>
-                      <dt>Common Chat</dt>
-                      <dd>{{ dashboard.client.commonChatId || 'empty' }}</dd>
+                      <dt>{{ ui('Common Chat') }}</dt>
+                      <dd>{{ dashboard.client.commonChatId || ui('empty') }}</dd>
                     </div>
                     <div>
-                      <dt>Mentors</dt>
-                      <dd>{{ (dashboard.client.mentors || []).join(', ') || 'empty' }}</dd>
+                      <dt>{{ ui('Mentors') }}</dt>
+                      <dd>{{ (dashboard.client.mentors || []).join(', ') || ui('empty') }}</dd>
                     </div>
                     <div>
-                      <dt>Resume status</dt>
-                      <dd>{{ dashboard.client.resumeStatus || 'empty' }}</dd>
+                      <dt>{{ ui('Resume status') }}</dt>
+                      <dd>{{ dashboard.client.resumeStatus || ui('empty') }}</dd>
                     </div>
                     <div>
-                      <dt>LinkedIn status</dt>
-                      <dd>{{ dashboard.client.linkedInStatus || 'empty' }}</dd>
+                      <dt>{{ ui('LinkedIn status') }}</dt>
+                      <dd>{{ dashboard.client.linkedInStatus || ui('empty') }}</dd>
                     </div>
                   </dl>
                 </AccordionContent>
@@ -2675,11 +2718,11 @@ onUnmounted(() => {
             <dl v-if="!isClient" class="info-list compact-info">
               <div>
                 <dt>Имя</dt>
-                <dd>{{ dashboard.client.firstName || 'empty' }}</dd>
+                <dd>{{ dashboard.client.firstName || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>Фамилия</dt>
-                <dd>{{ dashboard.client.lastName || 'empty' }}</dd>
+                <dd>{{ dashboard.client.lastName || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>Образование</dt>
@@ -2691,84 +2734,89 @@ onUnmounted(() => {
               </div>
               <div>
                 <dt>Реальная локация</dt>
-                <dd>{{ dashboard.client.realLocation || 'empty' }}</dd>
+                <dd>{{ dashboard.client.realLocation || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>Желаемая локация</dt>
-                <dd>{{ dashboard.client.desiredLocation || 'empty' }}</dd>
+                <dd>{{ dashboard.client.desiredLocation || ui('empty') }}</dd>
               </div>
               <div>
                 <dt><FieldInfoLabel label="GitHub" tooltip="ссылка без https://" test-id="profile-github-info" /></dt>
-                <dd>{{ githubUrl || 'empty' }}</dd>
+                <dd>{{ githubUrl || ui('empty') }}</dd>
               </div>
               <div>
                 <dt><FieldInfoLabel label="LinkedIn" tooltip="ссылка без https://" test-id="profile-linkedin-info" /></dt>
-                <dd>{{ linkedInProfileUrl || 'empty' }}</dd>
+                <dd>{{ linkedInProfileUrl || ui('empty') }}</dd>
               </div>
               <div>
-                <dt>Telegram RU</dt>
-                <dd>{{ telegramRuContact || 'empty' }}</dd>
+                <dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_ru') : 'Telegram RU' }}</dt>
+                <dd>{{ telegramRuContact || ui('empty') }}</dd>
               </div>
               <div>
-                <dt>Telegram EN</dt>
-                <dd>{{ telegramEnContact || 'empty' }}</dd>
+                <dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_en') : 'Telegram EN' }}</dt>
+                <dd>{{ telegramEnContact || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>Стоп-лист компаний</dt>
-                <dd>{{ dashboard.client.stopListCompany || 'empty' }}</dd>
+                <dd>{{ dashboard.client.stopListCompany || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>English level</dt>
-                <dd>{{ dashboard.client.englishLevel || 'empty' }}</dd>
+                <dd>{{ dashboard.client.englishLevel || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>Ready for interview in English in 2 months</dt>
-                <dd data-testid="profile-ready-for-interview-in-english-in-2-months-value">{{ dashboard.client.readyForInterviewInEnglishIn2Months || 'empty' }}</dd>
+                <dd data-testid="profile-ready-for-interview-in-english-in-2-months-value">{{ dashboard.client.readyForInterviewInEnglishIn2Months || ui('empty') }}</dd>
               </div>
               <div>
-                <dt>Client Id</dt>
+                <dt>{{ ui('Client Id') }}</dt>
                 <dd>{{ dashboard.client.id }}</dd>
               </div>
               <div>
                 <dt>Стэк</dt>
-                <dd>{{ dashboard.client.primaryStack || 'empty' }}</dd>
+                <dd>{{ dashboard.client.primaryStack || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>Рынок</dt>
-                <dd>{{ dashboard.client.market || 'empty' }}</dd>
+                <dd>{{ dashboard.client.market || ui('empty') }}</dd>
               </div>
               <div>
                 <dt>Статус</dt>
-                <dd>{{ dashboard.client.clientStatus || 'empty' }}</dd>
+                <dd>{{ dashboard.client.clientStatus || ui('empty') }}</dd>
               </div>
               <div>
-                <dt>Common Chat</dt>
-                <dd>{{ dashboard.client.commonChatId || 'empty' }}</dd>
+                <dt>{{ ui('Common Chat') }}</dt>
+                <dd>{{ dashboard.client.commonChatId || ui('empty') }}</dd>
               </div>
               <div>
-                <dt>Mentors</dt>
-                <dd>{{ (dashboard.client.mentors || []).join(', ') || 'empty' }}</dd>
+                <dt>{{ ui('Mentors') }}</dt>
+                <dd>{{ (dashboard.client.mentors || []).join(', ') || ui('empty') }}</dd>
               </div>
               <div>
-                <dt>Resume status</dt>
-                <dd>{{ dashboard.client.resumeStatus || 'empty' }}</dd>
+                <dt>{{ ui('Resume status') }}</dt>
+                <dd>{{ dashboard.client.resumeStatus || ui('empty') }}</dd>
               </div>
               <div>
-                <dt>LinkedIn status</dt>
-                <dd>{{ dashboard.client.linkedInStatus || 'empty' }}</dd>
+                <dt>{{ ui('LinkedIn status') }}</dt>
+                <dd>{{ dashboard.client.linkedInStatus || ui('empty') }}</dd>
               </div>
             </dl>
           </template>
         </Card>
 
+        </template>
+        <template #workplaces>
+          <StudentWorkPlaces v-if="validatedProfileEnabled" ref="workPlacesSection" v-model:work-places="profileWorkPlaces" :client="dashboard.client" :editing="workplaceEditor.editing" :saving="workplaceEditor.saving" :error="workplaceEditor.error" />
+        </template>
+        <template #telegram>
         <Card v-if="isClient" class="action-card telegram-card" data-testid="telegram-card">
           <template #title>
             <div class="profile-card-title-row">
               <span>Telegram</span>
-              <span :class="telegramDotClass" :title="telegramStatusLabel"></span>
+              <span :class="telegramDotClass" :title="ui(telegramStatusLabel)"></span>
             </div>
           </template>
-          <template #subtitle>{{ telegramAccounts.length ? `${telegramAccounts.length} Telegram account${telegramAccounts.length === 1 ? '' : 's'}` : 'No Telegram account row' }}</template>
+          <template #subtitle>{{ validatedProfileEnabled ? 'Аккаунтов Telegram: ' + telegramAccounts.length : telegramAccounts.length ? `${telegramAccounts.length} Telegram account${telegramAccounts.length === 1 ? '' : 's'}` : 'No Telegram account row' }}</template>
           <template #content>
             <div v-if="telegramAccounts.length > 1" class="telegram-account-tabs" data-testid="telegram-account-tabs">
               <button
@@ -2779,31 +2827,31 @@ onUnmounted(() => {
                 :data-testid="`telegram-account-tab-${account.id}`"
                 @click="selectTelegramAccount(account)"
               >
-                <span>{{ account.accountLabel || account.platform }}</span>
-                <small>{{ account.phone || account.foreignNumber || account.login || account.platform }}</small>
+                <span>{{ platformDisplayLabel(account.accountLabel || account.platform) }}</span>
+                <small>{{ account.phone || account.foreignNumber || account.login || platformDisplayLabel(account.platform) }}</small>
               </button>
             </div>
             <Message v-if="currentTelegramState.error" severity="error" :closable="false" data-testid="telegram-error">
-              {{ currentTelegramState.error }}
+              {{ ui(currentTelegramState.error) }}
             </Message>
             <div v-if="selectedTelegramAccount" class="telegram-panel">
               <Message severity="info" :closable="false" data-testid="telegram-beta-message">
-                Telegram writing is in beta.
+                {{ ui('Telegram writing is in beta.') }}
               </Message>
               <div class="telegram-status-row">
-                <span data-testid="telegram-status">Status: {{ telegramStatusLabel }}</span>
-                <Button icon="pi pi-refresh" label="Refresh" size="small" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-refresh-button" @click="refreshTelegramStatus" />
+                <span data-testid="telegram-status">{{ ui('Status') }}: {{ ui(telegramStatusLabel) }}</span>
+                <Button icon="pi pi-refresh" :label="ui('Refresh')" size="small" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-refresh-button" @click="refreshTelegramStatus" />
               </div>
               <div class="telegram-connect-row">
-                <InputText v-model="currentTelegramState.phone" placeholder="Phone" data-testid="telegram-phone" />
-                <InputText v-if="telegramStatusLabel === 'needs_code'" v-model="currentTelegramState.code" placeholder="Code" data-testid="telegram-code" />
-                <Password v-if="telegramStatusLabel === 'needs_password'" v-model="currentTelegramState.password" placeholder="Cloud password" toggle-mask :feedback="false" data-testid="telegram-password" />
-                <Button label="Connect Telegram" icon="pi pi-link" :loading="currentTelegramState.loading" data-testid="telegram-connect-button" @click="connectTelegram" />
-                <Button label="Disconnect" icon="pi pi-times" severity="danger" outlined :loading="currentTelegramState.loading" data-testid="telegram-disconnect-button" @click="disconnectTelegram" />
+                <InputText v-model="currentTelegramState.phone" :placeholder="ui('Phone')" data-testid="telegram-phone" />
+                <InputText v-if="telegramStatusLabel === 'needs_code'" v-model="currentTelegramState.code" :placeholder="ui('Code')" data-testid="telegram-code" />
+                <Password v-if="telegramStatusLabel === 'needs_password'" v-model="currentTelegramState.password" :placeholder="ui('Cloud password')" toggle-mask :feedback="false" data-testid="telegram-password" />
+                <Button :label="ui('Connect Telegram')" icon="pi pi-link" :loading="currentTelegramState.loading" data-testid="telegram-connect-button" @click="connectTelegram" />
+                <Button :label="ui('Disconnect')" icon="pi pi-times" severity="danger" outlined :loading="currentTelegramState.loading" data-testid="telegram-disconnect-button" @click="disconnectTelegram" />
               </div>
               <div v-if="telegramStatusLabel === 'active'" class="telegram-open-row">
-                <Button v-if="!currentTelegramState.open" label="Open Telegram" icon="pi pi-comments" severity="info" data-testid="telegram-open-button" @click="openTelegram" />
-                <Button v-else label="Hide Telegram" icon="pi pi-chevron-up" severity="secondary" outlined data-testid="telegram-hide-button" @click="hideTelegram" />
+                <Button v-if="!currentTelegramState.open" :label="ui('Open Telegram')" icon="pi pi-comments" severity="info" data-testid="telegram-open-button" @click="openTelegram" />
+                <Button v-else :label="ui('Hide Telegram')" icon="pi pi-chevron-up" severity="secondary" outlined data-testid="telegram-hide-button" @click="hideTelegram" />
               </div>
               <Accordion v-if="currentTelegramState.open" v-model:value="currentTelegramState.panelOpen" class="telegram-accordion" data-testid="telegram-accordion">
                 <AccordionPanel value="telegram">
@@ -2811,7 +2859,7 @@ onUnmounted(() => {
                     <span class="accordion-title">
                       <i class="pi pi-comments"></i>
                       <span>Telegram</span>
-                      <small>{{ telegramSelectedFolderTitle }}</small>
+                      <small>{{ ui(telegramSelectedFolderTitle) }}</small>
                     </span>
                   </AccordionHeader>
                   <AccordionContent>
@@ -2819,20 +2867,20 @@ onUnmounted(() => {
                       <button
                         type="button"
                         :class="['telegram-mode-toggle', { enabled: currentTelegramState.writeEnabled }]"
-                        :title="telegramModeTitle"
+                        :title="ui(telegramModeTitle)"
                         data-testid="telegram-write-toggle"
                         @click="toggleTelegramWriteMode"
                       >
                         <i :class="currentTelegramState.writeEnabled ? 'pi pi-lock-open' : 'pi pi-lock'"></i>
-                        <span>{{ telegramModeLabel }}</span>
+                        <span>{{ ui(telegramModeLabel) }}</span>
                       </button>
                       <select v-model="currentTelegramState.list" class="native-select telegram-folder-select" data-testid="telegram-folder-select" @change="changeTelegramList">
                         <option v-for="folder in currentTelegramState.folders" :key="folder.id" :value="folder.id">
-                          {{ folder.title }}
+                          {{ ui(folder.title) }}
                         </option>
                       </select>
                       <form class="telegram-search-form" data-testid="telegram-search-form" @submit.prevent="loadTelegramDialogs">
-                        <InputText v-model="currentTelegramState.search" placeholder="Search chats" data-testid="telegram-search-input" />
+                        <InputText v-model="currentTelegramState.search" :placeholder="ui('Search chats')" data-testid="telegram-search-input" />
                         <Button type="submit" icon="pi pi-search" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-search-button" />
                       </form>
                       <Button icon="pi pi-refresh" severity="secondary" outlined :loading="currentTelegramState.loading" data-testid="telegram-dialogs-refresh-button" @click="loadTelegramDialogs" />
@@ -2856,8 +2904,8 @@ onUnmounted(() => {
                               <button
                                 type="button"
                                 class="telegram-username-copy"
-                                :aria-label="`Copy ${dialog.username}`"
-                                :title="`Copy ${dialog.username}`"
+                                :aria-label="`${ui('Copy')} ${dialog.username}`"
+                                :title="`${ui('Copy')} ${dialog.username}`"
                                 data-testid="telegram-username-copy-button"
                                 @click="copyTelegramUsername(dialog.username, $event)"
                               >
@@ -2867,17 +2915,17 @@ onUnmounted(() => {
                           </span>
                           <small v-if="dialog.unreadCount">{{ dialog.unreadCount }}</small>
                         </div>
-                        <p v-if="!currentTelegramState.dialogs.length" class="telegram-empty">No chats</p>
+                        <p v-if="!currentTelegramState.dialogs.length" class="telegram-empty">{{ ui('No chats') }}</p>
                         <p v-if="currentTelegramState.copiedUsername" class="telegram-copy-status" data-testid="telegram-copy-status">
-                          Copied {{ currentTelegramState.copiedUsername }}
+                          {{ ui('Copied') }} {{ currentTelegramState.copiedUsername }}
                         </p>
                       </aside>
                       <div class="telegram-chat">
                         <form v-if="telegramSelectedDialog?.isPrivate" class="telegram-contact-form" data-testid="telegram-contact-form" @submit.prevent="renameTelegramContact">
-                          <InputText v-model="currentTelegramState.renameFirstName" placeholder="First name" data-testid="telegram-contact-first-name" />
-                          <InputText v-model="currentTelegramState.renameLastName" placeholder="Last name" data-testid="telegram-contact-last-name" />
-                          <Button type="submit" icon="pi pi-save" label="Save name" size="small" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-contact-save-button" />
-                          <span v-if="currentTelegramState.renameMessage" class="telegram-contact-status" data-testid="telegram-contact-status">{{ currentTelegramState.renameMessage }}</span>
+                          <InputText v-model="currentTelegramState.renameFirstName" :placeholder="ui('First name')" data-testid="telegram-contact-first-name" />
+                          <InputText v-model="currentTelegramState.renameLastName" :placeholder="ui('Last name')" data-testid="telegram-contact-last-name" />
+                          <Button type="submit" icon="pi pi-save" :label="ui('Save name')" size="small" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-contact-save-button" />
+                          <span v-if="currentTelegramState.renameMessage" class="telegram-contact-status" data-testid="telegram-contact-status">{{ ui(currentTelegramState.renameMessage) }}</span>
                         </form>
                         <div class="telegram-messages">
                           <div v-for="message in currentTelegramState.messages" :key="message.id" :class="['telegram-message', { outgoing: message.outgoing }]">
@@ -2885,8 +2933,8 @@ onUnmounted(() => {
                           </div>
                         </div>
                         <form class="telegram-send-row" @submit.prevent="sendTelegramMessage">
-                          <InputText v-model="currentTelegramState.messageText" :placeholder="currentTelegramState.writeEnabled ? 'Message' : 'Read-only mode'" :disabled="!currentTelegramState.writeEnabled" data-testid="telegram-message-input" />
-                          <Button type="submit" icon="pi pi-send" label="Send" :disabled="!currentTelegramState.writeEnabled" :loading="currentTelegramState.loading" data-testid="telegram-send-button" />
+                          <InputText v-model="currentTelegramState.messageText" :placeholder="ui(currentTelegramState.writeEnabled ? 'Message' : 'Read-only mode')" :disabled="!currentTelegramState.writeEnabled" data-testid="telegram-message-input" />
+                          <Button type="submit" icon="pi pi-send" :label="ui('Send')" :disabled="!currentTelegramState.writeEnabled" :loading="currentTelegramState.loading" data-testid="telegram-send-button" />
                         </form>
                       </div>
                     </section>
@@ -2897,92 +2945,94 @@ onUnmounted(() => {
           </template>
         </Card>
 
+        </template>
+        <template #actions>
         <Card v-if="isClient" class="action-card">
-          <template #title>Dolphin profile</template>
-          <template #subtitle>{{ dolphinActionMode === 'create_new' ? 'Create the missing automation profiles' : 'Open the connected automation profiles' }}</template>
+          <template #title>{{ ui('Dolphin profile') }}</template>
+          <template #subtitle>{{ ui(dolphinActionMode === 'create_new' ? 'Create the missing automation profiles' : 'Open the connected automation profiles') }}</template>
           <template #content>
             <div v-if="dolphinActionMode === 'create_new'" class="proxy-choice-panel" data-testid="own-proxy-panel">
               <label class="checkbox-field">
                 <input v-model="ownProxy" type="checkbox" data-testid="own-proxy-checkbox" />
-                <span>I have my own proxy</span>
+                <span>{{ ui('I have my own proxy') }}</span>
               </label>
             </div>
-            <Button v-if="!hasActiveDolphinLease" :label="dolphinActionLabel" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, dolphinActionMode)" />
+            <Button v-if="!hasActiveDolphinLease" :label="ui(dolphinActionLabel)" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, dolphinActionMode)" />
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
-              <h3>Dolphin access</h3>
-              <p>Open Dolphin Anty and enter the credentials below.</p>
+              <h3>{{ ui('Dolphin access') }}</h3>
+              <p>{{ ui('Open Dolphin Anty and enter the credentials below.') }}</p>
               <p>{{ dolphinLease.targetClientName }}</p>
               <p v-if="dolphinLease.ownProxyName" class="helper-text" data-testid="actual-proxy-name">
-                Please name your proxy exactly: {{ dolphinLease.ownProxyName }}
+                {{ ui('Please name your proxy exactly:') }} {{ dolphinLease.ownProxyName }}
               </p>
               <dl class="info-list lease-info-list">
                 <div>
-                  <dt>Dolphin login</dt>
+                  <dt>{{ ui('Dolphin login') }}</dt>
                   <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
                 </div>
                 <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
-                  <dt>Client email</dt>
+                  <dt>{{ ui('Client email') }}</dt>
                   <dd>{{ dolphinLease.sourceEmail }}</dd>
                 </div>
                 <div>
-                  <dt>Password</dt>
+                  <dt>{{ ui('Password') }}</dt>
                   <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
                 </div>
                 <div>
-                  <dt>Profiles</dt>
-                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
+                  <dt>{{ ui('Profiles') }}</dt>
+                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || ui('empty') }}</dd>
                 </div>
                 <div>
-                  <dt>Guaranteed authorization time left</dt>
-                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
+                  <dt>{{ ui('Guaranteed authorization time left') }}</dt>
+                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} {{ validatedProfileEnabled ? 'сек.' : 'sec' }}</dd>
                 </div>
               </dl>
             </section>
             <div class="verification-panel">
-              <Button label="Get verification code" icon="pi pi-envelope" size="small" severity="secondary" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
+              <Button :label="ui('Get verification code')" icon="pi pi-envelope" size="small" severity="secondary" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
               <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
-                {{ verificationCodeError }}
+                {{ ui(verificationCodeError) }}
               </Message>
               <div v-if="verificationCode" class="verification-code-row">
-                <span data-testid="verification-code-value">Code: {{ verificationCode.code }}</span>
-                <Button label="Copy" icon="pi pi-copy" size="small" severity="secondary" data-testid="copy-verification-code-button" @click="copyVerificationCode" />
+                <span data-testid="verification-code-value">{{ ui('Code') }}: {{ verificationCode.code }}</span>
+                <Button :label="ui('Copy')" icon="pi pi-copy" size="small" severity="secondary" data-testid="copy-verification-code-button" @click="copyVerificationCode" />
               </div>
             </div>
           </template>
         </Card>
 
         <Card v-if="adminCanOpenDolphinProfiles" class="action-card">
-          <template #title>Dolphin profile</template>
+          <template #title>{{ ui('Dolphin profile') }}</template>
           <template #subtitle>Open profiles for the latest client</template>
           <template #content>
             <Button v-if="!hasActiveDolphinLease" label="Open Dolphin profiles" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-admin-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, 'open_existing')" />
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
-              <h3>Dolphin access</h3>
-              <p>Open Dolphin Anty and enter the credentials below.</p>
+              <h3>{{ ui('Dolphin access') }}</h3>
+              <p>{{ ui('Open Dolphin Anty and enter the credentials below.') }}</p>
               <p>{{ dolphinLease.targetClientName }}</p>
               <p v-if="dolphinLease.ownProxyName" class="helper-text" data-testid="actual-proxy-name">
                 Please name your proxy exactly: {{ dolphinLease.ownProxyName }}
               </p>
               <dl class="info-list lease-info-list">
                 <div>
-                  <dt>Dolphin login</dt>
+                  <dt>{{ ui('Dolphin login') }}</dt>
                   <dd data-testid="dolphin-lease-email">{{ dolphinLease.username }}</dd>
                 </div>
                 <div v-if="dolphinLease.sourceEmail && dolphinLease.sourceEmail !== dolphinLease.username">
-                  <dt>Client email</dt>
+                  <dt>{{ ui('Client email') }}</dt>
                   <dd>{{ dolphinLease.sourceEmail }}</dd>
                 </div>
                 <div>
-                  <dt>Password</dt>
+                  <dt>{{ ui('Password') }}</dt>
                   <dd data-testid="dolphin-lease-password">{{ dolphinLease.password }}</dd>
                 </div>
                 <div>
-                  <dt>Profiles</dt>
-                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || 'empty' }}</dd>
+                  <dt>{{ ui('Profiles') }}</dt>
+                  <dd data-testid="dolphin-lease-profiles">{{ (dolphinLease.profileIds || []).join(', ') || ui('empty') }}</dd>
                 </div>
                 <div>
-                  <dt>Guaranteed authorization time left</dt>
-                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} sec</dd>
+                  <dt>{{ ui('Guaranteed authorization time left') }}</dt>
+                  <dd data-testid="dolphin-lease-countdown">{{ dolphinLeaseSecondsLeft }} {{ validatedProfileEnabled ? 'сек.' : 'sec' }}</dd>
                 </div>
               </dl>
             </section>
@@ -2991,7 +3041,7 @@ onUnmounted(() => {
 
         <Card v-if="isAdmin" class="action-card">
           <template #title>Message to Telegram chat</template>
-          <template #subtitle>Linked chat: {{ dashboard.client.commonChatId || 'empty' }}</template>
+          <template #subtitle>Linked chat: {{ dashboard.client.commonChatId || ui('empty') }}</template>
           <template #content>
             <form class="admin-linked-chat-form" data-testid="admin-linked-chat-form" @submit.prevent="sendAdminLinkedChatMessage">
               <label class="field wide-field">
@@ -3022,108 +3072,55 @@ onUnmounted(() => {
           </template>
         </Card>
 
+        </template>
+        <template #accounts>
         <Card class="accounts-card">
-          <template #title>Platform accounts</template>
-          <template #subtitle>{{ accountRows.length }} connected rows</template>
+          <template #title>{{ ui('Platform accounts') }}</template>
+          <template #subtitle>{{ validatedProfileEnabled ? 'Подключено аккаунтов: ' + accountRows.length : accountRows.length + ' connected rows' }}</template>
           <template #content>
             <div v-if="isClient" class="feature-toolbar">
-              <Button label="Add account" icon="pi pi-plus" severity="secondary" data-testid="open-account-editor-button" @click="openNewAccountForm" />
+              <Button :label="ui('Add account')" icon="pi pi-plus" severity="secondary" data-testid="open-account-editor-button" @click="openNewAccountForm" />
               <span v-if="accountMessage" class="success-text" data-testid="account-save-message">{{ accountMessage }}</span>
-              <span v-if="accountError" class="error-text" data-testid="account-error">{{ accountError }}</span>
+              <span v-if="accountError && !(validatedProfileEnabled && accountEditorOpen)" class="error-text" data-testid="account-error">{{ accountError }}</span>
             </div>
-            <form v-if="isClient && accountEditorOpen" class="account-form" data-testid="account-form" novalidate @submit.prevent="saveAccount">
-              <label v-if="!editingAccount" class="field">
-                <span>Platform</span>
-                <select v-model="accountForm.platformId" class="native-select" required data-testid="account-platform">
-                  <option value="">Choose platform</option>
-                  <option v-for="platform in platforms" :key="platform.id" :value="String(platform.id)">
-                    {{ platform.label }}
-                  </option>
-                </select>
-              </label>
-              <label v-else class="field">
-                <span>Platform</span>
-                <InputText :model-value="accountForm.platform" disabled data-testid="account-platform-locked" />
-              </label>
-              <label class="field">
-                <span>Label</span>
-                <InputText :model-value="accountDisplayLabel" disabled data-testid="account-label" />
-              </label>
-              <label class="field">
-                <span>Login</span>
-                <InputText v-model="accountForm.login" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" data-testid="account-login" />
-              </label>
-              <label class="field">
-                <span>Phone</span>
-                <InputText :model-value="accountForm.phone" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" data-testid="account-phone" @update:model-value="updateAccountPhone" />
-              </label>
-              <label class="field">
-                <span>Email</span>
-                <InputText v-model="accountForm.email" :disabled="!accountFieldEnabled('email')" :required="accountFieldRequired('email')" data-testid="account-email" />
-              </label>
-              <label class="field">
-                <span>Nickname</span>
-                <InputText v-model="accountForm.nickname" :disabled="!accountFieldEnabled('nickname')" :required="accountFieldRequired('nickname')" data-testid="account-nickname" />
-              </label>
-              <label class="field wide-field">
-                <span>
-                  <FieldInfoLabel v-if="accountUrlInfoVisible" label="URL" tooltip="ссылка без https://" test-id="account-url-info" />
-                  <template v-else>URL</template>
-                </span>
-                <InputText v-model="accountForm.linkedInUrl" :disabled="!accountFieldEnabled('linkedInUrl')" :required="accountFieldRequired('linkedInUrl')" data-testid="account-linkedin-url" />
-              </label>
-              <label class="field">
-                <span>Foreign number</span>
-                <InputText v-model="accountForm.foreignNumber" :disabled="!accountFieldEnabled('foreignNumber')" :required="accountFieldRequired('foreignNumber')" data-testid="account-foreign-number" />
-              </label>
-              <label class="field">
-                <span>Recovery codes</span>
-                <InputText v-model="accountForm.recoveryCodes" :disabled="!accountFieldEnabled('recoveryCodes')" :required="accountFieldRequired('recoveryCodes')" data-testid="account-recovery-codes" />
-              </label>
-              <label class="field">
-                <span>Password</span>
-                <Password v-model="accountForm.password" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('password') || (editingAccount && !accountSecretsReady)" :required="accountFieldRequired('password')" data-testid="account-password-widget" input-class="password-input" />
-              </label>
-              <label class="field">
-                <span>Email password</span>
-                <Password v-model="accountForm.emailPassword" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('emailPassword') || (editingAccount && !accountSecretsReady)" :required="accountFieldRequired('emailPassword')" data-testid="account-email-password-widget" input-class="password-input" />
-              </label>
-              <div class="form-actions wide-field">
-                <Button type="submit" :label="editingAccount ? 'Save account' : 'Add account'" icon="pi pi-save" :loading="accountSaving || accountSecretsLoading" :disabled="editingAccount && !accountSecretsReady" data-testid="save-account-button" />
-                <Button type="button" label="Cancel" icon="pi pi-times" severity="secondary" data-testid="close-account-editor-button" @click="closeAccountForm" />
-              </div>
-            </form>
+            <Dialog v-if="validatedProfileEnabled" :visible="accountEditorOpen" modal class="student-account-dialog" :header="editingAccount ? 'Редактировать аккаунт' : 'Добавить аккаунт'" :dismissable-mask="false" :closable="!accountSaving" :close-on-escape="!accountSaving" :pt="{ pcCloseButton: { root: { 'aria-label': 'Закрыть' } } }" @update:visible="closeAccountForm">
+              <AccountForm v-if="accountEditorOpen" v-model:form="accountForm" :editing="editingAccount" :preview="validatedProfileEnabled" :saving="accountSaving" :secrets-loading="accountSecretsLoading" :secrets-ready="accountSecretsReady" :error="accountError" :platforms="platforms" :policy="selectedAccountPolicy" :display-label="accountDisplayLabel" :phone-ru-selected="phoneRuSelected" :phone-ru-exists="phoneRuExists" :phone-ru-validation-message="phoneRuValidationMessage" @save="saveAccount" @cancel="closeAccountForm" @phone="updateAccountPhone" />
+            </Dialog>
+            <AccountForm v-else-if="isClient && accountEditorOpen" v-model:form="accountForm" :editing="editingAccount" :preview="validatedProfileEnabled" :saving="accountSaving" :secrets-loading="accountSecretsLoading" :secrets-ready="accountSecretsReady" :error="accountError" :platforms="platforms" :policy="selectedAccountPolicy" :display-label="accountDisplayLabel" :phone-ru-selected="phoneRuSelected" :phone-ru-exists="phoneRuExists" :phone-ru-validation-message="phoneRuValidationMessage" @save="saveAccount" @cancel="closeAccountForm" @phone="updateAccountPhone" />
 
             <DataTable :value="accountRows" striped-rows responsive-layout="scroll" data-testid="accounts-table">
-              <Column field="platform" header="Platform" />
-              <Column field="accountLabel" header="Label" />
-              <Column field="login" header="Login" />
-              <Column field="phone" header="Phone" />
-              <Column field="email" header="Email" />
-              <Column field="nickname" header="Nickname" />
+              <Column field="platform" :header="ui('Platform')">
+                <template #body="{ data }"><span>{{ platformDisplayLabel(data.platform) }}</span><small v-if="validatedProfileEnabled && platformKey(data) === 'phone_ru'" class="phone-ru-hint">📞 Используется для HH на ру рынке</small></template>
+              </Column>
+              <Column v-if="!validatedProfileEnabled" field="accountLabel" header="Label" />
+              <Column field="login" :header="ui('Login')" />
+              <Column field="phone" :header="ui('Phone')" />
+              <Column field="email" :header="ui('Email')" />
+              <Column field="nickname" :header="validatedProfileEnabled ? 'Username' : 'Nickname'" />
               <Column header="URL">
                 <template #body="{ data }">
-                  <span>{{ accountUrl(data) || 'empty' }}</span>
+                  <span>{{ accountUrl(data) || ui('empty') }}</span>
                 </template>
               </Column>
-              <Column header="Password">
+              <Column :header="ui('Password')">
                 <template #body="{ data }">
                   <Tag v-if="data.password" :value="data.password" severity="secondary" />
-                  <span v-else>empty</span>
+                  <span v-else>{{ ui('empty') }}</span>
                 </template>
               </Column>
-              <Column v-if="isClient" header="Actions">
+              <Column v-if="isClient" :header="ui('Actions')">
                 <template #body="{ data }">
                   <div class="row-actions">
-                    <Button icon="pi pi-pencil" aria-label="Edit account" size="small" severity="secondary" :disabled="!canEditPlatformAccount(data)" :title="canEditPlatformAccount(data) ? 'Edit account' : 'Unsupported platform is read-only'" data-testid="edit-account-button" @click="editAccount(data)" />
-                    <Button icon="pi pi-trash" aria-label="Delete account" size="small" severity="danger" data-testid="delete-account-button" @click="deleteAccount(data)" />
+                    <Button icon="pi pi-pencil" :aria-label="ui('Edit account')" size="small" severity="secondary" :disabled="!canEditPlatformAccount(data)" :title="ui(canEditPlatformAccount(data) ? 'Edit account' : 'Unsupported platform is read-only')" data-testid="edit-account-button" @click="editAccount(data)" />
+                    <Button icon="pi pi-trash" :aria-label="ui('Delete account')" size="small" severity="danger" data-testid="delete-account-button" @click="deleteAccount(data)" />
                   </div>
                 </template>
               </Column>
             </DataTable>
           </template>
         </Card>
-      </div>
+        </template>
+      </StudentDashboardLayout>
     </section>
   </main>
 </template>

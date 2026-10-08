@@ -1,3 +1,5 @@
+import { prepareTelegramRichMessage } from './prepare-message.ts'
+
 type BotApiHttpResponse = {
   ok: boolean
   status: number
@@ -14,7 +16,7 @@ type SendMessageInput = {
   text: string
   messageThreadId?: number
   replyMarkup?: unknown
-  parseMode?: string
+  parseMode?: import('./types.ts').SendOneInput['parseMode']
   linkPreviewOptions?: unknown
 }
 
@@ -129,6 +131,17 @@ export function createTelegramBotApi(options: {
     }
   }
 
+  async function sendResponse(input: SendMessageInput): Promise<unknown> {
+    const richMessage = prepareTelegramRichMessage(input)
+    if (!richMessage) return await requestResponse('sendMessage', sendMessageBody(input))
+    return await requestResponse('sendRichMessage', {
+      chat_id: input.chatId,
+      ...(input.messageThreadId !== undefined ? { message_thread_id: input.messageThreadId } : {}),
+      rich_message: richMessage,
+      ...(input.replyMarkup ? { reply_markup: input.replyMarkup } : {})
+    })
+  }
+
   async function unwrapLegacyResponse(data: unknown): Promise<unknown> {
     if (!data || typeof data !== 'object') {
       throw botError(
@@ -155,18 +168,18 @@ export function createTelegramBotApi(options: {
 
   return {
     async sendMessageResponse(input: SendMessageInput): Promise<unknown> {
-      return await requestResponse('sendMessage', sendMessageBody(input))
+      return await sendResponse(input)
     },
     async sendMessage(input: SendMessageInput): Promise<unknown> {
       const chatId = String(input.chatId ?? '').trim()
       const text = String(input.text ?? '').trim()
       if (!chatId) throw botError('telegram_bot_chat_id_missing', 'Telegram chat ID is required.')
       if (!text) throw botError('telegram_bot_empty_message', 'Telegram message text is required.')
-      return await unwrapLegacyResponse(await requestResponse('sendMessage', sendMessageBody({
+      return await unwrapLegacyResponse(await sendResponse({
         ...input,
         chatId,
         text
-      })))
+      }))
     },
     async answerCallbackQuery(input: { callbackQueryId: string; text?: string }): Promise<unknown> {
       const callbackQueryId = String(input.callbackQueryId ?? '').trim()

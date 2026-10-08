@@ -1,4 +1,8 @@
 const assert = require('node:assert/strict')
+const { createTelegramBotApi } = require('./bot-api.ts') as
+  typeof import('./bot-api.ts')
+const { createTelegramIntegration } = require('./integration.ts') as
+  typeof import('./integration.ts')
 const {
   BACKEND_OVERLOADED_MESSAGE,
   BACKEND_UNAVAILABLE_MESSAGE,
@@ -334,16 +338,36 @@ function testYuliaMessageTemplateContract(): void {
     YULIA_TASKS_FOOTER
   ].join('\n'))
   assertYuliaTemplate(yuliaTemplates.yuliaTaskCardMessage('en', {
-    clientName: 'Анна', market: 'EN', draftUrl: 'https://docs.test/draft',
-    stack: 'must-not-appear', realLocation: 'must-not-appear', githubUrl: 'must-not-appear',
-    emailEn: 'must-not-appear@example.com', telegramEn: '@must_not_appear',
-    phoneEn: '+1 000', linkedInUrl: 'https://linkedin.com/in/must-not-appear'
+    clientName: 'Анна', market: 'EN', draftUrl: 'https://docs.test/draft?a=1&b=2',
+    rootFolder: 'https://drive.test/root?a=1&b=2', sourceFolder: 'https://drive.test/source',
+    kirasComments: 'Добавить <опыт>', stack: 'Java & Kotlin',
+    realLocation: 'Tbilisi <Georgia>', desiredLocation: 'Berlin & Remote',
+    realAge: '24', englishLevel: 'B2 & higher', education: 'University <Faculty>, 2024',
+    readyForInterviewInEnglishIn2Months: 'Yes',
+    emailEn: 'anna&work@example.com', telegramEn: '@anna<en>', phoneEn: '+1 555 0100',
+    linkedInUrl: 'https://linkedin.com/in/anna?a=1&b=2',
+    githubUrl: 'https://github.com/anna?a=1&b=2'
   }), [
     '<b>Английская версия</b>',
     'Студент: Анна',
     'Рынок: EN',
     'Статус: английская версия в работе',
-    'Черновик: https://docs.test/draft',
+    'Стек: Java &amp; Kotlin',
+    'Реальная локация: Tbilisi &lt;Georgia&gt;',
+    'Желаемая локация: Berlin &amp; Remote',
+    'Реальный возраст: 24',
+    'Уровень английского: B2 &amp; higher',
+    'Ready for interview in English in 2 months: Yes',
+    'Образование: University &lt;Faculty&gt;, 2024',
+    'Email EN: anna&amp;work@example.com',
+    'Telegram EN: @anna&lt;en&gt;',
+    'Phone EN: +1 555 0100',
+    'LinkedIn: https://linkedin.com/in/anna?a=1&amp;b=2',
+    'GitHub: https://github.com/anna?a=1&amp;b=2',
+    'Корневая папка: https://drive.test/root?a=1&amp;b=2',
+    'Исходные данные: https://drive.test/source',
+    'Комментарии Киры: Добавить &lt;опыт&gt;',
+    'Черновик: https://docs.test/draft?a=1&amp;b=2',
     'Отправь ссылку на EN-версию следующим сообщением — я прикреплю её к этой задаче.',
     YULIA_TASKS_FOOTER
   ].join('\n'))
@@ -373,24 +397,65 @@ function testYuliaMessageTemplateContract(): void {
   }
 
   const reworkScenarios = [
-    ['draft', 'Черновик отправлен на доработку', 'Ждем новую ссылку на черновик следующим сообщением.'],
-    ['en', 'EN-версия отправлена на доработку', 'Отправь обновленную ссылку на EN-версию следующим сообщением.'],
-    ['ru', 'RU-версия отправлена на доработку', 'Отправь обновленную ссылку на RU-версию следующим сообщением.']
+    ['draft', 'Черновик отправлен на доработку', 'Ждем новую ссылку на черновик следующим сообщением.', 'черновик в работе'],
+    ['en', 'EN-версия отправлена на доработку', 'Отправь обновленную ссылку на EN-версию следующим сообщением.', 'английская версия в работе'],
+    ['ru', 'RU-версия отправлена на доработку', 'Отправь обновленную ссылку на RU-версию следующим сообщением.', 'русская версия в работе']
   ]
-  for (const [stage, heading, hint] of reworkScenarios) {
+  const reworkInput = {
+    clientName: 'Анна', market: 'EN', stack: 'Java & Kotlin',
+    realLocation: 'Tbilisi <Georgia>', desiredLocation: 'Berlin & Remote',
+    realAge: '24', englishLevel: 'B2', readyForInterviewInEnglishIn2Months: 'Yes',
+    education: 'University <Faculty>, 2024', emailEn: 'anna&work@example.com',
+    telegramEn: '@anna<en>', phoneEn: '+1 555 0100',
+    linkedInUrl: 'https://linkedin.com/in/anna', githubUrl: 'https://github.com/anna',
+    rootFolder: 'https://drive.test/root', sourceFolder: 'https://drive.test/source',
+    kirasComments: 'Первоначальные <замечания>', draftUrl: 'https://docs.test/draft'
+  }
+  const reworkStudentRows = [
+    'Стек: Java &amp; Kotlin',
+    'Реальная локация: Tbilisi &lt;Georgia&gt;',
+    'Желаемая локация: Berlin &amp; Remote',
+    'Реальный возраст: 24',
+    'Уровень английского: B2',
+    'Ready for interview in English in 2 months: Yes',
+    'Образование: University &lt;Faculty&gt;, 2024',
+    'Email EN: anna&amp;work@example.com',
+    'Telegram EN: @anna&lt;en&gt;',
+    'Phone EN: +1 555 0100',
+    'LinkedIn: https://linkedin.com/in/anna',
+    'GitHub: https://github.com/anna',
+    'Корневая папка: https://drive.test/root',
+    'Исходные данные: https://drive.test/source',
+    'Комментарии Киры: Первоначальные &lt;замечания&gt;'
+  ]
+  for (const [stage, heading, hint, status] of reworkScenarios) {
     assertYuliaTemplate(yuliaTemplates.yuliaReworkMessage(
       stage,
-      'Анна',
+      reworkInput,
       'Исправить <опыт>',
       'https://example.invalid/cv?a=1&b=2'
     ), [
       `<b>${heading}</b>`,
       'Студент: Анна',
+      'Рынок: EN',
+      `Статус: ${status}`,
+      ...reworkStudentRows,
+      ...(stage === 'draft' ? [] : ['Черновик: https://docs.test/draft']),
       'Файл на доработку: https://example.invalid/cv?a=1&amp;b=2',
       'Комментарий: Исправить &lt;опыт&gt;',
       hint,
       YULIA_TASKS_FOOTER
     ].join('\n'))
+    const empty = yuliaTemplates.yuliaReworkMessage(stage, { clientName: 'Анна', market: 'ru' }, '  ', '')
+    for (const label of ['Стек', 'Реальная локация', 'Желаемая локация', 'Реальный возраст',
+      'Уровень английского', 'Ready for interview in English in 2 months', 'Образование',
+      'Email EN', 'Telegram EN', 'Phone EN', 'LinkedIn', 'GitHub', 'Корневая папка',
+      'Исходные данные', 'Комментарии Киры', 'Файл на доработку', 'Комментарий']) {
+      assert.ok(empty.text.split('\n').includes(`${label}: empty`), `${stage}: ${label}`)
+    }
+    const longComment = 'Подробная причина возврата. '.repeat(40)
+    assert.ok(yuliaTemplates.yuliaReworkMessage(stage, reworkInput, longComment, '').text
+      .includes(`Комментарий: ${longComment.trim()}`), 'do not truncate the rejection reason')
   }
 
   assertYuliaTemplate(yuliaTemplates.yuliaTaskListMessage({
@@ -606,7 +671,322 @@ function makeWorkflowListRepository(workflowRecords: any[]) {
   }
 }
 
+function pollingHttpResponse(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return body
+    }
+  }
+}
+
+function pollingUpdate(updateId: number) {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: 1_700_000_000 + updateId,
+      text: '/backend_status',
+      chat: { id: -5216637594, type: 'supergroup' },
+      from: { id: 42, username: 'tester' }
+    }
+  }
+}
+
+async function runRealAdapterPollingScenario(options: {
+  requester: (url: string, requestOptions: Record<string, unknown>) => Promise<any>
+  token?: string
+  preserveConsoleError?: boolean
+}) {
+  const stop = new AbortController()
+  const sentMessages: any[] = []
+  let handledUpdates = 0
+  const token = options.token ?? 'polling-test-token'
+  const botApi = createTelegramBotApi({
+    token,
+    requester: options.requester,
+    requestTimeoutMs: 100
+  })
+  const telegramIntegration = createTelegramIntegration({
+    token,
+    regularErrorChatId: '',
+    summaryLogsChatId: '',
+    logger() {},
+    botApi: {
+      async sendMessageResponse(input) {
+        sentMessages.push(input)
+        stop.abort()
+        return {
+          ok: true,
+          result: {
+            message_id: sentMessages.length,
+            date: 1_700_000_000,
+            chat: { id: Number(input.chatId), type: 'supergroup' },
+            text: input.text
+          }
+        }
+      }
+    }
+  })
+
+  const realConsoleError = console.error
+  if (!options.preserveConsoleError) console.error = () => undefined
+  try {
+    await runSupportBot({
+      apiClient: {
+        async backendStatus() {
+          handledUpdates += 1
+          return { ok: true }
+        }
+      },
+      botApi,
+      telegramIntegration,
+      stopSignal: stop.signal,
+      pollTimeout: 0,
+      pollErrorDelayMs: 0,
+      idleDelayMs: 0
+    })
+  } finally {
+    if (!options.preserveConsoleError) console.error = realConsoleError
+  }
+
+  return { handledUpdates, sentMessages }
+}
+
+async function testTelegramPollingRecoveryContract(): Promise<void> {
+  {
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        requests += 1
+        if (requests === 1) {
+          const cause = Object.assign(new Error('socket reset'), { code: 'ECONNRESET' })
+          const error = new TypeError('fetch failed') as Error & { cause?: unknown }
+          error.cause = cause
+          throw error
+        }
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(10)] })
+      }
+    })
+    assert.equal(requests, 2)
+    assert.equal(result.handledUpdates, 1)
+    assert.equal(result.sentMessages.length, 1)
+  }
+
+  {
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        requests += 1
+        if (requests === 1) {
+          throw Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' })
+        }
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(11)] })
+      }
+    })
+    assert.equal(requests, 2)
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  {
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        requests += 1
+        if (requests <= 3) throw new TypeError('fetch failed')
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(12)] })
+      }
+    })
+    assert.equal(requests, 4)
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  {
+    const offsets: Array<number | undefined> = []
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async (_url, requestOptions) => {
+        requests += 1
+        const body = JSON.parse(String(requestOptions.body))
+        offsets.push(body.offset)
+        if (requests === 1) {
+          return pollingHttpResponse({ ok: true, result: [{ update_id: 40 }] })
+        }
+        if (requests === 2) throw new TypeError('fetch failed')
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(41)] })
+      }
+    })
+    assert.deepEqual(offsets, [undefined, 41, 41])
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  {
+    const retryableStatuses = [409, 429, 500, 502, 503, 504]
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        const status = retryableStatuses[requests]
+        requests += 1
+        if (status !== undefined) {
+          return pollingHttpResponse({
+            ok: false,
+            error_code: status,
+            description: `Telegram polling error ${status}`
+          }, status)
+        }
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(42)] })
+      }
+    })
+    assert.equal(requests, retryableStatuses.length + 1)
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  for (const fatalStatus of [401, 404]) {
+    let requests = 0
+    const botApi = createTelegramBotApi({
+      token: 'polling-test-token',
+      requester: async () => {
+        requests += 1
+        if (requests > 1) throw new Error(`fatal Telegram ${fatalStatus} response was retried`)
+        return pollingHttpResponse({
+          ok: false,
+          error_code: fatalStatus,
+          description: fatalStatus === 401 ? 'Unauthorized' : 'Not Found'
+        }, fatalStatus)
+      }
+    })
+    await assert.rejects(
+      () => runSupportBot({
+        botApi,
+        telegramIntegration: createTelegramIntegration({
+          token: 'polling-test-token',
+          regularErrorChatId: '',
+          summaryLogsChatId: '',
+          logger() {}
+        }),
+        pollTimeout: 0,
+        pollErrorDelayMs: 0,
+        idleDelayMs: 0
+      }),
+      (error: any) => {
+        assert.equal(error.code, 'telegram_bot_api_failed')
+        assert.equal(error.details?.data?.error_code, fatalStatus)
+        return true
+      }
+    )
+    assert.equal(requests, 1)
+  }
+
+  {
+    const botApi = createTelegramBotApi({
+      token: '',
+      requester: async () => {
+        throw new Error('requester must not be called')
+      }
+    })
+    await assert.rejects(
+      () => runSupportBot({
+        botApi,
+        telegramIntegration: createTelegramIntegration({
+          token: 'polling-test-token',
+          regularErrorChatId: '',
+          summaryLogsChatId: '',
+          logger() {}
+        }),
+        pollTimeout: 0,
+        pollErrorDelayMs: 0,
+        idleDelayMs: 0
+      }),
+      (error: any) => {
+        assert.equal(error.code, 'telegram_bot_token_missing')
+        return true
+      }
+    )
+  }
+
+  await assert.rejects(
+    () => runSupportBot({
+      botApi: {
+        async getUpdates() {
+          throw new Error('programming bug')
+        }
+      },
+      telegramIntegration: createTelegramIntegration({
+        token: 'polling-test-token',
+        regularErrorChatId: '',
+        summaryLogsChatId: '',
+        logger() {}
+      }),
+      pollTimeout: 0,
+      pollErrorDelayMs: 0,
+      idleDelayMs: 0
+    }),
+    /programming bug/
+  )
+
+  {
+    const token = 'polling-super-secret-token'
+    const previousToken = process.env.VEU_SUPPORT_BOT
+    const realConsoleError = console.error
+    const logs: string[] = []
+    process.env.VEU_SUPPORT_BOT = token
+    console.error = (...args: any[]) => {
+      logs.push(args.map(String).join(' '))
+    }
+    try {
+      let requests = 0
+      const result = await runRealAdapterPollingScenario({
+        token,
+        preserveConsoleError: true,
+        requester: async () => {
+          requests += 1
+          if (requests === 1) {
+            throw Object.assign(
+              new Error(`fetch failed at https://api.telegram.org/bot${token}/getUpdates?token=${token}`),
+              { code: 'ECONNRESET', credential: token }
+            )
+          }
+          return pollingHttpResponse({ ok: true, result: [pollingUpdate(43)] })
+        }
+      })
+      assert.equal(result.handledUpdates, 1)
+    } finally {
+      console.error = realConsoleError
+      if (previousToken === undefined) delete process.env.VEU_SUPPORT_BOT
+      else process.env.VEU_SUPPORT_BOT = previousToken
+    }
+    const logged = logs.join('\n')
+    assert.match(logged, /telegram_poll_retry/)
+    assert.match(logged, /ECONNRESET/)
+    assert.match(logged, /\[REDACTED\]/)
+    assert.equal(logged.includes(token), false)
+  }
+
+  {
+    const realConsoleError = console.error
+    console.error = () => {
+      throw new Error('logger unavailable')
+    }
+    try {
+      let requests = 0
+      const result = await runRealAdapterPollingScenario({
+        preserveConsoleError: true,
+        requester: async () => {
+          requests += 1
+          if (requests === 1) throw new TypeError('fetch failed')
+          return pollingHttpResponse({ ok: true, result: [pollingUpdate(44)] })
+        }
+      })
+      assert.equal(result.handledUpdates, 1)
+    } finally {
+      console.error = realConsoleError
+    }
+  }
+}
+
 async function runTests() {
+  await testTelegramPollingRecoveryContract()
   testKiraMessageTemplateContract()
   testYuliaMessageTemplateContract()
   testPolinaMessageTemplateContract()
@@ -1437,6 +1817,58 @@ async function runTests() {
       userId: '343610488',
       username: 'kira_manual'
     }
+    for (const [version, target, field] of [
+      ['Draft', 'Draft in process', 'cvDraftUrl'],
+      ['English version', 'English version in progress', 'enVersionUrl'],
+      ['Russian version', 'Russian version in process', 'ruVersionUrl']
+    ]) {
+      for (const reviewer of ['student', 'Kira']) for (const missingLink of [false, true]) {
+        const status = `${version} in approve by ${reviewer}`
+        const links: Record<string, string> = {
+          cvDraftUrl: 'https://docs.test/draft?a=1&b=2',
+          enVersionUrl: 'https://docs.test/en?a=1&b=2',
+          ruVersionUrl: 'https://docs.test/ru?a=1&b=2'
+        }
+        const returnedUrl = missingLink ? '' : links[field]
+        const repository = makeWorkflowRepository(makeWorkflow({
+          status, ...links, [field]: returnedUrl,
+          clientMarket: version === 'Russian version' ? 'Ru' : 'EN',
+          clientGoogleFolder: 'https://drive.test/root', studentDataFolderUrl: 'https://drive.test/source',
+          kirasComments: 'Изначальные замечания Киры', lastRejectionComment: 'Устаревшая причина возврата'
+        }))
+        const comment = 'Текущая причина: исправить описание <опыта> и образование.'
+        const result = await rejectResumeWorkflowById(98, repository, {
+          actor: reviewer === 'Kira' ? manualKiraActor : studentActor,
+          expectedStatus: status, rejectionComment: comment
+        })
+        assert.equal(repository.patches.length, 1)
+        assert.equal(result.workflow.status, target)
+        assert.deepEqual(result.transitions, [`${status} -> ${target}`])
+        assert.equal(result.workflow[field], '')
+        for (const other of Object.keys(links)) {
+          if (other !== field) assert.equal(result.workflow[other], links[other])
+        }
+        assert.equal(result.notifications.length, 1)
+        const notification = result.notifications[0]
+        assert.equal(notification.kind, 'private_provider')
+        assert.deepEqual(notification.chatIds, ['8222949251', '315110920'])
+        assert.equal(notification.parseMode, 'HTML')
+        for (const row of [
+          'Студент: Test', `Рынок: ${version === 'Russian version' ? 'ru' : 'EN'}`,
+          'Стек: Python', 'Реальная локация: Tbilisi, Georgia', 'Желаемая локация: Remote RU proxy',
+          'Реальный возраст: 24', 'Уровень английского: B1', 'Ready for interview in English in 2 months: Yes',
+          'Образование: University', 'Email EN: student.en@example.com', 'Telegram EN: @student_en',
+          'Phone EN: +1 555 0100', 'LinkedIn: https://linkedin.com/in/student-user',
+          'GitHub: https://github.com/student-user', 'Корневая папка: https://drive.test/root',
+          'Исходные данные: https://drive.test/source', 'Комментарии Киры: Изначальные замечания Киры',
+          `Файл на доработку: ${returnedUrl ? returnedUrl.replaceAll('&', '&amp;') : 'empty'}`,
+          'Комментарий: Текущая причина: исправить описание &lt;опыта&gt; и образование.'
+        ]) assert.ok(notification.text.split('\n').includes(row), `${status}: ${row}`)
+        assert.ok(!notification.text.includes('Устаревшая причина возврата'))
+        assert.ok(!notification.text.includes('Юля, резюме для'), 'a rejection with no link is still rework')
+        assert.equal(notification.text.split(YULIA_TASKS_FOOTER).length - 1, 1)
+      }
+    }
     assert.equal(resolveActorForWorkflow(manualKiraActor, makeWorkflow()).role, 'kira')
     assert.equal(resolveActorForWorkflow(ruTranslatorActor, makeWorkflow({
       status: 'Russian version in process'
@@ -1691,17 +2123,66 @@ async function runTests() {
 
     const missingEnglishVersionRepository = makeWorkflowRepository(makeWorkflow({
       status: 'English version in progress',
+      clientGoogleFolder: 'https://drive.google.com/drive/folders/root',
       studentDataFolderUrl: 'https://drive.google.com/drive/folders/manual-source',
       kirasComments: 'Please prepare the draft.',
       cvDraftUrl: 'https://drive.google.com/drive/folders/draft-from-provider'
     }))
     const missingEnglishTask = await getProviderTaskById(98, missingEnglishVersionRepository, providerActor)
     assert.match(missingEnglishTask.message, /Отправь ссылку на EN-версию следующим сообщением/)
-    assert.doesNotMatch(missingEnglishTask.message, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:/)
-    assert.doesNotMatch(
-      missingEnglishTask.message,
-      /Стек:|Реальная локация:|Желаемая локация:|Реальный возраст:|Уровень английского:|Образование:|GitHub:/
-    )
+    const englishStudentRows = [
+      'Стек: Python',
+      'Реальная локация: Tbilisi, Georgia',
+      'Желаемая локация: Remote RU proxy',
+      'Реальный возраст: 24',
+      'Уровень английского: B1',
+      'Образование: University',
+      'Email EN: student.en@example.com',
+      'Telegram EN: @student_en',
+      'Phone EN: +1 555 0100',
+      'LinkedIn: https://linkedin.com/in/student-user',
+      'Ready for interview in English in 2 months: Yes',
+      'GitHub: https://github.com/student-user',
+      'Корневая папка: https://drive.google.com/drive/folders/root',
+      'Исходные данные: https://drive.google.com/drive/folders/manual-source',
+      'Комментарии Киры: Please prepare the draft.',
+      'Черновик: https://drive.google.com/drive/folders/draft-from-provider'
+    ]
+    for (const market of ['EN', 'both']) {
+      const englishTask = await getProviderTaskById(98, makeWorkflowRepository({
+        ...missingEnglishVersionRepository.workflowRecord,
+        clientMarket: market
+      }), providerActor)
+      for (const row of englishStudentRows) {
+        assert.equal(englishTask.message.split('\n').filter((line: string) => line === row).length, 1, row)
+      }
+      assert.equal(englishTask.parseMode, 'HTML')
+      assert.deepEqual(
+        englishTask.replyMarkup.inline_keyboard.flat().map((button: any) => button.text),
+        ['Назад к задачам']
+      )
+    }
+    const emptyEnglishTask = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+      status: 'English version in progress',
+      clientStack: '', realLocation: '', desiredLocation: '', realAge: undefined,
+      clientReadyForInterviewInEnglishIn2Months: '',
+      englishLevel: '', education: '', educationEntries: [], clientGithubUrl: '',
+      clientEmailEn: '', clientTelegramEnNickname: '', clientPhoneEn: '', clientLinkedInUrl: '',
+      clientTelegramEn: '@login_must_not_appear'
+    })), providerActor)
+    for (const label of ['Стек', 'Реальная локация', 'Желаемая локация', 'Реальный возраст',
+      'Уровень английского', 'Образование', 'Email EN', 'Telegram EN', 'Phone EN', 'LinkedIn',
+      'Ready for interview in English in 2 months',
+      'GitHub', 'Корневая папка', 'Исходные данные', 'Комментарии Киры', 'Черновик']) {
+      assert.ok(emptyEnglishTask.message.split('\n').includes(`${label}: empty`), label)
+    }
+    assert.doesNotMatch(emptyEnglishTask.message, /login_must_not_appear/)
+    for (const realAge of [null, '', ' ']) {
+      const task = await getProviderTaskById(98, makeWorkflowRepository(makeWorkflow({
+        status: 'English version in progress', realAge
+      })), providerActor)
+      assert.match(task.message, /Реальный возраст: empty/)
+    }
     const savedProviderEnglishResult = await saveProviderLinkFromChat(
       missingEnglishVersionRepository,
       providerActor,
@@ -2141,8 +2622,8 @@ async function runTests() {
                 const card = await getProviderTaskById(98, repository, providerActor)
                 assert.equal(notification.text, `${yuliaTemplates.yuliaNewTaskMessage('draft', 'Test', 'EN').text}\n\n${card.message}`)
               } else {
-                assert.doesNotMatch(notification.text, /Email EN:|Telegram EN:|Phone EN:|LinkedIn:|Стек:|GitHub:/)
-                assert.match(notification.text, /Открой \/open_my_tasks, чтобы взять задачу в работу\.$/)
+                const card = await getProviderTaskById(98, repository, providerActor)
+                assert.equal(notification.text, `${yuliaTemplates.yuliaNewTaskMessage('en', 'Test', 'EN').text}\n\n${card.message}`)
                 assert.match(notification.text, /Подготовь, пожалуйста, EN-версию\./)
               }
             }

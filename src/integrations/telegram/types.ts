@@ -67,8 +67,10 @@ export type TelegramCallResult<T> =
       failure: ClientFailure
     }
 
+export type TelegramSentMessage = Message.TextMessage | Message.RichMessageMessage
+
 export type SendOneResult =
-  TelegramCallResult<Message.TextMessage>
+  TelegramCallResult<TelegramSentMessage>
 
 export type SendManyResult =
   Record<string, SendOneResult>
