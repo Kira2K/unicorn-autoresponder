@@ -11,7 +11,8 @@ export type {
   TelegramCommandDispatchResult,
   TelegramCommandHandler,
   TelegramCommandName,
-  TelegramReplyMarkup
+  TelegramReplyMarkup,
+  TelegramSentMessage
 } from './types.ts'
 
 import { createTelegramIntegration } from './integration.ts'
