@@ -16,7 +16,7 @@ export async function runCvExtractorTests() {
           linkedin: null, other: [] },
         summary: 'Summary', skill_groups: [], skills: ['TypeScript'],
         experience: [{ company: 'Employer', title: 'Engineer', start_date: null,
-          end_date: null, current: true, location: null, description: 'Built systems.',
+          end_date: 'Present', current: true, location: null, description: 'Built systems.',
           technologies: ['TypeScript'], named_organizations: ['Vendor'] }],
         education: [], languages: [{ name: 'English', level: 'B2' }],
         named_organizations: ['Partner']
@@ -31,4 +31,6 @@ export async function runCvExtractorTests() {
   assert.equal(request[0].content.filter((item: any) => item.type === 'input_file').length, 1)
   assert.match(request[0].content.at(-1).text, /final CV only/i)
   assert.deepEqual(profile.namedOrganizations, ['Partner'])
+  assert.equal(profile.experience[0].current, true)
+  assert.equal(profile.experience[0].endDate, undefined)
 }

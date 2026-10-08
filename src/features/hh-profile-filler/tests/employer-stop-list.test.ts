@@ -7,7 +7,11 @@ export async function runEmployerStopListTests() {
   assert.deepEqual(parseStopListCompany(' Amazon, "RBI",, amazon , Yandex '),
     ['Amazon', 'RBI', 'Yandex'])
   assert.deepEqual(parseStopListCompany('Alpha;Beta, Gamma\nDelta'),
-    ['Alpha;Beta', 'Gamma\nDelta'])
+    ['Alpha', 'Beta', 'Gamma', 'Delta'])
+  assert.deepEqual(resolveOfficialEmployerOptions('ООО «Acme» (Acme Ltd)', [
+    { officialName: 'Acme', text: 'Acme software' },
+    { officialName: 'Acme Consulting', text: 'Acme Consulting' }
+  ]).map(item => item.officialName), ['Acme'])
 
   assert.deepEqual(mergeEmployerCandidates(
     [{ name: 'AWS', sources: ['noco:stop_list_company'] }],

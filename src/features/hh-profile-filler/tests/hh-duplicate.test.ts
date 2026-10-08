@@ -79,6 +79,7 @@ export async function runHHCloneTests() {
       const result = await duplicateResumeVariant(livePage, source, 'Senior Backend Developer',
         'Python', 'En', { duplicateId: cloneId })
       assert.equal(result.id, cloneId)
+      assert.equal(result.nativeSourceId, sourceId)
       assert.equal(result.isDraft, true)
     }
     assert.equal(clonePosts, 1, 'Recovery never creates another copy')

@@ -1,4 +1,9 @@
+import { runRecoveryPolicyTests } from './recovery-policy.test.ts'
+import { runPreserveExistingTest } from './preserve-existing.test.ts'
+import { runExperienceLocationTests } from './hh-experience-location.test.ts'
+import { runHHRecoveryTests } from './hh-recovery.test.ts'
 import { runHHManualDomTests } from './hh-manual-dom.test.ts'
+import { runHHExperienceCompanyTests } from './hh-experience-company.test.ts'
 import { runEmployerStopListTests } from './employer-stop-list.test.ts'
 import { runLanguagePolicyTests } from './language-policy.test.ts'
 import { runCvExtractorTests } from './cv-extractor.test.ts'
@@ -28,6 +33,10 @@ import { runHHJobSearchStatusTests } from './hh-job-search-status.test.ts'
 import { runHHLiveDomTests } from './hh-live-dom.test.ts'
 
 async function main() {
+  runRecoveryPolicyTests()
+  await runPreserveExistingTest()
+  await runExperienceLocationTests()
+  await runHHRecoveryTests()
   await runStrictInvariantTests()
   await runContractDomTests()
   runLanguagePolicyTests()
@@ -51,6 +60,7 @@ async function main() {
   await runHHJobSearchStatusTests()
   await runHHLiveDomTests()
   await runHHManualDomTests()
+  await runHHExperienceCompanyTests()
   await runHHLanguageTests()
   await runHHEmployerTests()
   await runDriveSourceTests()

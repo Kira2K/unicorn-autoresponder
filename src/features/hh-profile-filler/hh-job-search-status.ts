@@ -1,5 +1,6 @@
 import type { Page } from 'playwright'
 import { profileFillerError } from './errors.ts'
+import { clickAfterDismissingStaleContacts } from './hh-stale-contacts.ts'
 
 export const ACTIVE_JOB_SEARCH_STATUS = 'active_search' as const
 const LABEL = 'Активно ищу работу'
@@ -15,10 +16,14 @@ async function openStatus(page: Page): Promise<void> {
   await page.locator(TRIGGER).waitFor({ state: 'visible', timeout: 15_000 })
 }
 
+async function openOptions(page: Page): Promise<void> {
+  await clickAfterDismissingStaleContacts(page, page.locator(TRIGGER))
+}
+
 export async function verifyActiveJobSearchStatus(page: Page): Promise<typeof ACTIVE_JOB_SEARCH_STATUS> {
   await openStatus(page)
   const value = (await page.locator(VALUE).innerText()).trim()
-  await page.locator(TRIGGER).click()
+  await openOptions(page)
   const selected = await page.locator(RADIO).isChecked()
   await page.keyboard.press('Escape')
   if (value !== LABEL || !selected) throw profileFillerError('profile_hh_job_search_status_incomplete',
@@ -29,7 +34,7 @@ export async function verifyActiveJobSearchStatus(page: Page): Promise<typeof AC
 // Account-level preference: check after each publication, never alter database workflow status.
 export async function ensureActiveJobSearchStatus(page: Page): Promise<typeof ACTIVE_JOB_SEARCH_STATUS> {
   await openStatus(page)
-  await page.locator(TRIGGER).click()
+  await openOptions(page)
   if (!(await page.locator(RADIO).isChecked())) {
     await page.getByRole('dialog').getByText(LABEL, { exact: true }).click()
     await page.waitForFunction(({ selector, label }) => document.querySelector(selector)?.textContent?.trim() === label,

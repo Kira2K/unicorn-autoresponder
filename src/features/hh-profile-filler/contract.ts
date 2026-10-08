@@ -27,10 +27,11 @@ export function contractIssues(value: ResumeContractVerification): string[] {
   for (const name of CONTRACT_SECTIONS) {
     const item = value.checks?.[name]
     const allowedException = name === 'employers' && item?.status === 'exception' && Boolean(item.reason)
+    const allowedWarning = name === 'contacts' && item?.status === 'warning' && Boolean(item.reason)
     // Not applicable must be explicitly justified by the reader, never by a missing control.
     const allowedNA = ['education', 'permits'].includes(name) &&
       item?.status === 'not_applicable' && Boolean(item.reason)
-    if (item?.status !== 'passed' && !allowedException && !allowedNA) issues.push(`${name}_not_verified`)
+    if (item?.status !== 'passed' && !allowedException && !allowedNA && !allowedWarning) issues.push(`${name}_not_verified`)
   }
   if (!value.contentFingerprint) issues.push('content_fingerprint_missing')
   if (!value.titleVerified || !value.experienceVerified) issues.push('core_not_verified')

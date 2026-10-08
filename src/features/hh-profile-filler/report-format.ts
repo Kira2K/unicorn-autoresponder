@@ -8,7 +8,11 @@ export function formatProfileFillerReport(result: ProfileFillerResult): string {
   const profile = result.dolphinProfileName ? oneLine(result.dolphinProfileName) :
     'не определён; заполнение не начиналось'
   const header = `${result.ok ? '✅' : '⚠️'} HH Profile Filler\nПрофиль Dolphin: ${profile}`
-  if (result.ok) return `${header}\nПолучилось заполнить.`
+  if (result.ok) {
+    const contactWarnings = result.contractVerification?.filter(item => item.checks?.contacts.status === 'warning').length ?? 0
+    return `${header}\nПолучилось заполнить.` + (contactWarnings
+      ? `\n⚠️ Контакты: проверка не подтверждена в ${contactWarnings} резюме; заполнение продолжено.` : '')
+  }
   let reason = oneLine(safeErrorMessage(result.message)) || 'Неизвестная ошибка'
   const clientName = oneLine(result.clientName ?? '')
   if (clientName) {

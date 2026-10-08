@@ -12,7 +12,7 @@ function normalized(value: unknown): string {
 export function parseStopListCompany(value: unknown): string[] {
   const unique = new Set<string>()
   const result: string[] = []
-  for (const item of String(value ?? '').split(',')) {
+  for (const item of String(value ?? '').split(/[,;\r\n]+/)) {
     const name = item.trim().replace(/^["'`]+|["'`]+$/g, '').trim()
     const key = normalized(name)
     if (!key || unique.has(key)) continue
@@ -51,13 +51,24 @@ const EMPLOYER_ALIASES: EmployerAlias[] = [
 
 export type EmployerOption = { officialName: string; text: string }
 
+// Strip formatting/legal suffixes, not meaningful name tokens. Parenthetical
+// aliases are explicit source context, never an inferred substring relationship.
+export function employerSearchQueries(value: string): string[] {
+  const clean = (name: string) => name.replace(/^(?:current company|previous companies|компания)\s*:\s*/i, '')
+    .replace(/(?:^|\s)(?:LLC|Ltd\.?|Inc\.?|GmbH|ООО|ПАО|АО)(?=\s|$)/gi, ' ')
+    .replace(/["«»]/g, '').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '')
+  return [...new Set([value, value.replace(/\([^)]*\)/g, ''),
+    ...[...value.matchAll(/\(([^)]+)\)/g)].map(match => match[1])].map(clean).filter(Boolean))]
+}
+
 export function resolveOfficialEmployerOptions(candidate: string,
   options: EmployerOption[]): EmployerOption[] {
-  const candidateKey = normalized(candidate)
+  const candidateKeys = employerSearchQueries(candidate).map(normalized)
   const alias = EMPLOYER_ALIASES.find(item => item.queries.some(query =>
-    normalized(query) === candidateKey))
+    candidateKeys.includes(normalized(query))))
   if (alias) return options.filter(option => alias.official.test(option.officialName.trim()))
-  return options.filter(option => normalized(option.officialName) === candidateKey)
+  return options.filter(option => employerSearchQueries(option.officialName)
+    .some(query => candidateKeys.includes(normalized(query))))
 }
 
 export function employerNameKey(value: unknown): string {

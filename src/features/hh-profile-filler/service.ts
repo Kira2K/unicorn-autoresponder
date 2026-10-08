@@ -18,7 +18,7 @@ import { withAuthorizedHHPage } from './hh-session.ts'
 import { captureArtifactScreenshot, configurePrivacyAndStopList, createResumeDraft, deleteResume,
   completeExistingResume, ensureResumeEnglish, duplicateResumeVariant, INITIAL_HH_PROFESSION, legacyProfessionForTitle,
   inspectHH, listResumes, professionForTitle, resumeDraftFromExperience, resumeDraftFromWorkPermits,
-  resumeSkills, verifyKnownDraft, verifyResumeContract, type ResumeSnapshot } from './hh-resume-ui.ts'
+  resumeSkills, verifyKnownDraft, verifyResumeContract, prepareDraftExperience, type ResumeSnapshot } from './hh-resume-ui.ts'
 import type { PreparedProfile, ProfileFillerMarket, ProfileFillerResult,
   ProfileFillerScope, ResolvedClient, ResumeContractVerification } from './types.ts'
 
@@ -100,6 +100,7 @@ export function createProfileFillerService(options: {
   extractor?: ReturnType<typeof createCvExtractor>
   withPage?: typeof withAuthorizedHHPage
   ui?: {
+    prepareDraftExperience?: typeof prepareDraftExperience
     completeExistingResume?: typeof completeExistingResume
     ensureResumeEnglish?: typeof ensureResumeEnglish
     configurePrivacyAndStopList: typeof configurePrivacyAndStopList
@@ -119,7 +120,7 @@ export function createProfileFillerService(options: {
   const drive = options.drive ?? createDriveSourceLoader()
   let extractor = options.extractor
   const withPage = options.withPage ?? withAuthorizedHHPage
-  const ui = options.ui ?? { configurePrivacyAndStopList, createResumeDraft, deleteResume,
+  const ui = options.ui ?? { prepareDraftExperience, configurePrivacyAndStopList, createResumeDraft, deleteResume,
     duplicateResumeVariant, inspectHH, listResumes, resumeDraftFromExperience,
     resumeDraftFromWorkPermits, resumeSkills, verifyKnownDraft, verifyResumeContract,
     completeExistingResume, ensureResumeEnglish }
@@ -346,10 +347,13 @@ export function createProfileFillerService(options: {
             'Multiple existing resumes match the same mapped title.', 'resolve_resume')
           const knownId = executionOptions.resumeIdsByTitle?.[mapped] ?? state.targets[title]?.id
           let resume = knownId ? initial.find(item => item.id === knownId) : matches[0]
+          const recordedSource = state.targets[title]?.id === resume?.id ? state.targets[title]?.nativeSourceId : undefined
+          if (resume && recordedSource) resume = { ...resume, nativeSourceId: recordedSource }
           if (knownId && matches[0] && matches[0].id !== knownId) throw new ProfileFillerError(
             'profile_hh_target_ambiguous', 'Known resume ID conflicts with the mapped title.', 'resolve_resume')
           const knownTarget = (targetId: string): ResumeSnapshot => ({ id: targetId, title,
-            href: `https://hh.ru/resume/${targetId}`, isDraft: true })
+            href: `https://hh.ru/resume/${targetId}`, isDraft: true,
+            nativeSourceId: state.targets[title]?.id === targetId ? state.targets[title]?.nativeSourceId : undefined })
           if (scope === 'activate' || scope === 'title-variants') {
             const targetId = knownId ?? resume?.id
             if (scope === 'title-variants' && index > 0 && baseline && targetId && (!resume || resume.isDraft)) {
@@ -446,8 +450,10 @@ export function createProfileFillerService(options: {
           const readOnlyContent = ['activate', 'verify-final', 'delete-old'].includes(scope)
           assertCompleteSkills(await (readOnlyContent ? skills.verify : skills.ensure)(page, resume, expectedSkills), expectedSkills)
           if (profile.client.market === 'En') await (readOnlyContent ? resumeLanguage.verify : resumeLanguage.ensure)(page, resume)
+          if (!readOnlyContent && resume.isDraft) await ui.prepareDraftExperience?.(page, profile, resume)
           // A full persisted-content check gates publication and every subsequent copy.
-          await verify(resume, title)
+          // Read-only final verification performs that same check in verifyCompleted.
+          if (scope !== 'verify-final') await verify(resume, title)
           if (scope !== 'verify-final') {
             resume = await publication.activate(page, resume, artifactDir)
             if (resume.id !== state.targets[title].id || resume.title !== title) throw new ProfileFillerError(
@@ -466,8 +472,9 @@ export function createProfileFillerService(options: {
           throw new ProfileFillerError('profile_hh_contract_verification_failed',
             'Not every mapped resume satisfies the full contract.', 'verify')
         }
-        // A later variant can change shared HH profile data. Reopen every target before deletion.
-        for (let index = 0; index < targets.length; index += 1) {
+        // A later mutation can change shared HH profile data. Read-only verification
+        // already checked each target, and contains no mutations requiring another pass.
+        if (scope !== 'verify-final') for (let index = 0; index < targets.length; index += 1) {
           contracts[index] = await verifyCompleted(targets[index], expectedTitles[index])
         }
         await repository.revalidateClientStatus(profile.client.clientId, profile.client.market, profile.client)
@@ -480,7 +487,8 @@ export function createProfileFillerService(options: {
             save()
           }
         }
-        let final = ['verify-final', 'activate', 'title-variants'].includes(scope) ? targets : await ui.listResumes(page)
+        let final = ['verify-final', 'activate', 'title-variants'].includes(scope) ||
+          executionOptions.preserveExisting === true ? targets : await ui.listResumes(page)
         // A list redirect is not proof of deletion or absence. Known-ID verification is read-only.
         if (!final.length && targets.every(item => item.isDraft)) {
           final = []

@@ -110,6 +110,7 @@ export type ResolvedClient = {
   cvRevision: string
   studentFolderUrl?: string
   stopListCompanies: string[]
+  databaseEmployerCandidates?: EmployerCandidate[]
   contacts: ContactData
   fallbacks: {
     fullName?: string
@@ -151,7 +152,7 @@ export type ResumePrivacyVerification = {
 
 export type SourceIdentity = { host: string; port: number; database: string; readAt: string }
 export type ContractCheck = {
-  status: 'passed' | 'failed' | 'not_applicable' | 'exception'
+  status: 'passed' | 'failed' | 'not_applicable' | 'exception' | 'warning'
   reason?: string
 }
 

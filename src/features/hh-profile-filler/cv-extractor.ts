@@ -60,7 +60,10 @@ const CV_SCHEMA = strictObject({
   named_organizations: stringArray
 })
 
-const EXTRACTION_INSTRUCTIONS = `Extract an HH resume profile from the attached final CV. Optional later documents
+const EXTRACTION_INSTRUCTIONS = `Extract an HH resume profile from the attached final CV.
+Extract ALL employment entries without a fixed count, retaining distinct roles at the same company.
+Extract Bachelor and Master as separate education records when both are stated, even at the same
+institution. Never replace Bachelor with Master or infer an unstated degree. Optional later documents
 from Самопрезентация whose filenames contain Описание опыта are used only for organization extraction.
 Preserve the CV language, wording, dates, metrics, responsibilities,
 skills and contacts. Never invent or improve facts. The summary must contain only the CV's about/summary
@@ -105,7 +108,7 @@ function assertProfile(value: any, market: ProfileFillerMarket): CvProfile {
     skills: stringList(value.skills),
     experience: value.experience.map((item: any) => ({
       company: optionalText(item.company) ?? '', title: optionalText(item.title) ?? '',
-      startDate: optionalText(item.start_date), endDate: optionalText(item.end_date),
+      startDate: optionalText(item.start_date), endDate: item.current ? undefined : optionalText(item.end_date),
       current: Boolean(item.current), location: optionalText(item.location),
       description: optionalText(item.description) ?? '', technologies: stringList(item.technologies),
       namedOrganizations: stringList(item.named_organizations)

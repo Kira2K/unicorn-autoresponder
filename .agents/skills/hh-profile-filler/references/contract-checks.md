@@ -39,7 +39,7 @@ method revalidateClientStatus now refreshes source identity/target data, not cli
 | En resume language | Metadata EN independent of site UI; publication/language adapter tests |
 | Location/permits/preferences | Saved market values and exact checked sets; contract/UI tests |
 | Privacy | Blacklist, anonymous, hidden phones, other fields visible; persisted checks |
-| Employers | Source stop-list/named organizations, one candidate per save, saved checkbox; employer tests |
+| Employers | Database current/previous/stop-list companies, one candidate per save, saved checkbox; employer tests |
 | Publication | Exact ID/title active and searchable; active_search job status; completion tests |
 | Copies/deletion | Verified baseline before copy; all targets rechecked before delete; failure regressions |
 | Preservation | Immutable first observations, exclusive profile lock, operation/target journal; invariant tests |
@@ -48,11 +48,22 @@ method revalidateClientStatus now refreshes source identity/target data, not cli
 | Delivery | Operation-keyed sent/unknown journal; sent skips, uncertain delivery blocks retry; invariant tests |
 | Smoke | Allowlisted client/profile, unpublished draft, cleanup, no Telegram; service tests |
 
-Only missing/ambiguous official employer cards may be skipped with a recorded reason. Unavailable
-search, lost checkboxes, unreadable fields or missing sections block whole-operation success.
+Missing/ambiguous official employer cards may be skipped with a recorded reason. Internal contact
+comparison/read failures are recorded as `warning` with their reason and do not block filling, copying,
+publication or completion; include contact warnings in the terminal report. Keep attempted contact
+verification mandatory, and do not use contact fingerprint/preservation differences as indirect blockers.
+Explicit HH validation and privacy errors still block. Other unavailable searches, lost checkboxes,
+unreadable fields or missing sections block whole-operation success.
 
 ## Validation boundary
 
 Run profile-filler:test, typecheck, Dolphin runtime and affected PostgreSQL runtime tests. Suites use
 mock adapters and intercepted local browser fixtures. They do not fill live HH resumes, send Telegram,
 change ENV files or register tasks. Fixtures do not prove compatibility with a changed live HH layout.
+
+Regression coverage for manual recovery must include saved city labels with hidden IDs, distinct
+Bachelor/Master records at one institution, wrong degree/year rejection, zero/one/many experience
+entries and multiple roles at one employer, skill-level redirects, repeated recovery without duplicates,
+all three database employer fields, contextual aliases/ambiguous cards, and privacy checkboxes outside
+the employer list. Run local checks before continuing the existing production draft; independently
+verify the full persisted contract before publication/copying. A passing mock is not live evidence.

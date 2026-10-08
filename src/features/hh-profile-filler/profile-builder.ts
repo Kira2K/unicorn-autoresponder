@@ -1,9 +1,10 @@
-import type { CvEducation, CvProfile, EmployerCandidate, PreparedProfile,
+import type { CvEducation, CvProfile, PreparedProfile,
   ResolvedClient } from './types.ts'
 import { titlesForStack } from './stack-titles.ts'
 import { profileFillerError } from './errors.ts'
 import { resolveProfileLanguages } from './language-policy.ts'
 import { mergeEmployerCandidates } from './employer-stop-list.ts'
+import { educationLevel } from './education-policy.ts'
 
 function first<T>(...values: Array<T | undefined | null>): T | undefined {
   return values.find(value => value !== undefined && value !== null && String(value).trim() !== '') ?? undefined
@@ -107,9 +108,12 @@ function mergeEducationFallback(extracted: CvEducation[], fallbackValue?: string
   if (!extracted.length) return fallback
   if (!fallback.length) return extracted
   return extracted.map(item => {
-    const exact = fallback.find(candidate =>
+    const compatible = fallback.filter(candidate => !item.degree || !candidate.degree ||
+      educationLevel(item.degree) === educationLevel(candidate.degree))
+    const exact = compatible.filter(candidate =>
       normalizedInstitution(candidate.institution) === normalizedInstitution(item.institution))
-    const candidate = exact ?? (extracted.length === 1 && fallback.length === 1 ? fallback[0] : undefined)
+    const candidate = exact.length === 1 ? exact[0] :
+      extracted.length === 1 && compatible.length === 1 && fallback.length === 1 ? compatible[0] : undefined
     if (!candidate) return item
     return {
       ...item,
@@ -145,23 +149,6 @@ function buildAbout(profile: CvProfile): string {
   const skills = skillsBlock(profile)
   if (skills) sections.push(`${ru ? 'Навыки' : 'Skills'}\n${skills}`)
   return sections.join('\n\n')
-}
-
-function cvEmployers(profile: CvProfile): EmployerCandidate[] {
-  const sources = new Map<string, { name: string; sources: Set<string> }>()
-  const add = (name: string, source: string) => {
-    const key = name.trim().toLowerCase().replace(/ё/g, 'е')
-    if (!key) return
-    const existing = sources.get(key) ?? { name: name.trim(), sources: new Set<string>() }
-    existing.sources.add(source)
-    sources.set(key, existing)
-  }
-  for (const item of profile.experience) {
-    add(item.company, 'cv:experience')
-    for (const name of item.namedOrganizations) add(name, 'cv:experience-context')
-  }
-  for (const name of profile.namedOrganizations) add(name, 'cv:named-organization')
-  return [...sources.values()].map(item => ({ name: item.name, sources: [...item.sources] }))
 }
 
 export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfile,
@@ -214,8 +201,7 @@ export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfil
     titles: titlesForStack(client.stack, client.market),
     about: buildAbout(profile),
     employerCandidates: mergeEmployerCandidates(
-      client.stopListCompanies.map(name => ({ name, sources: ['noco:stop_list_company'] })),
-      cvEmployers(profile)
+      client.databaseEmployerCandidates ?? client.stopListCompanies.map(name => ({ name, sources: ['noco:stop_list_company'] }))
     ),
     preparedAt: now
   }
@@ -226,10 +212,6 @@ export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfil
   if (!profile.summary || !prepared.about) {
     throw profileFillerError('profile_about_missing',
       'The final CV has no About/Summary.', 'prepare_profile')
-  }
-  if (!profile.experience.length) {
-    throw profileFillerError('profile_experience_missing',
-      'The final CV has no employment history.', 'prepare_profile')
   }
   return prepared
 }

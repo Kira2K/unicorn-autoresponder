@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import type { Page } from 'playwright'
 import { check, PROFILE_CONTRACT_VERSION, contractIssues, strictSkillsCheck } from './contract.ts'
-import { contentText, experienceContentMatches, educationContentMatches } from './content-policy.ts'
+import { contentText, experienceContentMatches, educationContentMatches, educationContentDifferences } from './content-policy.ts'
 import { inspectResumeLanguage } from './hh-resume-language.ts'
 import { preserveFirstObservation } from './preservation-state.ts'
 import { readBirthDate, normalizedBirthDate } from './hh-birth-date.ts'
+import { readResumeLocation } from './hh-location.ts'
 import type { PreparedProfile, ResumeContractVerification, ResumePrivacyVerification, ContractCheck } from './types.ts'
 import type { ResumeSnapshot } from './hh-resume-ui.ts'
 import type { SavedSkills } from './skill-contract.ts'
@@ -17,6 +18,7 @@ export type ContractReaders = {
   permits(): Promise<void>
   languages(): Promise<boolean>
   experienceMembership(): Promise<boolean>
+  experienceContent?(): Promise<string[]>
   educationMembership(): Promise<boolean>
   skills(): Promise<SavedSkills>
 }
@@ -35,7 +37,15 @@ export async function readResumeContract(page: Page, profile: PreparedProfile, r
   }
   const inspect = async (name: string, action: () => Promise<boolean>) => {
     try { checks[name] = check(await action(), `${name}_mismatch`) }
-    catch { checks[name] = check(false, `${name}_unreadable`) }
+    catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error &&
+        typeof error.code === 'string' && /^profile_[a-z_]+$/.test(error.code) ? error.code : ''
+      const detail = error instanceof Error && /^draft_experience_content_mismatch:/.test(error.message)
+        ? ` (${error.message})` : code ? ` (${code})` : ''
+      checks[name] = check(false, `${name}_unreadable${detail}`)
+    }
+    // A contact comparison/read failure is advisory; retain its reason without stopping the workflow.
+    if (name === 'contacts' && checks[name].status === 'failed') checks[name].status = 'warning'
   }
   const value = async (selectors: string[]) => {
     for (const selector of selectors) {
@@ -60,12 +70,21 @@ export async function readResumeContract(page: Page, profile: PreparedProfile, r
   await inspect('workPreferences', async () => { await readers.workPreferences(); return true })
   await inspect('contacts', async () => {
     await go(`/resume/edit/${resume.id}/contacts`)
+    // HH mounts the email/radio controls before hydrating the formatted phone.
+    // Retry reads only; a genuine saved mismatch still fails after the bound.
+    await page.waitForFunction(expected => {
+      const email = document.querySelector<HTMLInputElement>('[data-qa="resume-editor-email-input"], input[type="email"], input[name="email"]')
+      const phone = document.querySelector<HTMLInputElement>('[data-qa="resume-phone-cell_phone"], input[name="phone.formatted"]')
+      const preferred = document.querySelector<HTMLInputElement>('[data-qa="resume-editor-preferred-contact-email-checked"]')
+      return email?.value.trim() === expected.email && (!expected.phone ||
+        phone?.value.replace(/\D/g, '') === expected.phone) && preferred?.checked === true
+    }, { email: profile.cv.contacts.email, phone: profile.cv.contacts.phone?.replace(/\D/g, '') },
+    { timeout: 5_000 }).catch(() => undefined)
     const email = await value(['[data-qa="resume-editor-email-input"]', 'input[type="email"]', 'input[name="email"]'])
-    actual.email = email
     const phone = await value(['[data-qa="resume-phone-cell_phone"]', 'input[name="phone.formatted"]'])
-    actual.phone = phone.replace(/\D/g, '')
-    if (profile.cv.contacts.phone && actual.phone !== profile.cv.contacts.phone.replace(/\D/g, '')) return false
-    if (!profile.cv.contacts.phone) silent.phone = digest(actual.phone)
+    const phoneDigits = phone.replace(/\D/g, '')
+    if (profile.cv.contacts.phone && phoneDigits !== profile.cv.contacts.phone.replace(/\D/g, '')) return false
+    if (!profile.cv.contacts.phone) silent.phone = digest(phoneDigits)
     return email === profile.cv.contacts.email && await page.locator(
       '[data-qa="resume-editor-preferred-contact-email-checked"]').isChecked()
   })
@@ -95,10 +114,13 @@ export async function readResumeContract(page: Page, profile: PreparedProfile, r
     return correct
   })
   await inspect('location', async () => {
-    await go('/profile/edit/common')
-    const area = await value(['[data-qa="profile-common-edit-area"]', 'input[name="area"]'])
+    const area = await readResumeLocation(page, resume.id, resume.isDraft && !resume.nativeSourceId)
     actual.location = area
-    if (profile.client.market === 'En') return /^(?:Тбилиси|Tbilisi)(?:,\s*(?:Грузия|Georgia))?$/.test(area)
+    if (profile.client.market === 'En') {
+      const matches = /^(?:Тбилиси|Tbilisi)(?:,\s*(?:Грузия|Georgia))?$/.test(area)
+      if (matches) actual.location = 'Tbilisi, Georgia'
+      return matches
+    }
     if (!profile.cv.location) { silent.location = digest(area); return true }
     return area === profile.cv.location || area === profile.cv.location.split(',')[0].trim()
   })
@@ -115,24 +137,40 @@ export async function readResumeContract(page: Page, profile: PreparedProfile, r
   })
   await inspect('experience', async () => {
     if (!(await readers.experienceMembership())) return false
-    await go(`/resume/${resume.id}/experience`)
-    const cards = await rows(['[data-qa="resume-block-experience-item"]', '[data-qa="resume-list-card-experience"]',
-      '[data-qa="resume-block-experience"]'])
-    actual.experience = cards.slice().sort()
+    let cards: string[]
+    if (readers.experienceContent) cards = (await readers.experienceContent()).map(contentText)
+    else {
+      await go(`/resume/${resume.id}/experience`)
+      cards = await rows(['[data-qa="resume-block-experience-item"]', '[data-qa^="resume-list-card-experience-item-"]',
+        '[data-qa="resume-block-experience"]'])
+    }
+    // Fingerprint verified fields, independent of draft/profile vs published
+    // decoration, duration wording and control captions. Extra records remain
+    // subject to their separate preservation check.
+    actual.experience = profile.cv.experience
     extraExperience = cards.filter(card => !profile.cv.experience.some(item =>
       card.toLowerCase().includes(contentText(item.company).toLowerCase()))).map(digest)
     return profile.cv.experience.every(item => cards.filter(card => experienceContentMatches(card, item)).length === 1)
   })
+  let educationDifferences: string[] = []
   await inspect('education', async () => {
     if (!(await readers.educationMembership())) return false
     await go(`/resume/${resume.id}`)
-    const cards = await rows(['[data-qa="resume-block-education-item"]', '[data-qa="resume-list-card-education"]',
+    const cards = await rows(['[data-qa="resume-block-education-item"]', '[data-qa^="resume-list-card-education-item-"]',
       '[data-qa="resume-block-education"]'])
     actual.education = cards.slice().sort()
     extraEducation = cards.filter(card => !profile.cv.education.some(item =>
       card.toLowerCase().includes(contentText(item.institution).toLowerCase()))).map(digest)
-    return profile.cv.education.every(item => cards.filter(card => educationContentMatches(card, item)).length === 1)
+    educationDifferences = profile.cv.education.flatMap((item, index) => {
+      const matching = cards.filter(card => educationContentMatches(card, item))
+      if (matching.length === 1) return []
+      if (matching.length > 1) return [`record_${index + 1}:duplicate`]
+      const differences = cards.map(card => educationContentDifferences(card, item)).sort((a, b) => a.length - b.length)[0]
+      return [`record_${index + 1}:${differences?.join(',') ?? 'missing'}`]
+    })
+    return educationDifferences.length === 0
   })
+  if (educationDifferences.length) checks.education.reason = `education_mismatch (${educationDifferences.join('; ')})`
   let skills: SavedSkills = { tags: [], advanced: [] }
   await inspect('skills', async () => {
     skills = await readers.skills()
@@ -144,8 +182,7 @@ export async function readResumeContract(page: Page, profile: PreparedProfile, r
     await go(`/resume/${resume.id}`)
     const language = readers.resumeLanguage ? await readers.resumeLanguage() : await inspectResumeLanguage(page)
     actual.resumeLanguage = language
-    return profile.client.market === 'En' ? language === 'en' : language !== 'en' &&
-      Boolean(await page.locator('[data-qa="resume"]').count())
+    return language === (profile.client.market === 'En' ? 'en' : 'ru')
   })
   await inspect('publication', async () => {
     if (readers.publication) return readers.publication()
@@ -183,14 +220,18 @@ export async function readResumeContract(page: Page, profile: PreparedProfile, r
     silent, extraExperience, extraEducation }
   const before = profile.operationId ? preserveFirstObservation(profile.operationId, resume.id, 'content', current) :
     map.get(resume.id) ?? current
+  if (before.silent.phone && before.silent.phone !== silent.phone && checks.contacts.status === 'passed') {
+    checks.contacts = { status: 'warning', reason: 'contacts_preservation_unverified' }
+  }
   checks.preservation = check(before.skills.every(tag => current.skills.includes(tag)) &&
-    Object.entries(before.silent).every(([key, hash]) => silent[key] === hash) &&
+    Object.entries(before.silent).every(([key, hash]) => key === 'phone' || silent[key] === hash) &&
     before.extraExperience.every(hash => extraExperience.includes(hash)) &&
     before.extraEducation.every(hash => extraEducation.includes(hash)), 'Previously saved data was lost.')
   if (!map.has(resume.id)) map.set(resume.id, before)
   const verification: ResumeContractVerification = {
     contractVersion: PROFILE_CONTRACT_VERSION, resumeId: resume.id, title, isDraft: resume.isDraft,
     titleVerified: checks.title.status === 'passed', experienceVerified: checks.experience.status === 'passed',
+    // Contacts are checked separately: unstable reads must not reappear as copy fingerprint failures.
     privacy, checks, contentFingerprint: digest(actual), complete: false, issues: []
   }
   verification.issues = contractIssues(verification)

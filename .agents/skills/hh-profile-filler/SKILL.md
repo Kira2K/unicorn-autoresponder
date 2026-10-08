@@ -18,6 +18,11 @@ Mandatory post-publication step, in both Ru and En: set the HH job-search status
 including copies and resumed operations, and verify the saved status after reloading before reporting
 success. If it is already selected, verify it without toggling to another status. This is HH's job-search
 status, separate from resume publication/searchability and the client's read-only database status.
+If HH shows the known outdated-contacts notice after publication, dismiss only its explicit Close
+action and retain verified resume contacts. Never accept replacing them from the general profile
+as a side effect of setting job-search status. Match this actual alertdialog with whitespace-normalized text or its observed data-qa controls;
+account for delayed appearance in both the resume list and status selector. A static reminder
+banner is not the dialog. Unknown blocking dialogs require diagnosis.
 Never change the database status as a substitute. Missing or unpersisted job-search status blocks
 successful completion. Dry-run/live-smoke do not change it; read-only final verification must check it.
 
@@ -90,8 +95,12 @@ or automatically retry jobs based on database status or elapsed time.
 Read [contract-checks.md](references/contract-checks.md) when modifying or testing enforcement.
 Verify content, identity, contacts, experience/education membership, languages, skills, work preferences,
 privacy, employer selections and preservation before publishing or making the next native copy.
-Require active/searchable server state and `??????? ??? ??????` before whole-operation success.
-Recheck every target before deletion. A missing check, unreadable field or incomplete copy blocks progress.
+Require active/searchable server state and persisted `active_search` before whole-operation success.
+Recheck every target before deletion. A missing check, unreadable field or incomplete copy blocks progress,
+except internal contact comparison/read failures: record these as explicit warnings and continue filling,
+copying, publication and final verification. Do not mark contacts as verified or restart completed sections
+because of that warning. Include it in the terminal report. Contact uncertainty must not become an indirect
+fingerprint/preservation blocker. Explicit HH validation, authentication and privacy failures still block.
 Revalidate the selected repository's client/profile/account/CV records before editing and deletion;
 client status never gates the manually requested market. SQL mode verifies the configured runtime source
 and shared pool identity, and never falls back to Noco. Keep exclusive local Dolphin-profile locks,
@@ -144,10 +153,12 @@ sanitized observed-state fixture in `tests/fixtures/hh-wizard-observed.html`.
 
 Read [field-policy.md](references/field-policy.md) before a run that fills HH. Read [operations.md](references/operations.md) before supervising or diagnosing a manual run.
 
-Use the final CV first and fields from the selected repository only as fallback. In the student's Drive folder, open the exact
-`Самопрезентация` subfolder and use supported documents whose filename contains `Описание опыта` to
-expand employer candidates. Include employers, brand owners, brands/products, vendors, customers, and
-partners; add only unambiguous official HH employer cards and report skipped candidates without stopping.
+Use the final CV first and fields from the selected repository only as fallback for resume content.
+Employer exclusions are sourced ONLY from the read-only database fields `current_company`,
+`previous_companies`, and `stop_list_company`. Use CV/experience-description context to resolve those
+names, not to add unrelated employers, products, vendors or brands. Match official HH cards contextually;
+skip missing or ambiguous candidates, and retain existing saved exclusions. Follow field-policy.md for
+separate Bachelor/Master records, all CV experience entries, city labels and interrupted wizard recovery.
 
 For En always set `Tbilisi, Georgia` and select work permits through the Russian HH UI using exactly
 `Грузия`, `Сербия`, `Армения`, and `Казахстан`. For both markets set business trips ready,

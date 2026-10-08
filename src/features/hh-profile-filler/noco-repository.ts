@@ -269,6 +269,8 @@ export function createProfileFillerNocoRepository(
       cvRevision: text(cvRow.UpdatedAt ?? cvRow.Id),
       studentFolderUrl: text(cvRow.student_data_folder_url) || text(clientRow.google_folder) || undefined,
       stopListCompanies: parseStopListCompany(clientRow.stop_list_company),
+      databaseEmployerCandidates: ['current_company', 'previous_companies', 'stop_list_company']
+        .flatMap(key => parseStopListCompany(clientRow[key]).map(name => ({ name, sources: [`database:${key}`] }))),
       contacts,
       fallbacks: {
         fullName: text(clientRow.fio) || text(clientRow.client_name) || undefined,
@@ -293,7 +295,7 @@ export function createProfileFillerNocoRepository(
     const current = await resolveClient(id, market)
     if (expected) {
       const fields = ['clientId', 'market', 'stack', 'dolphinProfileId', 'cvUrl', 'cvRevision',
-        'contacts', 'fallbacks', 'credentials', 'stopListCompanies'] as const
+        'contacts', 'fallbacks', 'credentials', 'stopListCompanies', 'databaseEmployerCandidates'] as const
       if (fields.some(key => JSON.stringify(current[key]) !== JSON.stringify(expected[key]))) {
         throw profileFillerError('profile_sources_changed',
           'Prepared source records changed; prepare the profile again before editing HH.', 'source_preflight')

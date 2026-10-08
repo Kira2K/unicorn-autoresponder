@@ -21,9 +21,12 @@ export async function readResumePublication(page: Page, resume: ResumeSnapshot):
   if (!/^[a-z0-9]+$/i.test(resume.id)) throw profileFillerError(
     'profile_hh_invalid_resume_id', 'Publication verification requires a known resume ID.', 'verify_active')
   let state: (PublicationAttributes & { id?: string; title?: string; lang?: string }) | undefined
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  let reader = page
+  let recoveryPage: Page | undefined
+  try {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
-      state = await page.evaluate(async id => {
+      state = await reader.evaluate(async id => {
         const build = (window as Window & { globalVars?: { build?: string } }).globalVars?.build ?? ''
         const response = await fetch(`/resume/edit/${id}/position`, {
           headers: { Accept: 'application/json', 'X-Static-Version': build },
@@ -39,12 +42,32 @@ export async function readResumePublication(page: Page, resume: ResumeSnapshot):
     } catch (error) {
       // Editor transitions can replace the JS context or briefly return HTTP 406
       // for this GET. Only re-read; never replay the preceding publishing click.
-      if (attempt === 2 || !/execution context was destroyed|cannot find context|navigation|HTTP 406/i
+      if (attempt === 3 || !/execution context was destroyed|cannot find context|navigation|HTTP 406/i
         .test(String((error as Error)?.message))) throw error
-      await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
-      await page.waitForTimeout(500)
+      if (attempt === 1 && /HTTP 406/i.test(String((error as Error)?.message))) {
+        // A stale page build can keep rejecting JSON negotiation. Refresh that
+        // read context in a task-owned tab; never navigate the publishing wizard
+        // or repeat its preceding POST/click to recover a failed GET.
+        recoveryPage = await page.context().newPage()
+        reader = recoveryPage
+        await reader.goto(`https://hh.ru/resume/edit/${resume.id}/position`, {
+          waitUntil: 'domcontentloaded', timeout: 120_000
+        })
+        await reader.locator('[data-qa="resume-edit-title-suggest"]')
+          .waitFor({ state: 'visible', timeout: 15_000 })
+      }
+      if (/HTTP 406/i.test(String((error as Error)?.message))) {
+        // JSON negotiation requires the page's hydrated build header. An empty
+        // header produces HH's XML <doc/> 406 response, even in a fresh tab.
+        await reader.waitForFunction(() => Boolean(
+          (window as Window & { globalVars?: { build?: string } }).globalVars?.build),
+        undefined, { timeout: 5_000 }).catch(() => undefined)
+      }
+      await reader.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+      await reader.waitForTimeout(500)
     }
   }
+  } finally { await recoveryPage?.close().catch(() => undefined) }
   if (!state || state.id !== resume.id || typeof state.title !== 'string' ||
       state.title.trim() !== resume.title.trim()) throw profileFillerError(
     'profile_hh_publication_identity_mismatch', 'HH publication response does not match the exact resume ID/title.',

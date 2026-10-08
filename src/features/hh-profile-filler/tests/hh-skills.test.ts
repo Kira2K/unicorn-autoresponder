@@ -38,7 +38,8 @@ export async function runHHSkillsTests() {
           let names=${JSON.stringify(saved.map(item => item.name))};
           function render(){selected.replaceChildren(...names.map((name,index)=>{
             const chip=document.createElement('div');chip.dataset.qa='chips-trigger-chip-'+name;
-            chip.append(document.createTextNode(name));const remove=document.createElement('button');
+            const label=document.createElement('button');label.disabled=true;label.textContent=name;chip.append(label);
+            const remove=document.createElement('button');remove.dataset.qa='chip-delete-action';remove.setAttribute('aria-label','Удалить');
             remove.onclick=()=>{names.splice(index,1);render()};chip.append(remove);return chip;
           }))}
           function add(){names.push(option.textContent);option.hidden=true;

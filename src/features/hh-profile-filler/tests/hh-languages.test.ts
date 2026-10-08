@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright'
-import { fillProfileLanguages } from '../hh-languages.ts'
+import { fillProfileLanguages, verifyProfileLanguages } from '../hh-languages.ts'
 
 export async function runHHLanguageTests() {
   const browser = await chromium.launch({ headless: true })
@@ -8,6 +8,7 @@ export async function runHHLanguageTests() {
     const page = await browser.newPage()
     let rows = [{ name: 'Грузинский', level: 'Родной' }, { name: 'Английский', level: 'B1' }]
     let writes = 0
+    let delayRows = 0
     await page.route('**/*', async route => {
       const url = new URL(route.request().url())
       if (url.pathname === '/fixture-save') {
@@ -24,13 +25,14 @@ export async function runHHLanguageTests() {
         <button role="combobox" aria-label="Выбор языка сайта" onclick="throw Error('wrong control')">Русский</button>
         <script>
         const rows = ${JSON.stringify(rows)};
-        rows.forEach((row, index) => {
+        const render = () => rows.forEach((row, index) => {
           const card = document.createElement('div');
           card.dataset.qa = 'profile-language-bottom-sheet-content-' + index;
           card.innerHTML = '<button>' + row.name + ' ' + row.level + '</button>';
           card.querySelector('button').onclick = () => edit(index);
           document.querySelector('#cards').append(card);
         });
+        if (${delayRows}) setTimeout(render, ${delayRows}); else render();
         document.querySelector('[data-qa="profile-language-add"]').onclick = () => edit(-1);
         function edit(index) {
           let name = rows[index]?.name || '', level = rows[index]?.level || '';
@@ -70,5 +72,14 @@ export async function runHHLanguageTests() {
     rows.push({ ...rows[0] })
     await assert.rejects(() => fillProfileLanguages(page, [{ name: 'English', level: 'C1' }]),
       { code: 'profile_hh_language_ambiguous' })
+    rows = [{ name: 'Русский', level: 'Родной' }, { name: 'Английский', level: 'C1 — Продвинутый' }]
+    delayRows = 350
+    const beforeVerification = writes
+    await page.goto('https://hh.ru/profile/block/languages')
+    assert.equal(await verifyProfileLanguages(page, requested), true)
+    rows[1].level = 'B1 — Средний'
+    await page.goto('https://hh.ru/profile/block/languages')
+    assert.equal(await verifyProfileLanguages(page, requested), false, 'A genuinely wrong saved level remains a mismatch')
+    assert.equal(writes, beforeVerification, 'Verification never changes language records')
   } finally { await browser.close() }
 }

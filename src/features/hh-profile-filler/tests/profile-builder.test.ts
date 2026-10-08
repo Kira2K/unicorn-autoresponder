@@ -35,9 +35,9 @@ export function runProfileBuilderTests() {
   assert.match(prepared.about, /^Contacts\n/)
   assert.match(prepared.about, /\n\nSummary\nSummary text\.\n\nSkills\nBackend: Java, Spring$/)
   assert.deepEqual(prepared.employerCandidates.map(item => item.name),
-    ['Noco Stop', 'vendor', 'Employer', 'Product Brand', 'Partner'])
+    ['Noco Stop', 'vendor'])
   assert.deepEqual(prepared.employerCandidates.find(item => item.name === 'vendor')?.sources,
-    ['noco:stop_list_company', 'cv:experience-context'])
+    ['noco:stop_list_company'])
   assert.equal(prepared.cv.education[0].institution, 'Noco University')
   assert.deepEqual(prepared.cv.languages, [{ name: 'English', level: 'B2' }])
 

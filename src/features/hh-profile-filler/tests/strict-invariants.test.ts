@@ -79,6 +79,9 @@ export async function runStrictInvariantTests() {
     clientName: 'Private Client', dolphinProfileName: 'Actual Dolphin EN', market: 'En', stage: 'completed', message: '',
     expectedTitles: ['Title'], finalResumeIds: ['r1'], contractVerification: [verifiedContract()] }
   assert.equal(formatProfileFillerReport(result), '✅ HH Profile Filler\nПрофиль Dolphin: Actual Dolphin EN\nПолучилось заполнить.')
+  const contactWarning = structuredClone(result)
+  contactWarning.contractVerification![0].checks!.contacts = { status: 'warning', reason: 'contacts_mismatch' }
+  assert.match(formatProfileFillerReport(contactWarning), /Контакты: проверка не подтверждена в 1 резюме/)
   const error = formatProfileFillerReport({ ...result, ok: false,
     message: 'Private Client failed; password=secret' })
   assert.match(error, /Профиль Dolphin: Actual Dolphin EN/)

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { createProfileFillerService } from '../service.ts'
 import { ProfileFillerError } from '../errors.ts'
 import { verifiedContract } from './contract.test.ts'
+import { contractIssues } from '../contract.ts'
 import type { PreparedProfile } from '../types.ts'
 import type { ResumeSnapshot } from '../hh-resume-ui.ts'
 
@@ -24,7 +25,7 @@ export function makeServiceFixture(directory: string) {
   const verified = new Set<string>(), privateIds = new Set<string>()
   let serial = 0
   const controls = { failTitle: '', missingCheck: '', limit: false, sourceFailure: false, statusChanged: false,
-    inactive: false, wrongLanguage: false, wrongSearchStatus: false, badSkills: false, malformedPublished: false, failDuplicate: false, corruptBaselineAfterCopy: false }
+    inactive: false, wrongLanguage: false, wrongSearchStatus: false, badSkills: false, malformedPublished: false, failDuplicate: false, corruptBaselineAfterCopy: false, contactsWarning: false }
   const put = (title: string, id = `r${++serial}`, isDraft = true) => {
     const value = { id, title, isDraft, href: `https://hh.ru/resume/${id}` }
     const index = resumes.findIndex(item => item.id === id)
@@ -96,7 +97,8 @@ export function makeServiceFixture(directory: string) {
           result.checks!.about = { status: 'failed' }
         }
         if (controls.missingCheck) delete result.checks![controls.missingCheck]
-        if (Object.values(result.checks!).every(check => check.status === 'passed')) verified.add(resume.id)
+        if (controls.contactsWarning) result.checks!.contacts = { status: 'warning', reason: 'contacts_mismatch' }
+        if (!contractIssues(result).length) verified.add(resume.id)
         return result
       },
       async deleteResume(_page, resume) {

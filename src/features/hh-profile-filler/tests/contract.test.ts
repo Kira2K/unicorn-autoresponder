@@ -22,6 +22,15 @@ export function runContractTests() {
     assert.equal(verifyOperationContract(['Title'], [{ ...valid, ...invalid }], ['r1']), false)
   }
   assert.equal(verifyOperationContract(['Title'], [valid], ['r1']), true)
+  const contactsWarning = structuredClone(valid)
+  contactsWarning.checks!.contacts = { status: 'warning', reason: 'contacts_mismatch' }
+  assert.deepEqual(contractIssues(contactsWarning), [])
+  assert.equal(verifyOperationContract(['Title'], [contactsWarning], ['r1']), true)
+  contactsWarning.checks!.contacts = { status: 'warning' }
+  assert.ok(contractIssues(contactsWarning).includes('contacts_not_verified'))
+  const privacyWarning = structuredClone(valid)
+  privacyWarning.checks!.privacy = { status: 'warning', reason: 'unreadable' }
+  assert.ok(contractIssues(privacyWarning).includes('privacy_not_verified'))
   for (const name of CONTRACT_SECTIONS) {
     const missing = structuredClone(valid)
     delete missing.checks![name]

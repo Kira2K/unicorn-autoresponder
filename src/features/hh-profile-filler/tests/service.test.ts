@@ -14,6 +14,13 @@ export async function runServiceTests() {
   process.env.PROFILE_FILLER_STORAGE_ROOT = path.join(artifactDir, 'state')
   try {
   const fixture = (name: string) => makeServiceFixture(path.join(artifactDir, name))
+  const advisory = fixture('contacts-warning')
+  advisory.controls.contactsWarning = true
+  const advisoryResult = await advisory.service.execute(advisory.profile, undefined, { preserveExisting: true })
+  assert.equal(advisoryResult.operationComplete, true)
+  assert.ok(advisory.calls.some(call => call.startsWith('duplicate:')))
+  assert.equal(advisory.calls.filter(call => call.startsWith('activate:')).length, advisory.profile.titles.length)
+  assert.ok(advisoryResult.contractVerification?.every(item => item.checks?.contacts.status === 'warning'))
   const main = fixture('main')
   main.put('Old', 'old', false)
   const result = await main.service.execute(main.profile)
@@ -64,6 +71,12 @@ export async function runServiceTests() {
     assert.ok(!f.calls.some(call => /^(create|duplicate):/.test(call)), scope)
     if (['experience', 'skills', 'verify-final', 'delete-old'].includes(scope)) {
       assert.ok(!f.calls.some(call => /^privacy:/.test(call)), scope)
+    }
+    if (scope === 'verify-final') {
+      assert.deepEqual(f.calls.filter(call => call.startsWith('verify:')),
+        f.profile.titles.map((_, index) => `verify:known-${index}`),
+        'Read-only final verification checks every target once; no writes require a repeated content pass')
+      assert.ok(!f.calls.some(call => /^(activate|create|duplicate|delete|privacy):/.test(call)))
     }
   }
   for (const failure of ['inactive', 'wrongLanguage', 'wrongSearchStatus', 'badSkills'] as const) {

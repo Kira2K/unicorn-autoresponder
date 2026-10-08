@@ -407,7 +407,7 @@ export async function runHHLiveDomTests() {
 
     await page.setContent(`
       <main><button data-qa="resume-list-action-more">Меню резюме</button></main>
-      <div id="stale-contacts-overlay">
+      <div id="stale-contacts-overlay" class="magritte-overlay">
         <p>Контакты в резюме могли устареть</p>
         <button id="replace-contacts">Заменить на новые из профиля</button>
         <button id="close-stale-contacts">Закрыть</button>

@@ -54,6 +54,11 @@
 
 ## Recovery
 
+- Internal contact comparison/read failures are advisory. Record the reason, continue the remaining
+  filling and publication steps, and include a contact warning in the final report. Do not repeat already
+  completed sections just to clear this warning or claim the contact check passed. Explicit HH validation,
+  authentication and privacy errors retain their existing blocking behavior.
+
 - After publishing each resume (including native copies/recovery), ensure `Активно ищу работу` in
   HH's job-search status and reload to verify it. Reuse an already matching status. An active resume
   or `isSearchable: true` does not prove the job-search status. `verify-final` checks without writing.
@@ -100,7 +105,7 @@
   failure, not a missing/ambiguous candidate to silently skip. Respect any tool approval block on this write;
   keep it pending while completing independently authorized work.
   If a tool approval permits only a named employer, pass only that employer to the recovery write;
-  do not rerun the entire CV-derived candidate list. Reuse that approval without asking again. Record
+  do not rerun the entire database-sourced candidate list. Reuse that approval without asking again. Record
   the verified subset and remaining candidates separately; subset completion is not full completion.
 
 - New-resume creation may redirect to an existing unfinished wizard when no published baseline exists.

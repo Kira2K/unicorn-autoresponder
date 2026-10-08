@@ -20,7 +20,8 @@ export async function runHHActivationTests() {
       if (++readAttempts === 1) throw new Error('Execution context was destroyed, most likely because of a navigation')
       return { id: 'abc', title: 'Known title', status: 'new', isSearchable: true }
     },
-    waitForLoadState: async () => undefined, waitForTimeout: async () => undefined
+    waitForLoadState: async () => undefined, waitForTimeout: async () => undefined,
+    waitForFunction: async () => undefined
   }
   assert.equal((await readResumePublication(transitionPage as any,
     { id: 'abc', title: 'Known title', href: 'https://hh.ru/resume/abc', isDraft: true })).isActive, true)
@@ -33,6 +34,21 @@ export async function runHHActivationTests() {
   assert.equal((await readResumePublication(negotiationPage as any,
     { id: 'abc', title: 'Known title', href: 'https://hh.ru/resume/abc', isDraft: false })).isActive, true)
   assert.equal(negotiationReads, 2)
+  let staleReads = 0, recoveredReads = 0, closed = false
+  const freshReader = { ...transitionPage,
+    locator: () => ({ waitFor: async () => undefined }),
+    goto: async (url: string) => assert.equal(url, 'https://hh.ru/resume/edit/abc/position'),
+    evaluate: async () => { recoveredReads++; return { id: 'abc', title: 'Known title', status: 'approved', isSearchable: true } },
+    close: async () => { closed = true }
+  }
+  const staleReader = { ...transitionPage,
+    evaluate: async () => { staleReads++; throw new Error('HH publication read failed (HTTP 406).') },
+    context: () => ({ newPage: async () => freshReader }),
+    goto: async () => { throw new Error('Must not navigate the publishing wizard to recover a GET') }
+  }
+  assert.equal((await readResumePublication(staleReader as any,
+    { id: 'abc', title: 'Known title', href: 'https://hh.ru/resume/abc', isDraft: false })).isActive, true)
+  assert.equal(staleReads, 2); assert.equal(recoveredReads, 1); assert.equal(closed, true)
   const browser = await chromium.launch({ headless: true }).catch(() =>
     chromium.launch({ channel: 'chrome', headless: true }))
   try {

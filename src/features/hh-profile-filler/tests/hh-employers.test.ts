@@ -5,7 +5,7 @@ import type { PreparedProfile } from '../types.ts'
 
 export async function runHHEmployerTests() {
   const browser = await chromium.launch({ headless: true })
-  let stored: string[] = []
+  let stored: string[] = ['Legacy employer']
   let ignoreWrites = false
   try {
     const page = await browser.newPage()
@@ -28,7 +28,7 @@ export async function runHHEmployerTests() {
           const committed = new Set(${JSON.stringify(stored)});
           const trigger = document.querySelector('[data-qa="applicant-employers-list-activator-blacklist"]');
           const refresh = () => trigger.textContent = [...committed].join(', ') || 'Выберите работодателей'; refresh();
-          trigger.onclick = () => {
+          trigger.onclick = () => setTimeout(() => {
             const modal = document.createElement('div');
             modal.innerHTML = '<input data-qa="resume-editor-employer-list-search-input"><div id="results"></div><button data-qa="resume-modal-button-save">Добавить</button>';
             let selected;
@@ -45,13 +45,13 @@ export async function runHHEmployerTests() {
             };
             modal.querySelector('button').onclick = () => { if (selected) committed.add(selected); modal.remove(); refresh(); };
             document.body.append(modal);
-            for (const name of ['Employer A', 'Employer B']) {
+            for (const name of new Set([...committed, 'Employer A', 'Employer B'])) {
               const row = document.createElement('label'); row.dataset.qa = 'cell';
               row.innerHTML = '<input type="checkbox">' + name;
               row.querySelector('input').checked = committed.has(name);
               modal.querySelector('#results').append(row);
             }
-          };
+          }, 200);
           document.querySelector('[data-qa="resume-partial-edit-save"]').onclick = () => fetch('/save', {
             method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([...committed])
           });
@@ -62,14 +62,15 @@ export async function runHHEmployerTests() {
     ] } as PreparedProfile
     const resume = { id: 'draft', title: 'Draft', href: '', isDraft: true }
     const first = await configurePrivacyAndStopList(page, resume, profile)
-    assert.deepEqual(stored, ['Employer A', 'Employer B'])
-    assert.deepEqual(first.employers.filter(item => item.status === 'added').map(item => item.officialName), stored)
+    assert.deepEqual(stored, ['Legacy employer', 'Employer A', 'Employer B'])
+    assert.equal(first.preservedEmployers, true, 'Saved exclusions survive even when unavailable in directory search')
+    assert.deepEqual(first.employers.filter(item => item.status === 'added').map(item => item.officialName), ['Employer A', 'Employer B'])
     assert.deepEqual(first.employers.filter(item => item.status === 'skipped').map(item =>
       ({ name: item.candidate, reason: item.reason })), [{ name: 'Missing Co', reason: 'not_found' }])
     const second = await configurePrivacyAndStopList(page, resume, profile)
-    assert.deepEqual(second.employers.filter(item => item.status === 'existing').map(item => item.officialName), stored)
+    assert.deepEqual(second.employers.filter(item => item.status === 'existing').map(item => item.officialName), ['Employer A', 'Employer B'])
     assert.deepEqual(second.employers.filter(item => item.status === 'added'), [])
-    assert.equal(stored.length, 2)
+    assert.equal(stored.length, 3)
     stored = []
     ignoreWrites = true
     await assert.rejects(() => configurePrivacyAndStopList(page, resume, profile),

@@ -38,6 +38,23 @@ async function selectOption(page: Page, control: Locator, pattern: RegExp) {
   await options.click()
 }
 
+/** Read only. Wait for the dedicated cards instead of mistaking an unhydrated page for missing languages. */
+export async function verifyProfileLanguages(page: Page, languages: CvLanguage[]): Promise<boolean> {
+  for (const item of languages) {
+    const name = languageName(item.name)
+    const pattern = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+    const cards = page.locator(CARDS).filter({ visible: true }).filter({ hasText: pattern })
+    const ready = await cards.first().waitFor({ state: 'visible', timeout: 10_000 })
+      .then(() => true).catch(() => false)
+    if (!ready) throw profileFillerError('profile_hh_language_card_unreadable',
+      'A required saved language card did not load.', 'verify_languages')
+    if (await cards.count() !== 1) throw profileFillerError('profile_hh_language_ambiguous',
+      'Multiple saved cards match the required language.', 'verify_languages')
+    if (!levelPattern(item.level).test(await cards.innerText())) return false
+  }
+  return true
+}
+
 /** Update only source-supported languages in the dedicated editor, then reload to verify persistence. */
 export async function fillProfileLanguages(page: Page, languages: CvLanguage[]): Promise<void> {
   if (!languages.length) return

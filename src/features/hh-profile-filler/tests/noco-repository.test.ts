@@ -11,6 +11,7 @@ export async function runNocoRepositoryTests() {
   const records: Record<string, any[]> = {
     [TABLES.clients.id]: [{ Id: 7, client_name: 'Client', client_status: 'on en market',
       fio: 'Fallback Name', birth_date: '1990-01-01', desired_location: 'Anywhere',
+      current_company: 'Current Ltd', previous_companies: 'Earlier One; Earlier Two',
       stop_list_company: ' Amazon, "RBI", amazon, ,Yandex ',
       rel_clients_primary_stack: { Id: 1, name: 'Python' } }],
     [TABLES.hhAutoresponses.id]: [{ Id: 70, clients_id: 7,
@@ -46,6 +47,8 @@ export async function runNocoRepositoryTests() {
   assert.equal(resolved.contacts.telegram, '@nick')
   assert.equal(resolved.credentials.login, 'login@example.com')
   assert.deepEqual(resolved.stopListCompanies, ['Amazon', 'RBI', 'Yandex'])
+  assert.deepEqual(resolved.databaseEmployerCandidates?.map(item => item.name),
+    ['Current Ltd', 'Earlier One', 'Earlier Two', 'Amazon', 'RBI', 'Yandex'])
   assert.equal(reads.get(TABLES.clients.id), 1)
   for (const tableId of [TABLES.hhAutoresponses.id, TABLES.dolphinProfiles.id,
     TABLES.platformAccounts.id, TABLES.cvProcessing.id, TABLES.stacks.id]) {

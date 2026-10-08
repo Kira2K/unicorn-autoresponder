@@ -28,7 +28,7 @@ export async function saveResumeSkillNames(page: Page, resume: ResumeSnapshot, e
   if (start.length === expected.length && start.every(name => wanted.has(skillKey(name)))) return
   for (let index = start.length - 1; index >= 0; index -= 1) {
     if (!wanted.has(skillKey(start[index]))) {
-      await page.locator(SELECTED_SKILLS).nth(index).getByRole('button').click()
+      await page.locator(SELECTED_SKILLS).nth(index).locator('[data-qa="chip-delete-action"]').click()
     }
   }
   for (const name of expected) {
