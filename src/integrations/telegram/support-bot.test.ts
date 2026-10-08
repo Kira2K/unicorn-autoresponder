@@ -1,4 +1,8 @@
 const assert = require('node:assert/strict')
+const { createTelegramBotApi } = require('./bot-api.ts') as
+  typeof import('./bot-api.ts')
+const { createTelegramIntegration } = require('./integration.ts') as
+  typeof import('./integration.ts')
 const {
   BACKEND_OVERLOADED_MESSAGE,
   BACKEND_UNAVAILABLE_MESSAGE,
@@ -626,7 +630,322 @@ function makeWorkflowListRepository(workflowRecords: any[]) {
   }
 }
 
+function pollingHttpResponse(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return body
+    }
+  }
+}
+
+function pollingUpdate(updateId: number) {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: 1_700_000_000 + updateId,
+      text: '/backend_status',
+      chat: { id: -5216637594, type: 'supergroup' },
+      from: { id: 42, username: 'tester' }
+    }
+  }
+}
+
+async function runRealAdapterPollingScenario(options: {
+  requester: (url: string, requestOptions: Record<string, unknown>) => Promise<any>
+  token?: string
+  preserveConsoleError?: boolean
+}) {
+  const stop = new AbortController()
+  const sentMessages: any[] = []
+  let handledUpdates = 0
+  const token = options.token ?? 'polling-test-token'
+  const botApi = createTelegramBotApi({
+    token,
+    requester: options.requester,
+    requestTimeoutMs: 100
+  })
+  const telegramIntegration = createTelegramIntegration({
+    token,
+    regularErrorChatId: '',
+    summaryLogsChatId: '',
+    logger() {},
+    botApi: {
+      async sendMessageResponse(input) {
+        sentMessages.push(input)
+        stop.abort()
+        return {
+          ok: true,
+          result: {
+            message_id: sentMessages.length,
+            date: 1_700_000_000,
+            chat: { id: Number(input.chatId), type: 'supergroup' },
+            text: input.text
+          }
+        }
+      }
+    }
+  })
+
+  const realConsoleError = console.error
+  if (!options.preserveConsoleError) console.error = () => undefined
+  try {
+    await runSupportBot({
+      apiClient: {
+        async backendStatus() {
+          handledUpdates += 1
+          return { ok: true }
+        }
+      },
+      botApi,
+      telegramIntegration,
+      stopSignal: stop.signal,
+      pollTimeout: 0,
+      pollErrorDelayMs: 0,
+      idleDelayMs: 0
+    })
+  } finally {
+    if (!options.preserveConsoleError) console.error = realConsoleError
+  }
+
+  return { handledUpdates, sentMessages }
+}
+
+async function testTelegramPollingRecoveryContract(): Promise<void> {
+  {
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        requests += 1
+        if (requests === 1) {
+          const cause = Object.assign(new Error('socket reset'), { code: 'ECONNRESET' })
+          const error = new TypeError('fetch failed') as Error & { cause?: unknown }
+          error.cause = cause
+          throw error
+        }
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(10)] })
+      }
+    })
+    assert.equal(requests, 2)
+    assert.equal(result.handledUpdates, 1)
+    assert.equal(result.sentMessages.length, 1)
+  }
+
+  {
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        requests += 1
+        if (requests === 1) {
+          throw Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' })
+        }
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(11)] })
+      }
+    })
+    assert.equal(requests, 2)
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  {
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        requests += 1
+        if (requests <= 3) throw new TypeError('fetch failed')
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(12)] })
+      }
+    })
+    assert.equal(requests, 4)
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  {
+    const offsets: Array<number | undefined> = []
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async (_url, requestOptions) => {
+        requests += 1
+        const body = JSON.parse(String(requestOptions.body))
+        offsets.push(body.offset)
+        if (requests === 1) {
+          return pollingHttpResponse({ ok: true, result: [{ update_id: 40 }] })
+        }
+        if (requests === 2) throw new TypeError('fetch failed')
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(41)] })
+      }
+    })
+    assert.deepEqual(offsets, [undefined, 41, 41])
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  {
+    const retryableStatuses = [409, 429, 500, 502, 503, 504]
+    let requests = 0
+    const result = await runRealAdapterPollingScenario({
+      requester: async () => {
+        const status = retryableStatuses[requests]
+        requests += 1
+        if (status !== undefined) {
+          return pollingHttpResponse({
+            ok: false,
+            error_code: status,
+            description: `Telegram polling error ${status}`
+          }, status)
+        }
+        return pollingHttpResponse({ ok: true, result: [pollingUpdate(42)] })
+      }
+    })
+    assert.equal(requests, retryableStatuses.length + 1)
+    assert.equal(result.handledUpdates, 1)
+  }
+
+  for (const fatalStatus of [401, 404]) {
+    let requests = 0
+    const botApi = createTelegramBotApi({
+      token: 'polling-test-token',
+      requester: async () => {
+        requests += 1
+        if (requests > 1) throw new Error(`fatal Telegram ${fatalStatus} response was retried`)
+        return pollingHttpResponse({
+          ok: false,
+          error_code: fatalStatus,
+          description: fatalStatus === 401 ? 'Unauthorized' : 'Not Found'
+        }, fatalStatus)
+      }
+    })
+    await assert.rejects(
+      () => runSupportBot({
+        botApi,
+        telegramIntegration: createTelegramIntegration({
+          token: 'polling-test-token',
+          regularErrorChatId: '',
+          summaryLogsChatId: '',
+          logger() {}
+        }),
+        pollTimeout: 0,
+        pollErrorDelayMs: 0,
+        idleDelayMs: 0
+      }),
+      (error: any) => {
+        assert.equal(error.code, 'telegram_bot_api_failed')
+        assert.equal(error.details?.data?.error_code, fatalStatus)
+        return true
+      }
+    )
+    assert.equal(requests, 1)
+  }
+
+  {
+    const botApi = createTelegramBotApi({
+      token: '',
+      requester: async () => {
+        throw new Error('requester must not be called')
+      }
+    })
+    await assert.rejects(
+      () => runSupportBot({
+        botApi,
+        telegramIntegration: createTelegramIntegration({
+          token: 'polling-test-token',
+          regularErrorChatId: '',
+          summaryLogsChatId: '',
+          logger() {}
+        }),
+        pollTimeout: 0,
+        pollErrorDelayMs: 0,
+        idleDelayMs: 0
+      }),
+      (error: any) => {
+        assert.equal(error.code, 'telegram_bot_token_missing')
+        return true
+      }
+    )
+  }
+
+  await assert.rejects(
+    () => runSupportBot({
+      botApi: {
+        async getUpdates() {
+          throw new Error('programming bug')
+        }
+      },
+      telegramIntegration: createTelegramIntegration({
+        token: 'polling-test-token',
+        regularErrorChatId: '',
+        summaryLogsChatId: '',
+        logger() {}
+      }),
+      pollTimeout: 0,
+      pollErrorDelayMs: 0,
+      idleDelayMs: 0
+    }),
+    /programming bug/
+  )
+
+  {
+    const token = 'polling-super-secret-token'
+    const previousToken = process.env.VEU_SUPPORT_BOT
+    const realConsoleError = console.error
+    const logs: string[] = []
+    process.env.VEU_SUPPORT_BOT = token
+    console.error = (...args: any[]) => {
+      logs.push(args.map(String).join(' '))
+    }
+    try {
+      let requests = 0
+      const result = await runRealAdapterPollingScenario({
+        token,
+        preserveConsoleError: true,
+        requester: async () => {
+          requests += 1
+          if (requests === 1) {
+            throw Object.assign(
+              new Error(`fetch failed at https://api.telegram.org/bot${token}/getUpdates?token=${token}`),
+              { code: 'ECONNRESET', credential: token }
+            )
+          }
+          return pollingHttpResponse({ ok: true, result: [pollingUpdate(43)] })
+        }
+      })
+      assert.equal(result.handledUpdates, 1)
+    } finally {
+      console.error = realConsoleError
+      if (previousToken === undefined) delete process.env.VEU_SUPPORT_BOT
+      else process.env.VEU_SUPPORT_BOT = previousToken
+    }
+    const logged = logs.join('\n')
+    assert.match(logged, /telegram_poll_retry/)
+    assert.match(logged, /ECONNRESET/)
+    assert.match(logged, /\[REDACTED\]/)
+    assert.equal(logged.includes(token), false)
+  }
+
+  {
+    const realConsoleError = console.error
+    console.error = () => {
+      throw new Error('logger unavailable')
+    }
+    try {
+      let requests = 0
+      const result = await runRealAdapterPollingScenario({
+        preserveConsoleError: true,
+        requester: async () => {
+          requests += 1
+          if (requests === 1) throw new TypeError('fetch failed')
+          return pollingHttpResponse({ ok: true, result: [pollingUpdate(44)] })
+        }
+      })
+      assert.equal(result.handledUpdates, 1)
+    } finally {
+      console.error = realConsoleError
+    }
+  }
+}
+
 async function runTests() {
+  await testTelegramPollingRecoveryContract()
   testKiraMessageTemplateContract()
   testYuliaMessageTemplateContract()
   testPolinaMessageTemplateContract()
