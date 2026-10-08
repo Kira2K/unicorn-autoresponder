@@ -397,24 +397,65 @@ function testYuliaMessageTemplateContract(): void {
   }
 
   const reworkScenarios = [
-    ['draft', 'Черновик отправлен на доработку', 'Ждем новую ссылку на черновик следующим сообщением.'],
-    ['en', 'EN-версия отправлена на доработку', 'Отправь обновленную ссылку на EN-версию следующим сообщением.'],
-    ['ru', 'RU-версия отправлена на доработку', 'Отправь обновленную ссылку на RU-версию следующим сообщением.']
+    ['draft', 'Черновик отправлен на доработку', 'Ждем новую ссылку на черновик следующим сообщением.', 'черновик в работе'],
+    ['en', 'EN-версия отправлена на доработку', 'Отправь обновленную ссылку на EN-версию следующим сообщением.', 'английская версия в работе'],
+    ['ru', 'RU-версия отправлена на доработку', 'Отправь обновленную ссылку на RU-версию следующим сообщением.', 'русская версия в работе']
   ]
-  for (const [stage, heading, hint] of reworkScenarios) {
+  const reworkInput = {
+    clientName: 'Анна', market: 'EN', stack: 'Java & Kotlin',
+    realLocation: 'Tbilisi <Georgia>', desiredLocation: 'Berlin & Remote',
+    realAge: '24', englishLevel: 'B2', readyForInterviewInEnglishIn2Months: 'Yes',
+    education: 'University <Faculty>, 2024', emailEn: 'anna&work@example.com',
+    telegramEn: '@anna<en>', phoneEn: '+1 555 0100',
+    linkedInUrl: 'https://linkedin.com/in/anna', githubUrl: 'https://github.com/anna',
+    rootFolder: 'https://drive.test/root', sourceFolder: 'https://drive.test/source',
+    kirasComments: 'Первоначальные <замечания>', draftUrl: 'https://docs.test/draft'
+  }
+  const reworkStudentRows = [
+    'Стек: Java &amp; Kotlin',
+    'Реальная локация: Tbilisi &lt;Georgia&gt;',
+    'Желаемая локация: Berlin &amp; Remote',
+    'Реальный возраст: 24',
+    'Уровень английского: B2',
+    'Ready for interview in English in 2 months: Yes',
+    'Образование: University &lt;Faculty&gt;, 2024',
+    'Email EN: anna&amp;work@example.com',
+    'Telegram EN: @anna&lt;en&gt;',
+    'Phone EN: +1 555 0100',
+    'LinkedIn: https://linkedin.com/in/anna',
+    'GitHub: https://github.com/anna',
+    'Корневая папка: https://drive.test/root',
+    'Исходные данные: https://drive.test/source',
+    'Комментарии Киры: Первоначальные &lt;замечания&gt;'
+  ]
+  for (const [stage, heading, hint, status] of reworkScenarios) {
     assertYuliaTemplate(yuliaTemplates.yuliaReworkMessage(
       stage,
-      'Анна',
+      reworkInput,
       'Исправить <опыт>',
       'https://example.invalid/cv?a=1&b=2'
     ), [
       `<b>${heading}</b>`,
       'Студент: Анна',
+      'Рынок: EN',
+      `Статус: ${status}`,
+      ...reworkStudentRows,
+      ...(stage === 'draft' ? [] : ['Черновик: https://docs.test/draft']),
       'Файл на доработку: https://example.invalid/cv?a=1&amp;b=2',
       'Комментарий: Исправить &lt;опыт&gt;',
       hint,
       YULIA_TASKS_FOOTER
     ].join('\n'))
+    const empty = yuliaTemplates.yuliaReworkMessage(stage, { clientName: 'Анна', market: 'ru' }, '  ', '')
+    for (const label of ['Стек', 'Реальная локация', 'Желаемая локация', 'Реальный возраст',
+      'Уровень английского', 'Ready for interview in English in 2 months', 'Образование',
+      'Email EN', 'Telegram EN', 'Phone EN', 'LinkedIn', 'GitHub', 'Корневая папка',
+      'Исходные данные', 'Комментарии Киры', 'Файл на доработку', 'Комментарий']) {
+      assert.ok(empty.text.split('\n').includes(`${label}: empty`), `${stage}: ${label}`)
+    }
+    const longComment = 'Подробная причина возврата. '.repeat(40)
+    assert.ok(yuliaTemplates.yuliaReworkMessage(stage, reworkInput, longComment, '').text
+      .includes(`Комментарий: ${longComment.trim()}`), 'do not truncate the rejection reason')
   }
 
   assertYuliaTemplate(yuliaTemplates.yuliaTaskListMessage({
@@ -1775,6 +1816,58 @@ async function runTests() {
       ...kiraActor,
       userId: '343610488',
       username: 'kira_manual'
+    }
+    for (const [version, target, field] of [
+      ['Draft', 'Draft in process', 'cvDraftUrl'],
+      ['English version', 'English version in progress', 'enVersionUrl'],
+      ['Russian version', 'Russian version in process', 'ruVersionUrl']
+    ]) {
+      for (const reviewer of ['student', 'Kira']) for (const missingLink of [false, true]) {
+        const status = `${version} in approve by ${reviewer}`
+        const links: Record<string, string> = {
+          cvDraftUrl: 'https://docs.test/draft?a=1&b=2',
+          enVersionUrl: 'https://docs.test/en?a=1&b=2',
+          ruVersionUrl: 'https://docs.test/ru?a=1&b=2'
+        }
+        const returnedUrl = missingLink ? '' : links[field]
+        const repository = makeWorkflowRepository(makeWorkflow({
+          status, ...links, [field]: returnedUrl,
+          clientMarket: version === 'Russian version' ? 'Ru' : 'EN',
+          clientGoogleFolder: 'https://drive.test/root', studentDataFolderUrl: 'https://drive.test/source',
+          kirasComments: 'Изначальные замечания Киры', lastRejectionComment: 'Устаревшая причина возврата'
+        }))
+        const comment = 'Текущая причина: исправить описание <опыта> и образование.'
+        const result = await rejectResumeWorkflowById(98, repository, {
+          actor: reviewer === 'Kira' ? manualKiraActor : studentActor,
+          expectedStatus: status, rejectionComment: comment
+        })
+        assert.equal(repository.patches.length, 1)
+        assert.equal(result.workflow.status, target)
+        assert.deepEqual(result.transitions, [`${status} -> ${target}`])
+        assert.equal(result.workflow[field], '')
+        for (const other of Object.keys(links)) {
+          if (other !== field) assert.equal(result.workflow[other], links[other])
+        }
+        assert.equal(result.notifications.length, 1)
+        const notification = result.notifications[0]
+        assert.equal(notification.kind, 'private_provider')
+        assert.deepEqual(notification.chatIds, ['8222949251', '315110920'])
+        assert.equal(notification.parseMode, 'HTML')
+        for (const row of [
+          'Студент: Test', `Рынок: ${version === 'Russian version' ? 'ru' : 'EN'}`,
+          'Стек: Python', 'Реальная локация: Tbilisi, Georgia', 'Желаемая локация: Remote RU proxy',
+          'Реальный возраст: 24', 'Уровень английского: B1', 'Ready for interview in English in 2 months: Yes',
+          'Образование: University', 'Email EN: student.en@example.com', 'Telegram EN: @student_en',
+          'Phone EN: +1 555 0100', 'LinkedIn: https://linkedin.com/in/student-user',
+          'GitHub: https://github.com/student-user', 'Корневая папка: https://drive.test/root',
+          'Исходные данные: https://drive.test/source', 'Комментарии Киры: Изначальные замечания Киры',
+          `Файл на доработку: ${returnedUrl ? returnedUrl.replaceAll('&', '&amp;') : 'empty'}`,
+          'Комментарий: Текущая причина: исправить описание &lt;опыта&gt; и образование.'
+        ]) assert.ok(notification.text.split('\n').includes(row), `${status}: ${row}`)
+        assert.ok(!notification.text.includes('Устаревшая причина возврата'))
+        assert.ok(!notification.text.includes('Юля, резюме для'), 'a rejection with no link is still rework')
+        assert.equal(notification.text.split(YULIA_TASKS_FOOTER).length - 1, 1)
+      }
     }
     assert.equal(resolveActorForWorkflow(manualKiraActor, makeWorkflow()).role, 'kira')
     assert.equal(resolveActorForWorkflow(ruTranslatorActor, makeWorkflow({

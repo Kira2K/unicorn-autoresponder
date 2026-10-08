@@ -110,10 +110,32 @@ function yuliaNewTaskMessage(stage: ProviderStage, clientName: string, market: s
   ])
 }
 
+function valueOrEmpty(value: string | undefined): string {
+  return String(value ?? '').trim() || 'empty'
+}
+
+function yuliaStudentDataRows(input: ProviderTaskCardInput): string[] {
+  return [
+    `Стек: ${escapeTelegramHtml(valueOrEmpty(input.stack))}`,
+    `Реальная локация: ${escapeTelegramHtml(valueOrEmpty(input.realLocation))}`,
+    `Желаемая локация: ${escapeTelegramHtml(valueOrEmpty(input.desiredLocation))}`,
+    `Реальный возраст: ${escapeTelegramHtml(valueOrEmpty(input.realAge))}`,
+    `Уровень английского: ${escapeTelegramHtml(valueOrEmpty(input.englishLevel))}`,
+    `Ready for interview in English in 2 months: ${escapeTelegramHtml(valueOrEmpty(input.readyForInterviewInEnglishIn2Months))}`,
+    `Образование: ${escapeTelegramHtml(valueOrEmpty(input.education))}`,
+    `Email EN: ${escapeTelegramHtml(valueOrEmpty(input.emailEn))}`,
+    `Telegram EN: ${escapeTelegramHtml(valueOrEmpty(input.telegramEn))}`,
+    `Phone EN: ${escapeTelegramHtml(valueOrEmpty(input.phoneEn))}`,
+    `LinkedIn: ${escapeTelegramHtml(valueOrEmpty(input.linkedInUrl))}`,
+    `GitHub: ${escapeTelegramHtml(valueOrEmpty(input.githubUrl))}`,
+    `Корневая папка: ${escapeTelegramHtml(valueOrEmpty(input.rootFolder))}`,
+    `Исходные данные: ${escapeTelegramHtml(valueOrEmpty(input.sourceFolder))}`,
+    `Комментарии Киры: ${escapeTelegramHtml(valueOrEmpty(input.kirasComments))}`
+  ]
+}
+
 function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput): ProviderTelegramMessage {
   const config = STAGE_CONFIG[stage]
-  const valueOrEmpty = (value: string | undefined) => String(value ?? '').trim() || 'empty'
-  const readyForInterviewInEnglishIn2Months = valueOrEmpty(input.readyForInterviewInEnglishIn2Months)
   const commonRows = [
     bold(config.heading),
     `Студент: ${escapeTelegramHtml(input.clientName)}`,
@@ -121,23 +143,7 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
     `Статус: ${config.status}`
   ]
   const stageRows = stage === 'draft' || stage === 'en'
-    ? [
-        `Стек: ${escapeTelegramHtml(valueOrEmpty(input.stack))}`,
-        `Реальная локация: ${escapeTelegramHtml(valueOrEmpty(input.realLocation))}`,
-        `Желаемая локация: ${escapeTelegramHtml(valueOrEmpty(input.desiredLocation))}`,
-        `Реальный возраст: ${escapeTelegramHtml(valueOrEmpty(input.realAge))}`,
-        `Уровень английского: ${escapeTelegramHtml(valueOrEmpty(input.englishLevel))}`,
-        `Ready for interview in English in 2 months: ${escapeTelegramHtml(readyForInterviewInEnglishIn2Months)}`,
-        `Образование: ${escapeTelegramHtml(valueOrEmpty(input.education))}`,
-        `Email EN: ${escapeTelegramHtml(valueOrEmpty(input.emailEn))}`,
-        `Telegram EN: ${escapeTelegramHtml(valueOrEmpty(input.telegramEn))}`,
-        `Phone EN: ${escapeTelegramHtml(valueOrEmpty(input.phoneEn))}`,
-        `LinkedIn: ${escapeTelegramHtml(valueOrEmpty(input.linkedInUrl))}`,
-        `GitHub: ${escapeTelegramHtml(valueOrEmpty(input.githubUrl))}`,
-        `Корневая папка: ${escapeTelegramHtml(valueOrEmpty(input.rootFolder))}`,
-        `Исходные данные: ${escapeTelegramHtml(valueOrEmpty(input.sourceFolder))}`,
-        `Комментарии Киры: ${escapeTelegramHtml(valueOrEmpty(input.kirasComments))}`
-      ]
+    ? yuliaStudentDataRows(input)
     : []
   return htmlMessage([
     ...commonRows,
@@ -160,16 +166,20 @@ function yuliaLinkSavedMessage(stage: ProviderStage, clientName: string): Provid
 
 function yuliaReworkMessage(
   stage: ProviderStage,
-  clientName: string,
+  input: ProviderTaskCardInput,
   comment: string,
   returnedCvUrl: string
 ): ProviderTelegramMessage {
   const config = STAGE_CONFIG[stage]
   return htmlMessage([
     bold(config.reworkHeading),
-    `Студент: ${escapeTelegramHtml(clientName)}`,
-    `Файл на доработку: ${escapeTelegramHtml(returnedCvUrl)}`,
-    `Комментарий: ${escapeTelegramHtml(comment)}`,
+    `Студент: ${escapeTelegramHtml(input.clientName)}`,
+    `Рынок: ${escapeTelegramHtml(input.market)}`,
+    `Статус: ${config.status}`,
+    ...yuliaStudentDataRows(input),
+    stage !== 'draft' ? `Черновик: ${escapeTelegramHtml(valueOrEmpty(input.draftUrl))}` : undefined,
+    `Файл на доработку: ${escapeTelegramHtml(valueOrEmpty(returnedCvUrl))}`,
+    `Комментарий: ${escapeTelegramHtml(valueOrEmpty(comment))}`,
     config.reworkHint,
     YULIA_TASKS_FOOTER
   ])

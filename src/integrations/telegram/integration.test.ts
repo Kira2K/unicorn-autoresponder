@@ -72,7 +72,8 @@ async function testSendOneSuccessAndPayload(): Promise<void> {
   assert.equal(result.response.result.message_id, 17)
   assert.equal(result.response.result.from?.username, 'UserName')
   assert.equal(result.response.result.chat.id, -100123)
-  assert.equal(result.response.result.text, 'sent')
+  assert.ok('text' in result.response.result)
+  if ('text' in result.response.result) assert.equal(result.response.result.text, 'sent')
   assert.deepEqual((result.response.result as unknown as Record<string, unknown>).unknown_future_field, {
     retained: true
   })
@@ -100,6 +101,110 @@ async function testExplicitLinkPreviewOptions(): Promise<void> {
     prefer_large_media: true
   })
   assert.equal('disable_web_page_preview' in body, false)
+}
+
+async function testLongMessagesUseRichDelivery(): Promise<void> {
+  const { yuliaReworkMessage } = require('./resume-provider-message-templates.ts')
+  const card = yuliaReworkMessage('en', {
+    clientName: 'Тестовый ученик', market: 'EN',
+    education: 'Образование ученика. '.repeat(100),
+    kirasComments: 'Исходный комментарий Киры. '.repeat(100)
+  }, 'Причина возврата без сокращений.', 'https://example.invalid/returned')
+  const native = { ok: true as const, result: {
+    message_id: 18, date: 1_700_000_000,
+    chat: { id: 1, type: 'private' as const, first_name: 'Test' },
+    rich_message: { blocks: [{ type: 'paragraph' as const, text: 'complete response' }] },
+    unknown_future_field: { retained: true }
+  } }
+  const calls: Array<{ url: string; body: Record<string, any> }> = []
+  const events: unknown[] = []
+  const telegram = createTelegramIntegration({
+    ...quietOptions(),
+    logger(event) { events.push(event) },
+    requester: async (url, options) => {
+      calls.push({ url, body: JSON.parse(String(options.body)) })
+      return { ok: true, status: 200, async json() { return native } }
+    }
+  })
+  const markup = { inline_keyboard: [[{ text: 'Открыть', url: 'https://example.invalid/returned' }]] }
+  const result = await telegram.sendOne({ chatId: '1', ...card, replyMarkup: markup, messageThreadId: 3 })
+  assert.equal(result.kind, 'telegram-response')
+  if (result.kind !== 'telegram-response' || !result.response.ok) return
+  assert.equal(result.response, native, 'native Rich Message response must not be remapped')
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].url.endsWith('/sendRichMessage'))
+  assert.equal(calls[0].body.chat_id, '1')
+  assert.equal(calls[0].body.message_thread_id, 3)
+  assert.deepEqual(calls[0].body.reply_markup, markup)
+  assert.ok(!('text' in calls[0].body))
+  assert.ok(!('parse_mode' in calls[0].body))
+  assert.equal(calls[0].body.rich_message.html, card.text.replace(/\n/g, '<br>'))
+  assert.ok(calls[0].body.rich_message.html.includes('https://example.invalid/returned'))
+  assert.ok(!JSON.stringify(events).includes('Образование ученика.'))
+  assert.ok(!JSON.stringify(events).includes('telegram_send_one_invalid_response'))
+
+  calls.length = 0
+  const literal = '<not HTML> & *not Markdown*\n' + 'x'.repeat(4097)
+  await telegram.sendOne({ chatId: '1', text: literal })
+  assert.ok(calls[0].url.endsWith('/sendRichMessage'))
+  assert.deepEqual(calls[0].body.rich_message.blocks, [{ type: 'paragraph', text: literal }])
+}
+
+async function testRichDeliveryBoundariesAndFailures(): Promise<void> {
+  const calls: Array<{ url: string; body: Record<string, any> }> = []
+  const telegram = createTelegramIntegration({ ...quietOptions(), requester: async (url, options) => {
+    calls.push({ url, body: JSON.parse(String(options.body)) })
+    return { ok: true, status: 200, async json() { return success() } }
+  } })
+  for (const input of [
+    { text: 'x'.repeat(4096) },
+    { text: '<b>' + 'x'.repeat(4096) + '</b>', parseMode: 'HTML' as const },
+    { text: '&amp;'.repeat(4096), parseMode: 'HTML' as const },
+    { text: '<a href="https://example.invalid/' + 'q'.repeat(5000) + '">файл</a>', parseMode: 'HTML' as const },
+    { text: 'x'.repeat(4097), parseMode: 'MarkdownV2' as const }
+  ]) {
+    calls.length = 0
+    await telegram.sendOne({ chatId: '1', ...input })
+    assert.ok(calls[0].url.endsWith('/sendMessage'), 'short rendered text and legacy Markdown stay unchanged')
+    assert.equal(calls[0].body.text, input.text)
+  }
+  calls.length = 0
+  const sourceHtml = '<b>Карточка</b>\n<pre>строка 1\nстрока 2</pre>\n<code>a\nb</code>\n' + 'x'.repeat(4097)
+  await telegram.sendOne({ chatId: '1', text: sourceHtml, parseMode: 'HTML' })
+  assert.equal(calls[0].body.rich_message.html,
+    '<b>Карточка</b><br><pre>строка 1\nстрока 2</pre><br><code>a\nb</code><br>' + 'x'.repeat(4097))
+  calls.length = 0
+  await telegram.sendOne({ chatId: '1', text: '&#x1f600;'.repeat(4096), parseMode: 'HTML' })
+  assert.ok(calls[0].url.endsWith('/sendMessage'), 'count parsed Unicode characters, not HTML bytes')
+  calls.length = 0
+  await telegram.sendOne({ chatId: '1', text: 'x'.repeat(32768) })
+  assert.ok(calls[0].url.endsWith('/sendRichMessage'))
+  calls.length = 0
+  const overflow = await telegram.sendOne({ chatId: '1', text: 'x'.repeat(32769) })
+  assert.equal(overflow.kind, 'client-failure')
+  if (overflow.kind === 'client-failure') assert.equal(overflow.failure.stage, 'validation')
+  assert.equal(calls.length, 0, 'do not truncate or send a known oversized Rich Message')
+
+  let attempts = 0
+  const unknown = createTelegramIntegration({ ...quietOptions(), requester: async () => {
+    attempts += 1
+    throw new Error('Response lost after send')
+  } })
+  const lost = await unknown.sendOne({ chatId: '1', text: 'x'.repeat(5000) })
+  assert.equal(lost.kind, 'client-failure')
+  if (lost.kind === 'client-failure') assert.equal(lost.failure.stage, 'transport')
+  assert.equal(attempts, 1, 'never fall back to a second send after an unknown result')
+
+  attempts = 0
+  const apiError = { ok: false, error_code: 400, description: 'Rich message rejected', parameters: { retry_after: 5 } }
+  const rejected = createTelegramIntegration({ ...quietOptions(), requester: async () => {
+    attempts += 1
+    return { ok: false, status: 400, async json() { return apiError } }
+  } })
+  const errorResult = await rejected.sendOne({ chatId: '1', text: 'x'.repeat(5000) })
+  assert.equal(errorResult.kind, 'telegram-response')
+  if (errorResult.kind === 'telegram-response') assert.equal(errorResult.response, apiError)
+  assert.equal(attempts, 1)
 }
 
 async function testNativeApiErrors(): Promise<void> {
@@ -203,6 +308,9 @@ async function testInvalidResponses(): Promise<void> {
     {},
     { ok: 'true', result: {} },
     { ok: true, result: { message_id: 1 } },
+    { ok: true, result: { ...message(), text: undefined, rich_message: { blocks: [] } } },
+    { ok: true, result: { ...message(), text: undefined, rich_message: { blocks: [null] } } },
+    { ok: true, result: { ...message(), text: undefined, rich_message: { blocks: [{ type: 42 }] } } },
     { ok: false, error_code: 400 },
     { ok: false, description: 'missing code' }
   ]
@@ -503,7 +611,7 @@ function compileTimeContract(
       result.failure.stage
     void stage
   } else if (result.response.ok) {
-    const telegramMessage: Message.TextMessage = result.response.result
+    const telegramMessage: Message.TextMessage | Message.RichMessageMessage = result.response.result
     const messageId: number = telegramMessage.message_id
     const chatType: string = telegramMessage.chat.type
     void messageId
@@ -531,6 +639,8 @@ void compileTimeCommandContext
 async function runTests(): Promise<void> {
   await testSendOneSuccessAndPayload()
   await testExplicitLinkPreviewOptions()
+  await testLongMessagesUseRichDelivery()
+  await testRichDeliveryBoundariesAndFailures()
   await testNativeApiErrors()
   await testValidationAndConfiguration()
   await testTransportAndTimeout()
