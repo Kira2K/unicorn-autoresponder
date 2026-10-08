@@ -25,6 +25,7 @@ export function studentProfileSavePayload(profile) {
   return {
     ...profile,
     education: profile.noHigherEducation ? null : profile.educationEntries.map(row => [row.uni, row.faculty, row.grade, row.yearOfEnd].join(', ')).join('\n'),
+    educationEntries: profile.noHigherEducation ? null : profile.educationEntries,
     ...workPlacesSavePayload(profile.workPlaces)
   }
 }
