@@ -22,8 +22,17 @@ export async function runPostgresRepositoryTests() {
   assert.deepEqual(await sql.resolveClient(1, 'En'), await old.resolveClient(1, 'En'));
   assert.equal((await sql.resolveClient(1, 'En')).cvUrl, 'fake-updated');
 
+  for (const status of ['on ru market', 'studying', 'archived', '', null]) {
+    const fixture = makeHhFixture();
+    fixture.data.clients[0].client_status = status;
+    const manual = await createProfileFillerRepository('postgres', async () => fixture.reader)
+      .resolveClient(1, 'En');
+    assert.equal(manual.market, 'En');
+    assert.equal(manual.dolphinProfileId, (await sql.resolveClient(1, 'En')).dolphinProfileId);
+  }
+
   const cases: Array<(f: ReturnType<typeof makeHhFixture>) => void> = [
-    x => { x.data.clients = []; }, x => { x.data.clients[0].client_status = 'on ru market'; },
+    x => { x.data.clients = []; },
     x => { x.data.clients[0].stacks_id = null; }, x => { x.data.dolphinProfiles = []; },
     x => { x.data.dolphinProfiles.push({ ...x.data.dolphinProfiles[1], Id: 99 }); },
     x => { x.data.dolphinProfiles[1].dolphin_profile_id = ''; }, x => { x.data.cvProcessing = []; },

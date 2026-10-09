@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
-import { chooseFirstSuggestion, INITIAL_HH_PROFESSION, openProfessionEditor,
-  nextWizardStep, professionForTitle, SAVE_AND_CONTINUE_PATTERNS,
+import { assertNewResumeEntry, chooseFirstSuggestion, INITIAL_HH_PROFESSION, openProfessionEditor,
+  nextWizardStep, professionForTitle, sameSkill, SAVE_AND_CONTINUE_PATTERNS,
+  skillSearchVariants,
   specializationForStack } from '../hh-resume-ui.ts'
 import { formatProfileFillerReport } from '../reporter.ts'
 
@@ -19,6 +20,15 @@ function hiddenLocator(): any {
 }
 
 export async function runHHResumeUiTests() {
+  assert.doesNotThrow(() => assertNewResumeEntry('https://hh.ru/profile/resume/professional_role'))
+  assert.throws(() => assertNewResumeEntry('https://hh.ru/profile/resume/experience?resume=known'),
+    { code: 'profile_hh_new_resume_redirected' })
+  assert.equal(sameSkill('Postgres', 'PostgreSQL'), true)
+  assert.equal(sameSkill('Apache Kafka', 'Kafka'), true)
+  assert.equal(sameSkill('AWS (EKS)', 'AWS EKS'), true)
+  assert.equal(sameSkill('REST', 'REST API'), true)
+  assert.equal(sameSkill('Redis', 'Redis Streams'), false)
+  assert.deepEqual(skillSearchVariants('GitLab CI/CD'), ['GitLab CI/CD', 'GitLab CI'])
   assert.equal(SAVE_AND_CONTINUE_PATTERNS.some(pattern =>
     pattern.test('Сохранить и\u00a0продолжить')), true)
   assert.deepEqual(specializationForStack('FullStack', 'Ru'), {
@@ -33,10 +43,10 @@ export async function runHHResumeUiTests() {
   assert.equal(INITIAL_HH_PROFESSION, 'Программист, разработчик')
   assert.equal(professionForTitle(
     'Старший Fullstack разработчик / Senior Fullstack Developer', 'Ru'),
-  'Старший фуллстэк разработчик')
+  'Старший Fullstack разработчик / Senior Fullstack Developer')
   assert.equal(professionForTitle(
     'Старший Backend разработчик / Senior Backend Developer', 'Ru'),
-  'Старший бэкенд разработчик')
+  'Старший Backend разработчик / Senior Backend Developer')
   assert.equal(professionForTitle(
     'Старший Frontend разработчик / Senior Frontend Developer', 'En'),
   'Senior Frontend Developer')
@@ -100,6 +110,8 @@ export async function runHHResumeUiTests() {
   let submitClicks = 0
   let screenReads = 0
   const continueButton: any = {
+    count: async () => 1,
+    nth: () => continueButton,
     last: () => continueButton,
     isVisible: async () => true,
     click: async () => { submitClicks += 1 }
@@ -115,8 +127,10 @@ export async function runHHResumeUiTests() {
   const body: any = { innerText: async () => 'Заполните основную информацию' }
   const transitionPage: any = {
     url: () => 'https://hh.ru/profile/resume/common?resume=draft',
-    locator: (selector: string) => selector === 'body' ? body : screen,
-    getByText: () => continueButton,
+    locator: (selector: string) => selector === 'body' ? body :
+      selector === '[data-qa*="resume-profile-screen"]:visible' ? screen : hiddenLocator(),
+    getByText: (pattern: RegExp) => pattern.test('Город или регион проживания')
+      ? hiddenLocator() : continueButton,
     waitForLoadState: async () => undefined,
     waitForTimeout: async () => undefined
   }
@@ -126,30 +140,44 @@ export async function runHHResumeUiTests() {
   const report = formatProfileFillerReport({
     ok: false,
     dryRun: false,
+    scope: 'full',
+    scopeComplete: false,
+    operationComplete: false,
     clientId: 170,
     clientName: 'Аблена Дементьева',
+    dolphinProfileName: 'Actual Dolphin Ru',
     market: 'Ru',
     stage: 'fill_resume',
     message: 'x'.repeat(10_000)
   })
   assert.ok(report.length <= 3900)
   assert.ok(report.startsWith(
-    '⚠️ HH Profile Filler\nНе получилось заполнить Аблена Дементьева\nПричина: '))
+    '⚠️ HH Profile Filler\nПрофиль Dolphin: Actual Dolphin Ru\nНе получилось заполнить.\nПричина: '))
   assert.equal(report.length, 3900)
   assert.doesNotMatch(report, /170|fill_resume/)
 
   const redactedReport = formatProfileFillerReport({
     ok: false,
     dryRun: false,
+    scope: 'full',
+    scopeComplete: false,
+    operationComplete: false,
     clientId: 92,
     clientName: 'Галина   Фокина',
+    dolphinProfileName: 'Actual Dolphin En',
     market: 'En',
     stage: 'authenticate',
     code: 'auth_unknown',
     message: 'HH auth validation\nstayed unknown; password=secret'
   })
   assert.equal(redactedReport,
-    '⚠️ HH Profile Filler\nНе получилось заполнить Галина Фокина\n' +
+    '⚠️ HH Profile Filler\nПрофиль Dolphin: Actual Dolphin En\nНе получилось заполнить.\n' +
     'Причина: HH auth validation stayed unknown; password=[REDACTED]')
   assert.doesNotMatch(redactedReport, /92|authenticate|auth_unknown|secret/)
+
+  assert.throws(() => formatProfileFillerReport({
+    ok: true, dryRun: false, scope: 'experience', scopeComplete: true,
+    operationComplete: false, clientId: 7, clientName: 'Client', market: 'En',
+    stage: 'recovery_completed', message: 'Experience repaired.'
+  }), /profile_result_not_terminal/)
 }

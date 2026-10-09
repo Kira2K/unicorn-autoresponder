@@ -1,3 +1,8 @@
+import path from 'node:path'
+import { deliverOnce } from './report-delivery.ts'
+import { operationStorageRoot } from './operation-state.ts'
+import { formatProfileFillerReport } from './report-format.ts'
+export { formatProfileFillerReport } from './report-format.ts'
 import type { ProfileFillerResult } from './types.ts'
 import { safeErrorMessage } from './errors.ts'
 import { createRequire } from 'node:module'
@@ -10,45 +15,23 @@ const { SUMMARY_LOGS_CHANNEL_ID } = require('../hh-responses/orchestrator/config
   SUMMARY_LOGS_CHANNEL_ID?: string
 }
 
-const TELEGRAM_REPORT_MAX_LENGTH = 3900
-
-function oneLine(value: string): string {
-  return value.trim().replace(/\s+/g, ' ')
-}
-
-function failureReport(clientName: string, reason: string): string {
-  const normalizedName = oneLine(clientName).slice(0, 256)
-  const normalizedReason = oneLine(safeErrorMessage(reason)) || 'Неизвестная ошибка'
-  return `⚠️ HH Profile Filler\nНе получилось заполнить ${normalizedName}\nПричина: ${normalizedReason}`
-    .slice(0, TELEGRAM_REPORT_MAX_LENGTH)
-}
-
-export function formatProfileFillerReport(result: ProfileFillerResult): string {
-  return result.ok
-    ? '✅ HH Profile Filler\nПолучилось заполнить.'
-    : failureReport(result.clientName, result.message)
+const { getDolphinProfile } = require('../../integrations/dolphin/profiles.ts') as {
+  getDolphinProfile(id: number): Promise<{ name?: string }>
 }
 
 export async function reportProfileFillerResult(result: ProfileFillerResult): Promise<void> {
-  if (!SUMMARY_LOGS_CHANNEL_ID) {
-    console.warn(formatProfileFillerReport(result))
-    console.warn('summary_logs_channel_id is missing; Telegram report was not sent.')
-    return
+  if (result.dryRun || result.scope === 'live-smoke') throw new Error('profile_result_not_terminal')
+  if (!result.dolphinProfileName && result.dolphinProfileId) {
+    const detail = await getDolphinProfile(result.dolphinProfileId).catch(() => undefined)
+    if (detail?.name) result.dolphinProfileName = detail.name
   }
-  await sendTelegramMessage(SUMMARY_LOGS_CHANNEL_ID, formatProfileFillerReport(result))
+  const text = formatProfileFillerReport(result)
+  if (!SUMMARY_LOGS_CHANNEL_ID) throw new Error('profile_report_channel_missing')
+  await deliverOnce(result.operationId ?? result.jobId ?? '', text,
+    path.join(operationStorageRoot(), 'report-delivery'), message => sendTelegramMessage(SUMMARY_LOGS_CHANNEL_ID, message))
 }
 
-export async function reportProfileFillerFatal(message: string,
-  clientName?: string): Promise<void> {
-  if (!clientName?.trim()) {
-    console.warn('A client-named fatal Profile Filler report could not be sent: client name is unknown.')
-    return
-  }
-  const text = failureReport(clientName, message)
-  if (!SUMMARY_LOGS_CHANNEL_ID) {
-    console.warn(text)
-    console.warn('summary_logs_channel_id is missing; Telegram report was not sent.')
-    return
-  }
-  await sendTelegramMessage(SUMMARY_LOGS_CHANNEL_ID, text)
+export async function reportProfileFillerFatal(message: string, _clientName?: string): Promise<void> {
+  // Without an operation identity a process exception cannot safely trigger a client report.
+  console.warn(`HH Profile Filler: профиль не определён; ${safeErrorMessage(message)}`)
 }

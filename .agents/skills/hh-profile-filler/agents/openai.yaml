@@ -1,4 +1,4 @@
 interface:
   display_name: HH Profile Filler
   short_description: Fill HH resumes from Drive and Noco safely.
-  default_prompt: Use $hh-profile-filler to prepare, fill, schedule, or diagnose an HH profile-filling job.
+  default_prompt: Use $hh-profile-filler to manually fill, activate, and verify all mapped HH resumes for a specified client and market, regardless of client status. A draft is not a completed fill.

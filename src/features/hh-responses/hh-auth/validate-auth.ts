@@ -285,6 +285,11 @@ async function validateAuth(page: any, options: ValidateAuthOptions = {}): Promi
     signals.captchaChallenge
   ) {
     state = 'captcha'
+  } else if (signals.loginUrl || signals.accountTypeCards ||
+    (signals.loginButton && (signals.phoneInput || signals.emailInput || signals.passwordInput))) {
+    // Login links can match resume selectors through their backUrl parameter.
+    // HH also serves the login form directly at protected applicant URLs.
+    state = 'logged_out'
   } else if (
     signals.resumesAndProfile ||
     signals.vacancyResponsesButton ||
