@@ -88,12 +88,13 @@ function normalizeEducationEntry(value: unknown): EducationEntry {
     uni: normalizeText(record.uni ?? record.university ?? record.education),
     faculty: normalizeText(record.faculty ?? record.facultet),
     grade: normalizeText(record.grade),
-    yearOfEnd: normalizeText(record.yearOfEnd ?? record.year_of_end ?? record.year)
+    yearOfEnd: normalizeText(record.yearOfEnd ?? record.year_of_end ?? record.year),
+    ...(record.city != null ? { city: normalizeText(record.city) } : {})
   }
 }
 
 function hasEducationEntryValue(entry: EducationEntry): boolean {
-  return Boolean(entry.uni || entry.faculty || entry.grade || entry.yearOfEnd)
+  return Boolean(entry.uni || entry.faculty || entry.grade || entry.yearOfEnd || entry.city)
 }
 
 function parseEducationEntries(value: unknown, legacyEducation: unknown = ''): EducationEntry[] {
@@ -123,7 +124,7 @@ function parseEducationEntries(value: unknown, legacyEducation: unknown = ''): E
 function educationSummary(entries: EducationEntry[], fallback: unknown = ''): string {
   const summary = entries
     .filter(hasEducationEntryValue)
-    .map(entry => [entry.uni, entry.faculty, entry.grade, entry.yearOfEnd].filter(Boolean).join(', '))
+    .map(entry => [entry.uni, entry.faculty, entry.grade, entry.yearOfEnd, entry.city].filter(Boolean).join(', '))
     .filter(Boolean)
     .join('; ')
   return summary || normalizeText(fallback)

@@ -1,9 +1,11 @@
-export type EducationRow = { uni: string; faculty: string; grade: string; yearOfEnd: string };
+import { validateStudentEducation } from './student-education.ts';
+import type { EducationRow } from './student-education.ts';
+export type { EducationRow } from './student-education.ts';
 export type WorkPlace = { id?: string; companyName: string; isCurrent: boolean };
 export type StudentProfile = {
   firstName: string; lastName: string; middleName: string; fio: string; birthDate: string;
   realAge: number | null; englishLevelId: number | null; readyForInterviewInEnglishIn2Months: string;
-  educationEntries: EducationRow[] | null; noHigherEducation: boolean;
+  educationEntries: EducationRow[]; noHigherEducation: boolean;
   realLocation: string; desiredLocation: string; workPlaces: WorkPlace[];
   calendarEmail: string; telegramPersonalChatId: string;
 };
@@ -61,10 +63,7 @@ export function validateWorkPlaces(input: unknown): { value: WorkPlace[]; error:
 export function validateStudentProfile(input: unknown, options: { today?: string; englishLevelIds: readonly number[] }) {
   const draft = object(input), today = options.today ?? profileToday();
   const noHigherEducation = draft.noHigherEducation === true;
-  const educationEntries = (Array.isArray(draft.educationEntries) ? draft.educationEntries : []).map(item => {
-    const row = object(item);
-    return Object.fromEntries(['uni', 'faculty', 'grade', 'yearOfEnd'].map(k => [k, cleanProfileText(row[k])])) as EducationRow;
-  });
+  const education = validateStudentEducation(draft.educationEntries, noHigherEducation, Number(today.slice(0, 4)));
   const workplaceValidation = validateWorkPlaces(draft.workPlaces);
   const workPlaces = workplaceValidation.value;
   const telegram = cleanProfileText(draft.telegramPersonalChatId);
@@ -73,13 +72,13 @@ export function validateStudentProfile(input: unknown, options: { today?: string
     fio: profileFullName(draft), birthDate: isoBirthDate(draft.birthDate), realAge: profileAge(draft.birthDate, today),
     englishLevelId: Number(draft.englishLevelId) || null,
     readyForInterviewInEnglishIn2Months: cleanProfileText(draft.readyForInterviewInEnglishIn2Months),
-    educationEntries: noHigherEducation ? null : educationEntries, noHigherEducation,
+    educationEntries: education.value, noHigherEducation,
     realLocation: normalizeLocation(draft.realLocation),
     desiredLocation: /^remote$/i.test(cleanProfileText(draft.desiredLocation)) ? 'Remote' : normalizeLocation(draft.desiredLocation),
     workPlaces, calendarEmail: cleanProfileText(draft.calendarEmail).toLowerCase(),
     telegramPersonalChatId: telegram ? '@' + telegram.replace(/^@/, '') : ''
   };
-  const errors: Record<string, string> = {}, educationErrors: Record<string, boolean> = {};
+  const errors: Record<string, string> = {}, educationErrors = education.errors;
   for (const name of ['firstName', 'lastName', 'middleName'] as const) {
     const text = value[name];
     if (name === 'middleName' && !text) continue;
@@ -91,16 +90,7 @@ export function validateStudentProfile(input: unknown, options: { today?: string
   else if (value.realAge === null || value.realAge < 14 || value.realAge > 70) errors.birthDate = 'Проверьте дату: возраст должен быть от 14 до 70 лет';
   if (!options.englishLevelIds.includes(value.englishLevelId ?? 0)) errors.englishLevelId = 'Выберите уровень английского';
   if (!['Yes', 'No'].includes(value.readyForInterviewInEnglishIn2Months)) errors.readyForInterviewInEnglishIn2Months = 'Выберите вариант';
-  if (!noHigherEducation) {
-    for (const [index, row] of educationEntries.entries()) {
-      for (const field of ['uni', 'faculty', 'grade', 'yearOfEnd'] as const) {
-        if (!row[field] || (field === 'yearOfEnd' && (!/^\d{4}$/.test(row[field]) || Number(row[field]) < 1960 || Number(row[field]) > Number(today.slice(0, 4)) + 6)))
-          educationErrors[`${index}.${field}`] = true;
-      }
-    }
-    if (!educationEntries.length || educationEntries.length > 5 || Object.keys(educationErrors).length)
-      errors.educationEntries = 'Заполните все поля образования или отметьте «Нет высшего образования»';
-  }
+  if (education.error) errors.educationEntries = education.error;
   if (!locationPattern.test(value.realLocation)) errors.realLocation = 'Укажите в формате City, Country латиницей';
   if (value.desiredLocation !== 'Remote' && !locationPattern.test(value.desiredLocation)) errors.desiredLocation = 'Укажите City, Country латиницей или Remote';
   if (workplaceValidation.error) errors.workPlaces = workplaceValidation.error;

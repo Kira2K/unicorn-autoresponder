@@ -34,7 +34,12 @@ export function studentProfileStore(pool: SqlPool, database: CopyDatabase) {
         values.push(key === 'noHigherEducation' ? patch[key] === true : patch[key] || null);
         assignments.push(`${column}=$${values.length}`);
       }
-      if (patch.noHigherEducation === true) assignments.push('education=NULL', 'education_entries=NULL');
+      if (patch.educationEntries !== undefined) {
+        values.push(JSON.stringify(patch.educationEntries));
+        assignments.push(`education_entries=$${values.length}`);
+        values.push(patch.education ?? '');
+        assignments.push(`education=$${values.length}`);
+      }
       if (!assignments.length) return;
       // Only this SQL write is transactional. The established profile save remains separate.
       await writeTransaction(pool, database, async session => {

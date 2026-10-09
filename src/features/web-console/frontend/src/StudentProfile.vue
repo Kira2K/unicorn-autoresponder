@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch, watchEffect } from 'vue'
 import StudentProfileField from './StudentProfileField.vue'
 import { formatBirthDate, profileAge, profileFullName, profileFieldLabels, validateStudentProfile } from '../../student-profile-validation.ts'
 import { studentProfileDraft, studentProfileSavePayload } from './student-profile-draft.js'
+import { educationText } from '../../student-education.ts'
 import './student-profile.css'
 import { telegramInputValue, updateContactInput } from './contact-input.js'
 
@@ -22,10 +23,16 @@ const autoName = computed(() => profileFullName(draft.value))
 const autoAge = computed(() => profileAge(draft.value.birthDate))
 const blankEducation = () => ({ uni: '', faculty: '', grade: '', yearOfEnd: '' })
 const educationLabels = { uni: 'Университет', faculty: 'Факультет', grade: 'Квалификация', yearOfEnd: 'Год окончания' }
+const otherEducationLabels = { uni: 'Название учебного заведения', yearOfEnd: 'Год окончания', city: 'Город' }
+let educationDrafts = {}
 watch(() => props.client, client => { if (!editing.value) draft.value = studentProfileDraft(client) })
-function openEditor() { draft.value = studentProfileDraft(props.client); workPlaces.value = draft.value.workPlaces; submitted.value = false; failure.value = ''; success.value = ''; editing.value = true }
+function openEditor() { draft.value = studentProfileDraft(props.client); educationDrafts = {}; workPlaces.value = draft.value.workPlaces; submitted.value = false; failure.value = ''; success.value = ''; editing.value = true }
 function cancel() { editing.value = false; failure.value = ''; submitted.value = false }
-function setNoEducation() { draft.value.educationEntries = [blankEducation()] }
+function setNoEducation() {
+  const mode = draft.value.noHigherEducation
+  educationDrafts[String(!mode)] = draft.value.educationEntries.map(row => ({ ...row }))
+  draft.value.educationEntries = educationDrafts[String(mode)] || [{ ...blankEducation(), ...(mode ? { city: '' } : {}) }]
+}
 function removeEducation(index) {
   if (draft.value.educationEntries.length === 1) draft.value.educationEntries = [blankEducation()]
   else draft.value.educationEntries.splice(index, 1)
@@ -50,7 +57,6 @@ async function submit() {
   } catch (error) { failure.value = error?.message || 'Не удалось сохранить профиль. Попробуйте ещё раз.' }
   finally { saving.value = false }
 }
-const savedDraft = computed(() => studentProfileDraft(props.client))
 const viewFields = computed(() => [
   ['firstName', 'Имя', props.client.firstName], ['lastName', 'Фамилия', props.client.lastName],
   ['middleName', 'Отчество', props.client.middleName, true], ['fio', 'ФИО полностью', profileFullName(props.client)],
@@ -102,13 +108,22 @@ const viewFields = computed(() => [
         </div>
         <section class="student-section" :class="{ invalid: errors.educationEntries }" data-profile-field="educationEntries">
           <h4>Образование<span class="required-star"> *</span></h4>
+          <template v-if="!draft.noHigherEducation">
           <div v-for="(entry, index) in draft.educationEntries" :key="index" class="student-education-row">
             <input v-for="(label, name) in educationLabels" :key="name" v-model="entry[name]" :aria-label="`${label}, образование ${index + 1}`" :placeholder="label" :disabled="draft.noHigherEducation" :aria-invalid="submitted && Boolean(validation.educationErrors[`${index}.${name}`])" :class="{ 'input-invalid': submitted && validation.educationErrors[`${index}.${name}`] }" :inputmode="name === 'yearOfEnd' ? 'numeric' : undefined" :data-testid="`profile-education-${name}-${index}`" />
             <button type="button" class="student-icon-button" :disabled="draft.noHigherEducation" :aria-label="`Удалить образование ${index + 1}`" @click="removeEducation(index)">×</button>
           </div>
           <button type="button" class="student-button" :disabled="draft.noHigherEducation || draft.educationEntries.length >= 5" data-testid="add-education-button" @click="draft.educationEntries.push(blankEducation())">+ Добавить образование</button>
+          </template>
           <label class="student-checkbox student-no-education"><input v-model="draft.noHigherEducation" type="checkbox" data-testid="no-higher-education" @change="setNoEducation" />Нет высшего образования</label>
-          <small v-if="draft.noHigherEducation" class="student-hint">Поля образования заполнять не нужно</small>
+          <div v-if="draft.noHigherEducation" class="student-other-education" data-testid="other-education">
+            <h4>Другое образование</h4>
+            <div class="student-grid">
+              <StudentProfileField v-for="(label, name) in otherEducationLabels" :key="name" :name="`other-education-${name}`" :label="label" required :error="submitted && validation.educationErrors[`0.${name}`] ? 'Заполните поле корректно' : ''" v-slot="field">
+                <input :id="field.id" v-model="draft.educationEntries[0][name]" :aria-invalid="field.invalid" :aria-describedby="field.describedby" aria-required="true" :inputmode="name === 'yearOfEnd' ? 'numeric' : undefined" :data-testid="`profile-other-education-${name}`" />
+              </StudentProfileField>
+            </div>
+          </div>
           <small v-if="errors.educationEntries" class="student-error">{{ errors.educationEntries }}</small>
         </section>
         <div class="student-grid student-section">
@@ -135,7 +150,7 @@ const viewFields = computed(() => [
     <template v-else>
       <dl class="student-read-grid">
         <div v-for="[key, label, value, optional] in viewFields" :key="key"><dt>{{ label }}</dt><dd :class="{ 'student-missing': !value && !optional }">{{ value || (optional ? '—' : 'не заполнено') }}</dd></div>
-        <div class="student-wide"><dt>Образование</dt><dd v-if="client.noHigherEducation">Нет высшего образования</dd><dd v-else-if="savedValidation.errors.educationEntries" class="student-missing">не заполнено</dd><dd v-else v-for="(entry, index) in savedDraft.educationEntries" :key="index">{{ [entry.uni, entry.faculty, entry.grade, entry.yearOfEnd].join(', ') }}</dd></div>
+        <div class="student-wide"><dt>Образование</dt><dd v-if="client.noHigherEducation">Нет высшего образования</dd><dd v-if="savedValidation.errors.educationEntries" class="student-missing">не заполнено</dd><dd v-else v-for="(entry, index) in savedValidation.value.educationEntries" :key="index">{{ educationText([entry]) }}</dd></div>
       </dl>
       <slot />
     </template>

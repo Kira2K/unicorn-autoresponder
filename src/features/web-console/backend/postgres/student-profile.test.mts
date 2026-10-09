@@ -8,6 +8,8 @@ import type { SqlPool } from '../../../../integrations/postgres/contracts.mts';
 import type { ClientDashboard, ClientProfilePatch, WebConsoleRepository } from '../types.ts';
 import { openSqlConsole } from './runtime.mts';
 import { runtimeFixture } from './runtime-fixture.mts';
+import { workflowFixture } from './workflow-fixture.mts';
+import { tableIds } from './tables.mts';
 import { validateStudentProfile } from '../../student-profile-validation.ts';
 import type { StudentProfile } from '../../student-profile-validation.ts';
 const { studentProfileDraft, studentProfileSavePayload } = createRequire(import.meta.url)(
@@ -31,7 +33,7 @@ function fixture() {
       if (sql.startsWith('UPDATE')) {
         if (fail) throw Error('private SQL diagnostic');
         const row = rows.get(Number(values[0]))!;
-        for (const match of sql.matchAll(/(middle_name|no_higher_education|current_company|previous_companies)=\$(\d+)/g))
+        for (const match of sql.matchAll(/(middle_name|no_higher_education|current_company|previous_companies|education_entries|education)=\$(\d+)/g))
           row[match[1]] = values[Number(match[2]) - 1];
         if (sql.includes('education=NULL')) row.education = null;
         if (sql.includes('education_entries=NULL')) row.education_entries = null;
@@ -43,7 +45,7 @@ function fixture() {
   const store = studentProfileStore(pool, 'unicorn_noco_copy_restore');
   const baseWrites: { id: number; patch: ClientProfilePatch }[] = [];
   const dashboard = (id: number): ClientDashboard => ({ client: { id, clientName: '', firstName: '', lastName: '', fio: '',
-    birthDate: '', education: '', educationEntries: [], stopListCompany: '', calendarEmail: '', googleFolder: '',
+    birthDate: '', education: String(rows.get(id)?.education ?? ''), educationEntries: JSON.parse(String(rows.get(id)?.education_entries ?? '[]')), stopListCompany: '', calendarEmail: '', googleFolder: '',
     telegramPersonalChatId: '', commonChatId: '' }, platformAccounts: [], linkedInEmail: '' });
   const base = { async getClientDashboard(id: number) { return dashboard(id); },
     async updateClientProfile(id: number, patch: ClientProfilePatch) { baseWrites.push({ id, patch }); return dashboard(id); },
@@ -66,77 +68,88 @@ test('SQL profile: company moves/clearing and partial saves preserve unrelated f
   await f.repo.updateClientProfile(7, { currentCompany: '', previousCompanies: '' });
   assert.equal(f.row.current_company, null); assert.equal(f.row.previous_companies, null);
   assert.equal(f.row.middle_name, 'Initial'); assert.equal(f.row.no_higher_education, true);
-  await f.repo.updateClientProfile(7, { middleName: 'Updated', noHigherEducation: false });
-  assert.equal(f.row.middle_name, 'Updated'); assert.equal(f.row.no_higher_education, false);
+  await f.repo.updateClientProfile(7, { middleName: 'Updated' });
+  assert.equal(f.row.middle_name, 'Updated'); assert.equal(f.row.no_higher_education, true);
   const writes = f.calls.filter(c => c.sql.startsWith('UPDATE')).length;
   await f.repo.updateClientProfile(7, { firstName: 'Changed', middleName: undefined });
   assert.equal(f.calls.filter(c => c.sql.startsWith('UPDATE')).length, writes);
-  await f.repo.updateClientProfile(7, { noHigherEducation: true });
-  assert.equal(f.row.education, null);
+  await assert.rejects(f.repo.updateClientProfile(7, { noHigherEducation: true }), { code: 'invalid_student_education' });
+  assert.equal(f.row.education, 'Old education');
   assert.ok(f.baseWrites.every(({ patch }) => !Object.hasOwn(patch, 'currentCompany') && !Object.hasOwn(patch, 'noHigherEducation')));
 });
 
-test('education opt out clears both columns together with the flag, without an earlier base education write', async () => {
-  const f = fixture();
-  f.row.no_higher_education = false;
-  const input = { firstName: 'Updated', noHigherEducation: true, education: 'Stale university',
-    educationEntries: [{ uni: 'Stale university', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' }] };
-  const saved = await f.repo.updateClientProfile(7, input);
-  assert.deepEqual(f.baseWrites, [{ id: 7, patch: { firstName: 'Updated' } }]);
-  assert.equal(f.row.education, null);
-  assert.equal(f.row.education_entries, null);
-  assert.equal(saved.client.noHigherEducation, true);
+const otherEntry = { uni: 'Колледж связи', faculty: '', grade: '', yearOfEnd: '2020', city: 'Москва' };
+const higherEntry = { uni: 'University', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' };
+
+for (const mode of ['sql', 'legacy'] as const) test(`${mode}: actual dashboard mapping retains other education city`, async () => {
+  const f = workflowFixture();
+  await f.db.patchRecord(tableIds.clients, ['7'], { education_entries: JSON.stringify([otherEntry]), education: 'Stale' });
+  const saved = await f[mode].getClientDashboard(7);
+  assert.deepEqual(saved.client.educationEntries, [otherEntry]);
+  assert.equal(saved.client.education, 'Колледж связи, 2020, Москва');
+});
+
+test('other education and flag save together and survive repeated reads without mutating input', async () => {
+  const f = fixture(); f.row.no_higher_education = false;
+  const input = { firstName: 'Updated', noHigherEducation: true, education: 'Stale summary', educationEntries: [otherEntry] };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const saved = await f.repo.updateClientProfile(7, input);
+    assert.equal(saved.client.noHigherEducation, true);
+    assert.deepEqual(saved.client.educationEntries, [otherEntry]);
+    assert.equal(saved.client.education, 'Колледж связи, 2020, Москва');
+    assert.deepEqual(studentProfileDraft(saved.client).educationEntries, [otherEntry]);
+  }
+  assert.ok(f.baseWrites.every(({ patch }) => !Object.hasOwn(patch, 'education') && !Object.hasOwn(patch, 'educationEntries')));
   const updates = f.calls.filter(c => c.sql.startsWith('UPDATE'));
-  assert.equal(updates.length, 1);
-  assert.match(updates[0].sql, /no_higher_education=\$2,education=NULL,education_entries=NULL/);
-  assert.deepEqual(updates[0].values, [7, true]);
-  assert.equal(input.education, 'Stale university');
+  assert.equal(updates.length, 2);
+  assert.ok(updates.every(c => /no_higher_education=\$\d/.test(c.sql) && /education_entries=\$\d/.test(c.sql) && /education=\$\d/.test(c.sql)));
+  assert.equal(input.education, 'Stale summary');
 });
 
-test('failed education opt out never sends education to the separate base save', async () => {
+test('invalid other education is rejected before any writes, including partial patches', async () => {
+  for (const field of ['uni', 'yearOfEnd', 'city']) {
+    const f = fixture(), before = { ...f.row };
+    await assert.rejects(f.repo.updateClientProfile(7, { firstName: 'Changed', noHigherEducation: true,
+      educationEntries: [{ ...otherEntry, [field]: '' }] }), { code: 'invalid_student_education' });
+    assert.deepEqual(f.row, before); assert.deepEqual(f.baseWrites, []);
+    assert.equal(f.calls.filter(c => c.sql.startsWith('UPDATE')).length, 0);
+  }
   const f = fixture();
-  f.row.no_higher_education = false;
-  const before = { ...f.row };
-  f.setFailure();
-  await assert.rejects(f.repo.updateClientProfile(7, {
-    noHigherEducation: true, education: null, educationEntries: null
-  }), { code: 'postgres_write_failed' });
-  assert.deepEqual(f.baseWrites, [{ id: 7, patch: {} }]);
-  assert.deepEqual(f.row, before);
-  assert.ok(f.calls.some(c => c.sql === 'ROLLBACK'));
+  await assert.rejects(f.repo.updateClientProfile(7, { educationEntries: [higherEntry] }), { code: 'invalid_student_education' });
+  await f.repo.updateClientProfile(7, { firstName: 'Unrelated edit' });
+  assert.equal(f.row.education, 'Old education');
 });
 
-test('form payload round trip saves SQL NULL and preserves opt out on repeated saves and reads', async () => {
+test('failed education write leaves flag and previous education together and is not retried', async () => {
+  for (const noHigherEducation of [true, false]) {
+    const f = fixture(), before = { ...f.row }; f.setFailure();
+    await assert.rejects(f.repo.updateClientProfile(7, { noHigherEducation,
+      educationEntries: [noHigherEducation ? otherEntry : higherEntry] }), { code: 'postgres_write_failed' });
+    assert.deepEqual(f.row, before);
+    assert.ok(f.baseWrites.every(({ patch }) => !Object.hasOwn(patch, 'educationEntries')));
+    assert.equal(f.calls.filter(c => c.sql.startsWith('UPDATE')).length, 1);
+    assert.ok(f.calls.some(c => c.sql === 'ROLLBACK'));
+  }
+});
+
+test('form payload round trip retains other education and city', async () => {
   const f = fixture();
-  f.row.no_higher_education = false;
-  const profile = validateStudentProfile({ noHigherEducation: true,
-    educationEntries: [{ uni: 'Old university', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' }],
+  const profile = validateStudentProfile({ noHigherEducation: true, educationEntries: [otherEntry],
     firstName: 'Кира', lastName: 'Самсонова', birthDate: '2000-04-20', englishLevelId: 1,
     readyForInterviewInEnglishIn2Months: 'No', realLocation: 'Moscow, Russia', desiredLocation: 'Remote',
     calendarEmail: 'test@gmail.com', telegramPersonalChatId: '@test_student', workPlaces: []
   }, { today: '2026-10-05', englishLevelIds: [1] });
   assert.equal(profile.valid, true);
-  const payload = JSON.parse(JSON.stringify(studentProfileSavePayload(profile.value)));
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await f.repo.updateClientProfile(7, payload);
-    assert.equal(f.row.no_higher_education, true);
-    assert.equal(f.row.education, null);
-    assert.equal(f.row.education_entries, null);
-    const draft = studentProfileDraft((await f.repo.getClientDashboard(7)).client);
-    assert.equal(draft.noHigherEducation, true);
-    assert.deepEqual(draft.educationEntries, [{ uni: '', faculty: '', grade: '', yearOfEnd: '' }]);
-  }
-  assert.ok(f.baseWrites.every(({ patch }) => !Object.hasOwn(patch, 'education') && !Object.hasOwn(patch, 'educationEntries')));
-  assert.ok(f.calls.some(c => c.sql === 'COMMIT'));
+  await f.repo.updateClientProfile(7, JSON.parse(JSON.stringify(studentProfileSavePayload(profile.value))));
+  assert.deepEqual(studentProfileDraft((await f.repo.getClientDashboard(7)).client).educationEntries, [otherEntry]);
 });
 
-test('education remains editable when opting back in', async () => {
+test('switching back to higher education needs no city and removes an old city atomically', async () => {
   const f = fixture();
-  const educationEntries = [{ uni: 'University', faculty: 'CS', grade: 'Bachelor', yearOfEnd: '2020' }];
-  await f.repo.updateClientProfile(7, { noHigherEducation: false, educationEntries });
-  assert.deepEqual(f.baseWrites, [{ id: 7, patch: { educationEntries } }]);
-  assert.equal((await f.repo.getClientDashboard(7)).client.noHigherEducation, false);
-  assert.ok(!f.calls.some(c => c.sql.includes('education=NULL')));
+  await f.repo.updateClientProfile(7, { noHigherEducation: false, educationEntries: [{ ...higherEntry, city: 'Old city' }] });
+  const saved = (await f.repo.getClientDashboard(7)).client;
+  assert.equal(saved.noHigherEducation, false); assert.deepEqual(saved.educationEntries, [higherEntry]);
+  assert.deepEqual(f.baseWrites, [{ id: 7, patch: {} }]);
 });
 
 test('every client can save extensions without changing another client; account responses retain their own fields', async () => {
