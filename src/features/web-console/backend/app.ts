@@ -1906,6 +1906,7 @@ function createWebConsoleApp(options: {
     }
     if (
       (error as any)?.code === 'invalid_google_folder' ||
+      (error as any)?.code === 'invalid_student_education' ||
       (error as any)?.code === 'invalid_ready_for_interview_in_english_in_2_months' ||
       (error as any)?.code === 'telegram_message_too_long'
     ) {

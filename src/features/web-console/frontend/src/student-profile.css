@@ -24,6 +24,7 @@
 .student-work-row .student-checkbox { border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px; }
 .student-work-row .is-current { border-color: #38bdf8; background: #f0f9ff; color: #0369a1; }
 .student-no-education { margin-top: 16px; }
+.student-other-education { margin-top: 16px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
 .student-button, .student-icon-button, .student-chip { border: 1px solid #cbd5e1; border-radius: 7px; color: #334155; background: #f8fafc; padding: 9px 13px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
 .student-button:hover, .student-icon-button:hover { background: #e2e8f0; }
 .student-button:disabled, .student-icon-button:disabled { opacity: .5; cursor: not-allowed; }

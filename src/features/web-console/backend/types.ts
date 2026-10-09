@@ -12,6 +12,7 @@ export type EducationEntry = {
   faculty: string
   grade: string
   yearOfEnd: string
+  city?: string
 }
 
 export type ReadyForInterviewInEnglishIn2Months = 'Yes' | 'No'
