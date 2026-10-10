@@ -60,6 +60,12 @@ export type ConnectionPeopleSearchInput = {
 }
 
 export type ConnectionSearchProgress = {
+  actionRecovery?: Record<string, import('../action-recovery.ts').ActionRecovery>
+  invitationVerification?: { accountId: string; firstAttemptAt: string; attempt: number; nextCheckAt: string; blockedUntil?: string; personIds?: string[] }
+  reservedInvitations?: Record<string, SearchAudience>
+  historyProfileChecks?: Record<string, { signature: string; checkedAt: number }>
+  emptySearchPages?: Partial<Record<SearchAudience, number>>
+  automationId?: string
   invitationNotBefore?: string
   invitationPacingStarted?: boolean
   invitationPauseAfterPersonId?: string

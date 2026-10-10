@@ -19,13 +19,15 @@ assert.equal(connectionRetryDelay(50, () => .5), 1_755_000)
 assert.equal(connectionRetryDelay(1, () => 0, 3_600_000), 3_600_000)
 assert.equal(retryAfterMilliseconds({ details: { retryAfter: 120 } }), 120_000)
 assert.equal(retryAfterMilliseconds({ details: { retryAfterMs: 3_600_000 } }), 3_600_000)
-assert.equal(unipileRateLimitDelay(1, () => 0), 180_000)
-assert.equal(unipileRateLimitDelay(1, () => 1), 180_000)
-assert.equal(unipileRateLimitDelay(2, () => 0), 360_000)
-assert.equal(unipileRateLimitDelay(3, () => 0), 720_000)
-assert.equal(unipileRateLimitDelay(4, () => 0), 1_440_000)
-assert.equal(unipileRateLimitDelay(5, () => 0), 1_800_000)
+assert.equal(unipileRateLimitDelay(1, () => 0), 270_000)
+assert.equal(unipileRateLimitDelay(1, () => 1), 270_000)
+assert.equal(unipileRateLimitDelay(2, () => 0), 540_000)
+assert.equal(unipileRateLimitDelay(3, () => 0), 1_080_000)
+assert.equal(unipileRateLimitDelay(4, () => 0), 2_160_000)
+assert.equal(unipileRateLimitDelay(5, () => 0), 2_700_000)
+assert.equal(unipileRateLimitDelay(20, () => 0), 2_700_000)
 assert.equal(unipileRateLimitDelay(1, () => 0, 3_600_000), 3_600_000)
+assert.equal(unipileRateLimitDelay(5, () => 0, 60_000), 60_000)
 
 async function run() {
   const test = fixture({ stack: 'GO' })
@@ -44,10 +46,25 @@ async function run() {
     details: { httpStatus: 429, retryAfter: 120 }
   })
   const firstRateLimit = makeRetryState(runtime, run, 'unipile', 'people_search', rateLimitError)
-  assert.equal(firstRateLimit.delayMs, 180_000)
+  assert.equal(firstRateLimit.delayMs, 120_000)
   run.retryState = firstRateLimit
   const secondRateLimit = makeRetryState(runtime, run, 'unipile', 'people_search', rateLimitError)
-  assert.equal(secondRateLimit.delayMs, 360_000)
+  assert.equal(secondRateLimit.nextRetryAt, firstRateLimit.nextRetryAt)
+  now += 90_000
+  const sameResponseLater = makeRetryState(runtime, run, 'unipile', 'people_search', rateLimitError)
+  assert.equal(sameResponseLater.nextRetryAt, firstRateLimit.nextRetryAt)
+  assert.equal(sameResponseLater.delayMs, 30_000)
+  now = 0
+  const freshRateLimit = makeRetryState(runtime, run, 'unipile', 'people_search',
+    Object.assign(new Error('another response'), { code: rateLimitError.code, details: { ...rateLimitError.details } }))
+  assert.equal(freshRateLimit.delayMs, 120_000)
+  let writing
+  for (let attempt = 0; attempt < 3; attempt++) writing = makeRetryState(runtime, run, 'unipile', 'invitation_write',
+    { code: 'unipile_provider_too_many_requests', details: { httpStatus: 429 } }, writing)
+  assert.equal(writing!.delayMs, 7_200_000)
+  const supplied = makeRetryState(runtime, run, 'unipile', 'invitation_write',
+    { code: 'unipile_provider_too_many_requests', details: { httpStatus: 429, retryAfterMs: 60_000 } }, writing)
+  assert.equal(supplied.delayMs, 60_000)
 
   const readbackRetry = makeRetryState(runtime, run, 'unipile',
     'invitation_pending_readback', Object.assign(new Error('unreachable'), {
@@ -72,7 +89,7 @@ async function run() {
       { code: 'unipile_http_429', details: { httpStatus: 429 } })
     return 'ok'
   })
-  assert.equal(result, 'ok'); assert.equal(calls, 3); assert.equal(now, 540_000)
+  assert.equal(result, 'ok'); assert.equal(calls, 3); assert.equal(now, 810_000)
   assert.equal(run.retryState, undefined); assert.equal(run.stage, 'queued')
 
   calls = 0; now = 0

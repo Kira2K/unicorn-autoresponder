@@ -40,7 +40,9 @@ export async function recoverInvitationRateLimit(context: InvitationSafetyContex
   item.status = 'deferred'; item.reasonCode = errorCode
   item.updatedAt = runtime.now().toISOString(); await history.update(item)
   schedule(context, error); await save(run, 'retry_scheduled', 'critical')
-  const continued = await waitOrStop(runtime, run.runId, run.retryState!.delayMs, run.localDate)
+  const until = Date.parse(run.retryState!.nextRetryAt)
+  const continued = runtime.yieldWait ? await runtime.yieldWait(until) :
+    await waitOrStop(runtime, run.runId, Math.max(0, until - runtime.now().getTime()), run.localDate)
   if (!continued) return { retry: false, sent: false }
 
   const read = await pending.findFresh(item.personId, { allowAfterDayClose: true,

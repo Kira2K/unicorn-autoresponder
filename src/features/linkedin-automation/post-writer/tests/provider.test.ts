@@ -2,13 +2,45 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createPostAdapter, type PostHttp } from '../../../../integrations/unipile/post-writer-adapter.ts'
 import { createUnipileRequestScheduler } from '../../../../integrations/unipile/request-scheduler.ts'
-import { reactionPresent } from '../../../../integrations/unipile/post-writer-reactions.ts'
+import { reactionPresent, reactionsPresent } from '../../../../integrations/unipile/post-writer-reactions.ts'
 import { fullRetryAfter, createPostOpenAi } from '../openai-client.ts'
 import { mockContext } from '../mock-content.ts'
 import { fixture } from './helpers.ts'
 import { acquirePostWriterLease } from '../writer-lease.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+test('a shrinking reaction total cannot prove absence or permit another like', async () => {
+  const account = (await fixture().deps.source.accounts())[0]; let reads = 0
+  await assert.rejects(reactionPresent(account, 'post', async () => ++reads === 1
+    ? { data: [{ sender: { id: 'a' } }], total_count: 3 }
+    : { data: [{ sender: { id: 'b' } }], total_count: 2 }))
+  assert.equal(reads, 2)
+  await assert.rejects(reactionPresent(account, 'post', async () => ({ data: [{ sender: { id: '' } }], total_count: 1 })))
+})
+
+test('reactions honor a provider cursor and never accept an empty page with more data as absence', async () => {
+  const account = (await fixture().deps.source.accounts())[0], paths: string[] = []
+  assert.equal(await reactionPresent(account, 'post', async (_method, path) => {
+    paths.push(path)
+    return paths.length === 1 ? { data: [{ sender: { id: 'other' } }], next_cursor: 'page-2' }
+      : { data: [{ sender: { id: account.verifiedProviderId } }] }
+  }), true)
+  const query = new URL(paths[1], 'https://mock.invalid').searchParams
+  assert.equal(query.get('cursor'), 'page-2'); assert.equal(query.has('offset'), false)
+  await assert.rejects(reactionPresent(account, 'post', async () => ({ data: [], next_cursor: 'more' })))
+})
+
+test('post reconciliation rejects malformed cursors without issuing a malformed follow-up', async () => {
+  const account = (await fixture().deps.source.accounts())[0]
+  for (const next_cursor of [123, {}, 'private-cursor']) {
+    let reads = 0
+    const adapter = createPostAdapter(() => {}, { async request<T>() {
+      reads++; return { data: [], next_cursor } as T
+    } }, { run: action => action() })
+    await assert.rejects(adapter.recent(account)); assert.equal(reads, 1)
+  }
+})
 test('adapter imports no concrete HTTP client or scheduler factory', () => {
   const source = readFileSync(join(process.cwd(), 'src/integrations/unipile/post-writer-adapter.ts'), 'utf8')
   assert.doesNotMatch(source, /createUnipileHttpClient|createUnipileRequestScheduler|process\.env/)
@@ -42,6 +74,24 @@ test('reactions paginate using offset, short page is not assumed final', async (
   assert.ok(paths[1].includes('offset=1'))
   await assert.rejects(reactionPresent(account, 'post_1', async () => ({ data: [], total_count: 10 })))
   await assert.rejects(reactionPresent(account, 'post_1', async () => ({ wrong: [] })))
+})
+
+test('all selected actors share one scan; confirmation is fresh but identity permits provider cache', async () => {
+  const account = (await fixture().deps.source.accounts())[0]; let reads = 0
+  assert.deepEqual(await reactionsPresent(account, 'post', ['a', 'b'], async () => {
+    reads++; return { data: [{ sender: { id: reads === 1 ? 'a' : 'b' } }] }
+  }), ['a', 'b'])
+  assert.equal(reads, 2)
+  await assert.rejects(reactionsPresent(account, 'post', ['missing'], async () => ({ data: [], total_count: 4 })))
+  const modes: boolean[] = []
+  const http: PostHttp = { async request<T>(...[_method, path, _body, options]: Parameters<PostHttp['request']>) {
+    modes.push(options!.noCache)
+    return (path.startsWith('/accounts/') ? { provider: 'LINKEDIN', status: 'running' } :
+      path.includes('/users/me') ? { id: account.verifiedProviderId } : { data: [], total_count: 0 }) as T
+  } }
+  const adapter = createPostAdapter(() => {}, http, { run: action => action() })
+  await adapter.identity(account); await adapter.reactions!(account, 'post', ['a', 'b'])
+  assert.deepEqual(modes, [false, false, true])
 })
 test('full Retry-After and OpenAI structured request with usage', async () => {
   assert.equal(fullRetryAfter('3600'), 3_600_000)

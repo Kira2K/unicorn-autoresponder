@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 
@@ -27,6 +28,7 @@ export async function checkPreparedPosts(page: Page, base: string) {
   const runCount = data.runs.length
   await page.reload()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page)
   await page.getByTestId('post-writer-203').click()
   await page.getByTestId('post-prepared-day-1').click()
   await page.getByTestId('post-prepared-1').waitFor()

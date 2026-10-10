@@ -18,6 +18,11 @@ export function createInvitationHistoryController(runtime: ConnectionRuntime, ru
   const update = async (item: ConnectionHistoryItem) => {
     await withConnectionRetry(runtime, run, save, 'storage', 'history_update', () =>
       runtime.store.updateHistory(item), { allowAfterDayClose: true })
+    if (item.runId === run.runId) {
+      const reserved = run.searchProgress.reservedInvitations ??= {}
+      if (['sending', 'uncertain'].includes(item.status)) reserved[item.personId] = item.audience
+      else delete reserved[item.personId]
+    }
   }
 
   const countSkip = (item: ConnectionHistoryItem, reasonCode: string) => {
@@ -49,6 +54,7 @@ export function createInvitationHistoryController(runtime: ConnectionRuntime, ru
       item.reasonCode = reasonCode ?? (status === 'accepted' ? 'connection_accepted' : 'pending_readback_confirmed')
       item.verifiedAt = runtime.now().toISOString()
       await update(item)
+      if (run.searchProgress.actionRecovery) delete run.searchProgress.actionRecovery[`invite:${item.personId}`]
       pending.add(item.personId)
       run.counters.sent += 1
       run.counters.sentByAudience[item.audience] += 1

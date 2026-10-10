@@ -33,7 +33,7 @@ test('Stop during a 429 pause respects full Retry-After even across restart', as
   f.runtime.sleep = async () => { await f.service.stop(1) }
   f.provider.cancel = async (_a, id) => { f.calls.push(id); throw { details: { httpStatus: 429, retryAfterMs: 600_000 } } }
   await f.service.start(1, (await f.service.preview(1)).token)
-  assert.equal((await finished(f.service))?.status, 'uncertain')
+  assert.equal((await finished(f.service))?.status, 'stopped')
   await assert.rejects(createInvitationWithdrawal(f.runtime).preview(1), /Unipile ограничил/)
   assert.equal(f.stored()?.retryAt, f.runtime.now() + 600_000); assert.deepEqual(f.calls, ['1'])
 })

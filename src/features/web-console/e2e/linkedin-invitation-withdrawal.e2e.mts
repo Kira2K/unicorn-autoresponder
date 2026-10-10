@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { mkdir } from 'node:fs/promises'
@@ -38,6 +39,7 @@ try {
   await page.locator('input[type="password"]').fill('101010')
   await page.getByTestId('login-button').click()
   await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page)
   await page.getByTestId('withdrawal-open-203').click()
   await page.getByTestId('withdrawal-load').click()
   await page.getByText('Всего ожидают: 4. Подходят для отзыва: 2.').waitFor()
@@ -54,8 +56,15 @@ try {
   await page.getByTestId('withdrawal-stop').click()
   await page.getByText('Остановлено', { exact: true }).waitFor()
   await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+  await openLinkedInManual(page)
   await page.getByTestId('withdrawal-open-203').click()
   await page.getByText('Остановлено', { exact: true }).waitFor()
+  // Stop preserves receipts but does not spend another read on confirmation.
+  // An explicit check is available after reload; it must not resume cancellation.
+  if (await page.getByTestId('withdrawal-recheck').count()) {
+    await page.getByTestId('withdrawal-recheck').click()
+    await page.getByText('Результат проверен. Оставшаяся очередь сама не запускается.').waitFor()
+  }
   await page.getByTestId('withdrawal-load').click()
   page.once('dialog', dialog => void dialog.accept())
   await page.getByTestId('withdrawal-start').click()

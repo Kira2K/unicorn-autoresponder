@@ -7,7 +7,7 @@ import type { CommentLogger } from './types.ts'
 const SAFE_KEYS = new Set([
   'operationId', 'operation', 'level', 'durationMs', 'attempt', 'httpStatus', 'requestId', 'retryAfterMs',
   'page', 'count', 'candidateCount', 'inputTokens', 'outputTokens', 'cachedTokens', 'model',
-  'delayMs', 'errorCode', 'reasonCode', 'checkCount', 'publishedCount', 'itemCount'
+  'delayMs', 'errorCode', 'reasonCode', 'checkCount', 'publishedCount', 'itemCount', 'nextActionAt'
 ])
 
 const token = (value: unknown, fallback = 'unknown') => {
@@ -28,9 +28,9 @@ export function createCommentLogger(options: {
   jobId: string; platformAccountId: number; writeLine?: (line: string) => void; logDirectory?: string
 }): CommentLogger {
   const directory = options.logDirectory ?? path.resolve(process.cwd(), 'logs/linkedin-comments')
-  const file = path.join(directory, `${token(options.jobId)}-${process.pid}.jsonl`)
   const activeOperations = new Map<string, { operationId: string; startedAt: number }>()
   const write = options.writeLine ?? ((line: string) => {
+    const file = path.join(directory, `${token(options.jobId)}-${new Date().toISOString().slice(0, 10)}-${process.pid}.jsonl`)
     fs.mkdirSync(directory, { recursive: true }); fs.appendFileSync(file, `${line}\n`, 'utf8')
   })
   return { event(stage, status, details = {}) {

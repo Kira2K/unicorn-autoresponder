@@ -62,7 +62,7 @@ export async function executeProfilePlan(client: ProfileClient, plan: ProfilePla
       continue
     }
     const effectiveStep = write.step; const writeError = write.error
-    const checkDelay = Math.max(delayMilliseconds(timing.readBack, options.random), providerDelayMs(writeError))
+    const checkDelay = Math.max(delayMilliseconds(timing.readBack, options.random), providerDelayMs(writeError, clock()))
     options.onStage?.(`verifying:${step.id}:1/1`)
     await progress(index, { status: 'verifying', attempt: 1, maxAttempts: 1,
       message: 'Checking LinkedIn (1/1).', nextActionAt: scheduledAt(checkDelay, clock) })
@@ -75,7 +75,7 @@ export async function executeProfilePlan(client: ProfileClient, plan: ProfilePla
       logger.event('verification_check', 'succeeded', { stepId: step.id, section: step.section,
         attempt: 1, maxAttempts: 1, observation })
     } catch (error) {
-      const delay = providerDelayMs(error)
+      const delay = providerDelayMs(error, clock())
       if (delay) result.verification = { attempt: 0, maxAttempts: 4,
         notBefore: scheduledAt(delay, clock) }
       logger.event('verification_check', 'failed', { stepId: step.id, section: step.section,

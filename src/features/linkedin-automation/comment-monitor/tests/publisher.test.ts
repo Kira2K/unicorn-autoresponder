@@ -32,7 +32,7 @@ async function run() {
   await reconcileUncertain({ job: uncertainJob, logger, save: async () => undefined, adapter: {
     async reply() { writes += 1 }, async listReplies() { return { items: [] } }
   } })
-  assert.equal(writes, 0); assert.equal(uncertain.status, 'failed')
+  assert.equal(writes, 0); assert.equal(uncertain.status, 'uncertain')
 
   const ignoredJob = baseJob(); const ignored = item(); ignored.status = 'ignored'
   ignored.reasonCode = 'insult'; ignoredJob.state.items = [ignored]

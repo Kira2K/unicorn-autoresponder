@@ -9,14 +9,32 @@ export function runMutation(options: {
   client: ProfileClient; store: MutationStore; job: ProfileJob
   update(patch: Partial<ProfileJob>): void
   release(): void
+  acquire?(): () => void
   resumeVerification?: boolean
   executorOptions?: ExecutorOptions & { onSettled?(): void }
 }) {
-  const { client, store, job, update, release, executorOptions = {} } = options
+  const { client, store, job, update, executorOptions = {} } = options
+  let lease: (() => void) | undefined = options.release
+  const release = () => { lease?.(); lease = undefined }
+  const wait = executorOptions.wait ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)))
   const logger = executorOptions.logger ?? createProfileLogger({ jobId: job.jobId })
   const context = { store, job, update, logger }
   const settings = (readOnly: boolean): ExecutorOptions => ({
     ...executorOptions, logger,
+    async wait(ms) {
+      if (!options.acquire || ms <= 0) return wait(ms)
+      // Executor waits occur only after a persisted checkpoint, never mid-request.
+      release()
+      logger.event('operation_yield', 'succeeded', { durationMs: ms })
+      await wait(ms)
+      while (!lease) {
+        try { lease = options.acquire() }
+        catch (error) {
+          if (profileErrorCode(error) !== 'linkedin_operation_active') throw error
+          await wait(1000)
+        }
+      }
+    },
     onStage: phase => {
       update({ phase, updatedAt: new Date().toISOString() })
       logger.event('stage_change', 'succeeded', { operation: phase })

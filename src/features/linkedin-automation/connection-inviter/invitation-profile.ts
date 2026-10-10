@@ -7,6 +7,7 @@ import type { ConnectionHistoryItem, ConnectionInvitationProfile } from './types
 import { PENDING_SNAPSHOT_TTL_MS } from './pending-snapshot.ts'
 import { recordPendingReuse } from './logger.ts'
 import { evaluateCandidate, parseConnectionCandidate } from './policy.ts'
+import { ACTION_SKIPPED } from '../action-recovery.ts'
 
 type PreflightResult = { ready: true } | { ready: false; sent: boolean }
 
@@ -31,12 +32,17 @@ export async function readInvitationProfile(context: InvitationSafetyContext,
       if (mandatoryReadback || !readUnavailable) pending.invalidate(code)
       throw error
     }
-  }, { allowAfterDayClose: mandatoryReadback, ignoreStopRequested: mandatoryReadback })
+  }, { allowAfterDayClose: mandatoryReadback, ignoreStopRequested: mandatoryReadback, actionKey: `invite:${item.personId}` })
 }
 
 async function abortBeforePost(context: InvitationSafetyContext, item: ConnectionHistoryItem,
   error: unknown): Promise<PreflightResult> {
   const errorCode = connectionErrorCode(error)
+  if (errorCode === ACTION_SKIPPED && (error as any).actionKey === `invite:${item.personId}`) {
+    await context.history.release(item, ACTION_SKIPPED, 'failed')
+    context.history.countSkip(item, ACTION_SKIPPED)
+    return { ready: false, sent: false }
+  }
   if (!['connection_stop_requested', 'connection_daily_window_closed'].includes(errorCode)) {
     throw error
   }

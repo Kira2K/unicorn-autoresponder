@@ -2,7 +2,7 @@ import { CONNECTION_SEARCH_CATALOG, connectionSearchTerms } from '../catalog.ts'
 import { createMemoryConnectionInviterStore } from '../memory-store.ts'
 
 export function fixture(options: { stack?: string; sendFailure?: any; pendingReadFailure?: any;
-  stablePeople?: boolean; preflightRejectCount?: number; connectionCount?: number } =
+  stablePeople?: boolean; preflightRejectCount?: number; connectionCount?: number; confirmedReceipts?: boolean } =
   { stack: 'Frontend' }) {
   const pending = new Set<string>(); let person = 0; let sends = 0; let reads = 0
   let profileReads = 0; let currentStack = options.stack
@@ -50,7 +50,10 @@ export function fixture(options: { stack?: string; sendFailure?: any; pendingRea
       return { items: [...pending].slice(offset).map(user_id => ({ user_id })) } },
     async sendInvitation(_accountId: string, personId: string) {
       sends += 1; if (options.sendFailure) throw options.sendFailure
-      pending.add(personId); return { request_id: `request-${personId}` }
+      pending.add(personId)
+      const requestId = `request-${personId}`
+      return { request_id: requestId, ...(options.confirmedReceipts ? {
+        receipt: { accountId: _accountId, personId, requestId } } : {}) }
     }
   }
   return { adapter, repository, store: createMemoryConnectionInviterStore(), writerEnabled: true,

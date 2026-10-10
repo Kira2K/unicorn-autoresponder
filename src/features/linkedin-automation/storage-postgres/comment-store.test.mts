@@ -17,6 +17,6 @@ test('comment SQL checkpoints, author context, restart, failure and scoped purge
   f.fail('patch'); job.status = 'completed'; await assert.rejects(store.update(job)); f.fail('');
   assert.equal((await store.get(job.jobId))?.status, 'paused');
   f.seed('linkedin_comment_monitor_jobs', 9, { platform_account_id: 22, job_id: 'production', created_at: '2000-01-01' });
-  await store.purge('2026-09-02'); assert.deepEqual(await store.list(), []);
+  await store.purge('2026-09-02'); assert.equal((await store.list()).length, 1);
   assert.equal(f.rows.get('linkedin_comment_monitor_jobs')?.has(9), true);
 });

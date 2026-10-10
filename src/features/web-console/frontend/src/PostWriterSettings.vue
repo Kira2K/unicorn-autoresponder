@@ -4,7 +4,7 @@ import PostWriterIntervals from './PostWriterIntervals.vue'
 import PostWriterCv from './PostWriterCv.vue'
 import PostWriterPrepared from './PostWriterPrepared.vue'
 import { writerSettings } from './post-settings-draft'
-const props = defineProps({ settings: Object, disabled: Boolean, memesAvailable: Boolean, runs: Array, clientName: String })
+const props = defineProps({ settings: Object, disabled: Boolean, memesAvailable: Boolean, runs: Array, clientName: String, likeAccounts: Array, likeAccountsError: String })
 const emit = defineEmits(['save', 'start', 'publish'])
 const draft = ref(writerSettings()), topic = ref(''), cv = ref(), exclusions = ref('')
 watch(() => JSON.stringify(writerSettings(props.settings)), () => {
@@ -15,7 +15,11 @@ const payload = computed(() => ({ ...draft.value, forbiddenTopics: exclusions.va
 const dirty = computed(() => JSON.stringify(payload.value) !== JSON.stringify(writerSettings(props.settings)))
 const prepared = computed(() => draft.value.contentMode === 'prepared')
 const invalid = computed(() => (draft.value.scheduled && (prepared.value ? !props.memesAvailable : !draft.value.days.length)) ||
+  (draft.value.likes && draft.value.likeAccountIds !== undefined && !draft.value.likeAccountIds.length) ||
   draft.value.preparedPosts.some(post => Array.from(post.text).length > 3000))
+const selectedLikeIds = computed({ get: () => draft.value.likeAccountIds ?? [], set: value => { draft.value.likeAccountIds = value } })
+const unavailableLikes = computed(() => (draft.value.likeAccountIds ?? []).filter(id => !(props.likeAccounts ?? []).some(a => a.id === id)))
+function toggleLikes() { if (draft.value.likes && draft.value.likeAccountIds === undefined) draft.value.likeAccountIds = [] }
 const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 </script>
 <template>
@@ -49,6 +53,8 @@ const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
       </div>
       <aside class="schedule-panel">
         <h3>Расписание</h3>
+        <p v-if="settings?.automationManaged">Управляется в карточке ученика → «Расписание». Здесь настраивается содержимое постов.</p>
+        <template v-else>
         <label class="check-row"><input v-model="draft.scheduled" type="checkbox" :disabled="disabled" data-testid="post-scheduled" /> Автопубликация</label>
         <p>{{ prepared ? 'Отправим сохранённые тексты в выбранные дни. Можно оставить выключенным и публиковать вручную.' : 'Один пост в выбранный день. Расписание не ждёт подтверждения.' }}</p>
         <div v-if="!prepared" class="post-days">
@@ -56,9 +62,20 @@ const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
             :disabled="disabled" :data-testid="`post-day-${index + 1}`" /> {{ day }}</label>
         </div>
         <PostWriterIntervals v-model="draft.intervals" :disabled="disabled" />
+        </template>
         <hr />
-        <label class="check-row"><input v-model="draft.likes" type="checkbox" :disabled="disabled" data-testid="post-likes" /> Лайки от других учеников</label>
-        <small>После публикации: 6–7 подключённых учеников. Выключение не удаляет уже поставленные лайки.</small>
+        <label class="check-row"><input v-model="draft.likes" type="checkbox" :disabled="disabled" data-testid="post-likes" @change="toggleLikes" /> Лайки после публикации</label>
+        <details :open="draft.likes" class="topics-details"><summary>Кто ставит лайки · выбрано {{ selectedLikeIds.length }}</summary>
+          <p v-if="likeAccountsError" role="alert">{{ likeAccountsError }}</p>
+          <div class="like-options"><label v-for="actor in likeAccounts || []" :key="actor.id" class="check-row">
+            <input v-model="selectedLikeIds" type="checkbox" :value="actor.id" :disabled="disabled" :data-testid="`post-like-account-${actor.id}`" />{{ actor.name }} · #{{ actor.id }}</label></div>
+          <p v-if="!likeAccounts?.length && !likeAccountsError">Нет других подключённых аккаунтов.</p>
+          <p v-if="unavailableLikes.length">Недоступны: {{ unavailableLikes.map(id => '#' + id).join(', ') }}.
+            <button type="button" :disabled="disabled" @click="draft.likeAccountIds = selectedLikeIds.filter(id => !unavailableLikes.includes(id))">Убрать из выбора</button></p>
+          <small v-if="draft.likeAccountIds === undefined && draft.likes">Сохранена прежняя настройка: 6–7 подключённых аккаунтов. Отметьте конкретные аккаунты, чтобы заменить её.</small>
+          <small v-else>Лайки ставят только выбранные аккаунты. Выбор используется и при ручном запуске. Уже поставленные лайки не удаляются.</small>
+        </details>
+        <small v-if="draft.likes && draft.likeAccountIds !== undefined && !draft.likeAccountIds.length">Выберите хотя бы один аккаунт.</small>
         <details class="topics-details"><summary>Запреты для этого ученика</summary>
           <label>Одна тема на строку <textarea v-model="exclusions" rows="3" :disabled="disabled" data-testid="post-forbidden-topics" /></label>
         </details>
@@ -73,3 +90,4 @@ const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
   </section>
 </template>
 <style scoped src="./post-writer-settings.css"></style>
+<style scoped>.like-options { display:grid;gap:8px;max-height:220px;overflow:auto;padding:10px 0; }</style>

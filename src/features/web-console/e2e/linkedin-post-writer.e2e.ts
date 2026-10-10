@@ -1,3 +1,4 @@
+const { openLinkedInManual } = require('./linkedin-console-navigation.ts') as typeof import('./linkedin-console-navigation.ts')
 const assert: typeof import('node:assert/strict') = require('node:assert/strict')
 const { chromium } = require('playwright') as typeof import('playwright')
 const { startIsolatedPostTestProcesses, waitPostHttp, postRoot } =
@@ -25,6 +26,7 @@ async function main() {
     await page.locator('input[type="password"]').fill('101010')
     await page.getByTestId('login-button').click()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     const initial = await page.request.get(`http://127.0.0.1:${uiPort}/api/admin/linkedin/accounts/203/post-writer`)
     assert.deepEqual((await initial.json()).runs, [], 'E2E must use a fresh isolated backend')
@@ -49,6 +51,7 @@ async function main() {
     assert.equal(rejected.status(), 409, 'backend requires explicit meme review in manual approval mode')
     await page.reload()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     await page.getByTestId('post-approve').waitFor()
     assert.equal(await page.getByTestId('post-meme-reviewed').isChecked(), false)
@@ -72,6 +75,20 @@ async function main() {
     assert.equal(data.runs[0].meme.imageCalls, 1)
     assert.deepEqual(errors, [])
     await page.screenshot({ path: `${postRoot}/logs/post-writer-checks/mock-desktop.png`, fullPage: true })
+    // Presentation regression only; source fallback and actual publication are covered by source.test.ts.
+    const snapshotUrl = '**/api/admin/linkedin/accounts/203/post-writer'
+    const warningSnapshot = structuredClone(data)
+    warningSnapshot.runs[0].context.warning = { code: 'post_cv_missing_stack',
+      message: 'Готового английского CV нет. Пост создаётся по стеку без утверждений о личном опыте и достижениях.' }
+    await page.route(snapshotUrl, route => route.fulfill({ json: warningSnapshot }))
+    await page.route(`${snapshotUrl}/events`, route => route.fulfill({ contentType: 'text/event-stream',
+      body: `event: snapshot\ndata: ${JSON.stringify(warningSnapshot)}\n\n` }))
+    await page.reload(); await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page); await page.getByTestId('post-writer-203').click()
+    await page.getByTestId('post-source-warning').waitFor()
+    assert.match(await page.getByTestId('post-source-warning').innerText(), /CV.*стек.*личном опыте/u)
+    await page.screenshot({ path: `${postRoot}/logs/post-writer-checks/mock-stack-warning.png`, fullPage: true })
+    await page.unroute(snapshotUrl); await page.unroute(`${snapshotUrl}/events`)
     await page.setViewportSize({ width: 1920, height: 1080 })
     await page.screenshot({ path: `${postRoot}/logs/post-writer-checks/mock-wide.png`, fullPage: true })
     await checkPreparedPosts(page, `http://127.0.0.1:${uiPort}`)

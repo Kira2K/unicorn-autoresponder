@@ -53,9 +53,9 @@ async function run() {
   assert.equal(guarded.status, 'partial')
   assert.equal(guarded.stage, 'search_contract_suspect')
   assert.equal(guarded.errorCode, 'connection_search_contract_suspect')
-  assert.equal(guarded.searchProgress.consecutiveEmptyRecruiterSearches, 20)
+  assert.equal(guarded.searchProgress.consecutiveEmptyRecruiterSearches, 6)
   assert.deepEqual(guarded.counters.shortfallByAudience, { recruiter: 4, technical: 1 })
-  assert.equal(emptySearches, 20)
+  assert.equal(emptySearches, 6)
   assert.equal(empty.metrics.sends, 0)
 
   const split = fixture({ stack: 'GO', connectionCount: 1663 })

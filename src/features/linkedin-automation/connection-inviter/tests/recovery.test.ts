@@ -109,9 +109,9 @@ async function queuedCandidatesSurviveRestart() {
     autoRecover: false, sleep: async () => undefined })
   await service.recover()
   const failed: any = await waitRun(service, run.runId)
-  assert.equal(failed.status, 'partial'); assert.equal(failed.stage, 'search_exhausted')
+  assert.equal(failed.status, 'partial'); assert.equal(failed.stage, 'search_contract_suspect')
   assert.equal(failed.counters.sent, 1)
-  assert.equal(failed.errorCode, 'connection_search_space_exhausted')
+  assert.equal(failed.errorCode, 'connection_search_contract_suspect')
   assert.equal(test.metrics.sends, 1)
   service.stop()
 }

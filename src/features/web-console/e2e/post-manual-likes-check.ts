@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { once } from 'node:events'
@@ -36,6 +37,7 @@ export async function checkManualLikes(disconnected = false, resume = false) {
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD)
     await page.getByTestId('login-button').click()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     if (resume) assert.equal(await page.getByTestId('post-likes-start').innerText(), 'Продолжить лайки')
     await page.getByTestId('post-likes-start').click()
@@ -67,6 +69,7 @@ export async function checkManualLikes(disconnected = false, resume = false) {
     assert.equal(await page.getByTestId('post-likes').isChecked(), false)
     await page.reload()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     await page.getByTestId('post-progress').getByText(expectedLabel, { exact: false }).waitFor()
     if (disconnected) await page.getByTestId('post-like-skipped').waitFor()

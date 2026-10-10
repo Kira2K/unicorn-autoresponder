@@ -15,10 +15,10 @@ function safeResult(result: any): Record<string, unknown> {
 
 function executeLinkedInAuthRun(options: any) {
   const { account, action, execute, history, repository, run, update, onDone } = options
-  const startedWrite = history.start(run).then(() => true).catch(() => false)
-  void execute(account, action, (event: any) => update(run, {
+  const startedWrite = Promise.resolve().then(() => history.start(run)).then(() => true).catch(() => false)
+  void Promise.resolve().then(() => execute(account, action, (event: any) => update(run, {
     stage: event.stage, stageStatus: event.status
-  }), repository).then((result: any) => update(run, {
+  }), repository)).then((result: any) => update(run, {
     status: 'succeeded', stage: 'completed', stageStatus: 'succeeded',
     finishedAt: new Date().toISOString(), result: safeResult(result)
   })).catch((error: unknown) => {

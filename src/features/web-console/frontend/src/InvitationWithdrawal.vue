@@ -5,11 +5,11 @@ const props = defineProps({ account: Object })
 const control = useInvitationWithdrawal(props.account)
 const count = computed(() => control.preview.value?.items.filter(item => item.eligible).length || 0)
 const statuses = { running: 'Отзыв выполняется', completed: 'Очередь завершена', stopped: 'Остановлено',
-  failed: 'Очередь остановлена из-за ошибки', uncertain: 'Нужна проверка результата', interrupted: 'Прервано перезапуском' }
+  failed: 'Очередь остановлена из-за ошибки', uncertain: 'Нужна проверка результата', interrupted: 'Выполнение прервано' }
 const status = computed(() => control.active.value && control.run.value?.retryAttempt
   ? 'Пауза: Unipile ограничил запросы (429)' : statuses[control.run.value?.status])
 const reasons = { already_attempted: 'Уже была попытка: повтор запрещён', date_unknown: 'Нет надёжной даты — пропускаем',
-  too_recent: 'Не старше 14 дней — оставляем' }
+  too_recent: 'Не старше 14 дней — оставляем', invitation_result_pending: 'Может относиться к неподтверждённой отправке — оставляем' }
 </script>
 <template>
   <Button :label="control.run.value ? 'Открыть отзыв' : 'Отозвать старые приглашения'" size="small" severity="secondary" outlined
@@ -28,9 +28,9 @@ const reasons = { already_attempted: 'Уже была попытка: повто
         @click="control.minimize" />
     </div></template>
     <p>Проверяем все ожидающие приглашения этого аккаунта, включая отправленные вручную.
-      Отзываем только старше 14 дней, по одному, со случайными паузами 2–13 секунд.</p>
+      Отзываем только старше 14 дней, по одному, со случайными паузами 5–15 секунд.</p>
     <p>«Свернуть» скрывает окно: очередь продолжит работу, можно выбрать другого ученика.
-      После перезапуска backend она сама не продолжится.</p>
+      Автоматический прогон восстанавливается по расписанию; ручная очередь требует продолжения.</p>
     <p v-if="control.error.value" role="alert">{{ control.error.value }}</p>
     <section v-if="control.run.value" data-testid="withdrawal-progress" aria-live="polite">
       <strong>{{ status }}</strong>
@@ -48,7 +48,7 @@ const reasons = { already_attempted: 'Уже была попытка: повто
       <p v-if="control.run.value.checkedAt && !control.needsCheck.value">Результат проверен. Оставшаяся очередь сама не запускается.</p>
       <Button v-if="control.needsCheck.value" label="Проверить результат" data-testid="withdrawal-recheck"
         :loading="control.busy.value" :disabled="control.busy.value" @click="control.recheck" />
-      <p v-if="control.run.value.stopRequested && control.active.value">Останавливаемся. Проверяем уже начатую операцию.</p>
+      <p v-if="control.run.value.stopRequested && control.active.value">Останавливаемся. Сохраняем результат уже начатой операции.</p>
       <Button v-if="control.active.value" label="Остановить" severity="danger" data-testid="withdrawal-stop"
         :disabled="control.busy.value || control.run.value.stopRequested" @click="control.stop" />
     </section>

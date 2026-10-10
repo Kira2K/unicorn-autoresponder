@@ -39,7 +39,7 @@ async function searchRetriesSameCursor() {
   const internal: any = await test.store.getRun(started.runId)
   assert.equal(completed.status, 'succeeded')
   assert.deepEqual(failedCursors, ['same-cursor', 'same-cursor', 'same-cursor'])
-  assert.deepEqual(retryDelays.slice(0, 3), [180_000, 90_000, 180_000])
+  assert.deepEqual(retryDelays.slice(0, 3), [270_000, 90_000, 270_000])
   assert.equal(persistedTimerDelays.some(delay => delay >= 30 * 60_000), false)
   assert.equal(internal.searchProgress.recentSearchAt.length > completed.counters.searched, true)
 }

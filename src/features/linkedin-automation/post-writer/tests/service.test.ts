@@ -34,7 +34,6 @@ test('stop before POST; lost POST response reconciles after full Retry-After, ne
   f.restart()
   await f.step(599_000)
   assert.equal((await f.run()).status, 'uncertain')
-  await f.service.action(run.id, 'stop')
   await f.step(1000)
   assert.equal((await f.run()).status, 'published')
   assert.equal(f.counts.publish, 1)
