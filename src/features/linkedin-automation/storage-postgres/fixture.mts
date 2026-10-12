@@ -43,7 +43,7 @@ export function featureFixture() {
     transaction<T>(action: (tx: PostgresTransaction) => Promise<T>): Promise<T> {
       const request = tail.then(async () => {
         const before = structuredClone(rows); let value: T;
-        try { value = await action({ ...db, async lockKey() { calls.push('lock'); } }); }
+        try { value = await action({ ...db, async lockRecord() {}, async lockKey() { calls.push('lock'); } }); }
         catch (error) { rows.clear(); for (const [id, data] of before) rows.set(id, data); throw error; }
         if (fail === 'commit') throw Object.assign(Error('commit uncertain'), { code: 'commit_uncertain' });
         return value;

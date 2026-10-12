@@ -7,6 +7,9 @@ const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
 const { RELATIONS } = require('../../../integrations/noco/core/schema.ts') as {
   RELATIONS: Record<string, string>
 }
+const { resumeWorkflowRevision, staleResumeWorkflowError } = require('../../../integrations/telegram/resume-workflow-state.ts') as
+  typeof import('../../../integrations/telegram/resume-workflow-state.ts')
+const { withResumeWriteLock } = require('./resume-write-lock.ts') as typeof import('./resume-write-lock.ts')
 const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as {
   buildDolphinProfileStatus(options: {
     client: WebClient
@@ -1402,12 +1405,18 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
         .map(record => toResumeWorkflow(record, clientsById.get(cvProcessingClientId(record) ?? 0), []))
     },
 
-    async patchResumeWorkflow(recordId: number, input: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord> {
+    async patchResumeWorkflow(recordId: number, input: ResumeWorkflowPatch, expectedRevision?: string): Promise<ResumeWorkflowRecord> {
       const patch = buildResumeWorkflowPatch(input)
-      if (Object.keys(patch).length) {
-        await nocoClient.patchRecord(TABLES.cvProcessing.id, Number(recordId), patch)
-      }
-      const record = await fetchCvProcessingById(Number(recordId))
+      const record = typeof nocoClient.patchResumeWorkflowRecord === 'function' && expectedRevision !== undefined
+        ? await nocoClient.patchResumeWorkflowRecord(Number(recordId), patch, expectedRevision)
+        : await withResumeWriteLock(nocoClient, Number(recordId), async () => {
+            if (expectedRevision !== undefined) {
+              const current = await fetchCvProcessingById(Number(recordId))
+              if (!current || resumeWorkflowRevision(toResumeWorkflow(current)) !== expectedRevision) throw staleResumeWorkflowError()
+            }
+            if (Object.keys(patch).length) await nocoClient.patchRecord(TABLES.cvProcessing.id, Number(recordId), patch)
+            return await fetchCvProcessingById(Number(recordId))
+          })
       if (!record) throw notFoundError(`CV processing row ${recordId} was not found`)
       const clientId = cvProcessingClientId(record)
       const client = clientId ? await fetchClientById(clientId) ?? undefined : undefined
