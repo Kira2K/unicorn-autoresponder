@@ -179,6 +179,8 @@ async function applyAutomationProfileLock(
   status: OrchestratorStatus
   previousProfileStatusId: number | null | undefined
 }> {
+  const { assertDolphinOwnership } = require('../../../integrations/dolphin/ownership.ts') as { assertDolphinOwnership(id: number): void }
+  assertDolphinOwnership(clientData.dolphinProfileId)
   status = addLifecycleEvent(
     status,
     runStartedAt,

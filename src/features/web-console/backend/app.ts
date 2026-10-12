@@ -1,4 +1,5 @@
 const crypto = require('node:crypto')
+const { createCvTailoringService } = require('../../../integrations/cv-tailoring.ts') as typeof import('../../../integrations/cv-tailoring.ts')
 const { registerPostWriterRoutes } = require('./post-writer-routes.ts') as typeof import('./post-writer-routes.ts')
 const { createLivePostWriter } = require('../../linkedin-automation/post-writer/runtime.ts') as typeof import('../../linkedin-automation/post-writer/runtime.ts')
 const { createMockPostWriter } = require('../../linkedin-automation/post-writer/mock.ts') as typeof import('../../linkedin-automation/post-writer/mock.ts')
@@ -214,7 +215,6 @@ const CLIENT_PASSWORD = '1234'
 const PROVIDER_LOGIN = 'Nariman'
 const PROVIDER_PASSWORD = 'Nariman'
 const PROVIDER_STATUS_LABEL = 'on en market'
-const CV_TAILORING_ENDPOINT = 'https://tailered-cv.onrender.com/cv-from-pdf'
 const CV_TAILORING_MAX_PDF_BYTES = 15 * 1024 * 1024
 
 type AuthedRequest = Request & { webSession?: WebSession }
@@ -384,60 +384,7 @@ async function buildOwnProxyName(repository: WebConsoleRepository, client: any):
 }
 
 function createDefaultCvTailoringService(fetchImpl: typeof fetch = fetch): CvTailoringService {
-  return {
-    async tailorFromPdf(request: CvTailoringRequest): Promise<CvTailoringResult> {
-      const apiKey = String(process.env.CV_TAILORING_API_KEY ?? '').trim()
-      if (!apiKey) {
-        throw Object.assign(new Error('CV tailoring API key is not configured.'), {
-          code: 'cv_tailoring_not_configured'
-        })
-      }
-      const formData = new FormData()
-      const pdfBytes = new Uint8Array(request.fileBuffer.length)
-      pdfBytes.set(request.fileBuffer)
-      formData.append('cv', new Blob([pdfBytes.buffer], { type: 'application/pdf' }), request.fileName)
-      formData.append('jobRequirements', request.jobRequirements)
-      const response = await fetchImpl(CV_TAILORING_ENDPOINT, {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey },
-        body: formData
-      })
-      if (!response.ok) {
-        const message = await response.text().catch(() => '')
-        throw Object.assign(new Error(message || `CV tailoring API failed with ${response.status}`), {
-          code: 'cv_tailoring_api_failed',
-          status: response.status
-        })
-      }
-      const rawUrl = (await response.text()).trim()
-      const parsedUrl = extractCvTailoringUrl(rawUrl)
-      if (!parsedUrl) {
-        throw Object.assign(new Error('CV tailoring API returned an empty URL.'), {
-          code: 'cv_tailoring_api_failed',
-          status: response.status
-        })
-      }
-      return { url: parsedUrl }
-    }
-  }
-}
-
-function extractCvTailoringUrl(value: string): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const parsedUrl = (() => {
-    try {
-      const parsed = JSON.parse(raw)
-      if (typeof parsed === 'string') return parsed.trim()
-      if (parsed && typeof parsed.url === 'string') return parsed.url.trim()
-      if (parsed && typeof parsed.result === 'string') return parsed.result.trim()
-      if (parsed && typeof parsed.fileUrl === 'string') return parsed.fileUrl.trim()
-      return ''
-    } catch {
-      return raw
-    }
-  })()
-  return parsedUrl
+  return createCvTailoringService(fetchImpl)
 }
 
 function createMockCvTailoringService(): CvTailoringService {

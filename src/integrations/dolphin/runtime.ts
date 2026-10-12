@@ -29,6 +29,7 @@ const { requestLocalDolphin } = require('./local-api.ts') as {
 
 type DolphinStartResponse = import('./types.ts').DolphinStartResponse
 type DolphinRuntimeDependencies = {
+  readStartedEndpoint: (profileId: number, startedAt: number) => Promise<DolphinStartResponse>
   getRunningDolphinBrowserProfileIds: () => number[]
   killDolphinBrowserProfileProcesses: typeof killDolphinBrowserProfileProcesses
   requestLocalDolphin: typeof requestLocalDolphin
@@ -36,7 +37,9 @@ type DolphinRuntimeDependencies = {
 }
 
 const startedProfileIds = new Set<number>()
+const { acquireDolphinOwnership, assertDolphinOwnership, releaseDolphinOwnership } = require('./ownership.ts') as { acquireDolphinOwnership(id: number, owner?: string): void; assertDolphinOwnership(id: number): void; releaseDolphinOwnership(id: number): void }
 const defaultDependencies: DolphinRuntimeDependencies = {
+  readStartedEndpoint: require('./automation-endpoint.ts').readStartedDolphinEndpoint,
   getRunningDolphinBrowserProfileIds,
   killDolphinBrowserProfileProcesses,
   requestLocalDolphin,
@@ -66,7 +69,8 @@ async function waitForDolphinProfileToStop(profileId: number): Promise<boolean> 
   return !isDolphinProfileRunning(profileId)
 }
 
-async function stopDolphinProfile(profileId: number): Promise<void> {
+async function stopDolphinProfile(profileId: number, keepLease = false): Promise<void> {
+  assertDolphinOwnership(profileId)
   let stopError: unknown
 
   try {
@@ -96,6 +100,7 @@ async function stopDolphinProfile(profileId: number): Promise<void> {
   }
 
   startedProfileIds.delete(profileId)
+  if (!keepLease) releaseDolphinOwnership(profileId)
 }
 
 async function stopStartedProfiles(): Promise<void> {
@@ -189,8 +194,11 @@ async function requestDolphinProfileStart(
 
 async function startDolphinProfileWithHeadless(
   profileId: number,
-  headless: boolean
+  headless: boolean,
+  refuseIfBusy = false
 ): Promise<DolphinStartResponse> {
+  if (refuseIfBusy && isDolphinProfileRunning(profileId)) throw Error('dolphin_profile_busy')
+  const startedAt = Date.now()
   const body = {
     automation: true,
     headless
@@ -204,7 +212,12 @@ async function startDolphinProfileWithHeadless(
 
       return response
     } catch (error: any) {
-      if (!isProfileStartBusyError(error) || attempt === maxAttempts) {
+      if (refuseIfBusy && isProfileStartBusyError(error) && isDolphinProfileRunning(profileId)) {
+        // The profile was idle before our owned start. Preserve ownership even if endpoint recovery fails.
+        startedProfileIds.add(profileId)
+        return await dependencies.readStartedEndpoint(profileId, startedAt)
+      }
+      if (refuseIfBusy || !isProfileStartBusyError(error) || attempt === maxAttempts) {
         throw error
       }
 
@@ -213,7 +226,7 @@ async function startDolphinProfileWithHeadless(
         `Dolphin profile ${profileId} is busy before start attempt ` +
           `${attempt + 1}/${maxAttempts}; stopping and waiting ${retryDelayMs}ms`
       )
-      await stopDolphinProfile(profileId).catch(() => undefined)
+      await stopDolphinProfile(profileId, true).catch(() => undefined)
       await dependencies.wait(retryDelayMs)
     }
   }
@@ -225,9 +238,11 @@ async function startDolphinProfileWithHeadless(
 
 async function startDolphinProfile(
   profileId: number,
-  options: { headless?: boolean } = {}
+  options: { headless?: boolean; refuseIfBusy?: boolean; owner?: string } = {}
 ): Promise<DolphinStartResponse> {
-  return await startDolphinProfileWithHeadless(profileId, options.headless ?? DOLPHIN_HEADLESS)
+  acquireDolphinOwnership(profileId, options.owner)
+  try { return await startDolphinProfileWithHeadless(profileId, options.headless ?? DOLPHIN_HEADLESS, options.refuseIfBusy) }
+  catch (error) { if (!startedProfileIds.has(profileId)) releaseDolphinOwnership(profileId); throw error }
 }
 
 function __setDolphinRuntimeTestDependencies(
@@ -240,6 +255,7 @@ function __setDolphinRuntimeTestDependencies(
 }
 
 function __resetDolphinRuntimeForTests(): void {
+  for (const id of startedProfileIds) releaseDolphinOwnership(id)
   dependencies = defaultDependencies
   startedProfileIds.clear()
 }

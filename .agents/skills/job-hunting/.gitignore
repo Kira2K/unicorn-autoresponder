@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+# working files a run creates next to the scripts — anchored, so templates/ is not swallowed
+/rows.json
+/postings.json
+/bodies.json
+/shortlist.json
+/rejects.json
+/profile.md
+/applied-list.md
+/session-log.md

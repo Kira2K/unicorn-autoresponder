@@ -1,0 +1,31 @@
+# Infrastructure
+
+Shared adapters only; stage decisions belong in their stage folders.
+
+Sol model readiness: `sol-availability.ts` checks the exact configured ID and required effort in the authenticated App Server catalog. `readModels()` handles bounded pagination and exposes no arbitrary RPC. This is metadata evidence, not an inference-quality check. Missing catalog/model/effort blocks dispatch; neither an older Sol version nor a matching display name is a fallback. Classification checks before claiming generation intent; tool-enabled investigation checks before creating a thread. The existing loopback wire probe remains a separate check of serialization and tool isolation.
+
+Keep the roles distinct: Patchright/page readers execute collection operations; Sol high diagnoses unfamiliar sources and proposes recipes/engine repairs through the investigation contract. Sol medium receives complete bounded descriptions/rules for structured classification, with browser/shell tools disabled. Title/date/salary comparisons, recipe replay, cache lookup, SQL and reports stay deterministic. Jev remains deferred.
+
+Deferred concurrency coordinator: [reuse HH's bounded-worker helper with a shared three-action ceiling](../EFFICIENCY_PLAN.md#three-simultaneous-actions-hard-limit). This concerns simultaneous work, not a timed campaign schedule. Extract the reusable mechanism without importing the HH CLI/ENV/launch side effects; preserve HH behavior. External callers, nested work and resume must share the limit rather than creating separate three-worker pools.
+
+- `database.ts`: injected read-only repeatable-read callback using the existing PostgreSQL config, pool, identity marker, catalog and record reader. Closes sessions/pools; propagates sanitized errors. No schema writes or startup migrations.
+- `store.ts`: atomic state writes, candidate locks, redacted diagnostic events. Durable submission state is authoritative if diagnostic writing fails.
+- `browser.ts` / `browser-profile.ts`: explicit Playwright/Patchright selection, persistent profile lease/backup, runtime metadata and cleanup. Never silently switch drivers.
+- `navigation-policy.ts`: forbid LinkedIn and its short-link hosts.
+- `identity.ts`: canonical vacancy URLs and per-candidate application history checks.
+- `ai.ts`: existing AI HTTP client plus schemas; generation/evaluation policies stay in their stages.
+- `ai-usage.ts`: injected request measurement without changing AI policy. Counts logical calls versus actual retry attempts, provider-returned tokens, unknown usage and exact repeated request inputs. Emits only safe counters/hashes; sink failure is nonfatal. `createAiClient(env, {usage})` enables it for API consumers; CLI supplies it automatically.
+- `quota-guard.ts` / `budget-watchdog.ts`: account-wide Codex weekly-quota admission and hard-stop policy. The percentage comes only from App Server rate limits; token counters are separate diagnostics and deduplicate response IDs. Missing, invalid, stale, rolled-back or changed-window observations fail closed. The independent watchdog polls every five seconds, persists atomic status/stop reports, and invokes only an injected owned-worker cancellation callback.
+- `codex-app-server.ts`: narrow stdio App Server transport for rate-limit reads and turns started and registered by the same adapter. Interruptions require the exact owner token, thread ID and turn ID; the adapter exposes no arbitrary RPC or process-wide cancellation.
+- The classification adapter additionally uses `readAccount()` to require the existing ChatGPT account and reject API-key fallback. Its private thread configuration and loopback capability probe live in `stack_classification/codex-classification.ts`; the engine runner keeps its tools. Closing the client destroys only its owned pipes to prevent Windows shutdown hangs.
+- `sol-task-cli.ts`: one explicit, fresh-context Sol worker with a durable task intent and independent quota polling. It never retries an existing intent automatically. This includes Codex usage; it is not a separate paid API call.
+- `codex-token-audit.ts`: aggregate actual per-response usage from explicitly selected session streams and a fixed time interval. Deduplicate response IDs across streams; ignore cumulative snapshots; separate development/runtime and models. It reads no prompts and does not estimate weekly percentage from tokens.
+
+For a sanitized one-shot status refresh (no model call), run `node src/features/external-responses/infrastructure/budget-status-cli.ts --budget logs/external-responses/CAMPAIGN/budget.json --status logs/external-responses/CAMPAIGN/budget-status.json`. App Server authentication is inherited from the Windows Codex session. A live guarded task must provide `cancelOwnedWork`; `runGuardedTask` refuses live preflight without it. That preflight verifies the callback is wired, while an actual App Server cancellation still needs a live owned-turn acceptance check. Call `admitNewAiWork()` before every new turn. Resuming retains the approved baseline and window identity; it never rebases the allowance.
+
+Reuse injected contracts in tests. Do not load ENV or create clients inside pure business modules. CLI owns composition. Tests: `browser-session.test.ts`, persistence/identity cases in `contracts.test.ts`, and database adapter tests. Database migrations are explicit maintenance actions, separate from this runtime.
+
+Measurement contract tests: `tests/ai-usage.test.ts` use mocked HTTP responses including retries, missing/invalid usage, output parsing failure and failed log writes. No paid AI calls or browser navigation are needed. Details/report paths: [MVP reuse plan](../MVP_REUSE_PLAN.md#usage-measurement-implemented-now).
+
+- `postgres.ts`: injected checked read/write transactions and pool lifecycle, with no automatic migrations.
+- `postgres-store.ts`: SQL-backed batch/outcome persistence in `noco.application_batches` and `noco.applications`, advisory lock by database student, atomic intent/outcome updates, duplicate-safe history and best-effort local report snapshots. Local CV/browser state stays in the file adapter. Migration 006 places workflow tables in the same `noco` schema exposed by the existing NocoDB source.

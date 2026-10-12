@@ -115,6 +115,17 @@ async function main(): Promise<void> {
   await testStopKeepsTrackingWhenStillRunning()
   await testApiStopFailureCanStillCleanWithFallback()
   __resetDolphinRuntimeForTests()
+  let running = false, starts = 0, stops = 0, recovered = 0
+  __setDolphinRuntimeTestDependencies({
+    getRunningDolphinBrowserProfileIds: () => running ? [404] : [],
+    requestLocalDolphin: async (endpoint: string) => { if (endpoint.endsWith('/start')) { starts++; running = true; throw Error('EBUSY: DevToolsActivePort') }; stops++; running = false; return { success: true } },
+    readStartedEndpoint: async () => { recovered++; return { success: true, automation: { port: 9222 } } }
+  })
+  const { startDolphinProfile: startStrict } = require('./runtime.ts')
+  await startStrict(404, { refuseIfBusy: true, headless: false }); assert.equal(starts, 1); assert.equal(recovered, 1); assert.equal(stops, 0)
+  await stopDolphinProfile(404)
+  running = true; await assert.rejects(startStrict(404, { refuseIfBusy: true }), /busy/); assert.equal(starts, 1)
+  __resetDolphinRuntimeForTests()
   console.log('dolphin runtime tests passed')
 }
 

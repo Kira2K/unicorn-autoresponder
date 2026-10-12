@@ -1,0 +1,7 @@
+# Company form routes
+
+`sumup.ts` resolves only an observed `job-boards.greenhouse.io/embed/job_app` iframe on the official SumUp posting. The iframe board and job token must match the posting ID. The temporary Greenhouse `validityToken` is used only for browser navigation and stripped from inspection and receipt URLs. The route reuses the Greenhouse field and submission lifecycle; its engine memory version is `observed-greenhouse-iframe-v1`.
+
+`gurtam.ts` scopes controls to `#recruitment-applications-form` on official Gurtam career postings. The four custom selects are clicked through visible options and checked against their hidden backing values. The CV is selected through `#button-upload`, limited to a nonempty PDF smaller than 5 MiB, and verified by bytes, `#cv` filename, and visible upload label. Both required privacy and future-opportunity consents remain separate answers. The form posts the file with the final application; it has no prior upload endpoint. A visible confirmation inside `.recruitment-applications.form-submitted` is required, and `/recruitment-application-form` validation errors prevent success. Its memory version is `native-recruitment-form-v1`.
+
+Both routes enter `createAtsAdapters` and the existing application stage. Dry runs inspect and prepare answers without filling, uploading, or submitting. Existing eligibility, missing-answer, verification, durable intent, request evidence, and uncertain-outcome rules apply. The observed public pages were inspected read-only; no employer upload or submission has been tested.

@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "company:sql": "node src/features/company-client-management/cli.mts",
+    "company:sql:test": "node --test --test-concurrency=1 src/features/company-client-management/tests/*.test.mts",
+    "external:responses": "node src/features/external-responses/cli.ts",
+    "external:responses:test": "node --test src/features/external-responses/tests/*.test.ts",
     "linkedin:withdrawals:test": "node --test src/features/linkedin-automation/invitation-withdrawal/*.test.ts src/integrations/unipile/invitation-withdrawal.test.ts src/features/web-console/backend/invitation-withdrawal-routes.test.ts",
     "linkedin:withdrawals:e2e": "node src/features/web-console/e2e/linkedin-invitation-withdrawal.e2e.mts",
     "linkedin:posts:standalone": "node src/features/linkedin-automation/post-writer/standalone-cli.ts",
@@ -135,6 +139,7 @@
   "dependencies": {
     "@google/genai": "^1.50.1",
     "@grammyjs/types": "^5.0.0",
+    "@napi-rs/canvas": "1.0.9",
     "@primeuix/themes": "^2.0.3",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
@@ -148,17 +153,21 @@
     "input": "^1.0.1",
     "openapi-client-axios": "^7.9.0",
     "openapi-typescript": "^7.13.0",
-    "playwright": "^1.60.0",
+    "patchright": "1.63.0",
+    "pdfjs-dist": "6.3.289",
     "pg": "8.23.0",
+    "playwright": "^1.60.0",
     "prebuilt-tdlib": "^0.1008065.0",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.5",
+    "quickjs-emscripten": "0.32.0",
     "tdl": "^8.1.0",
     "telegram": "^2.26.22",
     "vite": "^8.0.16",
     "vue": "^3.5.38"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.3",
     "@types/node": "^24.12.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"

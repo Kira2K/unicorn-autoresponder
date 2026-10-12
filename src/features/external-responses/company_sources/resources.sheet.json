@@ -1,0 +1,20 @@
+{
+  "sheets": [
+    { "title": "ИНТЕГРАТОРЫ И САЙТЫ", "kind": "company", "firstRow": 3, "nameColumns": ["C", "B"], "urlColumns": ["D", "C", "B"], "auxiliaryUrlColumns": ["E"], "noteColumns": ["G", "H", "I", "J", "K", "L"] },
+    { "title": "АГРЕГАТОРЫ", "kind": "aggregator", "firstRow": 2, "nameColumns": ["B"], "urlColumns": ["C"], "noteColumns": ["A"] },
+    { "title": "ТГ-КАНАЛЫ (En)", "kind": "telegram", "firstRow": 3, "urlColumns": ["B"], "noteColumns": ["A", "C", "D"] },
+    { "title": "ТГ-КАНАЛЫ (Ru)", "kind": "telegram", "firstRow": 3, "urlColumns": ["B"], "noteColumns": ["A", "C", "D"] },
+    { "title": "Python", "kind": "vacancy_seed", "firstRow": 2, "stackHint": "Python" },
+    { "title": "AQA", "kind": "vacancy_seed", "firstRow": 2, "stackHint": "AQA" },
+    { "title": "React", "kind": "vacancy_seed", "firstRow": 2, "stackHint": "React" },
+    { "title": "DevOps", "kind": "vacancy_seed", "firstRow": 2, "stackHint": "DevOps" },
+    { "title": "Java", "kind": "vacancy_seed", "firstRow": 2, "stackHint": "Java" },
+    { "title": "Go", "kind": "vacancy_seed", "firstRow": 2, "stackHint": "Go" },
+    { "title": ".NET/C#", "kind": "vacancy_seed", "firstRow": 2, "stackHint": ".NET/C#" },
+    { "title": "MLOps", "kind": "vacancy_seed", "firstRow": 2, "stackHint": "MLOps" },
+    { "title": "Контакты HR из ТГ", "kind": "reference", "reason": "contact_outreach_not_enabled; no_contact_import" },
+    { "title": "КРИТЕРИИ", "kind": "reference", "reason": "reference_only; current_DB_stack_descriptions_and_restrictions_are_authoritative" }
+  ],
+  "deferredHosts": ["himalayas.app", "hiringcafe.com", "wantapply.com", "hirefy.com", "hirefy.me", "hirify.me"],
+  "separateWorkflowHosts": ["hh.ru", "hh.kz", "hh.uz", "hh.ge", "hh.by", "rabota.by", "hh1.ru"]
+}

@@ -1,0 +1,33 @@
+# Student eligibility
+
+Latest confirmed contract: [stack/market routing before personal checks and CV generation](../MVP_REUSE_PLAN.md#required-order). Python/global routes to authorized Python/En students, then applicable personal restrictions (such as no English) and history are checked. Current code below still has stack-only scope; market bindings/routing remain TODO.
+
+Vacancy market currently follows description language (English → Global; Russian → Ru) through deterministic extraction. This supersedes the older company-market assumption. Binding that saved market to student cohorts remains TODO; location/language also remain evidence for applicable personal restrictions.
+
+Efficiency TODO: [scoped rules, grouped semantic checks and cache invalidation](../EFFICIENCY_PLAN.md#local-restrictions-and-application-answers). Fresh dependency checks remain mandatory. A proposed short-circuit after a definite block must label unperformed checks explicitly, never mark them clear; current code below evaluates every rule.
+
+Planned contract: [local student–vacancy consideration](../VACANCY_REUSE_PLAN.md). Read the saved description and valid global decision from SQL, then apply only student-context restrictions/history. Another student does not trigger another body fetch/extraction or global classification. Pre-submit availability checks and explicit content refreshes remain separate.
+
+The shared selection skill defines the default work-location geography filter and its explicit student-rule exception. Default excluded postings stay in the run audit, not the shared vacancy pool. A student exception must trigger a separately scoped reconsideration of that audited posting and preserve the explicit rule/evidence; it cannot resurrect all global exclusions or waive employer requirements. Automatic audit-to-student exception routing is not wired yet. Do not claim that ordinary `match` automatically loads geographically excluded records.
+
+**Target rule: matching stack and market + no applicable restriction = eligible.** No extra CV score or inherited preference gate. The explicit higher-title rule is enforced by [seniority.ts](seniority.ts): Staff/Lead/Principal and other recognized higher titles require a matching `seniorityExceptions` entry with `source: cv|student_rule` and literal permission evidence. Matching and pre-submit gates enforce it; generic affirmative answer defaults cannot override it. Automatic extraction of these exceptions from SQL rules/CVs remains unconnected. Current implementation has not yet added market binding to the scope.
+
+Implemented CV boundary: shared classification has no student/CV input. Student matching and pre-application restriction checks pass identity, explicitly confirmed facts and narrowly scoped higher-title permission metadata through [student-context.ts](student-context.ts). CV files, general extracted CV facts, legacy search criteria and history are not supplied to policy adapters. History is checked separately. The explicit permission metadata is not a CV-fit score; other facts available only in a CV remain unresolved until independently confirmed.
+
+`matchCandidatePositions` accepts student identity, facts, stack membership and history without a CV property. The CLI still loads the existing local candidate record; a DB-only student loader remains planned. Preparation retains the original CV/facts separately for form answers and the future tailoring adapter. Tailoring is downstream of eligibility and is not integrated into external-responses yet. Legacy standalone `discover` still supports individual CV-fit filtering; it is not used by shared `collect`/`classify`/`match` campaigns.
+
+## Contract
+
+`matchCandidatePositions({candidate, collection, stackId}, {restrictions})` consumes a complete classified collection and returns cloned positions with `fit` and `restrictionChecks`. A database campaign requires `candidate.databaseClientId` in that stack's saved student IDs. Existing application/skip history excludes repeats. It does not mutate the collection, save state or submit applications.
+
+`RestrictionPolicy.load(student)` receives `EligibilityStudent` (identity and confirmed facts) and returns a complete timestamped rule set. A complete empty set allows automatically. `evaluate(rule,student,position)` returns `clear`, `block` or `review`, with explanation and evidence. All rules are considered: any block excludes; otherwise any unresolved rule requires review. Read failures, incomplete snapshots, wrong-student data and missing evidence never count as no restrictions. The AI adapter also projects confirmed facts when called directly.
+
+## Storage and contextual rules
+
+[postgres.ts](postgres.ts) reads the original `noco.client_company_restrictions_from_stop_companies`, native company links and `noco.clients.stop_list_company` after migration 005. The existing HH global stop-list is preserved. Normalized rules exist only in memory; no new restriction table or view is required. Contextual instructions such as "apply only in Paris" are interpreted by external responses; HH keeps company/name stop-lists. The loader also verifies that current student membership and stack description match the campaign. Shared vacancy rules belong in `.agents/skills/vacancy-selection/SKILL.md`.
+
+[restriction-ai.ts](restriction-ai.ts) implements an injected semantic evaluator. Rules are policy data requiring interpretation, not literal search strings or executable instructions. Future example: **“Apply only to positions in Paris.”** Evaluate the actual job location and remote conditions; a Paris office elsewhere in the posting is insufficient. Keep rule IDs, sources, decisions, reasons and supporting evidence in `restrictionChecks`. Adding a rule never requires a new `if city === ...` branch in the application loop. Use the existing restrictions table for contextual rules; no extra student-policy table is required.
+
+CLI: `match --candidate LOCAL_ID --student DB_ID --collection classified.json --stack stack-5 --out matches.json [--market en|ru]`. For offline fixtures only, `--offline --restrictions rules.json` supplies a complete rule snapshot; `--no-ai` permits empty rule sets and leaves unevaluated nonempty sets for review. Offline mode cannot submit live applications.
+
+Application execution rechecks current restrictions before opening, uploading and submitting; saved matching results are not permanent permission. History, target limits, truthful required answers, employer verification and receipt reconciliation remain separate submission safeguards. Tests: `student-eligibility.test.ts`, `pipeline.test.ts`, and database adapter tests under `../tests`.

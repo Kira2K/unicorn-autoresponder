@@ -155,6 +155,8 @@ function killDolphinBrowserProfileProcesses(profileIds: number[]): Array<{
   parentProcessId: number
   profileId: number
 }> {
+  const { assertDolphinOwnership } = require('./ownership.ts') as { assertDolphinOwnership(id: number): void }
+  for (const id of profileIds) assertDolphinOwnership(id)
   const ids = [...new Set(profileIds)]
     .map(id => Number(id))
     .filter(id => Number.isFinite(id) && id > 0)
@@ -199,6 +201,8 @@ function killDolphinBrowserProfileProcesses(profileIds: number[]): Array<{
 }
 
 async function cleanupPreexistingDolphinProfiles(profileIds: number[]): Promise<void> {
+  const { assertDolphinOwnership } = require('./ownership.ts') as { assertDolphinOwnership(id: number): void }
+  for (const id of profileIds) assertDolphinOwnership(id)
   const uniqueProfileIds = [...new Set(profileIds)]
 
   if (!uniqueProfileIds.length) {

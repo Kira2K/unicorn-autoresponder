@@ -359,12 +359,14 @@ function stackScenario(stack: ResolvedStack | NocoRecord | undefined, market: Ma
   return String(row?.[scenarioField(market)] ?? '').trim() || undefined
 }
 
-async function fetchNocoAutomationState(client: any): Promise<{
+type RestrictionResolver = (client: NocoRecord, market: Market) => { companies: BlockedCompany[]; holdReason?: string }
+async function fetchNocoAutomationState(client: any, loadPolicy?: () => Promise<RestrictionResolver | undefined>): Promise<{
   clients: NocoRecord[]
   autoresponseRows: NocoRecord[]
   profiles: NocoRecord[]
   stacks: NocoRecord[]
   restrictions: NocoRecord[]
+  restrictionPolicy?: RestrictionResolver
 }> {
   const clients = await client.fetchRecords(TABLES.clients.id, 1000)
   const autoresponseRows = await client.fetchRecords(
@@ -373,9 +375,10 @@ async function fetchNocoAutomationState(client: any): Promise<{
   )
   const profiles = await client.fetchRecords(TABLES.dolphinProfiles.id, 1000)
   const stacks = await client.fetchRecords(TABLES.stacks.id, 1000)
-  const restrictions = await client.fetchRecords(TABLES.restrictions.id, 1000)
+  const restrictionPolicy = await loadPolicy?.()
+  const restrictions = restrictionPolicy ? [] : await client.fetchRecords(TABLES.restrictions.id, 1000)
 
-  return { clients, autoresponseRows, profiles, stacks, restrictions }
+  return { clients, autoresponseRows, profiles, stacks, restrictions, restrictionPolicy }
 }
 
 function buildAutomationTargetsFromNocoState(
@@ -385,6 +388,7 @@ function buildAutomationTargetsFromNocoState(
     profiles: NocoRecord[]
     stacks: NocoRecord[]
     restrictions?: NocoRecord[]
+    restrictionPolicy?: RestrictionResolver
   },
   options: AutomationTargetOptions = {}
 ): ClientAutomationData[] {
@@ -416,6 +420,11 @@ function buildAutomationTargetsFromNocoState(
     for (const market of ['Ru', 'En'] as Market[]) {
       if (marketFilter && market !== marketFilter) continue
       if (!isEnabled(row[responseField(market)])) continue
+      const restrictionDecision = state.restrictionPolicy?.(client, market)
+      if (restrictionDecision?.holdReason) {
+        console.warn(`HH student ${client.Id} (${market}) paused: ${restrictionDecision.holdReason}`)
+        continue
+      }
 
       const profile = findClientDolphinProfile(
         state.profiles,
@@ -434,7 +443,7 @@ function buildAutomationTargetsFromNocoState(
         dolphinProfileId,
         commonChatId,
         coverText: String(row[coverField(market)] ?? '').trim() || undefined,
-        blockedCompanies: getBlockedCompaniesForClientMarket(
+        blockedCompanies: restrictionDecision?.companies ?? getBlockedCompaniesForClientMarket(
           client,
           market,
           state.restrictions ?? []
@@ -503,7 +512,7 @@ async function getNocoHHAuthCredentials(
   return toHHAuthCredentials(matches[0], client, market)
 }
 
-function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
+function createNocoDb(options: { nocoClient?: any; loadRestrictionPolicy?: () => Promise<RestrictionResolver | undefined> } = {}): AppDb {
   const nocoClient = options.nocoClient ?? createNocoClient()
   let cachedClients: Promise<NocoRecord[]> | undefined
   let cachedPlatformAccounts: Promise<NocoRecord[]> | undefined
@@ -526,7 +535,7 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
   return {
     async getAutomationTargets(mappingOptions: AutomationTargetOptions = {}): Promise<ClientAutomationData[]> {
       return buildAutomationTargetsFromNocoState(
-        await fetchNocoAutomationState(nocoClient),
+        await fetchNocoAutomationState(nocoClient, options.loadRestrictionPolicy),
         mappingOptions
       )
     },

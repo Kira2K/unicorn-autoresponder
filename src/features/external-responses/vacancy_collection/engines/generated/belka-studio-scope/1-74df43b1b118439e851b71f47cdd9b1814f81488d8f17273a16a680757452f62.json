@@ -1,0 +1,17 @@
+{
+  "id": "belka-studio-scope",
+  "version": 1,
+  "code": "function parse(input) {\n  const belka = /(?:^|\\n)The role is working within our studio:\\s*Belka Games(?:\\n|$)/i;\n  return { url: input.url, text: input.text, links: input.links, jobs: input.jobs.filter(job => belka.test(job.description)) };\n}",
+  "sourceIds": [
+    "76"
+  ],
+  "createdAt": "2026-09-29T12:30:39.092Z",
+  "sha256": "74df43b1b118439e851b71f47cdd9b1814f81488d8f17273a16a680757452f62",
+  "fixtures": [
+    {
+      "name": "keeps only explicitly attributed Belka studio jobs",
+      "inputSha256": "fbb69a98f0d6ab670a293dda2a68d4e696c81fe563bffde6d39d0bd1abff394e",
+      "outputSha256": "2f6aab2c5c09280665b368b672663225b422c7ed1d412d7ba2e8279679576607"
+    }
+  ]
+}
