@@ -30,3 +30,18 @@ test('logical key locks last until commit; failed commits do not repeat an opera
   await assert.rejects(db.transaction(async tx => { calls++; await tx.lockKey('mpeople', 'claim:7'); }), /commit_uncertain/);
   assert.equal(calls, 1);
 });
+
+test('record locks bind the physical key and remain inside the write transaction', async () => {
+  const f = workingFake(), db = await createPostgresClient(f.pool, 'unicorn_noco_copy_restore', { writable: true });
+  await db.transaction(async tx => {
+    await tx.lockRecord('mpeople', ['7']);
+    await tx.getRecord('mpeople', ['7']);
+  });
+  const lock = f.state.calls.findIndex(c => c.text.includes('FOR UPDATE'));
+  assert.ok(lock > 0);
+  assert.match(f.state.calls[lock].text, /SELECT _copy_id FROM noco\."mpeople" WHERE _copy_id=\$1 FOR UPDATE/);
+  assert.deepEqual(f.state.calls[lock].values, ['["7"]']);
+  assert.match(f.state.calls[lock + 1].text, /AS source_json/);
+  assert.equal(f.state.calls[lock + 2].text, 'COMMIT');
+  await assert.rejects(db.transaction(tx => tx.lockRecord('mpeople', [])), /invalid_record_key/);
+});

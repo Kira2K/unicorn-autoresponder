@@ -2,6 +2,11 @@ import { PostgresReadError } from '../../../../integrations/postgres/contracts.m
 import type { ConsoleSql, ConsoleWrites } from './contracts.mts';
 import { tableIds } from './tables.mts';
 import { consoleRow } from './records.mts';
+import { createRequire } from 'node:module';
+import { resumeWorkflowRevision, staleResumeWorkflowError } from '../../../../integrations/telegram/resume-workflow-state.ts';
+const { toResumeWorkflow } = createRequire(import.meta.url)('../repository.ts') as {
+  toResumeWorkflow(record: Record<string, unknown>): import('../types.ts').ResumeWorkflowRecord;
+};
 export function consoleWrites(db: ConsoleSql, options?: ConsoleWrites) {
   async function allow(table: string, id?: number, input?: Readonly<Record<string, unknown>>) {
     if (!options || ![tableIds.clients, tableIds.accounts, tableIds.profiles, tableIds.cv].includes(table))
@@ -13,6 +18,21 @@ export function consoleWrites(db: ConsoleSql, options?: ConsoleWrites) {
     return options;
   }
   return {
+    async patchResumeWorkflowRecord(id: number, input: Readonly<Record<string, unknown>>, expectedRevision: string) {
+      const granted = await allow(tableIds.cv, id);
+      return db.transaction(async tx => {
+        await tx.lockRecord(tableIds.cv, [String(id)]);
+        const current = await tx.getRecord(tableIds.cv, [String(id)]);
+        if (!current || (!granted.allClients && !granted.clientIds.has(Number(current.data.clients_id))))
+          throw new PostgresReadError('forbidden');
+        if (resumeWorkflowRevision(toResumeWorkflow(consoleRow(current))) !== expectedRevision)
+          throw new PostgresReadError('resume_workflow_stale_revision');
+        return consoleRow(await tx.patchRecord(tableIds.cv, [String(id)], input));
+      }).catch(error => {
+        if (error?.code === 'resume_workflow_stale_revision') throw staleResumeWorkflowError();
+        throw error;
+      });
+    },
     async createRecord(table: string, input: Readonly<Record<string, unknown>>) {
       const granted = await allow(table, undefined, input);
       if (table === tableIds.clients) throw new PostgresReadError('sql_console_create_client_disabled');

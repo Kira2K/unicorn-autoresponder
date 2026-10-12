@@ -1095,6 +1095,7 @@ function createWebConsoleApp(options: {
       const result = await resumeWorkflow(chatId, repository, {
         actor: botActorFromRequest(req),
         expectedStatus: req.body?.expectedStatus,
+        expectedRevision: req.body?.expectedRevision,
         studentDataFolderUrl: req.body?.studentDataFolderUrl
       })
       const notificationWarnings = await sendResumeNotifications(result)
@@ -1122,6 +1123,7 @@ function createWebConsoleApp(options: {
       const result = await rejectResumeWorkflow(chatId, repository, {
         actor: botActorFromRequest(req),
         expectedStatus: req.body?.expectedStatus,
+        expectedRevision: req.body?.expectedRevision,
         rejectionComment: req.body?.comment
       })
       const notificationWarnings = await sendResumeNotifications(result)
@@ -1207,7 +1209,8 @@ function createWebConsoleApp(options: {
       }
       const result = await resumeWorkflowById(workflowId, repository, {
         actor: botActorFromRequest(req),
-        expectedStatus: req.body?.expectedStatus
+        expectedStatus: req.body?.expectedStatus,
+        expectedRevision: req.body?.expectedRevision
       })
       const notificationWarnings = await sendResumeNotifications(result)
       res.status(result.found ? 200 : 404).json(publicResumeResult(result, { notificationWarnings }))
@@ -1226,6 +1229,7 @@ function createWebConsoleApp(options: {
       const result = await rejectResumeWorkflowById(workflowId, repository, {
         actor: botActorFromRequest(req),
         expectedStatus: req.body?.expectedStatus,
+        expectedRevision: req.body?.expectedRevision,
         rejectionComment: req.body?.comment
       })
       const notificationWarnings = await sendResumeNotifications(result)
@@ -1951,6 +1955,8 @@ function createWebConsoleApp(options: {
     }
     if (
       (error as any)?.code === 'resume_workflow_stale_status' ||
+      (error as any)?.code === 'resume_workflow_stale_revision' ||
+      (error as any)?.code === 'resume_workflow_unknown_status' ||
       (error as any)?.code === 'resume_workflow_noop' ||
       (error as any)?.code === 'resume_workflow_stopped' ||
       (error as any)?.code === 'resume_reject_not_allowed'

@@ -38,7 +38,7 @@ export function linkedInFixture() {
   }, async transaction(fn) {
     const before = structuredClone(f.rows);
     let value;
-    try { value = await fn({ ...db, async lockKey() {} }); } catch (error) { f.rows.clear(); for (const [id, rows] of before) f.rows.set(id, rows); throw error; }
+    try { value = await fn({ ...db, async lockRecord() {}, async lockKey() {} }); } catch (error) { f.rows.clear(); for (const [id, rows] of before) f.rows.set(id, rows); throw error; }
     if (uncertainCommit) throw Object.assign(Error('unknown commit'), { code: 'write_outcome_unknown' });
     return value;
   } } satisfies ConsoleSql;
