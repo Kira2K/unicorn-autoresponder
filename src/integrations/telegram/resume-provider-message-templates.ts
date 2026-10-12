@@ -19,6 +19,7 @@ type ProviderTaskCardInput = {
   sourceFolder?: string
   kirasComments?: string
   lastRejectionComment?: string
+  returnedCvUrl?: string
   draftUrl?: string
   emailEn?: string
   telegramEn?: string
@@ -151,6 +152,7 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
     ...commonRows,
     ...stageRows,
     lastRejectionComment ? `Комментарий возврата: ${escapeTelegramHtml(lastRejectionComment)}` : undefined,
+    lastRejectionComment && input.returnedCvUrl ? `Файл на доработку: ${escapeTelegramHtml(input.returnedCvUrl)}` : undefined,
     stage === 'en' ? `Черновик: ${escapeTelegramHtml(valueOrEmpty(input.draftUrl))}`
       : stage === 'ru' && input.draftUrl ? `Черновик: ${escapeTelegramHtml(input.draftUrl)}` : undefined,
     config.inputHint,

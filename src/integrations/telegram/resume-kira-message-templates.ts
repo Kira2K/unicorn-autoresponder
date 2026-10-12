@@ -1,3 +1,5 @@
+type ResumeRejectionContext = import('./resume-rejection-history.ts').ResumeRejectionContext
+
 type KiraTelegramMessage = {
   text: string
   parseMode: 'HTML'
@@ -55,27 +57,37 @@ function kiraCommentsSavedMessage(clientName: string): KiraTelegramMessage {
   ])
 }
 
-function kiraDraftReviewMessage(clientName: string): KiraTelegramMessage {
+function rejectionRows(rejection?: ResumeRejectionContext | null): Array<string | undefined> {
+  return rejection ? [
+    `Комментарий возврата: ${escapeTelegramHtml(rejection.comment)}`,
+    rejection.returnedCvUrl ? `Возвращённое резюме: ${escapeTelegramHtml(rejection.returnedCvUrl)}` : undefined
+  ] : []
+}
+
+function kiraDraftReviewMessage(clientName: string, rejection?: ResumeRejectionContext | null): KiraTelegramMessage {
   return kiraMessage([
     bold('🔍 Черновик на проверке'),
     `Студент: ${escapeTelegramHtml(clientName)}`,
-    'Кира, проверь черновик и оставь комментарии.'
+    'Кира, проверь черновик и оставь комментарии.',
+    ...rejectionRows(rejection)
   ])
 }
 
-function kiraEnglishReviewMessage(clientName: string): KiraTelegramMessage {
+function kiraEnglishReviewMessage(clientName: string, rejection?: ResumeRejectionContext | null): KiraTelegramMessage {
   return kiraMessage([
     bold('🇬🇧 Проверка EN-версии'),
     `Студент: ${escapeTelegramHtml(clientName)}`,
-    'Английская версия готова, ждет твоей проверки.'
+    'Английская версия готова, ждет твоей проверки.',
+    ...rejectionRows(rejection)
   ])
 }
 
-function kiraRussianReviewMessage(clientName: string): KiraTelegramMessage {
+function kiraRussianReviewMessage(clientName: string, rejection?: ResumeRejectionContext | null): KiraTelegramMessage {
   return kiraMessage([
     bold('🇷🇺 Проверка RU-версии'),
     `Студент: ${escapeTelegramHtml(clientName)}`,
-    'Русская версия готова, ждет твоей проверки.'
+    'Русская версия готова, ждет твоей проверки.',
+    ...rejectionRows(rejection)
   ])
 }
 
