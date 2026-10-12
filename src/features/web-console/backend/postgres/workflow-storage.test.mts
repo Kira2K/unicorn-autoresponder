@@ -7,8 +7,12 @@ test('CV create/read/patch preserves the legacy contract and only provided field
   const left = await a.legacy.getResumeWorkflowByTelegramChatId('-7007', { ensure: true });
   const right = await b.sql.getResumeWorkflowByTelegramChatId('-7007', { ensure: true });
   assert.deepEqual(right, left); assert.ok(right);
-  const patch = { cvDraftUrl: 'https://example.invalid/cv', lastRejectionComment: 'Unicode 😀', workflowTrace: 'trace', additionalVersions: '' };
+  const history = '  legacy history with whitespace  \n';
+  const patch = { cvDraftUrl: 'https://example.invalid/cv', lastRejectionComment: 'Unicode 😀',
+    rejectionHistory: history, workflowTrace: 'trace', additionalVersions: '' };
   assert.deepEqual(await b.sql.patchResumeWorkflow(right.id, patch), await a.legacy.patchResumeWorkflow(left!.id, patch));
+  assert.equal((await b.sql.getResumeWorkflowById(right.id))?.rejectionHistory, history);
+  assert.equal((await a.legacy.getResumeWorkflowById(left!.id))?.rejectionHistory, history);
   assert.equal((await b.sql.getResumeWorkflowByTelegramChatId('-7007', { ensure: true }))?.id, right.id);
   assert.equal(b.rows.get(t.cv)?.size, 1);
   assert.equal((await b.sql.getResumeWorkflowById(right.id))?.status, "collection student's data");

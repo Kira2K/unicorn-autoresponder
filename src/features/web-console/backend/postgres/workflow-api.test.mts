@@ -155,6 +155,8 @@ for (const market of ['Ru', 'En', 'both']) for (const version of ['Draft', 'Engl
         const rendered = owner === '9003' ? reason.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
           .replaceAll('>', '&gt;').replaceAll('"', '&quot;') : reason;
         assert.ok(card.message.includes(`Комментарий возврата: ${rendered}`));
+        const returnedUrl = `https://example.invalid/${version === 'Draft' ? 'draft' : version === 'English version' ? 'en' : 'ru'}`;
+        assert.ok(card.message.includes(`${owner === '9003' ? 'Файл на доработку' : 'Возвращённое резюме'}: ${returnedUrl}`));
         assert.equal(card.message.split(rendered).length - 1, 1);
         assert.equal(card.parseMode, owner === '9003' ? 'HTML' : undefined);
         assert.ok(!card.message.includes('Старая причина возврата'));

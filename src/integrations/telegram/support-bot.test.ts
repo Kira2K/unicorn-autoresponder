@@ -1053,7 +1053,27 @@ async function testTelegramPollingRecoveryContract(): Promise<void> {
   }
 }
 
+async function testTaskListCancelsPendingRejection() {
+  const chat = { id: 9002, type: 'private' };
+  const from = { id: 9002 };
+  for (const text of ['/open_my_tasks', '/tasks', '/open_my_tasks@veu_support_bot']) {
+    clearActiveTaskContextsForTest();
+    const calls: string[] = [];
+    const api = {
+      async providerTasks() { return { message: 'Tasks' }; },
+      async rejectWorkflow() { calls.push('reject'); return { found: true, message: 'Rejected' }; },
+      async saveResumeTaskInput() { calls.push('input'); return { message: 'Saved' }; }
+    };
+    await handleSupportBotCallback({ data: 'resume:reject:98:dak', message: { chat }, from }, api);
+    await handleSupportBotMessage({ text, chat, from }, api);
+    await handleSupportBotMessage({ text: 'Новые рекомендации для задачи из очереди', chat, from }, api);
+    assert.deepEqual(calls, ['input'], `${text} must cancel the previous rejection prompt`);
+  }
+  clearActiveTaskContextsForTest();
+}
+
 async function runTests() {
+  await testTaskListCancelsPendingRejection()
   await testTelegramPollingRecoveryContract()
   testKiraMessageTemplateContract()
   testYuliaMessageTemplateContract()

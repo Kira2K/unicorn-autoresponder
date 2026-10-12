@@ -527,6 +527,7 @@ async function handleOpenTasks(actor: SupportBotActor, api: SupportBotApiClient)
     return '/open_my_tasks работает только в личном чате. Открой личный чат с ботом и отправь там /open_my_tasks.'
   }
   clearActiveTaskContext(actor)
+  clearActiveRejectContext(actor)
 
   return await withBackendStatusMessage(async () => {
     const result = await api.providerTasks(actor)

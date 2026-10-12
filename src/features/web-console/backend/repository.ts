@@ -718,7 +718,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     additionalVersions: normalizeText(record.additional_versions),
     kirasComments: normalizeText(record.kiras_comments),
     lastRejectionComment: normalizeText(record.last_rejection_comment),
-    rejectionHistory: normalizeText(record.rejection_history),
+    rejectionHistory: String(record.rejection_history ?? ''),
     lastResponsible: normalizeText(record.last_responsible),
     lastWorkflowError: normalizeText(record.last_workflow_error),
     workflowTrace: normalizeText(record.workflow_trace)
@@ -742,7 +742,9 @@ function buildResumeWorkflowPatch(input: ResumeWorkflowPatch): Record<string, un
   ]
   const patch: Record<string, unknown> = {}
   for (const [inputField, nocoField] of fields) {
-    if (input[inputField] !== undefined) patch[nocoField] = normalizeText(input[inputField])
+    if (input[inputField] !== undefined) {
+      patch[nocoField] = inputField === 'rejectionHistory' ? String(input[inputField]) : normalizeText(input[inputField])
+    }
   }
   return patch
 }

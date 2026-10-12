@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { workflowFixture } from './workflow-fixture.mts';
 import { engine, workflowEnv, type WorkflowResult } from './workflow-scenario.mts';
+const { getProviderTaskById, getProviderTasks, saveProviderLinkFromChat } =
+  createRequire(import.meta.url)('../../../../integrations/telegram/resume-workflow.ts');
 type RejectionResult = WorkflowResult & { message: string; parseMode?: string;
   notifications: Array<{ kind: string; text: string; parseMode?: string; chatIds?: string[] }> };
 const versions = [
@@ -9,10 +12,10 @@ const versions = [
   ['English version', 'English version in progress', 'enVersionUrl'],
   ['Russian version', 'Russian version in process', 'ruVersionUrl']
 ] as const;
-for (const mode of ['legacy', 'sql'] as const) for (const market of ['Ru', 'En']) {
+for (const mode of ['legacy', 'sql'] as const) for (const market of ['Ru', 'En', 'both']) {
   for (const [version, target, field] of versions) for (const reviewer of ['Kira', 'student']) {
     if (market === 'Ru' && version === 'English version') continue;
-    test(`${mode}/${market}: ${reviewer} rejection preserves the stage link and provider notification`, async () => {
+    test(`${mode}/${market}/${version}: ${reviewer} rejection preserves the stage link and provider notification`, async () => {
       const restore = workflowEnv([7]);
       try {
         const f = workflowFixture(market), repo = f[mode];
@@ -22,7 +25,8 @@ for (const mode of ['legacy', 'sql'] as const) for (const market of ['Ru', 'En']
           enVersionUrl: 'https://example.invalid/en?a=1&b=2', ruVersionUrl: 'https://example.invalid/ru?a=1&b=2' };
         const actor = reviewer === 'Kira' ? { userId: '9002', chatId: '9002', chatType: 'private' }
           : { userId: '9001', username: 'sql_student', chatId: '-7007', chatType: 'supergroup' };
-        await repo.patchResumeWorkflow(initial!.id, { status, ...links });
+        const legacyHistory = '2026-01-01T00:00:00.000Z Draft in approve by Kira -> Draft in process by kira user:9002: Старый комментарий';
+        await repo.patchResumeWorkflow(initial!.id, { status, ...links, rejectionHistory: legacyHistory });
         const result = await engine.rejectResumeWorkflow('-7007', repo, {
           actor, expectedStatus: status, rejectionComment: 'Исправить описание опыта работы <проверка>' }) as RejectionResult;
         assert.equal(result.workflow.status, target); assert.equal(result.workflow[field], '');
@@ -30,7 +34,7 @@ for (const mode of ['legacy', 'sql'] as const) for (const market of ['Ru', 'En']
         const expectedUrl = reviewer === 'Kira' ? links[field].replaceAll('&', '&amp;') : links[field];
         assert.ok(result.message.includes(`Возвращённое резюме: ${expectedUrl}`));
         assert.equal(result.parseMode, reviewer === 'Kira' ? 'HTML' : undefined);
-        const recipient = market === 'En' && field === 'ruVersionUrl' ? '9004' : '9003';
+        const recipient = market !== 'Ru' && field === 'ruVersionUrl' ? '9004' : '9003';
         assert.equal(result.notifications.length, 1);
         assert.deepEqual(result.notifications[0].chatIds, [recipient]);
         const notification = result.notifications[0];
@@ -46,19 +50,74 @@ for (const mode of ['legacy', 'sql'] as const) for (const market of ['Ru', 'En']
             'Корневая папка', 'Исходные данные', 'Комментарии Киры'])
             assert.ok(notification.text.split('\n').some(row => row.startsWith(`${label}: `)), label);
         } else {
-          // The translator's existing message contract is outside the Yulia change.
           assert.ok(notification.text.includes('Причина возврата: Исправить описание опыта работы <проверка>'));
+          assert.ok(notification.text.includes(`Возвращённое резюме: ${links[field]}`));
           assert.ok(notification.text.includes(`EN: ${links.enVersionUrl}`));
         }
         for (const other of Object.keys(links) as Array<keyof typeof links>)
           if (other !== field) assert.equal(result.workflow[other], links[other]);
         const saved = await repo.getResumeWorkflowById(initial!.id);
         assert.equal(saved?.status, target); assert.equal(saved?.[field], '');
+        assert.ok(saved!.rejectionHistory.startsWith(legacyHistory + '\n'));
+        const event = JSON.parse(saved!.rejectionHistory.split('\n').at(-1)!);
+        assert.equal(event.returnedCvUrl, links[field]);
+        assert.equal(event.comment, 'Исправить описание опыта работы <проверка>');
+        const owner = { userId: recipient, chatId: recipient, chatType: 'private' };
+        const restored = structuredClone(saved);
+        const reopened = await getProviderTaskById(initial!.id, {
+          async getResumeWorkflowById() { return structuredClone(restored); }
+        }, owner);
+        const returnedLabel = recipient === '9003' ? 'Файл на доработку' : 'Возвращённое резюме';
+        const returnedUrl = recipient === '9003' ? links[field].replaceAll('&', '&amp;') : links[field];
+        assert.ok(reopened.message.includes(`${returnedLabel}: ${returnedUrl}`), 'reopening only persisted data retains the rejected URL');
+        assert.ok(reopened.message.includes('Комментарий возврата:'));
+        const waiting = await engine.resumeWorkflow('-7007', repo, { actor: owner, expectedStatus: target });
+        assert.equal(waiting.workflow.status, target, 'the returned URL does not count as a newly submitted version');
+        assert.deepEqual(waiting.transitions, []);
+        const list = await getProviderTasks(repo, owner);
+        assert.ok(!list.message.includes('Комментарий возврата:'));
+        assert.ok(!list.message.includes(links[field]));
+        await saveProviderLinkFromChat(repo, owner, 'https://example.invalid/revised', {
+          workflowId: initial!.id, expectedStatus: target
+        });
+        const afterUpload = await getProviderTaskById(initial!.id, repo, owner);
+        assert.ok(afterUpload.message.includes(`${returnedLabel}: ${returnedUrl}`), 'uploading a revision does not replace the rejected URL');
+        const advanced = await engine.resumeWorkflow('-7007', repo, { actor: owner, expectedStatus: target }) as RejectionResult;
+        const kiraNotice = advanced.notifications.find(item => item.kind === 'private_kira')!;
+        const escapedReturnedUrl = links[field].replaceAll('&', '&amp;');
+        assert.ok(kiraNotice.text.includes(`Возвращённое резюме: ${escapedReturnedUrl}`));
+        assert.ok(kiraNotice.text.includes('Комментарий возврата: Исправить описание опыта работы &lt;проверка&gt;'));
+        const kiraCard = await getProviderTaskById(initial!.id, repo, { userId: '9002', chatId: '9002', chatType: 'private' });
+        assert.ok(kiraCard.message.includes(`Возвращённое резюме: ${escapedReturnedUrl}`));
+        assert.ok(kiraCard.message.includes('https://example.invalid/revised'));
+        const toStudent = await engine.resumeWorkflow('-7007', repo, {
+          actor: { userId: '9002', chatId: '9002', chatType: 'private' }
+        }) as RejectionResult;
+        assert.ok(!toStudent.notifications[0].text.includes('Комментарий возврата:'));
+        assert.ok(!toStudent.notifications[0].text.includes(links[field]));
+        const studentStatus = await engine.getResumeStatus('-7007', repo) as WorkflowResult & { message: string };
+        assert.ok(!studentStatus.message.includes('Комментарий возврата:'));
+        assert.ok(!studentStatus.message.includes(links[field]));
+        const nextUrl = 'https://example.invalid/second-return';
+        const nextReason = 'Другой комментарий: уточнить достижения и результаты работы.';
+        await repo.patchResumeWorkflow(initial!.id, { status, [field]: nextUrl });
+        const second = await engine.rejectResumeWorkflow('-7007', repo, {
+          actor, expectedStatus: status, rejectionComment: nextReason
+        }) as RejectionResult;
+        assert.ok(second.workflow.rejectionHistory.startsWith(saved!.rejectionHistory + '\n'));
+        const secondCard = await getProviderTaskById(initial!.id, repo, owner);
+        assert.ok(secondCard.message.includes(`${returnedLabel}: ${nextUrl}`));
+        assert.ok(secondCard.message.includes(nextReason));
+        assert.ok(!secondCard.message.includes('Исправить описание опыта работы'));
+        assert.ok(!secondCard.message.includes(`${returnedLabel}: ${returnedUrl}`));
         await repo.patchResumeWorkflow(initial!.id, { status, ...links, [field]: '' });
         const missing = await engine.rejectResumeWorkflow('-7007', repo, {
           actor, expectedStatus: status, rejectionComment: 'оставил комменты в резюме' }) as RejectionResult;
         assert.ok(!missing.message.includes('Возвращённое резюме:'));
         assert.ok(!missing.notifications[0].text.includes('Возвращённое резюме:'), 'never substitute another version');
+        const missingCard = await getProviderTaskById(initial!.id, repo, owner);
+        assert.ok(!missingCard.message.includes(`${returnedLabel}: ${returnedUrl}`), 'the latest missing URL must not revive an older URL');
+        assert.ok(!missingCard.message.includes(nextUrl));
         if (recipient === '9003') {
           assert.ok(missing.notifications[0].text.split('\n').includes('Файл на доработку: empty'));
           assert.ok(!missing.notifications[0].text.includes('Юля, резюме для'), 'still a rejection, not a new task');

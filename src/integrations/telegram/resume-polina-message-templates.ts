@@ -12,6 +12,7 @@ type PolinaTaskCardInput = {
   sourceFolder?: string
   kirasComments?: string
   lastRejectionComment?: string
+  returnedCvUrl?: string
   draftUrl?: string
   enVersionUrl?: string
 }
@@ -54,6 +55,7 @@ function polinaTaskCardMessage(input: PolinaTaskCardInput): PolinaTelegramMessag
     input.sourceFolder ? `Папка с исходниками: ${input.sourceFolder}` : undefined,
     input.kirasComments ? `Комментарии Киры: ${input.kirasComments}` : undefined,
     lastRejectionComment ? `Комментарий возврата: ${lastRejectionComment}` : undefined,
+    lastRejectionComment && input.returnedCvUrl ? `Возвращённое резюме: ${input.returnedCvUrl}` : undefined,
     input.draftUrl ? `Черновик: ${input.draftUrl}` : undefined,
     input.enVersionUrl ? `EN: ${input.enVersionUrl}` : undefined,
     'Пришли ссылку на русскую версию следующим сообщением.',
@@ -65,6 +67,7 @@ function polinaReworkMessage(input: {
   clientName: string
   market: string
   comment?: string
+  returnedCvUrl?: string
   enVersionUrl?: string
 }): PolinaTelegramMessage {
   return message([
@@ -75,6 +78,7 @@ function polinaReworkMessage(input: {
     `Рынок: ${input.market}`,
     'Статус: русская версия в работе',
     input.comment ? `Причина возврата: ${input.comment}` : undefined,
+    input.returnedCvUrl ? `Возвращённое резюме: ${input.returnedCvUrl}` : undefined,
     input.enVersionUrl ? `EN: ${input.enVersionUrl}` : undefined,
     'Пришли новую ссылку на русскую версию следующим сообщением.',
     'Я сразу привяжу её к этой задаче.'
