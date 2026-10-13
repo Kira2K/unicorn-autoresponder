@@ -200,7 +200,7 @@ async function runPhysicalNocoBudgetRegression() {
       onPhysicalAttempt: budget.onPhysicalAttempt })
     const { createConnectionInviterStore } = await import('../noco-store.mts')
     const store = createConnectionInviterStore(client, { budgetController: budget })
-    const base = fixture({ stack: 'GO', connectionCount: 1663, preflightRejectCount: 4, confirmedReceipts: true })
+    const base = fixture({ stack: 'GO', connectionCount: 1663, preflightRejectCount: 8, confirmedReceipts: true })
     const productiveSearch = base.adapter.searchPeople.bind(base.adapter)
     let emptySearchPages = 0
     let totalSearchPages = 0
@@ -240,10 +240,10 @@ async function runPhysicalNocoBudgetRegression() {
 
     assert.equal(completed.status, 'succeeded')
     assert.equal(completed.stage, 'completed')
-    assert.equal(completed.counters.sent, 40)
-    assert.deepEqual(completed.counters.sentByAudience, { recruiter: 28, technical: 12 })
-    assert.equal(base.metrics.sends, 40)
-    assert.equal(history.filter(item => item.status === 'sent').length, 40)
+    assert.equal(completed.counters.sent, 7)
+    assert.deepEqual(completed.counters.sentByAudience, { recruiter: 5, technical: 2 })
+    assert.equal(base.metrics.sends, 7)
+    assert.equal(history.filter(item => item.status === 'sent').length, 7)
     assert.equal(emptySearchPages, 18)
     assert.equal(totalSearchPages >= 18, true)
 

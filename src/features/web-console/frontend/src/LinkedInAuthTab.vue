@@ -155,14 +155,16 @@ function openLog(account) { if (canLeave()) { logAccount.value = account?.platfo
                   </template>
                 </template>
                 <p v-if="task.stageMessage">{{ task.stageMessage }}</p>
-                <p v-if="task.summary">Выполнено: {{ task.summary.completed }} · Пропущено: {{ task.summary.skipped }} · Не подтверждено: {{ task.summary.unconfirmed }}</p>
+                <p v-if="task.feedResult" data-testid="automation-feed-result">Карточек: {{ task.feedResult.cards }} · Лайков: {{ task.feedResult.likes }}/5 · Комментариев: {{ task.feedResult.comments }}/1 · Пропущено: {{ task.feedResult.skipped }} · Не подтверждено: {{ task.feedResult.unconfirmed }}</p>
+                <p v-else-if="task.summary">Выполнено: {{ task.summary.completed }} · Пропущено: {{ task.summary.skipped }} · Не подтверждено: {{ task.summary.unconfirmed }}</p>
                 <p v-if="task.waitReason || task.reason">{{ reasonText(task.waitReason || task.reason) }}</p>
                 <p v-if="task.blockingTaskId">Ожидаем: {{ featureNames[automation.status.value.tasks?.find(t => t.id === task.blockingTaskId)?.feature] || 'другую фичу' }}</p>
                 <p v-if="!['completed','stopped','needs_attention'].includes(task.state)">Следующее действие: {{ dateMsk(task.effectiveNextAt ?? task.nextAt) }} · МСК</p>
                 <p>Обновлено: {{ dateMsk(task.updatedAt) }} · МСК</p>
                 <Button v-if="canResumeTask(task, schedule)" label="Продолжить фичу" size="small"
                   :disabled="automation.busy.value || !automation.writable.value" @click="resume(task)" data-testid="automation-resume" />
-                <small v-if="task.state === 'needs_attention'">Проверьте причину ошибки. Продолжится тот же прогон, без повторения подтверждённых отправок.</small>
+                <small v-if="task.resumeBlockedReason && ['stopped', 'needs_attention'].includes(task.state)">{{ reasonText(task.resumeBlockedReason) }}</small>
+                <small v-else-if="task.state === 'needs_attention'">Проверьте причину ошибки. Продолжится тот же прогон, без повторения подтверждённых отправок.</small>
               </details>
               <Button label="Открыть журнал ученика" size="small" outlined @click="openLog(selected)" />
             </template>

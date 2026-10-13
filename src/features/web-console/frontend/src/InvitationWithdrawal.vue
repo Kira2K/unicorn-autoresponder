@@ -9,7 +9,7 @@ const statuses = { running: 'Отзыв выполняется', completed: 'О�
 const status = computed(() => control.active.value && control.run.value?.retryAttempt
   ? 'Пауза: Unipile ограничил запросы (429)' : statuses[control.run.value?.status])
 const reasons = { already_attempted: 'Уже была попытка: повтор запрещён', date_unknown: 'Нет надёжной даты — пропускаем',
-  too_recent: 'Не старше 14 дней — оставляем', invitation_result_pending: 'Может относиться к неподтверждённой отправке — оставляем' }
+  too_recent: 'Не старше 21 дня — оставляем', invitation_result_pending: 'Может относиться к неподтверждённой отправке — оставляем' }
 </script>
 <template>
   <Button :label="control.run.value ? 'Открыть отзыв' : 'Отозвать старые приглашения'" size="small" severity="secondary" outlined
@@ -28,7 +28,7 @@ const reasons = { already_attempted: 'Уже была попытка: повто
         @click="control.minimize" />
     </div></template>
     <p>Проверяем все ожидающие приглашения этого аккаунта, включая отправленные вручную.
-      Отзываем только старше 14 дней, по одному, со случайными паузами 5–15 секунд.</p>
+      Отзываем только старше 21 дня, по одному, со случайными паузами 5–15 секунд.</p>
     <p>«Свернуть» скрывает окно: очередь продолжит работу, можно выбрать другого ученика.
       Автоматический прогон восстанавливается по расписанию; ручная очередь требует продолжения.</p>
     <p v-if="control.error.value" role="alert">{{ control.error.value }}</p>
@@ -70,7 +70,7 @@ const reasons = { already_attempted: 'Уже была попытка: повто
           {{ data.eligible ? 'Отозвать' : reasons[data.reason] }}
         </template></Column>
       </DataTable>
-      <Button :label="`Отозвать старше 14 дней (${count})`" severity="warn" data-testid="withdrawal-start"
+      <Button :label="`Отозвать старше 21 дня (${count})`" severity="warn" data-testid="withdrawal-start"
         :disabled="!count || !control.preview.value.writerEnabled || control.active.value || control.needsCheck.value || control.busy.value"
         @click="control.start" />
     </template>

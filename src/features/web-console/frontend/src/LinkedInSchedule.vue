@@ -87,7 +87,7 @@ defineExpose({ dirty })
         <label>С <input v-model="slot.start" type="text" inputmode="numeric" placeholder="10:00" maxlength="5" aria-label="С" data-testid="automation-start" /></label>
         <label>До <input v-model="slot.end" type="text" inputmode="numeric" placeholder="15:00" maxlength="5" aria-label="До" data-testid="automation-end" /></label>
       </div>
-      <div class="features"><label v-for="feature in ['invitations', 'posts', 'comments', 'withdrawals']" :key="feature" class="check">
+      <div class="features"><label v-for="feature in ['invitations', 'posts', 'comments', 'feed', 'withdrawals']" :key="feature" class="check">
         <input v-model="slot.features" type="checkbox" :value="feature" :data-testid="`automation-feature-${feature}`" /> {{ featureNames[feature] }}</label></div>
       <button class="text-button" @click="draft.slots = draft.slots.filter(s => s.id !== slot.id)">Удалить интервал</button>
     </fieldset>
@@ -102,7 +102,8 @@ defineExpose({ dirty })
       <p>Задачи начинают работу в случайное время внутри интервалов. Один аккаунт выполняет одно действие за раз; разные ученики работают параллельно.</p>
       <p>Комментарии работают во все дни с активностью и уступают другим фичам. Если включены посты, сначала ждут первую публикацию.</p>
       <p>Начатая задача может закончиться после интервала. Короткий интервал допустим; слишком затянувшуюся задачу остановит лимит времени.</p>
-      <p>Выключение останавливает новые автоматические действия. Уже отправленное проверяется. Ручные задания продолжаются.</p>
+      <p>Лента: один проход в день — до пяти лайков профессиональным постам и один комментарий. Порция — случайные 30–120 карточек, между запросами есть паузы; реклама и спам пропускаются.</p>
+      <p>Выключение прекращает новые автоматические запросы, включая проверки. Начатый запрос сохраняет результат; история отправок остаётся. Ручные задания продолжаются.</p>
       <p>Для перехода через полночь используйте два интервала: до 24:00 и с 00:00 следующего дня. Один автопост в сутки; приглашения используют прежнюю дневную норму.</p>
     </details>
     <p v-if="conflict" class="error" role="alert">Расписание изменено в другом окне. Ваш черновик сохранён здесь.

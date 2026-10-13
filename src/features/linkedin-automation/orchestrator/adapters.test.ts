@@ -142,7 +142,7 @@ test('Inviter cooperative checkpoints retain caches and the same recipients as a
   assert.ok(managed.yields > 0)
 })
 
-test('automatic withdrawal uses the same 14-day rule and continues the saved approved queue', async () => {
+test('automatic withdrawal uses the same 21-day rule and continues the saved approved queue', async () => {
   const f = withdrawalFixture(); let now = f.runtime.now(); f.runtime.now = () => now
   let service = createInvitationWithdrawal(f.runtime)
   await service.startAutomatic!(1, 'slot-1'); assert.equal(f.calls.length, 0)

@@ -13,7 +13,7 @@ const stages: Record<string, string> = {
   invitations_read: 'Сверка отправленных приглашений', invitation_send: 'Отправка приглашения',
   invitation_withdraw: 'Отзыв приглашения', posts_read: 'Проверка постов', post_send: 'Публикация поста',
   comments_read: 'Чтение комментариев и проверка ответов', comment_send: 'Отправка комментария',
-  likes_read: 'Проверка лайка', like_send: 'Отправка лайка'
+  likes_read: 'Проверка лайка', like_send: 'Отправка лайка', feed_read: 'Чтение домашней ленты'
 }
 
 export function createRequestPolicy(options: { store: Store; assertOwner(): Promise<void>;

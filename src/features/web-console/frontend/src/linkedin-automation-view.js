@@ -1,4 +1,4 @@
-export const featureNames = { invitations: 'Приглашения', posts: 'Посты', comments: 'Комментарии', withdrawals: 'Отзыв приглашений', likes: 'Лайки' }
+export const featureNames = { invitations: 'Приглашения', posts: 'Посты', comments: 'Комментарии', feed: 'Лента: 5 лайков + 1 комментарий', withdrawals: 'Отзыв приглашений', likes: 'Лайки' }
 export const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 export const stateNames = { planned: 'Запланировано', running: 'Выполняется', waiting: 'Ожидание', verifying: 'Проверяем отправленное', completed: 'Завершено', stopped: 'Остановлено', needs_attention: 'Нужно внимание' }
 export const connectionNames = { connected: 'Подключён', attention: 'Нужно внимание', error: 'Ошибка подключения', not_connected: 'Не подключён' }
@@ -37,6 +37,13 @@ export function scheduleError(draft) {
 }
 export function reasonText(code) {
   const messages = {
+    target_reached: 'Лента: подтверждены 5 лайков и 1 комментарий.',
+    partial_result: 'Лента: проход завершён частично. Выполненное, пропуски и ошибки — в журнале.',
+    no_professional_posts: 'В прочитанных карточках нет доступных профессиональных постов.',
+    feed_run_expired: 'Срок прохода ленты истёк; сохранённые отправки повторяться не будут.',
+    feed_read_recovery_unsafe: 'Ответ чтения ленты потерян. Этот проход продолжать нельзя: неизвестен срок ожидания провайдера.',
+    feed_model_not_configured: 'Для ленты не настроена модель. Проверьте настройки модели комментариев или профиля на backend.',
+    session_expired: 'Срок сессии истёк. Результаты сохранены; повторных отправок не будет.',
     unipile_action_skipped: 'Действие пропущено после 20 минут ошибок сервиса. Остальные действия продолжаются.',
     comments_post_skipped: 'Комментарии пропущены: публикацию не удалось подтвердить после ошибки сервиса.',
     history_and_quota_saved: 'История проверена, дневная норма сохранена.',
@@ -75,7 +82,7 @@ export function reasonText(code) {
 export const apiError = error => reasonText(error?.body?.code || error?.body?.error) || error?.message || 'Не удалось выполнить действие.'
 export const pendingTask = task => !['completed', 'stopped', 'needs_attention'].includes(task.state)
 export function canResumeTask(task, schedule, now = Date.now()) {
-  return !!schedule?.enabled && (['stopped', 'needs_attention'].includes(task.state) || (!!task.stopped && task.state === 'verifying')) &&
+  return !!schedule?.enabled && !task.resumeBlockedReason && (['stopped', 'needs_attention'].includes(task.state) || (!!task.stopped && task.state === 'verifying')) &&
     task.day === new Date(now + 3 * 3600_000).toISOString().slice(0, 10) &&
     (!task.deadlineAt || task.deadlineAt > now) && task.activeMs < task.activeLimitMs &&
     schedule.slots.some(slot => slot.features.includes(task.feature))
@@ -101,6 +108,6 @@ export function accountSummary(account, status) {
   return { schedule, tasks, current, last, attention, features: [...new Set((schedule?.slots ?? []).flatMap(s => s.features))] }
 }
 export function isErrorEvent(event) {
-  if (['comments_post_not_published', 'comments_not_started', 'post_account_not_ready', 'unipile_action_skipped', 'comments_post_skipped'].includes(event.code)) return true
+  if (['comments_post_not_published', 'comments_not_started', 'post_account_not_ready', 'unipile_action_skipped', 'comments_post_skipped', 'partial_result', 'feed_action_expired', 'feed_model_incomplete'].includes(event.code)) return true
   return event.httpStatus >= 400 || /error|failed|blocked|lost|uncertain|needs_attention|unavailable|timeout|invalid|conflict/.test(event.code)
 }

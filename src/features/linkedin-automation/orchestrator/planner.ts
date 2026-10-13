@@ -4,7 +4,7 @@ import { AUTOMATIC_RUN_MAX_AGE_MS } from '../execution-step.ts'
 const minute = 60_000, day = 86_400_000, moscow = 3 * 60 * minute
 export const unknownLockGraceMs = 10 * minute
 const initial: Record<Feature, number> = { invitations: 180 * minute, posts: 30 * minute,
-  withdrawals: 20 * minute, comments: 5 * minute }
+  withdrawals: 20 * minute, comments: 5 * minute, feed: 30 * minute }
 export const dateMsk = (now: number) => new Date(now + moscow).toISOString().slice(0, 10)
 export const dayStart = (date: string) => Date.parse(`${date}T00:00:00+03:00`)
 export const weekday = (date: string) => (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7
@@ -101,7 +101,7 @@ export function canRunBesideUnknown(task: Pick<Task, 'id' | 'account'> & { day?:
   // unknown recipients inside its approved queue; unrelated old requests can proceed.
   if (connections(pending.feature)) return task.feature !== pending.feature ||
     (pending.feature === 'invitations' && !!task.day && task.day > pending.day)
-  if (pending.feature === 'posts') return connections(task.feature) ||
+  if (pending.feature === 'posts') return connections(task.feature) || task.feature === 'feed' ||
     (task.day !== pending.day && ['posts', 'comments'].includes(task.feature))
   return task.feature !== pending.feature || (!!task.day && task.day > pending.day)
 }

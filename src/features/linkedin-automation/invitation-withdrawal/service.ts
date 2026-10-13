@@ -171,7 +171,7 @@ export function createInvitationWithdrawal(runtime: Runtime): WithdrawalService 
           !sameWithdrawalAccount(preview.account, account)) throw withdrawalError(
           'withdrawal_preview_expired', 'Обновите список перед подтверждением отзыва.')
         const total = preview.items.filter(item => item.eligible).length
-        if (!total) throw withdrawalError('withdrawal_empty', 'Нет приглашений старше 14 дней для отзыва.')
+        if (!total) throw withdrawalError('withdrawal_empty', 'Нет приглашений старше 21 дня для отзыва.')
         const run: Run = { id: token, platformAccountId: id, accountId: account.accountId,
           status: 'running', total, withdrawn: 0, skipped: 0,
           targets: copy(preview.items.filter(item => item.eligible)), cursor: 0, approvedAccount: copy(account) }

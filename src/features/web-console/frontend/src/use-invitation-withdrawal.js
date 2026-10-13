@@ -42,7 +42,7 @@ export function useInvitationWithdrawal(account) {
   }) }
   const start = () => {
     const count = preview.value?.items.filter(item => item.eligible).length || 0
-    if (!count || !window.confirm(`Отозвать ${count} приглашений старше 14 дней у ${account.clientName}? ` +
+    if (!count || !window.confirm(`Отозвать ${count} приглашений старше 21 дня у ${account.clientName}? ` +
       'Повторное приглашение этим людям может быть недоступно до трёх недель.')) return
     return action(async () => {
       run.value = await request('', { token: preview.value.token, confirm: true }); preview.value = null

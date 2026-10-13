@@ -1,6 +1,25 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
+test('resume skips a saved approved target younger than the current 21-day threshold', async () => {
+  const f = fixture()
+  await f.service.startAutomatic!(1, 'old-policy')
+  const state = f.stored()!
+  state.run!.targets![0].createdAt = new Date(f.runtime.now() - 20 * 86_400_000).toISOString()
+  await f.runtime.store.save(1, state)
+  await f.service.close()
+  const resumed = createInvitationWithdrawal(f.runtime)
+  try {
+    let step
+    for (let i = 0; i < 5 && step?.status !== 'completed'; i++) {
+      step = await resumed.stepManaged!(1, 'old-policy')
+    }
+    assert.equal(step?.status, 'completed')
+    assert.deepEqual(f.calls, ['2'])
+    assert.equal((await resumed.status(1))?.skipped, 1)
+  } finally { await resumed.close() }
+})
+
 test('new day archives a stopped withdrawal and never cancels its unknown ID again', async () => {
   const f = fixture(); let now = f.runtime.now()
   f.runtime.now = () => now

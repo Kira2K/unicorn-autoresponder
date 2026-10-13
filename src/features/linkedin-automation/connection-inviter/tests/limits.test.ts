@@ -2,14 +2,14 @@ const assert = require('node:assert/strict')
 const { dailyAudienceTargets, dailyInvitationLimit, dateParts, connectionCount } =
   require('../limits.ts') as typeof import('../limits.ts')
 const { makeRun } = require('../run-model.ts') as typeof import('../run-model.ts')
-const { confirmedQuotaExceeded, confirmedQuotaReached, synchronizeConfirmedProgress } =
+const { confirmedQuotaExceeded, confirmedQuotaReached, synchronizeConfirmedProgress, applyDailyInvitationCap } =
   require('../daily-progress.ts') as
   typeof import('../daily-progress.ts')
 
-const boundaries = [[0, 5], [149, 5], [150, 7], [199, 7], [200, 8], [250, 10],
-  [300, 11], [350, 13], [400, 15], [450, 17], [500, 18], [550, 20], [600, 22],
-  [650, 24], [700, 27], [750, 29], [800, 31], [850, 33], [900, 36], [950, 38],
-  [999, 38], [1000, 40], [5000, 40]]
+const boundaries = [[0, 5], [149, 5], [150, 7], [199, 7], [200, 7], [250, 7],
+  [300, 7], [350, 7], [400, 7], [450, 7], [500, 7], [550, 7], [600, 7],
+  [650, 7], [700, 7], [750, 7], [800, 7], [850, 7], [900, 7], [950, 7],
+  [999, 7], [1000, 7], [5000, 7]]
 for (const invalid of [null, undefined, '', ' ', false, true, -1, NaN, Infinity]) {
   assert.equal(connectionCount({ relations_count: invalid }), undefined)
 }
@@ -67,4 +67,24 @@ const exactHistory = [
 const exact = synchronizeConfirmedProgress(stale, exactHistory, stale.audienceQuota)
 assert.equal(confirmedQuotaReached(exact, stale.audienceQuota), true)
 assert.equal(confirmedQuotaExceeded(exact, stale.audienceQuota), false)
+for (const [sent, reserved, expected] of [
+  [{ recruiter: 2, technical: 0 }, {}, { recruiter: 5, technical: 2 }],
+  [{ recruiter: 6, technical: 0 }, {}, { recruiter: 6, technical: 1 }],
+  [{ recruiter: 1, technical: 3 }, {}, { recruiter: 4, technical: 3 }],
+  [{ recruiter: 5, technical: 1 }, { pending: 'technical' }, { recruiter: 5, technical: 2 }],
+  [{ recruiter: 28, technical: 12 }, {}, { recruiter: 28, technical: 12 }],
+] as const) {
+  const run = structuredClone(stale)
+  run.dailyLimit = 40; run.dailyQuota = 40
+  run.counters.sentByAudience = { ...sent }
+  run.counters.sent = sent.recruiter + sent.technical
+  run.searchProgress.reservedInvitations = { ...reserved }
+  applyDailyInvitationCap(run)
+  assert.equal(run.dailyLimit, 7); assert.equal(run.dailyQuota, 7)
+  assert.deepEqual(run.audienceQuota, expected)
+  assert.deepEqual(run.counters.sentByAudience, sent, 'Never rewrite already sent invitations')
+  assert.deepEqual(run.searchProgress.reservedInvitations, reserved, 'Unknown outcomes still occupy quota')
+  applyDailyInvitationCap(run)
+  assert.deepEqual(run.audienceQuota, expected, 'Applying the cap again must not reset quota')
+}
 console.log('connection invitation limit tests passed')

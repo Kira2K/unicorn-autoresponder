@@ -27,7 +27,7 @@ async function run() {
     } } })
   const started: any = await service.start(7)
   const completed: any = await waitRun(service, started.runId)
-  assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.sent, 11)
+  assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.sent, 7)
   const retry = events.find(event => event.stage === 'retry' && event.status === 'failed')
   assert.equal(retry?.details?.attempt, 1)
   assert.equal(retry?.details?.delayMs, 270_000)

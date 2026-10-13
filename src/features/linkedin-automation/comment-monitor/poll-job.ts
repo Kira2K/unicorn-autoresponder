@@ -31,7 +31,10 @@ function transient(error: any, code: string) {
 
 export async function pollMonitorJob(options: Parameters<typeof pollMonitorStep>[0]): Promise<ExecutionStep> {
   const result = await monitorResult(options)
-  return { ...result, ...monitorRecovery(options.job) }
+  const job = options.job
+  return { ...result, ...monitorRecovery(job), report: { checkedAt: job.lastCheckAt },
+    summary: result.summary ?? { completed: job.state.published, skipped: job.state.failed,
+      unconfirmed: pendingReplies(job).length } }
 }
 export function monitorRecovery(job: MonitorJob) {
   const actions = { ...job.state.readRecovery,

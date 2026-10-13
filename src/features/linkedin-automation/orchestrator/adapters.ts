@@ -4,6 +4,7 @@ import type { PostWriterService } from '../post-writer/service.ts'
 import type { Adapters, StepContext } from './contracts.ts'
 import { fail } from './contracts.ts'
 import { dateMsk } from './planner.ts'
+import { postReport } from './notifications.ts'
 import type { ExecutionStep } from '../execution-step.ts'
 const { withRequestContext, requestContext } = (requestControl as any).default ?? requestControl
 
@@ -12,7 +13,8 @@ export type Services = {
   inviter: ReturnType<typeof createConnectionInviterService>
   posts: PostWriterService
   comments: {
-    prepareManaged(account: number, key: string, publishedAt?: number): Promise<{ jobId: string; expiresAt: string; state: { automationId?: string } }>
+    prepareManaged(account: number, key: string, publishedAt?: number): Promise<{ jobId: string; expiresAt: string;
+      state: { automationId?: string; published?: number; failed?: number } }>
     stepManaged(id: string, stop?: boolean, cooperate?: StepContext['cooperate'], verifyOnly?: boolean): Promise<ExecutionStep>
     resumeManaged(id: string): Promise<void>
   }
@@ -74,6 +76,11 @@ export function createFeatureAdapters(services: Services): Adapters {
     ctx.signal.addEventListener('abort', stopNow, { once: true })
     try {
       const result = await services.posts.stepManaged(ctx.task.runId!, stop || ctx.signal.aborted, ctx.cooperate)
+      if (result.status === 'completed' || result.publishedAt) {
+        // Optional local reporting must never turn a successful publication into a failed step.
+        try { (result as ExecutionStep).report = postReport((await services.posts.get(ctx.task.account.id)).runs.find(run => run.id === ctx.task.runId)) }
+        catch { /* The publication result remains authoritative when its optional report cannot be loaded. */ }
+      }
       if ('warning' in result && result.warning) {
         if (ctx.task.reason !== result.warning.code)
           await ctx.stage?.(result.warning.code, `Предупреждение: ${result.warning.message}`)
@@ -90,6 +97,8 @@ export function createFeatureAdapters(services: Services): Adapters {
     const publishedAt = Math.max(0, ...(await services.posts.get(ctx.task.account.id)).runs
       .filter(run => run.status === 'published').map(run => run.publishedAt ?? 0))
     const job = await services.comments.prepareManaged(ctx.task.account.id, `automation:${ctx.task.account.key}`, publishedAt)
+    if (ctx.task.commentBaseline?.runId !== job.jobId)
+      ctx.task.commentBaseline = { runId: job.jobId, completed: job.state.published ?? 0, skipped: job.state.failed ?? 0 }
     await ctx.stage?.('comments_check', 'Комментарии: проверяем сессию, предыдущие ответы и новые комментарии.')
     if (ctx.task.runId !== job.jobId) await ctx.bind(job.jobId)
     const result = await services.comments.stepManaged(job.jobId, ctx.signal.aborted, ctx.cooperate)
@@ -102,7 +111,7 @@ export function createFeatureAdapters(services: Services): Adapters {
     if (!service?.startAutomatic || !service.stepManaged) throw fail('automation_withdrawal_adapter_missing')
     if (!ctx.task.runId) {
       if (stop) return { status: 'stopped' as const }
-      await ctx.stage?.('withdrawal_prepare', 'Отзыв: получаем список и выбираем приглашения строго старше 14 суток.')
+      await ctx.stage?.('withdrawal_prepare', 'Отзыв: получаем список и выбираем приглашения строго старше 21 дня.')
       const run = await service.startAutomatic(ctx.task.account.id, ctx.task.id)
       await ctx.bind(run.id); requestContext().runId = run.id
     }

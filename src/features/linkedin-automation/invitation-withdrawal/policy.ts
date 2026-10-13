@@ -3,7 +3,7 @@ import { retryAfterMilliseconds, unipileRateLimitDelay } from '../connection-inv
 import { providerRetryAt } from '../../../integrations/unipile/retry-after.ts'
 import { retryableUnipileRead } from '../../../integrations/unipile/read-retry.ts'
 const DAY = 86_400_000
-export const WITHDRAWAL_AGE_MS = 14 * DAY
+export const WITHDRAWAL_AGE_MS = 21 * DAY
 export function sameWithdrawalAccount(left: Account, right: Account) {
   return left.platformAccountId === right.platformAccountId && left.accountId === right.accountId &&
     left.linkedinUrl === right.linkedinUrl && left.verifiedProviderId === right.verifiedProviderId

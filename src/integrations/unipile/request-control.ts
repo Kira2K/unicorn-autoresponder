@@ -2,6 +2,8 @@ import type { AsyncLocalStorage as Context } from 'node:async_hooks'
 const { AsyncLocalStorage } = require('node:async_hooks') as typeof import('node:async_hooks')
 const { randomUUID } = require('node:crypto') as typeof import('node:crypto')
 const { safeUnipileDiagnostics } = require('./error-diagnostics.ts') as typeof import('./error-diagnostics.ts')
+// Verified with the raw feed endpoint; requesting 120 returns a GraphQL error.
+const MAX_HOME_FEED_COUNT = 100
 export type RequestInfo = { method: string; operation: string; route?: string; stage?: string; account?: string; write: boolean; requestId?: string; startedAt?: number; dispatched?: boolean }
 export type RequestContext = { taskId?: string; runId?: string; actionId?: string; initiator?: 'schedule' | 'manual' | 'recovery'; account?: string; feature?: string;
   assertWrite?(): Promise<void>; assertRequest?(): Promise<void>; signal?: AbortSignal;
@@ -26,8 +28,16 @@ function requestInfo(method: string, path: string, body?: any): RequestInfo {
   const prefixed = parts.length > 1 && !['accounts', 'users', 'posts', 'search', 'webhooks', 'hosted', 'chats'].includes(parts[0])
   const account = url.searchParams.get('account_id') || (body instanceof FormData
     ? body.get('account_id') : body?.account_id) || (parts[0] === 'accounts' ? parts[1] : prefixed ? parts[0] : undefined)
+  // The Raw API envelope is POST, but this one narrowly allowlisted operation is a read.
+  const feedRead = method === 'POST' && /^\/acc_[A-Za-z0-9_-]+\/linkedin\/?$/.test(url.pathname) &&
+    body?.method === 'GET' && body.url === 'https://www.linkedin.com/voyager/api/graphql' && body.bypass_url_encoding === true &&
+    Object.keys(body).every(key => ['method', 'url', 'bypass_url_encoding', 'query_params'].includes(key)) &&
+    body.query_params && Object.keys(body.query_params).every(key => ['queryId', 'variables'].includes(key)) &&
+    /^voyagerFeedDashMainFeed\.[a-f0-9]{32}$/.test(body.query_params.queryId) &&
+    /^\(start:\d+,count:[1-9]\d{0,2}(?:,paginationToken:[A-Za-z0-9_%~.\-]+)?\)$/.test(body.query_params.variables) &&
+    Number(body.query_params.variables.match(/,count:(\d+)/)?.[1]) <= MAX_HOME_FEED_COUNT
   // Only operation families are logged; query values and bodies never leave the HTTP client.
-  const stage = parts.includes('search') ? (parts.includes('parameters') ? 'search_parameters' : 'people_search') :
+  const stage = feedRead ? 'feed_read' : parts.includes('search') ? (parts.includes('parameters') ? 'search_parameters' : 'people_search') :
     parts.includes('relation-requests') ? (method === 'GET' ? 'invitations_read' : parts.includes('cancel') ? 'invitation_withdraw' : 'invitation_send') :
     parts.includes('relations') ? 'connections_read' :
     parts.includes('reactions') ? (method === 'GET' ? 'likes_read' : 'like_send') :
@@ -38,9 +48,9 @@ function requestInfo(method: string, path: string, body?: any): RequestInfo {
   const template = safeUnipileDiagnostics(0, {}, { requestPath: path }).requestPath?.split('?')[0]
     .replace(/\/me(?=\/|$)/g, '/:id')
   return { method, route: template ? `${method} ${template}` : undefined,
-    write: method !== 'GET', account: account ? String(account) : undefined, requestId: randomUUID(), startedAt: Date.now(),
+    write: method !== 'GET' && !feedRead, account: account ? String(account) : undefined, requestId: randomUUID(), startedAt: Date.now(),
     stage,
-    operation: parts.includes('reactions') ? 'likes' : parts.includes('comments') ? 'comments' : parts[prefixed ? 1 : 0] || 'root' }
+    operation: feedRead ? 'feed' : parts.includes('reactions') ? 'likes' : parts.includes('comments') ? 'comments' : parts[prefixed ? 1 : 0] || 'root' }
 }
 async function beforeRequest(info: RequestInfo) {
   await policy?.before(info, contexts.getStore())
@@ -77,7 +87,7 @@ async function runRequest<T>(info: RequestInfo, action: () => Promise<T>): Promi
     if (info.requestId) { writes.get(info.requestId)?.finish(); writes.delete(info.requestId) }
   }
 }
-module.exports = { installRequestPolicy, requestInfo,
+module.exports = { MAX_HOME_FEED_COUNT, installRequestPolicy, requestInfo,
   hasAccountRequestQueue: () => Boolean(policy?.queue),
   drainWrites: () => Promise.all([...writes.values()].map(value => value.promise)),
   requestContext: () => contexts.getStore(),

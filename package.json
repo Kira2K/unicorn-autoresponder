@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "linkedin:feed:test": "node --test src/integrations/unipile/home-feed.test.ts src/integrations/unipile/feed-actions.test.ts src/features/linkedin-automation/feed-reader/*.test.ts",
+    "linkedin:feed:mock": "node src/features/linkedin-automation/feed-reader/demo.mts",
     "linkedin:orchestrator:e2e": "node src/features/web-console/e2e/linkedin-automation.e2e.mts",
     "linkedin:orchestrator:test": "node --test src/features/linkedin-automation/action-recovery.test.ts src/features/linkedin-automation/orchestrator/*.test.ts src/integrations/postgres/linkedin-automation.test.mts src/integrations/unipile/account-request-queue.test.ts",
     "linkedin:withdrawals:test": "node --test src/features/linkedin-automation/invitation-withdrawal/*.test.ts src/integrations/unipile/invitation-withdrawal.test.ts src/features/web-console/backend/invitation-withdrawal-routes.test.ts",

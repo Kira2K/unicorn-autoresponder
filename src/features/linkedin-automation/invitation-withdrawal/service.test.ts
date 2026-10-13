@@ -2,6 +2,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { fixture, finished } from './test-fixture.ts'
 import { createInvitationWithdrawal } from './service.ts'
+
+test('manual and scheduled runs leave 14-21 day invitations and withdraw only strictly older than 21 days', async () => {
+  for (const automatic of [false, true]) {
+    const f = fixture(), now = f.runtime.now(), day = 86_400_000
+    f.pending([14, 15, 20, 21, 22].map(age => ({ id: String(age), name: `Age ${age}`,
+      createdAt: new Date(now - age * day).toISOString() })))
+    const preview = await f.service.preview(1)
+    assert.deepEqual(preview.items.filter(item => item.eligible).map(item => item.id), ['22'])
+    if (automatic) {
+      await f.service.startAutomatic!(1, 'age-check')
+      let step
+      do { step = await f.service.stepManaged!(1, 'age-check') } while (step.status !== 'completed')
+    } else {
+      await f.service.start(1, preview.token)
+      await finished(f.service)
+    }
+    assert.deepEqual(f.calls, ['22'])
+  }
+})
 test('all old pending invitations, including outside our history, are withdrawn once', async () => {
   const f = fixture(), preview = await f.service.preview(1)
   assert.equal(f.calls.length, 0)

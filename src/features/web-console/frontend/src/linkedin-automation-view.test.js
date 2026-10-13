@@ -1,6 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { scheduleDraft, schedulePayload, scheduleError, timeMinutes, dateMsk, accountSummary, apiError, reasonText, isErrorEvent, canResumeTask } from './linkedin-automation-view.js'
+
+test('feed expiry and unsafe read cannot be resumed from the console', () => {
+  const now = Date.parse('2026-10-11T12:00:00+03:00')
+  const task = { feature: 'feed', state: 'stopped', day: '2026-10-11', activeMs: 0, activeLimitMs: 3600_000 }
+  const schedule = { enabled: true, slots: [{ features: ['feed'] }] }
+  assert.equal(canResumeTask(task, schedule, now), true)
+  for (const reason of ['feed_run_expired', 'feed_read_recovery_unsafe']) {
+    assert.equal(canResumeTask({ ...task, resumeBlockedReason: reason }, schedule, now), false)
+    assert.doesNotMatch(reasonText(reason), /Нужна проверка:/)
+  }
+  for (const code of ['partial_result', 'feed_action_expired', 'feed_model_incomplete'])
+    assert.equal(isErrorEvent({ code }), true)
+  assert.equal(isErrorEvent({ code: 'target_reached' }), false)
+})
 test('continuation is offered for every unfinished feature today, only while its original budget allows it', () => {
   const now = Date.parse('2026-10-03T10:00:00+03:00')
   const schedule = { enabled: true, slots: [{ features: ['invitations', 'posts', 'comments', 'withdrawals'] }] }

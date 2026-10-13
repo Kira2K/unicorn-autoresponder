@@ -11,9 +11,9 @@ const record = (value: unknown): Record<string, unknown> =>
 function sourceFor(code: string, readDiagnostic?: string): Event['source'] {
   if (readDiagnostic) return 'Unipile'
   if (/postgres|sql_|persistence|storage|ECONN|^[0-9]{2}[A-Z0-9]{3}$/.test(code)) return 'SQL'
-  if (/unipile/.test(code)) return 'Unipile'
+  if (/unipile|^feed_graphql_error$/.test(code)) return 'Unipile'
   if (/dolphin/.test(code)) return 'Dolphin'
-  if (/openai/.test(code)) return 'OpenAI'
+  if (/openai|^feed_model_(incomplete|response_invalid)$/.test(code)) return 'OpenAI'
   return 'наш код'
 }
 

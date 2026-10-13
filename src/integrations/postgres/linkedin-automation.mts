@@ -5,8 +5,9 @@ import type { Store, Task, Schedule, Event, Cooldown, Feature } from '../../feat
 const { fail } = createRequire(import.meta.url)('../../features/linkedin-automation/orchestrator/contracts.ts') as
   typeof import('../../features/linkedin-automation/orchestrator/contracts.ts');
 import type { State as WithdrawalState, Store as WithdrawalStore } from '../../features/linkedin-automation/invitation-withdrawal/contracts.ts';
+import type { NoticeStore } from '../../features/linkedin-automation/orchestrator/notifications.ts';
 
-export function createLinkedInAutomationStore(pool: SqlPool): Store & { withdrawals: WithdrawalStore;
+export function createLinkedInAutomationStore(pool: SqlPool): Store & NoticeStore & { withdrawals: WithdrawalStore;
   importWithdrawal(id: number, value: WithdrawalState): Promise<void> } {
   async function transaction<T>(write: boolean, action: (sql: SqlSession) => Promise<T>): Promise<T> {
     const sql = await pool.connect(); let broken = false;
@@ -39,6 +40,30 @@ export function createLinkedInAutomationStore(pool: SqlPool): Store & { withdraw
   };
   return {
     withdrawals,
+    async claimNotice(taskId, key, value, owner, epoch) { return transaction(true, async s => {
+      await owned(s, owner, epoch);
+      const { rows } = await s.query('SELECT state FROM linkedin_automation.tasks WHERE id=$1 FOR UPDATE', [taskId]);
+      if (!rows.length) return false;
+      const previous = (rows[0].state as Task).notices?.[key];
+      if (previous && (previous.status !== 'retry' || (previous.nextAt ?? 0) > value.at)) return false;
+      await s.query(`UPDATE linkedin_automation.tasks SET state=jsonb_set(state,'{notices}',
+        COALESCE(state->'notices','{}'::jsonb) || jsonb_build_object($2::text,$3::jsonb)) WHERE id=$1`,
+      [taskId, key, JSON.stringify(value)]);
+      return true;
+    }); },
+    async finishNotice(taskId, key, value, owner, epoch) { await transaction(true, async s => {
+      await owned(s, owner, epoch);
+      const { rows } = await s.query(`UPDATE linkedin_automation.tasks SET state=jsonb_set(state,'{notices}',
+        COALESCE(state->'notices','{}'::jsonb) || jsonb_build_object($2::text,$3::jsonb))
+        WHERE id=$1 AND state->'notices'->$2->>'status'='sending' RETURNING id`, [taskId, key, JSON.stringify(value)]);
+      if (!rows.length) throw fail('automation_notification_conflict');
+    }); },
+    async feedHistory(accountKey: string) {
+      const result = await read(`SELECT DISTINCT action->>'cardId' AS id FROM linkedin_automation.tasks,
+        LATERAL jsonb_array_elements(COALESCE(state->'feed'->'actions','[]'::jsonb)) AS action
+        WHERE account_key=$1 AND feature='feed' AND (action ? 'attemptedAt' OR action->>'state' IN ('confirmed','unknown'))`, [accountKey]);
+      return result.rows.map(row => String(row.id)).filter(id => id.startsWith('urn:li:'));
+    },
     async importWithdrawal(id, value) {
       await transaction(true, async s => {
         await s.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`linkedin-withdrawal-import:${id}`]);
@@ -92,10 +117,13 @@ export function createLinkedInAutomationStore(pool: SqlPool): Store & { withdraw
     async save(task, entry, owner, epoch) { return transaction(true, async s => {
       await owned(s, owner, epoch);
       const next = { ...task, version: task.version + 1 };
-      const updated = await s.query(`UPDATE linkedin_automation.tasks SET version=$2,state=$3::jsonb
-        WHERE id=$1 AND version=$4 RETURNING id`, [task.id,next.version,JSON.stringify(next),task.version]);
+      // Delivery receipts have their own lock and never change the business version.
+      // Preserve them when a feature saves a previously loaded task concurrently.
+      const updated = await s.query(`UPDATE linkedin_automation.tasks SET version=$2,
+        state=$3::jsonb || jsonb_build_object('notices',COALESCE(state->'notices','{}'::jsonb))
+        WHERE id=$1 AND version=$4 RETURNING id,state`, [task.id,next.version,JSON.stringify(next),task.version]);
       if (!updated.rows.length) throw fail('automation_version_conflict');
-      await event(s, entry); return next;
+      await event(s, entry); return (updated.rows[0].state ?? next) as Task;
     }); },
     async history(account, after = 0, limit = 200, filter = {}) {
       const result = await read(`SELECT id,state FROM linkedin_automation.events
@@ -104,7 +132,7 @@ export function createLinkedInAutomationStore(pool: SqlPool): Store & { withdraw
           AND ($5::text IS NULL OR state->>'source'=$5)
           AND ($6::text IS NULL OR state->>'feature'=$6)
           AND (NOT $7::boolean OR COALESCE((state->>'httpStatus')::int,0)>=400
-            OR state->>'code' ~ 'error|failed|blocked|lost|uncertain|needs_attention|unavailable|timeout|invalid|conflict|identity_mismatch|automation_likes_expired|comments_post_not_published|comments_not_started|post_account_not_ready|unipile_action_skipped|comments_post_skipped')
+            OR state->>'code' ~ 'error|failed|blocked|lost|uncertain|needs_attention|unavailable|timeout|invalid|conflict|identity_mismatch|automation_likes_expired|comments_post_not_published|comments_not_started|post_account_not_ready|unipile_action_skipped|comments_post_skipped|partial_result|feed_action_expired|feed_model_incomplete')
           AND ($8::double precision IS NULL OR at>=to_timestamp($8/1000.0))
           AND ($9::double precision IS NULL OR at<to_timestamp($9/1000.0))
         ORDER BY id ${filter.latest ? 'DESC' : 'ASC'} LIMIT $3`, [account ?? null,after,Math.min(1000,limit),

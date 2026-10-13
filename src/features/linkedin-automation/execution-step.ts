@@ -4,6 +4,7 @@
  */
 export const AUTOMATIC_RUN_MAX_AGE_MS = 24 * 60 * 60_000
 export type ExecutionStep = {
+  report?: import('./orchestrator/notifications.ts').FeatureReport
   status: 'ready' | 'waiting' | 'verifying' | 'completed' | 'stopped' | 'needs_attention'
   nextActionAt?: string
   reason?: string

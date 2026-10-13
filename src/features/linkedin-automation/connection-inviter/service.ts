@@ -495,11 +495,12 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           run.status = 'stopped'; run.stage = 'stopped_by_admin'
           synchronizeConfirmedProgress(run, history, run.audienceQuota)
           await save(run, 'stopped', 'critical')
-          return { status: 'stopped', summary: { completed: run.counters.sent,
+          return { status: 'stopped', report: { target: run.dailyQuota ?? run.dailyLimit }, summary: { completed: run.counters.sent,
             skipped: run.counters.skipped, unconfirmed: pending.length } }
         }
           if (!current && ['succeeded', 'partial', 'failed', 'paused'].includes(run.status))
             return { status: run.status === 'succeeded' ? 'completed' : 'needs_attention', reason: run.errorCode,
+              report: { target: run.dailyQuota ?? run.dailyLimit },
               skippedActions: skippedActions(run.searchProgress.actionRecovery), summary: { completed: run.counters.sent,
                 skipped: run.counters.skipped, unconfirmed: Object.keys(run.searchProgress.reservedInvitations ?? {}).length } }
         if (!current) {
@@ -523,7 +524,9 @@ export function createConnectionInviterService(options: ServiceOptions = {}) {
           (step.status === 'waiting' && !running.has(runId))) {
           await current.steps.return(undefined); managed.delete(runId)
         }
-        return step
+        return { ...step, report: { target: run.dailyQuota ?? run.dailyLimit },
+          summary: step.summary ?? { completed: run.counters.sent, skipped: run.counters.skipped,
+            unconfirmed: Object.keys(run.searchProgress.reservedInvitations ?? {}).length } }
       } finally { stepping.delete(runId) }
     },
     async stopRun(runId: string) {

@@ -21,6 +21,16 @@ test('missing migration is detected read-only; backend does not run DDL', async 
   assert.ok(!f.calls.some(c => /CREATE|ALTER|DROP/.test(c.sql))); assert.equal(f.releases(), 1);
 });
 
+test('feed history reads only action IDs across retained tasks, including stopped/unknown sends', async () => {
+  const f = fixture(sql => sql.includes('SELECT DISTINCT action') ? [{ id: 'urn:li:activity:7' }] : []);
+  assert.deepEqual(await f.store.feedHistory!('linkedin:owner'), ['urn:li:activity:7']);
+  const query = f.calls.find(c => c.sql.includes('SELECT DISTINCT action'))!;
+  assert.deepEqual(query.values, ['linkedin:owner']);
+  assert.match(query.sql, /attemptedAt/); assert.match(query.sql, /confirmed.*unknown/);
+  assert.doesNotMatch(query.sql, /interval|state->>'state'/);
+  assert.equal(f.calls[0].sql, 'BEGIN READ ONLY');
+});
+
 test('status reads every active shared wait in one read-only query without changing deadlines', async () => {
   const cooldown = { account: 'a', method: '*', until: 1000, observedAt: 100, code: 'unipile_limit' };
   const f = fixture(sql => sql.includes('SELECT state FROM linkedin_automation.cooldowns') ? [{ state: cooldown }] : []);
@@ -37,9 +47,10 @@ test('history filters the retained log on the server and pages newest first with
   const query = f.calls.find(c => c.sql.includes('SELECT id,state'))!;
   assert.match(query.sql, /id<\$4/); assert.match(query.sql, /ORDER BY id DESC/);
   const errorCodeFilter = new RegExp(/state->>'code' ~ '([^']+)'/.exec(query.sql)![1]);
-  for (const code of ['comments_post_not_published', 'comments_not_started', 'post_account_not_ready'])
+  for (const code of ['comments_post_not_published', 'comments_not_started', 'post_account_not_ready',
+    'partial_result', 'feed_action_expired', 'feed_model_incomplete'])
     assert.ok(errorCodeFilter.test(code), `The error filter must retain ${code}`);
-  for (const code of ['active_day_finished', 'waiting_for_post', 'completed'])
+  for (const code of ['active_day_finished', 'waiting_for_post', 'completed', 'target_reached', 'stage_feed_read'])
     assert.equal(errorCodeFilter.test(code), false, `A normal wait or completion is not an error: ${code}`);
   assert.deepEqual(query.values, [7, 0, 200, 43, 'SQL', 'posts', true, 100, 200]);
   await f.store.history(undefined, 42);
@@ -63,7 +74,34 @@ test('task checkpoint and log share one transaction with optimistic version vali
   assert.equal(saved.version, 5);
   const update = f.calls.find(c => c.sql.includes('UPDATE linkedin_automation.tasks'))!;
   assert.deepEqual([update.values[0], update.values[1], update.values[3]], ['x', 5, 4]);
+  assert.match(update.sql, /jsonb_build_object\('notices',COALESCE\(state->'notices'/);
   assert.ok(f.calls.findIndex(c => c.sql.includes('INSERT INTO linkedin_automation.events')) < f.calls.findIndex(c => c.sql === 'COMMIT'));
+});
+
+test('notification claim checks lease, locks task, and never reclaims sending or sent receipts', async () => {
+  const receipt = { status: 'sending' as const, at: 100, text: 'report' };
+  for (const status of ['sending', 'sent', 'unknown', 'failed', 'retry']) {
+    const f = fixture(sql => /SELECT epoch/.test(sql) ? [{ epoch: 1 }] :
+      /SELECT state.*FOR UPDATE/.test(sql) ? [{ state: { notices: { n: { ...receipt, status, nextAt: 200 } } } }] : []);
+    assert.equal(await f.store.claimNotice('t', 'n', receipt, 'o', 1), false);
+    assert.ok(!f.calls.some(c => c.sql.startsWith('UPDATE')));
+  }
+  const f = fixture(sql => /SELECT epoch/.test(sql) ? [{ epoch: 1 }] :
+    /SELECT state.*FOR UPDATE/.test(sql) ? [{ state: { notices: { n: { status: 'retry', nextAt: 100 } } } }] : []);
+  assert.equal(await f.store.claimNotice('t', 'n', receipt, 'o', 1), true);
+  const update = f.calls.find(c => c.sql.startsWith('UPDATE'))!;
+  assert.doesNotMatch(update.sql, /SET version=/);
+  assert.deepEqual(update.values, ['t', 'n', JSON.stringify(receipt)]);
+});
+
+test('notification completion is leased, updates only receipts and requires the claimed state', async () => {
+  const value = { status: 'sent' as const, at: 100, text: 'report', messageId: 1 };
+  const f = fixture(sql => /SELECT epoch/.test(sql) ? [{ epoch: 1 }] : /RETURNING id/.test(sql) ? [{ id: 't' }] : []);
+  await f.store.finishNotice('t', 'n', value, 'o', 1);
+  const update = f.calls.find(c => c.sql.startsWith('UPDATE'))!;
+  assert.match(update.sql, /status'='sending'/); assert.doesNotMatch(update.sql, /SET version=/);
+  const lost = fixture(); await assert.rejects(lost.store.claimNotice('t', 'n', value, 'o', 1), { code: 'automation_owner_lost' });
+  assert.ok(!lost.calls.some(c => /UPDATE/.test(c.sql)));
 });
 test('event failure rolls back the preceding checkpoint', async () => {
   const f = fixture(sql => {

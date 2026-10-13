@@ -101,8 +101,8 @@ async function missingStack() {
   assert.equal(test.metrics.reads, 0); assert.equal(test.metrics.sends, 0)
   const resumed: any = await service.start(7, { safeRecruiterOnly: true })
   const completed: any = await waitRun(service, resumed.runId)
-  assert.equal(completed.status, 'partial'); assert.equal(completed.audienceQuota.technical, 3)
-  assert.equal(completed.counters.shortfallByAudience.technical, 3)
+  assert.equal(completed.status, 'partial'); assert.equal(completed.audienceQuota.technical, 2)
+  assert.equal(completed.counters.shortfallByAudience.technical, 2)
   assert.equal((await service.history(7)).filter((item: any) => item.status === 'sent')
     .every((item: any) => item.audience === 'recruiter'), true)
 }
@@ -112,7 +112,7 @@ async function weekendRun() {
     now: () => new Date('2026-08-29T09:00:00Z'), sleep: async () => undefined })
   const started: any = await service.start(7)
   const completed: any = await waitRun(service, started.runId)
-  assert.equal(completed.status, 'succeeded'); assert.equal(completed.dailyQuota, 11)
+  assert.equal(completed.status, 'succeeded'); assert.equal(completed.dailyQuota, 7)
 }
 async function safeFailedRetry() {
   const test = fixture({ stack: 'Frontend' }); const readProfile = test.adapter.getOwnProfile
@@ -126,7 +126,7 @@ async function safeFailedRetry() {
   assert.equal(failed.status, 'failed'); assert.equal(test.metrics.sends, 0)
   const retried: any = await service.start(7); const completed: any = await waitRun(service, retried.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.searched > 0, true)
-  assert.equal(test.metrics.sends, 11)
+  assert.equal(test.metrics.sends, 7)
 }
 async function safeHistoryRetry() {
   const timeout = Object.assign(new Error('timeout'), { code: 'unipile_timeout' })
@@ -134,7 +134,7 @@ async function safeHistoryRetry() {
   const service = createConnectionInviterService({ ...test, now: clock, sleep: async () => undefined })
   const initial: any = await service.start(7)
   const completed: any = await waitRun(service, initial.runId)
-  assert.equal(completed.status, 'succeeded'); assert.equal(test.metrics.sends, 11)
+  assert.equal(completed.status, 'succeeded'); assert.equal(test.metrics.sends, 7)
 }
 async function stoppableRun() {
   const test = fixture({ stack: 'Frontend' }); const waits: Array<() => void> = []; const events: any[] = []

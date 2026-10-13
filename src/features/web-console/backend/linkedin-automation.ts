@@ -7,6 +7,13 @@ import type { Express, RequestHandler } from 'express'
 import { createOrchestrator } from '../../linkedin-automation/orchestrator/service.ts'
 import { describeFailure } from '../../linkedin-automation/orchestrator/failure.ts'
 import { createFeatureAdapters, type Services } from '../../linkedin-automation/orchestrator/adapters.ts'
+import { createNotifications, createTelegramNoticeSender, postReport, notificationConfig } from '../../linkedin-automation/orchestrator/notifications.ts'
+import { createManagedFeedAdapter } from '../../linkedin-automation/feed-reader/managed.mts'
+import { feedRunSummary } from '../../linkedin-automation/feed-reader/run.mts'
+import { createFeedModel } from '../../linkedin-automation/feed-reader/model.mts'
+import { createHomeFeedReader } from '../../../integrations/unipile/home-feed.mts'
+import { createFeedActions } from '../../../integrations/unipile/feed-actions.mts'
+import * as feedHttp from '../../../integrations/unipile/http-client.ts'
 import { createRequestPolicy } from '../../linkedin-automation/orchestrator/request-policy.ts'
 import { accountKey, fail, type Schedule } from '../../linkedin-automation/orchestrator/contracts.ts'
 import { plan, dateMsk, dayStart, validateSchedule, unknownLockGraceMs } from '../../linkedin-automation/orchestrator/planner.ts'
@@ -18,10 +25,12 @@ import type { LikeEvent } from '../../linkedin-automation/post-writer/types.ts'
 const { createLinkedInOperationGate } = (gateModule as any).default ?? gateModule
 const { installRequestPolicy, requestContext, drainWrites } = (requestControl as any).default ?? requestControl
 
-export async function prepareLinkedInAutomation(store: ReturnType<typeof createLinkedInAutomationStore>,
+export async function prepareLinkedInAutomation(store: Omit<ReturnType<typeof createLinkedInAutomationStore>, 'claimNotice' | 'finishNotice'> &
+  Partial<Pick<ReturnType<typeof createLinkedInAutomationStore>, 'claimNotice' | 'finishNotice'>>,
   repository: { listAccounts(): Promise<LinkedInAuthAccountRow[]>;
     recordFailure?(id: number, input: { errorCode: string; accountStatus?: string }): Promise<void> },
-  options: { now?: () => number; autoStart?: boolean; withdrawalDirectory?: string; version?: string } = {}) {
+  options: { now?: () => number; autoStart?: boolean; withdrawalDirectory?: string; version?: string;
+    notifications?: { chatId: string; since: number; token?: string; send?: ReturnType<typeof createTelegramNoticeSender> } } = {}) {
   if (!await store.ready()) return undefined
   const now = options.now ?? Date.now, owner = randomUUID()
   // Fingerprint the executed sources once, including uncommitted local changes.
@@ -38,6 +47,7 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
   })()
   let epoch = await store.claim(owner, now()), connected = epoch !== undefined, services: Services | undefined
   let leaseObservedAt = now(), runtime: ReturnType<typeof createOrchestrator> | undefined
+  let notifications: ReturnType<typeof createNotifications> | undefined
   const aliases = new Map<string, string>(), providerKeys = new Map<string, string>()
   const accountInfo = new Map<string, { accountId: number; studentId: number }>()
   const pendingLikeEvents: LikeEvent[] = []
@@ -127,6 +137,7 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
       const status = await runtime.status()
       connected = status.isOwner; epoch = status.owner?.id === owner ? status.owner.epoch : undefined
       if (connected) leaseObservedAt = now()
+      if (connected && epoch !== undefined) notifications?.tick(status, owner, epoch)
     } finally { ticking = false }
   }
   function attach(value: Services) {
@@ -142,7 +153,23 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
       return value
     } }
     runtime = createOrchestrator({ store: { ...leasedStore, async release(id, token) { await drainWrites(); await store.release(id, token) } }, owner, now, version, autoStart: false,
-      adapters: createFeatureAdapters(value),
+      adapters: { ...createFeatureAdapters(value), feed: createManagedFeedAdapter({
+        identity: async accountId => {
+          const row = (await repository.listAccounts()).find(a => a.platformAccountId === accountId)
+          if (!row?.verifiedProviderId || !row.unipileAccountId) throw fail('automation_account_unverified')
+          if (row.unipileAccountStatus !== 'running' || row.authErrorCode) throw fail('post_account_not_ready')
+          return { unipileId: row.unipileAccountId, ownerId: row.verifiedProviderId }
+        },
+        history: async key => { if (!store.feedHistory) throw fail('feed_history_unavailable'); return store.feedHistory(key) },
+        dependencies: ctx => {
+          const { createUnipileHttpClient } = (feedHttp as any).default ?? feedHttp
+          const client = createUnipileHttpClient()
+          return { read: createHomeFeedReader(client), provider: createFeedActions({ client,
+            accountId: ctx.task.account.unipileId, signal: ctx.signal, now: ctx.now }) }
+        },
+        model: ctx => createFeedModel({ apiKey: String(process.env.OPENAI_LINKEDIN_COMMENT_API_KEY ?? process.env.OPENAI_LINKEDIN_PROFILE_API_KEY ?? ''),
+          model: String(process.env.OPENAI_LINKEDIN_COMMENT_MODEL ?? process.env.OPENAI_LINKEDIN_PROFILE_MODEL ?? ''), signal: ctx.signal })
+      }) },
       transfer: async schedule => {
         await assertOwner()
         if (schedule.slots.some(s => s.features.includes('posts'))) await value.posts.transferAutomation(schedule.account.id)
@@ -151,6 +178,23 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
           await value.posts.stopAutomaticLikes(schedule.account.id)
       }, report: event => console.error('[linkedin-automation]', JSON.stringify(event)) })
     for (const event of pendingLikeEvents.splice(0)) reportLikeEvent(event)
+    try {
+      const config = options.notifications ?? (options.autoStart === false ? undefined : notificationConfig())
+      if (config) {
+        if (!Number.isFinite(config.since) || config.since <= 0 || !store.claimNotice || !store.finishNotice)
+          throw fail('telegram_notifications_config_invalid')
+        notifications = createNotifications({ store: { ...store, claimNotice: store.claimNotice, finishNotice: store.finishNotice },
+          now, since: config.since, chatId: config.chatId,
+          send: 'send' in config && config.send ? config.send : createTelegramNoticeSender(config),
+          failure: async task => (await store.history(task.account.id, 0, 20, { latest: true, feature: task.feature,
+            errorsOnly: true, from: task.startedAt ?? task.createdAt })).find(event => event.taskId === task.id && event.source !== 'Telegram'),
+          postReport: async task => postReport((await value.posts.get(task.account.id)).runs.find(r => r.id === task.runId)),
+          report: event => runtime?.recordEvent(event) })
+      }
+    } catch {
+      runtime.recordEvent({ at: now(), source: 'Telegram', code: 'telegram_notifications_config_invalid',
+        message: 'Уведомления не включены: проверьте чат, дату включения и доступ бота.', stage: 'Настройка уведомлений' })
+    }
     const safeTick = () => tick().catch(error => { connected = false; runtime?.suspend(error) })
     if (options.autoStart !== false) { heartbeat = setInterval(() => void safeTick(), 5000); heartbeat.unref(); void safeTick() }
     return runtime
@@ -172,7 +216,7 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
       app[method](api + path, requireAdmin, async (req, res) => {
         try { if (!runtime) throw fail('automation_unavailable'); res.json(await action(req)) }
         catch (error) { const detail = describeFailure(error)
-          res.status(/invalid|overlap/.test(detail.code) ? 400 : /conflict/.test(detail.code) ? 409 : 503).json(detail) }
+          res.status(/invalid|overlap/.test(detail.code) ? 400 : /conflict|feed_run_expired|feed_read_recovery_unsafe/.test(detail.code) ? 409 : 503).json(detail) }
       })
     }
     route('get', '', async () => {
@@ -193,7 +237,10 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
               stage: item.errorStage ? likeStages[item.errorStage] : item.attemptedAt !== undefined ? likeStages.like_readback : likeStages.like_preflight })) } }
         }
       }))
-      return { ...status, postResults }
+      // Keep cards, cursor, model inputs and the send ledger in SQL, not in every UI poll.
+      const tasks = status.tasks.map(({ feed, ...task }) => ({ ...task,
+        ...(feed ? { feedResult: { ...feedRunSummary(feed), reason: feed.reason } } : {}) }))
+      return { ...status, tasks, postResults }
     })
     route('get', '/history', req => {
       const number = (key: string) => {
@@ -204,8 +251,8 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
       }
       const source = req.query.source ? String(req.query.source) : undefined
       const feature = req.query.feature ? String(req.query.feature) : undefined
-      if ((source && !['Unipile', 'SQL', 'Dolphin', 'OpenAI', 'наш код'].includes(source)) ||
-        (feature && !['posts', 'comments', 'invitations', 'withdrawals', 'likes'].includes(feature))) throw fail('automation_history_invalid')
+      if ((source && !['Unipile', 'SQL', 'Dolphin', 'OpenAI', 'Telegram', 'наш код'].includes(source)) ||
+        (feature && !['posts', 'comments', 'invitations', 'withdrawals', 'likes', 'feed'].includes(feature))) throw fail('automation_history_invalid')
       return store.history(number('account'), number('after') ?? 0, 200, { latest: req.query.latest === 'true',
         before: number('before'), source, feature, errorsOnly: req.query.errorsOnly === 'true', from: number('from'), to: number('to') })
     })
@@ -240,7 +287,7 @@ export async function prepareLinkedInAutomation(store: ReturnType<typeof createL
       connected = false
       services?.inviter.stop(); (services?.comments as any)?.stop?.()
       const postsClosed = services?.posts.close()
-      await runtime?.close(); await postsClosed; uninstall()
+      await notifications?.close(); await runtime?.close(); await postsClosed; uninstall()
       if (!runtime && epoch !== undefined) await store.release(owner, epoch)
       removeSignals?.()
     })()

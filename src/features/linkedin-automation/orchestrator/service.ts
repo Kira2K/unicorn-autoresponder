@@ -6,12 +6,13 @@ import { describeFailure } from './failure.ts'
 import { listReadDiagnostic } from '../../../integrations/unipile/read-retry.ts'
 import { recordFailure, recoveryExpired, recoveryWakeAt, skipRecovery, ACTION_SKIPPED, summaryMessage } from '../action-recovery.ts'
 
-const priorities = { posts: 1, invitations: 2, comments: 3, withdrawals: 4 }
+const priorities = { posts: 1, invitations: 2, comments: 3, feed: 4, withdrawals: 5 }
 export function createOrchestrator(options: { store: Store; adapters: Adapters; now?: () => number;
   random?: () => number; owner?: string; version?: string; autoStart?: boolean;
   sleep?(ms: number): Promise<void>;
   transfer?(schedule: Schedule): Promise<void>; changed?(schedule: Schedule): Promise<void>; report?(entry: Event): void }) {
   const { store, adapters } = options, now = options.now ?? Date.now, random = options.random ?? Math.random
+  const adapter = (feature: Task['feature']) => { const value = adapters[feature]; if (!value) throw fail('automation_feature_unavailable'); return value }
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
   const actionPauses = new Map<string, number>()
   const owner = options.owner ?? randomUUID(), running = new Map<string, { task: Task; signal: AbortController; work: Promise<void>; released?: boolean }>()
@@ -43,6 +44,10 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
   }
   async function persist(task: Task, event: Event) {
     if (epoch === undefined) throw fail('automation_owner_lost')
+    if ((event.httpStatus ?? 0) >= 400 || (task.state === 'needs_attention' && task.lastFailure?.code !== event.code) ||
+      /429|too_many_requests|rate_limit|shared_cooldown/.test(event.code))
+      task.lastFailure = { source: event.source, code: event.code, message: event.message,
+        stage: event.stage, httpStatus: event.httpStatus, nextAt: event.nextAt }
     const next = await store.save(task, event, owner, epoch); Object.assign(task, next)
   }
   async function assertOwner() {
@@ -94,15 +99,15 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
   const context = (task: Task, controller: AbortController, waiting: Waiting): StepContext => ({ task, now,
     signal: controller.signal, assertWrite: () => assertWrite(task, controller.signal),
     waitForRequest: action => waitWithoutActiveTime(waiting, action),
-    async stage(code, message) {
+    async stage(code, message, detail) {
       await assertOwner(); task.stage = code; task.stageMessage = message
-      await persist(task, entry(task, `stage_${code}`, message))
+      await persist(task, { ...entry(task, `stage_${code}`, message), ...detail })
     },
     async cooperate(action, until, verifying = false) {
       const current = running.get(task.id)
       task.state = verifying ? 'verifying' : 'waiting'; task.nextAt = until ?? now()
       if (verifying) task.uncertainSince ??= now()
-      const generating = until === undefined && ['posts', 'comments'].includes(task.feature)
+      const generating = until === undefined && ['posts', 'comments', 'feed'].includes(task.feature)
       await persist(task, entry(task, generating ? 'stage_generating_text' : 'account_yielded', generating
         ? 'Генерируем текст. Аккаунт освобождён для других фич.' : 'Аккаунт освобождён на время ожидания.'))
       await actionFinished(task)
@@ -143,7 +148,7 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         const timedOut = Boolean(task.deadlineAt && now() >= task.deadlineAt) || task.activeMs >= task.activeLimitMs
         if (removed || timedOut) { task.stopped = true; controller.abort(removed ? 'disabled' : 'deadline') }
         if (!task.startedAt) {
-          const estimate = await adapters[task.feature].estimate(task)
+          const estimate = await adapter(task.feature).estimate(task)
           const history = await store.durations(task.feature, task.account.key)
           task.activeLimitMs = Math.min(12 * 60 * 60_000, Math.max(15 * 60_000, 2 * reserve(task.feature, estimate, history)))
           task.startedAt = now(); task.deadlineAt = now() + task.elapsedLimitMs
@@ -153,12 +158,12 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         await persist(task, entry(task, 'step_started', checking ? 'Проверяем результат отправленного.' : 'Начинаем следующий шаг.'))
         waiting.arm()
         if (task.retryRequested && !task.stopped) {
-          await adapters[task.feature].resume?.(ctx); task.retryRequested = false
+          await adapter(task.feature).resume?.(ctx); task.retryRequested = false
           await persist(task, entry(task, 'retry_prepared', 'Продолжение того же прогона подготовлено.'))
         }
         if (task.stopped) task.stopApplied = true
         const result: ExecutionStep & { runId?: string; publishedAt?: number } = task.stopped
-          ? await adapters[task.feature].stop(ctx) : await adapters[task.feature].step(ctx)
+          ? await adapter(task.feature).stop(ctx) : await adapter(task.feature).step(ctx)
         if (result.runId && !task.runId) await ctx.bind(result.runId)
         for (const skipped of result.skippedActions ?? []) {
           if (task.reportedSkips?.includes(skipped.actionId)) continue
@@ -173,6 +178,7 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         task.activeMs += Math.max(0, now() - started - waiting.ms); accounted = true
         task.updatedAt = now(); task.reason = result.reason
         if (result.summary) task.summary = result.summary
+        if (result.report) task.report = result.report
         task.recoveryDeadlineAt = result.recoveryDeadlineAt
         if (result.publishedAt) task.publishedAt = result.publishedAt
         const waitingResult = ['waiting', 'verifying'].includes(result.status)
@@ -184,7 +190,8 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         else task.uncertainSince = undefined
         if (['disabled', 'deadline'].includes(controller.signal.reason) && !task.stopped) { task.stopped = true
           if (!['completed', 'stopped', 'verifying'].includes(task.state)) { task.state = 'waiting'; task.nextAt = now() } }
-        const detail = task.state === 'needs_attention' ? describeFailure({ code: result.reason ?? 'automation_feature_blocked' }) : undefined
+        const detail = task.state === 'needs_attention' || /429|too_many_requests|rate_limit|shared_cooldown/.test(result.reason ?? '')
+          ? describeFailure({ code: result.reason ?? 'automation_feature_blocked' }) : undefined
         await persist(task, { ...entry(task, result.reason ?? task.state, result.summary ? summaryMessage(result.summary) :
           result.reason === ACTION_SKIPPED ? describeFailure({ code: ACTION_SKIPPED }).message : task.state === 'completed' ? 'Задание завершено.' :
           task.state === 'verifying' ? 'Результат неизвестен. Повторной отправки нет; продолжаем сверку.' :
@@ -353,7 +360,8 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
         waits.set(key, { provider: cooldowns ? until('*') : await store.blockedUntil(key, '*', now()),
           action: cooldowns ? until('action') : await store.blockedUntil(key, 'action', now()) })
       }))
-      const tasks = snapshot.tasks.map(task => {
+      const tasks = snapshot.tasks.map(saved => {
+        const task = { ...saved, resumeBlockedReason: adapters[saved.feature]?.resumeBlockedReason?.(saved, now()) }
         if (terminal(task)) return task
         const wait = waits.get(task.account.key)!, active = running.get(task.id)
         const other = [...running.values()].find(r => r.task.account.key === task.account.key && r.task.id !== task.id && !r.released)
@@ -365,7 +373,7 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
           effectiveNextAt: Math.max(task.nextAt, wait.provider, wait.action), stage: active?.task.stage ?? task.stage,
           stageMessage: active?.task.stageMessage ?? task.stageMessage }
       })
-      return { available, isOwner: epoch !== undefined, ownerId: owner, error: lastError, ...snapshot, tasks }
+      return { available, isOwner: epoch !== undefined, ownerId: owner, error: lastError, ...snapshot, tasks, cooldowns }
     },
     history: store.history.bind(store),
     async saveSchedule(value: Schedule, expectedVersion: number) {
@@ -401,6 +409,8 @@ export function createOrchestrator(options: { store: Store; adapters: Adapters; 
       if (running.has(id) || !schedule?.enabled ||
         !schedule.slots.some(s => s.features.includes(task.feature)) || task.day !== dateMsk(now()) ||
         (task.deadlineAt && task.deadlineAt <= now()) || task.activeMs >= task.activeLimitMs) throw fail('automation_resume_invalid')
+      const blocked = adapter(task.feature).resumeBlockedReason?.(task, now())
+      if (blocked) throw fail(blocked)
       task.stopped = false
       task.stopApplied = false
       task.state = 'waiting'; task.nextAt = Math.max(now(), Number.isFinite(task.nextAt) ? task.nextAt : 0); task.reason = undefined

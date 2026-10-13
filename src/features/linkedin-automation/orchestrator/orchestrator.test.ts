@@ -18,10 +18,36 @@ import { createPostWriterService } from '../post-writer/service.ts'
 import { createMockDependencies } from '../post-writer/mock.ts'
 import * as commentsModule from '../comment-monitor/service.ts'
 import { readAllSentInvitations } from '../../../integrations/unipile/sent-invitations.ts'
+import { createManagedFeedAdapter } from '../feed-reader/managed.mts'
+import { createFeedRun } from '../feed-reader/run.mts'
 const { createUnipileHttpClient } = (httpModule as any).default ?? httpModule
 const { installRequestPolicy, withRequestContext, requestInfo } = (controlModule as any).default ?? controlModule
 
 const noon = Date.parse('2026-09-28T12:00:00+03:00')
+
+test('console dispatches saved feature reports without blocking its scheduler heartbeat', async () => {
+  const f = fixture(), s = schedule(), task = plan(s, [], noon, () => 0)[0]
+  Object.assign(task, { state: 'completed', summary: { completed: 7, skipped: 0, unconfirmed: 0 }, report: { target: 7 } })
+  f.schedules.push(s); f.tasks.push(task)
+  let finish!: () => void, started!: () => void, sent = 0
+  const startedPromise = new Promise<void>(resolve => { started = resolve })
+  const delivery = new Promise<void>(resolve => { finish = resolve })
+  const receipts: Record<string, any> = {}
+  const storage = Object.assign(f.store, { withdrawals: { async load() { return undefined }, async save() {} }, async importWithdrawal() {},
+    async claimNotice(_id: string, key: string, value: any) { if (receipts[key]) return false; receipts[key] = value; return true },
+    async finishNotice(_id: string, key: string, value: any) { receipts[key] = value } })
+  const console = (await prepareLinkedInAutomation(storage, { listAccounts: async () => [] }, { now: f.now, autoStart: false,
+    notifications: { chatId: '-100123', since: noon, send: async text => { sent++; assert.match(text, /7 из 7/);
+      started(); await delivery; return { status: 'sent', messageId: 1 } } } }))!
+  console.attach({ inviter: { stop() {} }, comments: { stop() {} },
+    posts: { async close() {}, async transferAutomation() {}, async stopAutomaticLikes() {} } } as any)
+  try {
+    await console.tick(); await startedPromise
+    f.advance(5000); await console.tick(); assert.equal(sent, 1)
+    assert.equal((await f.store.snapshot()).owner?.until, f.now() + 45_000)
+  } finally { finish(); await console.close() }
+  assert.equal(Object.values(receipts)[0].status, 'sent')
+})
 
 test('failed error checkpoint survives SQL recovery with task attribution and no secret values', async () => {
   const f = fixture(), reports: Event[] = []; f.schedules.push(schedule(1, ['posts']))
@@ -437,6 +463,171 @@ export function fixture() {
       sleep: async ms => { time += ms; await new Promise(r => setImmediate(r)) }, autoStart: false, owner: id }) } }
 }
 
+test('scheduled feed requests random batches, survives restart and completes 5/1', async () => {
+  const f = fixture(), s = schedule(1, ['feed']); s.account.unipileId = 'acc_feed_test'; f.schedules.push(s)
+  let reads = 0, likes = 0, comments = 0, evaluations = 0
+  f.adapters.feed = createManagedFeedAdapter({
+    identity: async () => ({ unipileId: 'acc_feed_test', ownerId: '1' }), history: async () => ['urn:li:activity:0'], random: () => .5,
+    dependencies: () => ({
+      read: async input => {
+        reads++; assert.equal(input.count, 75)
+        const start = input.cursor?.start ?? 0
+        const cards = Array.from({ length: input.count! }, (_, i) => ({ id: `urn:li:activity:${start + i}`, text: 'A concrete professional observation', resharedText: '', sponsored: false }))
+        return { ids: cards.map(c => c.id), cards, rawCount: cards.length, next: { start: start + cards.length, token: 'cursor' } }
+      },
+      provider: {
+        prepare: async card => ({ id: card.id, text: card.text, authorId: 'other', canReact: true, canComment: true, reacted: false }),
+        like: async id => { assert.ok(f.tasks[0].feed!.actions.some(a => a.postId === id && a.state === 'sending')); likes++ },
+        comment: async () => { comments++; return { id: 'comment' } }, verify: async () => true
+      }
+    }),
+    model: () => ({
+      evaluate: async input => { evaluations++; return { assessments: input.posts.map((p, i) => ({ id: p.id,
+        category: Number(p.id.split(':').at(-1)) > 2 && Number(p.id.split(':').at(-1)) < 75 ? 'advertisement' : 'professional', reason: 'Оценка' })) } },
+      comment: async () => ({ text: 'How does this handle the boundary case?', evidence: 'concrete professional' })
+    })
+  })
+  let engine = f.create(), restarted = false
+  try {
+    for (let i = 0; i < 250; i++) {
+      await engine.tick(); await engine.idle()
+      const task = f.tasks[0]
+      if (reads === 1 && !restarted) { await engine.close(); engine = f.create('feed-restart'); restarted = true }
+      if (task?.state === 'completed') break
+      f.advance(30_000)
+    }
+    const task = f.tasks[0]
+    assert.equal(task.state, 'completed'); assert.equal(reads, 2); assert.equal(likes, 5); assert.equal(comments, 1)
+    assert.equal(task.feed!.feed.cards!.length, 150); assert.equal(task.summary!.completed, 6)
+    assert.ok(!task.feed!.selection!.likes.includes('urn:li:activity:0'))
+    assert.ok(f.events.some(e => e.operation === 'feed_like_send' && e.accountId === 1 && e.studentId === 101))
+    assert.ok(f.events.some(e => e.operation === 'feed_read' && /запрошено: 75/.test(e.message)))
+    assert.ok(f.events.some(e => e.operation === 'feed_finished' && /лайков: 5\/5; комментариев: 1\/1/.test(e.message)))
+    assert.equal(task.runId, task.id)
+    // Stop is local even after disconnection; the saved actions and identities remain intact.
+    const copyTask = clone(task); copyTask.feed!.phase = 'acting'
+    const stopAdapter = createManagedFeedAdapter({ identity: async () => { throw new Error('disconnected') },
+      history: async () => { throw new Error('no read') }, model: () => { throw new Error('no model') },
+      dependencies: () => { throw new Error('no provider') } })
+    const stopped = await stopAdapter.stop({ task: copyTask, stage: async () => {}, now: f.now, signal: new AbortController().signal } as any)
+    assert.equal(stopped.status, 'stopped'); assert.equal(likes, 5); assert.equal(comments, 1)
+    copyTask.feed!.actions.at(-1)!.state = 'unknown'
+    copyTask.feed!.nextAt = f.now() + 120_000
+    const actionsBeforeResume = clone(copyTask.feed!.actions), choiceBeforeResume = clone(copyTask.feed!.selection)
+    await f.adapters.feed!.resume!({ task: copyTask, stage: async () => {}, now: f.now } as any)
+    assert.equal(copyTask.feed!.phase, 'acting'); assert.equal(copyTask.feed!.nextAt, f.now() + 120_000)
+    assert.deepEqual(copyTask.feed!.actions, actionsBeforeResume); assert.deepEqual(copyTask.feed!.selection, choiceBeforeResume)
+    assert.equal(reads, 2); assert.equal(likes, 5); assert.equal(comments, 1)
+    copyTask.feed!.phase = 'stopped'
+    await assert.rejects(() => f.adapters.feed!.resume!({ task: copyTask, stage: async () => {},
+      now: () => copyTask.feed!.feed.startedAt + 60 * 60_000 } as any), { code: 'feed_run_expired' })
+  } finally { await engine.close() }
+})
+
+test('feed preparation rejects missing model configuration without reading the feed', async () => {
+  const f = fixture(), s = schedule(1, ['feed']); s.account.unipileId = 'acc_feed_test'; f.schedules.push(s)
+  let reads = 0
+  f.adapters.feed = createManagedFeedAdapter({ identity: async () => ({ unipileId: s.account.unipileId, ownerId: '1' }),
+    history: async () => [], dependencies: () => { reads++; throw Error('must not read') },
+    model: () => { throw fail('feed_model_not_configured') } })
+  const engine = f.create()
+  try {
+    await engine.tick(); await engine.idle()
+    assert.equal(reads, 0); assert.equal(f.tasks[0].reason, 'feed_model_not_configured')
+    assert.equal(f.tasks[0].state, 'needs_attention'); assert.equal(f.tasks[0].feed, undefined)
+  } finally { await engine.close() }
+})
+
+test('feed journal preserves the failed model stage, source and HTTP status without raw payloads', async () => {
+  const f = fixture(), s = schedule(1, ['feed']); s.account.unipileId = 'acc_feed_test'; f.schedules.push(s)
+  f.adapters.feed = createManagedFeedAdapter({
+    identity: async () => ({ unipileId: s.account.unipileId, ownerId: '1' }), history: async () => [], random: () => 0,
+    dependencies: () => ({ read: async () => ({ ids: ['urn:li:activity:1'], rawCount: 1,
+      cards: [{ id: 'urn:li:activity:1', text: 'Professional observation', resharedText: '', sponsored: false }] }), provider: {} as any }),
+    model: () => ({ evaluate: async () => { throw Object.assign(new Error('private provider payload'), {
+      code: 'openai_feed_failed', details: { httpStatus: 503 } }) }, comment: async () => { throw Error('no comment') } })
+  })
+  const engine = f.create()
+  try {
+    await engine.tick(); await engine.idle(); f.advance(60_000); await engine.tick(); await engine.idle()
+    assert.equal(f.tasks[0].state, 'needs_attention')
+    const event = f.events.find(e => e.operation === 'feed_classify' && e.httpStatus === 503)!
+    assert.ok(event); assert.equal(event.source, 'OpenAI'); assert.equal(event.accountId, 1); assert.equal(event.studentId, 101)
+    assert.match(event.message, /openai_feed_failed.*HTTP 503/)
+    assert.doesNotMatch(JSON.stringify(f.events), /private provider payload/)
+  } finally { await engine.close() }
+})
+
+test('feed resume is rejected before state changes when its own budget or read recovery forbids it', async () => {
+  for (const reason of ['feed_run_expired', 'feed_read_recovery_unsafe'] as const) {
+    const f = fixture(), s = schedule(1, ['feed']); s.account.unipileId = 'acc_feed_test'; f.schedules.push(s)
+    const task = plan(s, [], f.now(), () => 0)[0]
+    task.feed = createFeedRun({ id: task.id, accountId: s.account.unipileId, ownerId: '1', now: f.now(), excluded: [] })
+    Object.assign(task, { state: 'stopped', stopped: true, stopApplied: true, runId: task.id, deadlineAt: f.now() + 86400_000 })
+    task.feed.phase = 'stopped'
+    if (reason === 'feed_run_expired') f.advance(31 * 60_000)
+    else { task.feed.feed.phase = 'needs_attention'; task.feed.feed.reason = 'feed_read_interrupted' }
+    f.tasks.push(task)
+    const unexpected = () => { throw Error('resume must not access external dependencies') }
+    f.adapters.feed = createManagedFeedAdapter({ identity: unexpected, history: unexpected, dependencies: unexpected, model: unexpected })
+    const engine = f.create()
+    try {
+      await engine.tick(); await engine.idle()
+      const before = clone(f.tasks[0])
+      assert.equal((await engine.status()).tasks[0].resumeBlockedReason, reason)
+      await assert.rejects(engine.resume(task.id), { code: reason })
+      assert.deepEqual(f.tasks[0], before)
+      assert.equal(f.events.filter(e => e.code === 'resumed').length, 0)
+    } finally { await engine.close() }
+  }
+})
+
+test('feed model and saved pauses yield to other features, then finish after the slot', async () => {
+  const f = fixture(), s = schedule(1, ['feed', 'posts', 'invitations', 'withdrawals'])
+  s.account.unipileId = 'acc_feed_test'; s.slots[0].end = 725; f.schedules.push(s)
+  f.tasks.push(...plan(s, [], f.now(), () => 0).map(t => ({ ...t,
+    plannedAt: f.now() + (t.feature === 'feed' ? 0 : 90_000), nextAt: f.now() + (t.feature === 'feed' ? 0 : 90_000) })))
+  let release!: () => void, modelStarted = false, reads = 0, likes = 0, comments = 0
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const completed: string[] = []
+  for (const feature of ['posts', 'invitations', 'withdrawals'] as const) f.adapters[feature].step = async () => {
+    completed.push(feature); return { status: feature === 'posts' ? 'needs_attention' : 'completed', reason: 'test_finished' }
+  }
+  f.adapters.feed = createManagedFeedAdapter({
+    identity: async () => ({ unipileId: s.account.unipileId, ownerId: '1' }), history: async () => [], random: () => 0,
+    dependencies: () => ({ read: async () => {
+      reads++; const cards = Array.from({ length: 5 }, (_, i) => ({ id: `urn:li:activity:${i}`, text: 'A concrete professional observation', resharedText: '', sponsored: false }))
+      return { cards, ids: cards.map(c => c.id), rawCount: 5 }
+    }, provider: {
+      prepare: async card => ({ id: card.id, text: card.text, authorId: 'other', canReact: true, canComment: true, reacted: false }),
+      like: async () => { likes++ }, comment: async () => { comments++; return { id: 'saved-comment' } }, verify: async () => true
+    } }),
+    model: () => ({ evaluate: async input => {
+      modelStarted = true; await gate
+      return { assessments: input.posts.map(p => ({ id: p.id, category: 'professional', reason: 'Профессиональный пост' })) }
+    }, comment: async () => ({ text: 'How does this handle the boundary case?', evidence: 'concrete professional' }) })
+  })
+  const engine = f.create()
+  try {
+    await engine.tick(); await engine.idle(); f.advance(60_000); await engine.tick()
+    for (let i = 0; !modelStarted && i < 30; i++) await new Promise(r => setImmediate(r))
+    assert.equal(modelStarted, true)
+    for (let i = 0; completed.length < 3 && i < 10; i++) {
+      f.advance(15_000); await engine.tick(); await new Promise(r => setImmediate(r))
+    }
+    assert.deepEqual(completed, ['posts', 'invitations', 'withdrawals'])
+    release(); await engine.idle()
+    for (let i = 0; i < 100 && f.tasks.find(t => t.feature === 'feed')!.state !== 'completed'; i++) {
+      f.advance(30_000); await engine.tick(); await engine.idle()
+    }
+    const task = f.tasks.find(t => t.feature === 'feed')!
+    assert.equal(task.state, 'completed'); assert.ok(task.updatedAt > task.windowEnd)
+    assert.equal(reads, 1); assert.equal(likes, 5); assert.equal(comments, 1)
+    assert.equal(task.reason, 'target_reached')
+    await engine.tick(); await engine.idle(); assert.equal(likes, 5); assert.equal(comments, 1)
+  } finally { release(); await engine.close() }
+})
+
 test('explicit continuation applies to every stopped feature without resetting budgets or saved waits', async () => {
   for (const feature of ['invitations', 'posts', 'comments', 'withdrawals'] as const) {
     const f = fixture(), s = schedule(1, [feature]); f.schedules.push(s)
@@ -480,8 +671,9 @@ test('all adapters can persist Stop after disconnect, but cannot resume external
   for (const task of plan(s, [], noon, () => 0)) {
     task.runId = 'saved'
     const ctx: any = { task, now: () => noon, signal: new AbortController().signal }
-    assert.equal((await adapters[task.feature].stop(ctx)).status, 'stopped')
-    await assert.rejects(adapters[task.feature].step(ctx), { code: 'automation_account_changed' })
+    const adapter = adapters[task.feature]; assert.ok(adapter)
+    assert.equal((await adapter.stop(ctx)).status, 'stopped')
+    await assert.rejects(adapter.step(ctx), { code: 'automation_account_changed' })
   }
   assert.equal(stops, 4)
 })
@@ -1113,9 +1305,10 @@ test('an aborted step cannot start a read request', async () => {
 })
 
 test('unknown-result isolation applies to every feature without expiring duplicate protection', () => {
-  const features = ['invitations', 'posts', 'withdrawals', 'comments'] as const
-  const permitted = { invitations: ['posts', 'comments', 'withdrawals'], withdrawals: ['posts', 'comments', 'invitations'],
-    posts: ['invitations', 'withdrawals'], comments: ['invitations', 'posts', 'withdrawals'] }
+  const features = ['invitations', 'posts', 'withdrawals', 'comments', 'feed'] as const
+  const permitted = { invitations: ['posts', 'comments', 'withdrawals', 'feed'], withdrawals: ['posts', 'comments', 'invitations', 'feed'],
+    posts: ['invitations', 'withdrawals', 'feed'], comments: ['invitations', 'posts', 'withdrawals', 'feed'],
+    feed: ['invitations', 'posts', 'withdrawals', 'comments'] }
   const tasks = plan(schedule(1, [...features]), [], noon, () => 0)
   for (const pending of tasks) for (const candidate of tasks) for (const elapsed of [0, 60_000, 30 * 86400_000]) {
     const unknown = { ...pending, state: 'verifying' as const, uncertainSince: noon }
@@ -1363,6 +1556,7 @@ test('admin API preserves server-owned account identity and reports each bulk re
   const base = `http://127.0.0.1:${(server.address() as any).port}/api/admin/linkedin/automation`
   try {
     assert.equal((await fetch(base)).status, 403)
+    assert.equal((await fetch(base + '/history?source=Telegram', { headers: { 'x-test-admin': 'yes' } })).status, 200)
     const response = await fetch(base + '/apply', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-test-admin': 'yes' },
       body: JSON.stringify({ enabled: true, slots: schedule().slots, account: { key: 'forged' }, accounts: [{ id: 1, version: 0 }, { id: 999, version: 0 }] }) })
     assert.equal(response.status, 200)

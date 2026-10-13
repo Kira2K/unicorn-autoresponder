@@ -1,14 +1,10 @@
 import type { SearchAudience } from './catalog.ts'
 
-const DAILY_LIMITS = [
-  [1000, 40], [950, 38], [900, 36], [850, 33], [800, 31], [750, 29], [700, 27],
-  [650, 24], [600, 22], [550, 20], [500, 18], [450, 17], [400, 15], [350, 13],
-  [300, 11], [250, 10], [200, 8], [150, 7], [0, 5]
-] as const
+export const MAX_DAILY_INVITATIONS = 7
 
 export function dailyInvitationLimit(connections: number): number {
   const normalized = Math.max(0, Math.floor(connections))
-  return DAILY_LIMITS.find(([minimum]) => normalized >= minimum)?.[1] ?? 5
+  return normalized >= 150 ? MAX_DAILY_INVITATIONS : 5
 }
 
 export function dailyAudienceTargets(dailyLimit: number): Record<SearchAudience, number> {

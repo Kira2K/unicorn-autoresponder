@@ -68,6 +68,7 @@ try {
   await page.goto(url); await page.getByTestId('email-input').fill('unicornveryevil@gmail.com')
   await page.locator('input[type="password"]').fill('101010'); await page.getByTestId('login-button').click()
   await page.getByTestId('admin-linkedin-tab').click(); await page.getByText('Исполнитель на связи', { exact: true }).waitFor()
+  assert.equal((await page.request.get(`${url}/api/admin/linkedin/automation/history?feature=feed`)).status(), 200)
   await page.getByTestId('linkedin-student-203').click(); await page.getByTestId('linkedin-detail-schedule').click()
   await page.getByTestId('automation-enabled').check(); await page.getByTestId('automation-add').click()
   await page.getByTestId('automation-end').fill('12')
@@ -79,11 +80,13 @@ try {
     await page.getByTestId('automation-post-fallback').check()
   await page.getByTestId('automation-add').click(); assert.match(await page.getByTestId('automation-validation').innerText(), /Пересекаются/)
   await page.getByRole('button', { name: 'Удалить интервал' }).last().click()
+  await page.getByTestId('automation-feature-feed').check()
   await page.getByTestId('automation-preview').click(); await page.getByTestId('automation-preview-result').waitFor()
   assert.equal(schedules.length, 0); assert.equal(tasks.length, 0)
   await page.getByTestId('automation-save').click(); await page.getByTestId('automation-confirm').click()
   await page.getByText('Расписание сохранено.', { exact: true }).waitFor()
   assert.equal(schedules[0].enabled, true); assert.equal((await posts.get(203)).settings.automationManaged, true)
+  assert.ok(schedules[0].slots[0].features.includes('feed'))
   assert.equal((await posts.get(203)).runs.length, 0)
   await page.getByRole('button', { name: 'Копировать день', exact: true }).click()
   await page.locator('.copy-box').getByLabel('Вт', { exact: true }).check()
@@ -142,6 +145,24 @@ try {
   assert.match(await postCard.innerText(), /подтверждено 1 из 3[\s\S]*Ожидают отправки: 1; проверки: 1/)
   assert.match(await postCard.innerText(), /Mock actor · аккаунт 901 · Проверка результата лайка: post_identity_mismatch/)
   posts.get = getPosts
+  // Feed status is a compact projection. Recovery data stays in storage and never leaks into polling.
+  tasks.push({ id: 'feed-proof', account: schedules[0].account, feature: 'feed', state: 'completed',
+    reason: 'partial_result', updatedAt: at, feed: { phase: 'completed', reason: 'partial_result',
+      feed: { ids: ['urn:li:activity:1'], pages: 1, cursor: { token: 'private-cursor' }, cards: [{ text: 'private-post-text' }] },
+      actions: [...Array.from({ length: 5 }, (_, i) => ({ key: `like:${i}`, kind: 'like', state: 'confirmed' })),
+        { key: 'comment', kind: 'comment', state: 'unknown', text: 'private-comment-text' }] } } as any)
+  const feedStatus = await (await page.request.get(`${url}/api/admin/linkedin/automation`)).json()
+  const projected = feedStatus.tasks.find((t: any) => t.id === 'feed-proof')
+  assert.equal(projected.feed, undefined)
+  assert.equal(projected.feedResult.likes, 5); assert.equal(projected.feedResult.comments, 0)
+  assert.equal(projected.feedResult.unconfirmed, 1)
+  assert.doesNotMatch(JSON.stringify(feedStatus), /private-cursor|private-post-text|private-comment-text/)
+  assert.ok(tasks.find(t => t.id === 'feed-proof')!.feed!.feed.cards!.length)
+  await page.getByRole('button', { name: 'Обновить статус' }).click()
+  const feedCard = page.locator('details.task').filter({ hasText: 'Лента: 5 лайков + 1 комментарий' })
+  await feedCard.locator('summary').click()
+  assert.match(await feedCard.getByTestId('automation-feed-result').innerText(), /Лайков: 5\/5.*Комментариев: 0\/1/)
+  assert.match(await feedCard.innerText(), /проход завершён частично/)
   tasks.length = 0; providerUntil = 0
   await page.getByRole('button', { name: 'Свернуть карточку' }).click()
 

@@ -2,7 +2,7 @@ import { verifyConnectionAccount } from './account.mts'
 import { nextConnectionAudience } from './audience-sequence.ts'
 import { createCandidateDiscovery } from './discovery.ts'
 import { confirmedQuotaExceeded, confirmedQuotaReached,
-  synchronizeConfirmedProgress, invitationCapacity } from './daily-progress.ts'
+  synchronizeConfirmedProgress, invitationCapacity, applyDailyInvitationCap } from './daily-progress.ts'
 import { connectionError, connectionErrorCode } from './errors.ts'
 import { dailyAudienceTargets, dailyInvitationLimit } from './limits.ts'
 import { reconcileInvitations } from './pending.ts'
@@ -202,6 +202,14 @@ async function* runConnectionSteps(runtime: ConnectionRuntime, run: ConnectionRu
       run.searchProgress.invitationNotBefore = undefined
     }
     let progress = synchronizeConfirmedProgress(run, history, run.audienceQuota)
+    if (frozenQuota) {
+      if (confirmedQuotaExceeded(progress, run.audienceQuota)) {
+        throw connectionError('connection_daily_quota_exceeded',
+          'Confirmed invitation history exceeds the daily audience quota.')
+      }
+      applyDailyInvitationCap(run)
+      progress = synchronizeConfirmedProgress(run, history, run.audienceQuota)
+    }
     let observedConnectionCount = run.connectionCount
     if (!frozenQuota || !confirmedQuotaReached(progress, run.audienceQuota)) {
       run.stage = 'verifying_account'; await save(run, 'stage_changed')

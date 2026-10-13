@@ -83,7 +83,7 @@ async function run() {
     await reloadedCell.getByText('Completed', { exact: true }).waitFor()
     await reloadedCell.getByText('Connection history', { exact: true }).waitFor()
     assert.match(await reloadedCell.innerText(), /320 connections/)
-    assert.match(await reloadedCell.innerText(), /8 recruiters/)
+    assert.match(await reloadedCell.innerText(), /5 recruiters/)
     assert.match(await reloadedCell.innerText(), /Connection history/)
     assert.equal(fallbackPolls, 0, JSON.stringify(fallbackUrls))
   } finally {
