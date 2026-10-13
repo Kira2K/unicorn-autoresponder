@@ -189,7 +189,8 @@ try {
   assert.match(await logged.innerText(), /HTTP[\s\S]*500/)
   assert.match(await logged.innerText(), /Unipile[\s\S]*trace-run[\s\S]*trace-action[\s\S]*trace-request/)
   await page.screenshot({ path: '.codex-tmp/automation-log.png', fullPage: true })
-  await page.getByTestId('automation-log-source').selectOption('SQL'); await page.getByText('Событий по этим условиям нет.').waitFor()
+    await page.getByTestId('automation-log-source').selectOption('Telegram'); await page.getByText('Событий по этим условиям нет.').waitFor()
+    await page.getByTestId('automation-log-source').selectOption('SQL'); await page.getByText('Событий по этим условиям нет.').waitFor()
 
   await page.getByRole('button', { name: 'Ученики', exact: true }).click()
   // Failed SQL does not erase the account list or present an empty list as success.

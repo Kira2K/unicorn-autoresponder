@@ -172,6 +172,8 @@ export function createNotifications(options: { store: NoticeStore; since: number
       if (saved.day < dateMsk(options.since) || saved.updatedAt < options.since) continue
       let task = saved
       const prefix = `${options.chatId}:`, receipts = task.notices ?? {}
+      const finishedLikesNotice = Object.entries(receipts).some(([key, value]) =>
+        key.startsWith(prefix + 'likes:') && value.status !== 'retry')
       const interrupted = Object.entries(receipts).find(([key, value]) => key.startsWith(prefix) && value.status === 'sending')
       if (interrupted) {
         await options.store.finishNotice(task.id, interrupted[0], { ...interrupted[1], status: 'unknown',
@@ -184,7 +186,7 @@ export function createNotifications(options: { store: NoticeStore; since: number
       const original = noticeCandidate(task, now())
       if (original?.kind === 'result' && receipts[prefix + original.key] && receipts[prefix + original.key].status !== 'retry' &&
         !(task.feature === 'posts' && task.publishedAt && task.report?.likes?.pending &&
-          !Object.keys(receipts).some(k => k.startsWith(prefix + 'likes:')))) continue
+          !finishedLikesNotice)) continue
       if (options.failure && (!task.lastFailure?.httpStatus) && (task.state === 'needs_attention' || task.summary?.skipped ||
         task.summary?.unconfirmed || /429|too_many_requests|rate_limit|shared_cooldown/.test(task.reason ?? ''))) {
         let cached = failures.get(task.id)
@@ -197,7 +199,7 @@ export function createNotifications(options: { store: NoticeStore; since: number
       let candidate = noticeCandidate(task, now())
       if (candidate && receipts[prefix + candidate.key] && receipts[prefix + candidate.key].status !== 'retry') candidate = undefined
       if (!candidate && task.feature === 'posts' && task.publishedAt && task.report?.likes?.pending &&
-        !Object.keys(receipts).some(k => k.startsWith(prefix + 'likes:')) && now() >= (postChecks.get(task.id) ?? 0)) {
+        !finishedLikesNotice && now() >= (postChecks.get(task.id) ?? 0)) {
         postChecks.set(task.id, now() + 60_000)
         const report = await options.postReport?.(task)
         if (report?.likes && !report.likes.pending) {

@@ -33,7 +33,7 @@ const student = id => props.accounts.find(a => a.platformAccountId === id)?.clie
       <label>Ученик<select v-model="account" data-testid="automation-log-account"><option value="">Все ученики</option>
         <option v-for="a in accounts" :key="a.platformAccountId" :value="a.platformAccountId">{{ a.clientName }} · #{{ a.platformAccountId }}</option></select></label>
       <label>Фича<select v-model="feature" data-testid="automation-log-feature"><option value="">Все фичи</option><option v-for="(name, key) in featureNames" :key="key" :value="key">{{ name }}</option></select></label>
-      <label>Источник<select v-model="source" data-testid="automation-log-source"><option value="">Все сервисы</option><option v-for="name in ['Unipile', 'SQL', 'Dolphin', 'OpenAI', 'наш код']" :key="name">{{ name }}</option></select></label>
+      <label>Источник<select v-model="source" data-testid="automation-log-source"><option value="">Все сервисы</option><option v-for="name in ['Unipile', 'SQL', 'Dolphin', 'OpenAI', 'Telegram', 'наш код']" :key="name">{{ name }}</option></select></label>
       <label>День · МСК<input v-model="day" type="date" aria-label="День журнала" /></label>
       <label class="check"><input v-model="errorsOnly" type="checkbox" data-testid="automation-log-errors" />Только ошибки</label>
       <Button label="Обновить журнал" size="small" outlined :loading="loading" @click="load()" />

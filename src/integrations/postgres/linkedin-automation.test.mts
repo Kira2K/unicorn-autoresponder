@@ -48,7 +48,8 @@ test('history filters the retained log on the server and pages newest first with
   assert.match(query.sql, /id<\$4/); assert.match(query.sql, /ORDER BY id DESC/);
   const errorCodeFilter = new RegExp(/state->>'code' ~ '([^']+)'/.exec(query.sql)![1]);
   for (const code of ['comments_post_not_published', 'comments_not_started', 'post_account_not_ready',
-    'partial_result', 'feed_action_expired', 'feed_model_incomplete'])
+    'partial_result', 'feed_action_expired', 'feed_model_incomplete', 'telegram_403', 'telegram_429',
+    'telegram_delivery_unknown', 'telegram_response_unknown', 'telegram_delivery_interrupted'])
     assert.ok(errorCodeFilter.test(code), `The error filter must retain ${code}`);
   for (const code of ['active_day_finished', 'waiting_for_post', 'completed', 'target_reached', 'stage_feed_read'])
     assert.equal(errorCodeFilter.test(code), false, `A normal wait or completion is not an error: ${code}`);

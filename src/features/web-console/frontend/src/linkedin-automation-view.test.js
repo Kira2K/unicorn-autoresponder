@@ -11,7 +11,8 @@ test('feed expiry and unsafe read cannot be resumed from the console', () => {
     assert.equal(canResumeTask({ ...task, resumeBlockedReason: reason }, schedule, now), false)
     assert.doesNotMatch(reasonText(reason), /Нужна проверка:/)
   }
-  for (const code of ['partial_result', 'feed_action_expired', 'feed_model_incomplete'])
+  for (const code of ['partial_result', 'feed_action_expired', 'feed_model_incomplete', 'telegram_403', 'telegram_429',
+    'telegram_delivery_unknown', 'telegram_response_unknown', 'telegram_delivery_interrupted'])
     assert.equal(isErrorEvent({ code }), true)
   assert.equal(isErrorEvent({ code: 'target_reached' }), false)
 })

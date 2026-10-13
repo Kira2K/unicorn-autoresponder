@@ -163,3 +163,26 @@ test('notification network wait does not block caller and close drains the alrea
   await new Promise(resolve => setImmediate(resolve)); release(); await worker.close()
   assert.equal(Object.values(f.task.notices!)[0].status, 'sent')
 })
+
+test('final likes report retries a rejected Telegram delivery after the saved pause and restart', async () => {
+  const f = fixture(); f.task.updatedAt--
+  const task = f.snapshot.tasks.find(t => t.feature === 'posts')!
+  Object.assign(task, { state: 'completed', runId: 'post', publishedAt: start,
+    summary: { completed: 1, skipped: 0, unconfirmed: 0 },
+    report: { likes: { confirmed: 0, pending: 1, unconfirmed: 0, failed: 0 } } })
+  let attempts = 0
+  const options = { ...f.options,
+    postReport: async () => ({ likes: { confirmed: 1, pending: 0, unconfirmed: 0, failed: 0 } }),
+    send: async (text: string) => {
+      f.sent.push(text); attempts++
+      return attempts === 2 ? { status: 'retry' as const, nextAt: start + 120_000 }
+        : { status: 'sent' as const, messageId: attempts }
+    } }
+  const worker = createNotifications(options)
+  await tick(worker, f.snapshot)
+  f.advance(); await tick(worker, f.snapshot); assert.equal(attempts, 2)
+  f.advance(114_999); await tick(createNotifications(options), f.snapshot); assert.equal(attempts, 2)
+  f.advance(1); await tick(createNotifications(options), f.snapshot); assert.equal(attempts, 3)
+  assert.match(f.sent[2], /Лайки к посту/)
+  f.advance(); await tick(createNotifications(options), f.snapshot); assert.equal(attempts, 3)
+})

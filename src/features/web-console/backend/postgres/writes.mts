@@ -3,7 +3,8 @@ import type { ConsoleSql, ConsoleWrites } from './contracts.mts';
 import { tableIds } from './tables.mts';
 import { consoleRow } from './records.mts';
 import { createRequire } from 'node:module';
-import { resumeWorkflowRevision, staleResumeWorkflowError } from '../../../../integrations/telegram/resume-workflow-state.ts';
+const { resumeWorkflowRevision, staleResumeWorkflowError } = createRequire(import.meta.url)(
+  '../../../../integrations/telegram/resume-workflow-state.ts') as typeof import('../../../../integrations/telegram/resume-workflow-state.ts');
 const { toResumeWorkflow } = createRequire(import.meta.url)('../repository.ts') as {
   toResumeWorkflow(record: Record<string, unknown>): import('../types.ts').ResumeWorkflowRecord;
 };

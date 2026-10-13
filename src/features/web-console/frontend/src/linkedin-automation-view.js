@@ -109,5 +109,5 @@ export function accountSummary(account, status) {
 }
 export function isErrorEvent(event) {
   if (['comments_post_not_published', 'comments_not_started', 'post_account_not_ready', 'unipile_action_skipped', 'comments_post_skipped', 'partial_result', 'feed_action_expired', 'feed_model_incomplete'].includes(event.code)) return true
-  return event.httpStatus >= 400 || /error|failed|blocked|lost|uncertain|needs_attention|unavailable|timeout|invalid|conflict/.test(event.code)
+  return event.httpStatus >= 400 || /error|failed|blocked|lost|uncertain|needs_attention|unavailable|timeout|invalid|conflict|telegram_(?:\d{3}|response_unknown|delivery_unknown|delivery_interrupted)/.test(event.code)
 }
