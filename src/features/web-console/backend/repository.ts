@@ -7,6 +7,9 @@ const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
 const { RELATIONS } = require('../../../integrations/noco/core/schema.ts') as {
   RELATIONS: Record<string, string>
 }
+const { resumeWorkflowRevision, staleResumeWorkflowError } = require('../../../integrations/telegram/resume-workflow-state.ts') as
+  typeof import('../../../integrations/telegram/resume-workflow-state.ts')
+const { withResumeWriteLock } = require('./resume-write-lock.ts') as typeof import('./resume-write-lock.ts')
 const { buildDolphinProfileStatus } = require('./dolphin-profile-status.ts') as {
   buildDolphinProfileStatus(options: {
     client: WebClient
@@ -88,12 +91,13 @@ function normalizeEducationEntry(value: unknown): EducationEntry {
     uni: normalizeText(record.uni ?? record.university ?? record.education),
     faculty: normalizeText(record.faculty ?? record.facultet),
     grade: normalizeText(record.grade),
-    yearOfEnd: normalizeText(record.yearOfEnd ?? record.year_of_end ?? record.year)
+    yearOfEnd: normalizeText(record.yearOfEnd ?? record.year_of_end ?? record.year),
+    ...(record.city != null ? { city: normalizeText(record.city) } : {})
   }
 }
 
 function hasEducationEntryValue(entry: EducationEntry): boolean {
-  return Boolean(entry.uni || entry.faculty || entry.grade || entry.yearOfEnd)
+  return Boolean(entry.uni || entry.faculty || entry.grade || entry.yearOfEnd || entry.city)
 }
 
 function parseEducationEntries(value: unknown, legacyEducation: unknown = ''): EducationEntry[] {
@@ -123,7 +127,7 @@ function parseEducationEntries(value: unknown, legacyEducation: unknown = ''): E
 function educationSummary(entries: EducationEntry[], fallback: unknown = ''): string {
   const summary = entries
     .filter(hasEducationEntryValue)
-    .map(entry => [entry.uni, entry.faculty, entry.grade, entry.yearOfEnd].filter(Boolean).join(', '))
+    .map(entry => [entry.uni, entry.faculty, entry.grade, entry.yearOfEnd, entry.city].filter(Boolean).join(', '))
     .filter(Boolean)
     .join('; ')
   return summary || normalizeText(fallback)
@@ -717,7 +721,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     additionalVersions: normalizeText(record.additional_versions),
     kirasComments: normalizeText(record.kiras_comments),
     lastRejectionComment: normalizeText(record.last_rejection_comment),
-    rejectionHistory: normalizeText(record.rejection_history),
+    rejectionHistory: String(record.rejection_history ?? ''),
     lastResponsible: normalizeText(record.last_responsible),
     lastWorkflowError: normalizeText(record.last_workflow_error),
     workflowTrace: normalizeText(record.workflow_trace)
@@ -741,7 +745,9 @@ function buildResumeWorkflowPatch(input: ResumeWorkflowPatch): Record<string, un
   ]
   const patch: Record<string, unknown> = {}
   for (const [inputField, nocoField] of fields) {
-    if (input[inputField] !== undefined) patch[nocoField] = normalizeText(input[inputField])
+    if (input[inputField] !== undefined) {
+      patch[nocoField] = inputField === 'rejectionHistory' ? String(input[inputField]) : normalizeText(input[inputField])
+    }
   }
   return patch
 }
@@ -1390,17 +1396,27 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
 
     async getProviderResumeTasks(): Promise<ResumeWorkflowRecord[]> {
       const records = await fetchCvProcessingByStatuses(RESUME_ACTIVE_TASK_STATUSES)
+      const clients: NocoRecord[] = records.length
+        ? await nocoClient.fetchRecords(TABLES.clients.id, 1000, { fields: 'Id,client_name,market' })
+        : []
+      const clientsById = new Map(clients.map(client => [Number(client.Id), client]))
       return records
         .sort((a, b) => Number(a.Id) - Number(b.Id))
-        .map(record => toResumeWorkflow(record, undefined, []))
+        .map(record => toResumeWorkflow(record, clientsById.get(cvProcessingClientId(record) ?? 0), []))
     },
 
-    async patchResumeWorkflow(recordId: number, input: ResumeWorkflowPatch): Promise<ResumeWorkflowRecord> {
+    async patchResumeWorkflow(recordId: number, input: ResumeWorkflowPatch, expectedRevision?: string): Promise<ResumeWorkflowRecord> {
       const patch = buildResumeWorkflowPatch(input)
-      if (Object.keys(patch).length) {
-        await nocoClient.patchRecord(TABLES.cvProcessing.id, Number(recordId), patch)
-      }
-      const record = await fetchCvProcessingById(Number(recordId))
+      const record = typeof nocoClient.patchResumeWorkflowRecord === 'function' && expectedRevision !== undefined
+        ? await nocoClient.patchResumeWorkflowRecord(Number(recordId), patch, expectedRevision)
+        : await withResumeWriteLock(nocoClient, Number(recordId), async () => {
+            if (expectedRevision !== undefined) {
+              const current = await fetchCvProcessingById(Number(recordId))
+              if (!current || resumeWorkflowRevision(toResumeWorkflow(current)) !== expectedRevision) throw staleResumeWorkflowError()
+            }
+            if (Object.keys(patch).length) await nocoClient.patchRecord(TABLES.cvProcessing.id, Number(recordId), patch)
+            return await fetchCvProcessingById(Number(recordId))
+          })
       if (!record) throw notFoundError(`CV processing row ${recordId} was not found`)
       const clientId = cvProcessingClientId(record)
       const client = clientId ? await fetchClientById(clientId) ?? undefined : undefined

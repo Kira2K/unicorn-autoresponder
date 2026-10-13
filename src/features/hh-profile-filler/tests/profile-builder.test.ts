@@ -7,7 +7,8 @@ export function runProfileBuilderTests() {
   const client: ResolvedClient = {
     clientId: 45, clientName: 'Test', currentStatus: 'on en market', market: 'En',
     stack: 'Java', dolphinProfileId: 1, cvUrl: 'https://docs.google.com/document/d/x',
-    cvRevision: '1', contacts: { email: 'noco@example.com', phone: '+222',
+    cvRevision: '1', stopListCompanies: ['Noco Stop', 'vendor'],
+    contacts: { email: 'noco@example.com', phone: '+222',
       telegram: '@noco', other: [] }, fallbacks: { fullName: 'Noco Name', location: 'Belgrade',
         education: '[{"uni":"Noco University","faculty":"CS","yearOfEnd":"2016"}]',
         englishLevel: 'B2' },
@@ -34,9 +35,40 @@ export function runProfileBuilderTests() {
   assert.match(prepared.about, /^Contacts\n/)
   assert.match(prepared.about, /\n\nSummary\nSummary text\.\n\nSkills\nBackend: Java, Spring$/)
   assert.deepEqual(prepared.employerCandidates.map(item => item.name),
-    ['Employer', 'Vendor', 'Product Brand', 'Partner'])
+    ['Noco Stop', 'vendor'])
+  assert.deepEqual(prepared.employerCandidates.find(item => item.name === 'vendor')?.sources,
+    ['noco:stop_list_company'])
   assert.equal(prepared.cv.education[0].institution, 'Noco University')
   assert.deepEqual(prepared.cv.languages, [{ name: 'English', level: 'B2' }])
+
+  const partialEducation = buildPreparedProfile({ ...client,
+    fallbacks: { ...client.fallbacks,
+      education: 'Noco University, graduation year 2016, Computer Science, bachelor' }
+  }, { ...cv, education: [{ institution: 'Noco University', degree: 'Bachelor' }] },
+  '2026-09-03T00:00:00Z')
+  assert.deepEqual(partialEducation.cv.education, [{
+    institution: 'Noco University', degree: 'Bachelor',
+    specialization: 'Computer Science', graduationYear: 2016
+  }])
+
+  const singleExpandedInstitution = buildPreparedProfile({ ...client,
+    fallbacks: { ...client.fallbacks,
+      education: 'Short University Name, year 2024, Applied Informatics, bachelor' }
+  }, { ...cv, education: [{ institution: 'The Expanded University Name', degree: 'Bachelor' }] },
+  '2026-09-03T00:00:00Z')
+  assert.equal(singleExpandedInstitution.cv.education[0].graduationYear, 2024)
+  assert.equal(singleExpandedInstitution.cv.education[0].specialization, 'Applied Informatics')
+
+  const cvEnglishWins = buildPreparedProfile({ ...client,
+    fallbacks: { ...client.fallbacks, englishLevel: 'B1' }
+  }, { ...cv, languages: [{ name: 'English', level: 'C1' }] },
+  '2026-09-03T00:00:00Z')
+  assert.deepEqual(cvEnglishWins.cv.languages, [{ name: 'English', level: 'C1' }])
+
+  const defaultEnglish = buildPreparedProfile({ ...client,
+    fallbacks: { ...client.fallbacks, englishLevel: undefined }
+  }, { ...cv, languages: [] }, '2026-09-03T00:00:00Z')
+  assert.deepEqual(defaultEnglish.cv.languages, [{ name: 'English', level: 'B2' }])
 
   const ruClient: ResolvedClient = {
     ...client, clientId: 170, clientName: 'Аблена Дементьева', market: 'Ru',

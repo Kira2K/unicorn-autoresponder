@@ -12,6 +12,7 @@ export type DolphinStartResponse = {
 }
 
 export type DolphinBrowserProfile = {
+  name?: string
   id: number | string
   tags?: string[]
   status?: DolphinProfileStatus | null

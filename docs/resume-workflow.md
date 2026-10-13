@@ -101,8 +101,13 @@ Commands:
 - `additional_versions`: spare long text field for extra versions/notes.
 - `kiras_comments`: comments for the provider.
 - `last_responsible`: helper field for the current responsible side.
-- `last_rejection_comment`: last comment used when returning a CV for rework.
+- `last_rejection_comment`: active rework comment for the current draft/EN/RU
+  stage. Cleared when the student approves that stage; `rejection_history`
+  retains the complete comment history.
 - `rejection_history`: append-only history of rejection transitions/comments.
+  New entries are JSON lines with `version: 1`, `at`, `stage` (`draft`/`en`/`ru`),
+  `transition`, `actor`, `comment`, and `returnedCvUrl`. Existing text entries
+  are retained unchanged; no new storage columns are required.
 - `last_workflow_error`: helper field for stop/failure diagnosis.
 - `workflow_trace`: helper field for transition history.
 
@@ -167,6 +172,35 @@ once before private next-responsible notifications can be delivered.
 
 ## Behavior
 
+Кнопки перехода и возврата содержат короткую версию состояния задачи (статус,
+ссылки, комментарии и история). После изменения файла или нового цикла доработки
+старые кнопки отклоняются без записи и уведомлений, даже если статус снова тот же
+или подрядчик использовал прежний URL. Версия вычисляется из сохранённых данных,
+поэтому переживает перезапуск; новые поля в БД не нужны. Кнопки, отправленные до
+этого изменения без версии, тоже отклоняются: сотрудники заново открывают карточку,
+ученик проверяет актуальный файл через `/resume_status` и согласует командой
+`/resume I approve`. Прямые команды по-прежнему действуют на текущую задачу.
+
+Запись действия проверяет, что прочитанное состояние ещё актуально. PostgreSQL
+блокирует строку CV до проверки и записи в одной транзакции; проигравший
+конкурирующий запрос получает конфликт и не отправляет уведомления. Noco-адаптер
+сериализует проверку и PATCH в одном backend-процессе. Для Noco требуется один
+backend-писатель: его API не предоставляет межпроцессный conditional PATCH.
+Неясный результат записи не повторяется. Обработка notification warning не меняет
+версию задачи. Роли и отдельная атомарная запись EN-согласования/LinkLab сохраняются.
+
+Неизвестный непустой статус, включая исторический `finished`, требует проверки
+администратором: бот показывает его и блокирует продвижение, не сбрасывая задачу
+на сбор данных и не угадывая соответствующий этап. Пустой статус сохраняет прежнее
+поведение начального этапа.
+
+Ссылки должны быть целыми HTTP(S) URL с непустым hostname, без пробелов,
+управляющих символов и добавленного текста. Сохранение не меняет исходный URL
+(включая query и fragment). Проверка выполняется также перед переходом, поэтому
+невалидная ссылка, уже записанная в хранилище, не считается готовым файлом. Это
+проверка формата, не проверка доступа к документу. Требования к рынкам и аккаунтам
+не меняются.
+
 In normal mode, `/resume` creates the missing `CV processing` row for the linked
 student if needed, then advances the current checkpoint only when the required
 data for that checkpoint already exists. It does not write fake links in normal
@@ -207,7 +241,38 @@ Telegram integration: более 4096 и не более 32768 символов 
 Короткие карточки отправляются прежним способом. Текст не обрезается и не
 разбивается; неизвестный результат отправки не повторяет уведомление или переход.
 Шаблоны Полины показывают студента, комментарий и действие по
-доработке, а также актуальную ссылку на EN-версию.
+доработке, ссылку на возвращённый RU-файл и отдельно актуальную ссылку на EN-версию.
+
+При повторном открытии задачи через `/open_my_tasks` карточки Юли, Полины и Киры
+показывают актуальный комментарий отдельной строкой `Комментарий возврата:`
+и сохранённую ссылку именно на возвращённый файл. У Юли используется подпись
+`Файл на доработку:`, у Полины и Киры — `Возвращённое резюме:`. Исходные
+комментарии Киры остаются отдельным полем. Эти же данные добавляются в
+уведомление Кире о повторной проверке исправленного файла.
+
+Ссылка берётся из последнего события возврата текущего этапа в
+`rejection_history`, а не из рабочей ссылки новой версии. Статус, причина и
+история сохраняются одной записью до отправки уведомлений. Загрузка исправления
+не меняет сохранённую ссылку возврата; повторный возврат заменяет активную пару
+«комментарий + файл». Старая история остаётся доступной, но из её текстовых строк
+невозможно восстановить URL: отсутствующая ссылка не подменяется другим файлом.
+Пустая или повреждённая последняя запись не восстанавливает ссылку из более
+раннего возврата. Комментарий другого этапа не показывается в новой задаче.
+
+Новые строки возврата добавляются только в уведомления и подробные карточки
+Киры и провайдеров. Сообщения ученику, `/resume_status`, общий список задач и
+служебные ответы не дополняются; прежний ответ на команду возврата не меняется.
+
+Причина возврата сохраняется при загрузке исправленной ссылки и проверке
+Кирой. После согласования этого этапа учеником `last_rejection_comment`
+очищается в той же записи перехода, чтобы замечания к черновику или EN не
+попадали в новую задачу EN/RU. `rejection_history` и `kiras_comments` сохраняются.
+Возврат RU Полине остаётся уведомлением о доработке с причиной даже при пустой
+`ru_version_url`.
+
+Команды `/open_my_tasks` и `/tasks`, как и кнопка списка задач, отменяют
+ожидание комментария возврата. Следующее сообщение обрабатывается как обычный
+ввод для очереди задач, а не как причина возврата ранее выбранного резюме.
 
 В контактах Telegram RU/EN бот и карточка исполнителя показывают `nickname`,
 если он заполнен. Иначе используется прежний вариант — `login` и остальные
@@ -291,6 +356,8 @@ Polina's messages are deterministic plain-text templates implemented in
 `src/integrations/telegram/resume-polina-message-templates.ts`. They apply to
 the Russian-translator lane for EN and both-market workflows; RU-only workflows
 remain in Yulia's main-provider lane.
+Provider task lists load each client's name and market before applying these
+lane rules, including when the repository uses PostgreSQL.
 
 Covered scenarios are: a new RU task; RU task card; RU rework; saved RU link;
 task list and empty list; multiple or missing link tasks; unavailable, stale,
@@ -352,8 +419,9 @@ filling chat/thread. RU-market workflows still move to `moved to filling`, but
 do not emit the LinkedIn-ready notification because they are filled in a
 different async lane.
 
-If the workflow reaches `filled`, the bot replies with ready English and Russian
-version links. If the workflow is `stopped`, the bot replies with the last
+At `moved to filling` and `filled`, student-facing replies show only the RU link
+for RU-only clients, even if an older EN link remains stored. EN/both workflows
+show both available links. If the workflow is `stopped`, the bot replies with the last
 stored workflow error and waits for admin action or a test reset.
 
 ## Protected Bot API
@@ -440,12 +508,17 @@ Run:
 
 ```bash
 npm run tg:support-bot:test
+node --test src/integrations/telegram/resume-workflow-state.test.ts src/features/web-console/backend/postgres/workflow-hardening.test.mts src/features/web-console/backend/postgres/workflow-hardening-api.test.mts
 npm run tg:resume:e2e:test
 npm run web:test
 npm run web:e2e
 npm run typecheck
 npm run web:build
 ```
+
+When `APP_DB=postgres` is set locally, run the isolated visible-runner test with
+`WEB_CONSOLE_USE_MOCK_DATA=true` so its in-memory repository uses mocked auxiliary
+services. This applies to `tg:resume:e2e:test`, not the live test-user runner.
 
 Schema helper:
 

@@ -647,6 +647,74 @@ function makeWorkflowRepository(workflowRecord = makeWorkflow()) {
   return repository
 }
 
+async function testProviderRejectionTaskCards(): Promise<void> {
+  const reason = ('Исправить <опыт> & "даты". ' + 'Уточнить детали опыта. '.repeat(250)).trim()
+  const htmlReason = reason.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const originalComments = 'Исходные <замечания> & рекомендации'
+  const scenarios = [
+    ['Draft', 'Draft in process', 'EN', providerActor],
+    ['Draft', 'Draft in process', 'Ru', providerActor],
+    ['Draft', 'Draft in process', 'both', providerActor],
+    ['English version', 'English version in progress', 'EN', providerActor],
+    ['English version', 'English version in progress', 'both', providerActor],
+    ['Russian version', 'Russian version in process', 'Ru', providerActor],
+    ['Russian version', 'Russian version in process', 'EN', ruTranslatorActor],
+    ['Russian version', 'Russian version in process', 'both', ruTranslatorActor]
+  ] as const
+  for (const [stage, target, market, owner] of scenarios) {
+    for (const reviewer of ['Kira', 'student']) {
+      const status = `${stage} in approve by ${reviewer}`
+      const repository = makeWorkflowRepository(makeWorkflow({
+        status, clientMarket: market, kirasComments: originalComments,
+        lastRejectionComment: 'Старая причина возврата',
+        cvDraftUrl: 'https://docs.test/draft', enVersionUrl: 'https://docs.test/en', ruVersionUrl: 'https://docs.test/ru'
+      }))
+      const rejection = await rejectResumeWorkflowById(98, repository, {
+        actor: reviewer === 'Kira' ? kiraActor : studentActor,
+        expectedStatus: status, rejectionComment: reason
+      })
+      assert.equal(repository.workflowRecord.status, target)
+      assert.equal(repository.workflowRecord.lastRejectionComment, reason)
+      assert.equal(repository.workflowRecord.kirasComments, originalComments)
+      const html = owner === providerActor
+      const renderedReason = html ? htmlReason : reason
+      const notification = rejection.notifications.find((item: any) => item.kind === 'private_provider')
+      assert.equal(notification.text.split(renderedReason).length - 1, 1, 'notification reason stays singular')
+      const persisted = structuredClone(repository.workflowRecord)
+      const patchCount = repository.patches.length
+      const api = {
+        providerTasks: (actor: any) => getProviderTasks(repository, actor),
+        providerTask: (id: number, actor: any) => getProviderTaskById(id, repository, actor)
+      }
+      const chat = { id: Number(owner.chatId), type: 'private' }
+      const from = { id: Number(owner.userId), username: owner.username }
+      const list = await handleSupportBotMessage({ text: '/open_my_tasks', chat, from }, api)
+      const openButton = list.replyMarkup.inline_keyboard.flat().find((button: any) => button.callback_data === callbackData('open', 98))
+      assert.ok(openButton, `${market}/${status}: task is available to its provider`)
+      const card = await handleSupportBotCallback({ data: openButton.callback_data, message: { chat }, from }, api)
+      const text = responseText(card)
+      assert.ok(text.includes(`Комментарий возврата: ${renderedReason}`), `${market}/${status}: reopened card retains the full reason`)
+      assert.equal(text.split(renderedReason).length - 1, 1)
+      assert.doesNotMatch(text, /Старая причина возврата/)
+      assert.equal(card.parseMode, html ? 'HTML' : undefined)
+      if (stage !== 'Russian version' || market !== 'Ru') {
+        assert.ok(text.includes(`Комментарии Киры: ${html ? 'Исходные &lt;замечания&gt; &amp; рекомендации' : originalComments}`))
+      }
+      if (stage !== 'Draft') assert.ok(text.indexOf('Комментарий возврата:') < text.indexOf('Черновик:'))
+      assert.deepEqual(repository.workflowRecord, persisted, 'opening the card does not alter persisted data')
+      assert.equal(repository.patches.length, patchCount, 'opening the card does not write')
+      const blankRepository = makeWorkflowRepository(makeWorkflow({ status: target, clientMarket: market }))
+      const blankCard = await getProviderTaskById(98, blankRepository, owner)
+      blankRepository.workflowRecord.lastRejectionComment = ' \n\t '
+      const whitespaceCard = await getProviderTaskById(98, blankRepository, owner)
+      assert.equal(whitespaceCard.message, blankCard.message)
+      assert.doesNotMatch(blankCard.message, /Комментарий возврата:/)
+      assert.equal(blankRepository.patches.length, 0)
+    }
+  }
+  clearActiveTaskContextsForTest()
+}
+
 function makeWorkflowListRepository(workflowRecords: any[]) {
   const patches: any[] = []
   return {
@@ -985,7 +1053,27 @@ async function testTelegramPollingRecoveryContract(): Promise<void> {
   }
 }
 
+async function testTaskListCancelsPendingRejection() {
+  const chat = { id: 9002, type: 'private' };
+  const from = { id: 9002 };
+  for (const text of ['/open_my_tasks', '/tasks', '/open_my_tasks@veu_support_bot']) {
+    clearActiveTaskContextsForTest();
+    const calls: string[] = [];
+    const api = {
+      async providerTasks() { return { message: 'Tasks' }; },
+      async rejectWorkflow() { calls.push('reject'); return { found: true, message: 'Rejected' }; },
+      async saveResumeTaskInput() { calls.push('input'); return { message: 'Saved' }; }
+    };
+    await handleSupportBotCallback({ data: 'resume:reject:98:dak', message: { chat }, from }, api);
+    await handleSupportBotMessage({ text, chat, from }, api);
+    await handleSupportBotMessage({ text: 'Новые рекомендации для задачи из очереди', chat, from }, api);
+    assert.deepEqual(calls, ['input'], `${text} must cancel the previous rejection prompt`);
+  }
+  clearActiveTaskContextsForTest();
+}
+
 async function runTests() {
+  await testTaskListCancelsPendingRejection()
   await testTelegramPollingRecoveryContract()
   testKiraMessageTemplateContract()
   testYuliaMessageTemplateContract()
@@ -1812,6 +1900,7 @@ async function runTests() {
   process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = '777'
   process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'false'
   try {
+    await testProviderRejectionTaskCards()
     const manualKiraActor = {
       ...kiraActor,
       userId: '343610488',

@@ -24,9 +24,12 @@ test('invalid required values, impossible dates and boundary ages cannot be save
   for (const date of ['2027-01-01', '2016-01-01', '1950-01-01']) assert.ok(validateStudentProfile({ ...complete(), birthDate: date }, options).errors.birthDate);
   for (const date of ['2012-10-05', '1956-10-05']) assert.equal(validateStudentProfile({ ...complete(), birthDate: date }, options).errors.birthDate, undefined);
 });
-test('education opt out clears values; partial rows and invalid years fail', () => {
+test('education opt out requires other education; higher education needs no city', () => {
   const optedOut = validateStudentProfile({ ...complete(), noHigherEducation: true }, options);
-  assert.equal(optedOut.value.educationEntries, null); assert.equal(optedOut.valid, true);
+  assert.equal(optedOut.valid, false); assert.ok(optedOut.educationErrors['0.city']);
+  assert.equal(validateStudentProfile(complete(), options).valid, true);
+  const other = validateStudentProfile({ ...complete(), noHigherEducation: true, educationEntries: [{ uni: 'School', yearOfEnd: '2020', city: 'Москва' }] }, options);
+  assert.equal(other.valid, true); assert.equal(other.value.educationEntries[0].city, 'Москва');
   assert.ok(validateStudentProfile({ ...complete(), educationEntries: [] }, options).errors.educationEntries);
   const partial = validateStudentProfile({ ...complete(), educationEntries: [{ uni: 'Вуз', yearOfEnd: '2022' }] }, options);
   assert.ok(partial.educationErrors['0.faculty']); assert.ok(partial.educationErrors['0.grade']);

@@ -1,24 +1,21 @@
 # Operations
 
-## Status queue
+## Manual execution
 
-- State defaults to `storage/hh-profile-filler/state.json`; override with `PROFILE_FILLER_STORAGE_ROOT`.
-- The first scan establishes observed client statuses and queues only target-status rows updated after the fixed watermark.
-- Later scans queue only actual transitions into `on ru market` or `on en market`.
-- Revalidate status immediately before source preparation.
-- Failed jobs retry after 24 hours, at most three attempts. A client leaving the target status cancels its pending job.
-- Reuse one repository snapshot for the whole pending run; do not refresh all source tables per client.
-- With `APP_DB=postgres`, read current SQL columns through the existing repository factory. Keep the same record IDs, CV revision format and local queue file. Do not restart old jobs just because the storage changes.
-- A SQL read failure stops preparation; do not retry through Noco. The Noco-specific delay below applies only to Noco responses.
-- Treat NocoDB HTTP 429 as `profile_noco_rate_limited`, honor `Retry-After` (or use the safe fallback delay), and defer without consuming an HH attempt or losing `dry_run_passed` state.
-
-## Daily sequence
-
-Run Profile Filler through its own Windows task and process. It must not be started by, chained to,
-or share a wrapper with HH autoresponses. The repository default is `HH-Profile-Filler-Daily` at
-12:00 Europe/Warsaw; autoresponses remain a separate task at 03:40 Europe/Warsaw. For each pending
-job, run source/auth/UI dry-run first and execute only on success.
-Run Profile Filler Dolphin sessions in headful mode so the active HH window is visible on the desktop.
+- Filling starts only from a manual user request naming the client and market. `client_status` does not
+  gate preparation, filling or recovery, and must not be changed to match the requested market.
+- Resolve the numeric client ID unambiguously. Use the requested market for the final CV, Dolphin profile
+  and HH account. Continue to require a confirmed final CV (`moved to filling` or `filled`).
+- Run source/auth/UI dry-run before ordinary filling and execute only on success. Use headful Dolphin
+  sessions so the active HH window is visible on the desktop.
+- Status scans, pending queues, daily tasks and automatic retries are disabled. Legacy CLI commands and
+  scheduler scripts fail without running jobs. Preserve old local queue files; never process them.
+- Do not start Profile Filler from HH autoresponses or register a schedule. Supervised recovery attempts
+  belong to the active manual operation; a later run after terminal failure requires a new manual request.
+- With `APP_DB=postgres`, use the existing repository factory and preserve record IDs and CV revisions.
+  A SQL read failure stops preparation; do not fall back to Noco.
+- On NocoDB HTTP 429, honor `Retry-After` within the active manual operation or report the terminal failure;
+  do not create an automatic retry job.
 
 ## Full wizard live smoke
 
@@ -46,32 +43,109 @@ Run Profile Filler Dolphin sessions in headful mode so the active HH window is v
   entire supervised client/market skill operation reaches verified completion or a genuinely terminal
   failure. The end of one CLI process is not terminal when a code fix or another attempt will follow. Use
   `--defer-telegram` for every such attempt, and call `--report-result <result.json>` exactly once for the
-  final result; its marker prevents reporting the same result file twice. Never send a message for a dry-run,
+  final result; the operation journal prevents delivery under different result filenames. Never send a message for a dry-run,
   Noco 429, network error, diagnostic failure, scheduled retry, code correction, or other intermediate error.
   A terminal failure message is
-  `⚠️ HH Profile Filler\nНе получилось заполнить <client_name>\nПричина: <safe_error_message>`, using the resolved
-  client name from the selected repository and a sanitized, single-line terminal error message. IDs and fuller diagnostics stay in
+  `⚠️ HH Profile Filler\nПрофиль Dolphin: <actual_name>\nНе получилось заполнить.\nПричина: <safe_error_message>`, using the actual
+  Dolphin API profile name and a sanitized reason with separate client names removed. IDs and fuller diagnostics stay in
   local artifacts. A reporting failure must be logged but must not re-run an already completed HH mutation.
 - Set `TELEGRAM_STORAGE_ROOT` to the main runtime repository's `storage` directory so the runner
   uses `storage/telegram-reporting/.telegram-session`, not a worktree-local session path.
 
 ## Recovery
 
-- Missing final CV: no HH changes; retry next day.
-- CAPTCHA/2FA/auth failure: stop the Dolphin profile, report, retry next day.
+- Internal contact comparison/read failures are advisory. Record the reason, continue the remaining
+  filling and publication steps, and include a contact warning in the final report. Do not repeat already
+  completed sections just to clear this warning or claim the contact check passed. Explicit HH validation,
+  authentication and privacy errors retain their existing blocking behavior.
+
+- After publishing each resume (including native copies/recovery), ensure `Активно ищу работу` in
+  HH's job-search status and reload to verify it. Reuse an already matching status. An active resume
+  or `isSearchable: true` does not prove the job-search status. `verify-final` checks without writing.
+
+- En resume language: inspect the language selector in the exact resume's top toolbar. Change
+  `По-русски` to `In English`, reload, and verify persistence independently for every resume ID.
+  An English title/About, English C1 in spoken languages, an En Dolphin name or native duplication
+  does not prove that the resume language is English. Already-English resumes require verification only.
+  Read-only final verification must fail if any En resume still has Russian/unknown language.
+
+- Skills recovery uses the exact resume's `/resume/edit/<id>/keySkills` editor, including already active
+  resumes. Read selected chips separately from recommendations; a visible recommended skill is not saved.
+  Complete the 30-skill contract in SKILL.md and verify persisted levels after reloading. Do not substitute
+  the first unrelated suggestion or accept a missing search sheet as proof that 30 skills were saved.
+  The desktop `chips-trigger-input` can be directly editable, while a readonly trigger opens a search
+  sheet. Use the exact `suggest-item-user-input` option when the source name is absent from the catalog.
+  Set levels in `/resume/edit/<id>/skillsLevels`; read the actual checked radio in each skill's Advanced
+  label after reopening. Use `domcontentloaded` for save redirects, since unrelated assets can delay `load`.
+  Read-only `verify-final` and publication-only `activate` must also verify this contract; if incomplete,
+  fail with a skills-specific result rather than claiming that activation alone completes filling.
+
+- Production completion requires every exact mapped ID/title to have active, searchable HH server state.
+  `not_finished` is always incomplete, regardless of saved content. Use the publication adapter to finish
+  the prefilled wizard after content/privacy checks; do not retype matching fields. Read state after each
+  transition. A published but non-searchable/blocked/unknown state is not success.
+- After manual user actions, re-read every target first. Preserve edits and skip publishing clicks for
+  active IDs. `--resume-from activate --resume-ids <mapped-order-ids>` only finishes publication and verifies;
+  it does not recreate variants, edit privacy or delete anything. Do not remove old resumes until all
+  replacements have passed active-state verification. Allow HH's delayed post-publication redirect to settle
+  before navigating to the next resume; retry only read-only navigation when a page load fails.
+- A native copy can retain its title while still showing `Кем вы хотите работать?` with `Укажу профессию`
+  and no Next button. This is not a completed profession step. During activation use
+  `completeKnownResumeProfession`: select the canonical Russian programmer profession/specialization,
+  finish that step, restore the exact mapped title through the partial editor, and recheck active server state.
+  Never treat the saved title alone as evidence that the wizard has been completed.
+  Selecting a popular profession radio may not open specialization automatically: first open the picker
+  through Continue, then confirm the existing/missing specialization. Do not silently accept a missing picker
+  or uncheck an already selected specialization. Empty mounted error containers are not validation failures;
+  require non-empty error text or an explicitly invalid field.
+
+- Employer stop-list: confirm each selected search result into the employer list before changing the
+  search query; HH may discard unconfirmed checkboxes when results change. Save visibility and reopen
+  the editor to verify persistence. A selected official employer that did not persist is a verification
+  failure, not a missing/ambiguous candidate to silently skip. Respect any tool approval block on this write;
+  keep it pending while completing independently authorized work.
+  If a tool approval permits only a named employer, pass only that employer to the recovery write;
+  do not rerun the entire database-sourced candidate list. Reuse that approval without asking again. Record
+  the verified subset and remaining candidates separately; subset completion is not full completion.
+
+- New-resume creation may redirect to an existing unfinished wizard when no published baseline exists.
+  Treat this as `profile_hh_new_resume_redirected`, not a missing profession field. Keep the known draft ID,
+  verify its completed sections, and use the native clone adapter for missing variants. Finish that draft's
+  privacy independently of missing title variants and save a local checkpoint. Do not restart filled sections
+  or publish a baseline merely to make the profile overview available.
+- Native clone recovery: use the returned clone ID from `duplicate-<id>.json` (or a recorded native clone
+  response), never infer it from whichever wizard HH opens by default. Rename through the safe partial
+  position editor; it retains the copied specialization while preparing the draft. Verify each known ID directly
+  when HH hides all drafts. Use `--resume-from title-variants` with ordered known IDs to reuse partial copies.
+  A lost/invalid clone response is an uncertain external write: inspect existing drafts before any retry.
+  HH can reset the separate Setka visibility flag to `no_one` in native copies. Record this difference;
+  do not enable cross-service visibility while preparing unpublished HH title variants.
+
+- Language editing: use `/profile/block/languages`, including when every resume is an unfinished draft.
+  The profile overview can redirect to the experience wizard; never search for language controls there or
+  infer that publication is required. Read both overview-card and dedicated-editor card layouts. Use
+  `profile-language-add`, the language editor's `magritte-select-activator` controls and visible options,
+  then `profile-modal-button-save`. Reopen the editor to verify every source-supported language and level.
+- If an editor click happens during hydration, wait for the modal and retry once before reporting a
+  missing control. Scope language controls to their exact labels so the site-language menu is never selected.
+- A blocked Telegram report remains pending independently of HH work. Continue authorized recovery and
+  report only its eventual terminal result; do not resend an obsolete failure or bypass a delivery block.
+
+- Missing final CV: no HH changes; report the blocker and wait for a new manual request.
+- CAPTCHA/2FA/auth failure: stop the Dolphin profile, report, and wait for a new manual request after resolution.
 - Employer missing/ambiguous: skip candidate and continue.
 - If a supervised run stopped at work permits after artifacts and the visible draft confirm all prior sections,
   use the known draft ID with `--resume-from work-permits`. Resume only that draft from the confirmed stage;
   do not re-run its identity, education, skills, experience, contacts, About, or title pages.
 - If all mapped drafts are complete and a run stopped while configuring privacy, use `--resume-from privacy`.
-  It must require every exact mapped draft, use the direct visibility editor for each resume ID, and skip all
-  content-filling stages.
+  It must require every exact mapped resume, use the direct visibility editor for each resume ID, skip all
+  content-filling stages, and finish with activation and active-state verification.
 - A direct visibility editor with an empty body/title is a failed asset load, not a missing UI control. Retry
   that exact URL up to three times and wait for body hydration before inspecting selectors; record the terminal
   failure only if all bounded attempts stay empty.
-- If both target drafts passed privacy verification and the run stopped at old-resume deletion, use
-  `--resume-from delete-old`. Require both exact target drafts and their unpublished status, then skip content
-  and privacy mutation and perform only the pending deletion plus final list verification.
+- If all targets passed privacy verification and the run stopped at old-resume deletion, use
+  `--resume-from delete-old`. Require all exact targets to be active before deletion; skip content and privacy
+  mutation, finish any pending activation, then perform deletion and final verification.
 - In the current HH profile-card menu, a published resume may expose `Редактировать` but no delete action.
   Open that exact resume through `Редактировать` and accept only an explicit `Удалить резюме` control on its
   edit page; never use a generic `Удалить` action that could belong to experience, education, or another draft.
@@ -80,8 +154,21 @@ Run Profile Filler Dolphin sessions in headful mode so the active HH window is v
 - Use `/applicant/profile/me` as the canonical resume list. When no published resume remains,
   `/applicant/resumes` may redirect into an unfinished draft wizard and must not be interpreted as an empty
   resume list.
-- If HH also redirects `/applicant/profile/me` after the last published resume is deleted, verify every known
-  target ID directly with `--resume-ids <mapped-order-ids> --resume-from verify-final`: read its exact title
-  from the safe position editor and require its ID to open the unfinished draft wizard. This stage is read-only.
-- Resume limit: snapshot first, delete at most one old resume immediately before its replacement, and stop further deletions if replacement fails.
+- Final verification reads exact IDs/titles and publication attributes directly, even if a list redirects.
+  `--resume-ids <mapped-order-ids> --resume-from verify-final` is read-only and must fail for a draft or
+  non-searchable resume. Never interpret an unfinished wizard as a successfully completed production fill.
+- Resume limit: stop, retain existing resumes and report the blocker; never delete an old resume just to make room.
 - Final verification failure or partial replacement: stop, retain artifacts, send a critical report, and do not continue deleting.
+
+## Combined verification and reporting contract
+
+Follow `contract-checks.md`: verify persisted content and privacy before each publication/copy,
+then active/searchable state and active job-search status, and recheck every target before deletion.
+A resume limit stops without deleting an old resume to make space. Repository records are refreshed
+before mutation; manual filling remains independent of client status. PostgreSQL mode checks the
+runtime source identity without fallback. The profile lock and operation journals survive attempts.
+
+Terminal result artifacts require contract version 2, `operationComplete=true`, complete target IDs,
+and the actual Dolphin profile name. Final reporting uses the shared operation delivery journal;
+sent is skipped and unknown delivery is not retried automatically. This replaces older result formats.
+The legacy identity-override flag is rejected. No queue, timer or scheduled Profile Filler is enabled.

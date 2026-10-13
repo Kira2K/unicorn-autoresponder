@@ -23,7 +23,7 @@ const client = () => ({ id: clientId, studentProfileEnabled: enabled, clientName
   firstName: 'Кира', lastName: 'Самсонова', middleName: '', birthDate: '2000-04-20', englishLevelId: 1,
   readyForInterviewInEnglishIn2Months: 'No', realLocation: 'Moscow, Russia', desiredLocation: 'Remote',
   calendarEmail: `student${clientId}@gmail.com`, telegramPersonalChatId: '@kira_test', noHigherEducation: true,
-  educationEntries: [], currentCompany: 'Alpha,Beta', previousCompanies: 'Gamma,Delta', stopListCompany: 'Alpha,Beta,Gamma,Delta' });
+  educationEntries: [{ uni: 'School', faculty: '', grade: '', yearOfEnd: '2020', city: 'Moscow' }], currentCompany: 'Alpha,Beta', previousCompanies: 'Gamma,Delta', stopListCompany: 'Alpha,Beta,Gamma,Delta' });
 let dashboard: any = { client: client(), platformAccounts: [], linkedInEmail: '' };
 const platforms = [{ id: 30, label: 'phone_ru' }, { id: 28, label: 'phone_en' }, { id: 24, label: 'telegram_ru' },
   { id: 10, label: 'hh_en' }, { id: 11, label: 'hh_ru' }, { id: 16, label: 'linkedin' }, { id: 29, label: 'github' }];

@@ -1,4 +1,5 @@
 import { formatBirthDate } from '../../student-profile-validation.ts'
+import { educationText, validateStudentEducation } from '../../student-education.ts'
 
 const companies = value => String(value || '').split(',').map(name => name.trim()).filter(Boolean)
 export function studentProfileDraft(client) {
@@ -14,18 +15,19 @@ export function studentProfileDraft(client) {
     birthDate: formatBirthDate(client.birthDate), englishLevelId: client.englishLevelId ? String(client.englishLevelId) : '',
     readyForInterviewInEnglishIn2Months: ['Yes', 'No'].includes(client.readyForInterviewInEnglishIn2Months) ? client.readyForInterviewInEnglishIn2Months : '',
     noHigherEducation: client.noHigherEducation === true,
-    educationEntries: client.noHigherEducation ? [{ ...emptyEducation }] : client.educationEntries?.length
-      ? client.educationEntries.map(row => ({ ...emptyEducation, ...row })) : [{ ...emptyEducation, uni: client.education || '' }],
+    educationEntries: client.educationEntries?.length
+      ? client.educationEntries.map(row => ({ ...emptyEducation, ...row })) : [{ ...emptyEducation, uni: client.noHigherEducation ? '' : client.education || '', ...(client.noHigherEducation ? { city: '' } : {}) }],
     realLocation: client.realLocation || '', desiredLocation: client.desiredLocation || '',
     calendarEmail: client.calendarEmail || '', telegramPersonalChatId: client.telegramPersonalChatId || '', workPlaces
   }
 }
 
 export function studentProfileSavePayload(profile) {
+  const entries = validateStudentEducation(profile.educationEntries, profile.noHigherEducation === true, new Date().getFullYear()).value
   return {
     ...profile,
-    education: profile.noHigherEducation ? null : profile.educationEntries.map(row => [row.uni, row.faculty, row.grade, row.yearOfEnd].join(', ')).join('\n'),
-    educationEntries: profile.noHigherEducation ? null : profile.educationEntries,
+    education: educationText(entries),
+    educationEntries: entries,
     ...workPlacesSavePayload(profile.workPlaces)
   }
 }

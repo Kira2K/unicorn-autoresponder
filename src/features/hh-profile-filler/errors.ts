@@ -30,6 +30,8 @@ export function errorStage(error: unknown): string {
 export function safeErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error)
   return raw
+    .replace(/(?:postgres(?:ql)?|https?):\/\/[^\s/@]+:[^\s/@]+@/gi, '[REDACTED]@')
+    .replace(/(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret)\s*[:=]\s*[^\s,;]+/gi, 'secret=[REDACTED]')
     .replace(/password\s*[:=]\s*\S+/gi, 'password=[REDACTED]')
     .replace(/bearer\s+[\w.-]+/gi, 'Bearer [REDACTED]')
     .replace(/xc-token\s*[:=]\s*\S+/gi, 'xc-token=[REDACTED]')

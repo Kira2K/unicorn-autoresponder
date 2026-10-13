@@ -12,7 +12,7 @@ test('existing company columns restore workplace order and current flags without
   const payload = studentProfileSavePayload(profile)
   assert.equal(payload.stopListCompany, 'Sber,Yandex')
   assert.equal(payload.currentCompany, 'Yandex'); assert.equal(payload.previousCompanies, 'Sber')
-  assert.equal(payload.education, null); assert.equal(payload.educationEntries, null)
+  assert.ok(Array.isArray(payload.educationEntries))
   assert.deepEqual(studentProfileDraft(payload).workPlaces, draft.workPlaces)
 })
 
@@ -23,19 +23,15 @@ test('old education remains incomplete rather than being marked as no higher edu
   assert.equal(draft.educationEntries[0].faculty, '')
 })
 
-test('education opt out always sends null and restores a checked checkbox with one empty row', () => {
-  const draft = studentProfileDraft({ education: 'Legacy university' })
-  const payload = studentProfileSavePayload({ ...draft, noHigherEducation: true })
-  assert.equal(payload.education, null)
-  assert.equal(payload.educationEntries, null)
-  assert.equal(payload.noHigherEducation, true)
-  const restored = studentProfileDraft(payload)
-  assert.equal(restored.noHigherEducation, true)
-  assert.deepEqual(restored.educationEntries, [{ uni: '', faculty: '', grade: '', yearOfEnd: '' }])
-  const unchecked = validateStudentProfile({ ...restored, noHigherEducation: false }, { englishLevelIds: [] })
-  assert.equal(unchecked.value.noHigherEducation, false)
-  assert.ok(unchecked.errors.educationEntries)
-  assert.equal(draft.educationEntries[0].uni, 'Legacy university')
+test('other education payload and draft keep city and remove higher-only values', () => {
+  const entry = { uni: 'School', faculty: '', grade: '', yearOfEnd: '2020', city: 'Москва' }
+  const draft = studentProfileDraft({ noHigherEducation: true, educationEntries: [entry] })
+  const payload = studentProfileSavePayload(draft)
+  assert.deepEqual(payload.educationEntries, [entry])
+  assert.equal(payload.education, 'School, 2020, Москва')
+  assert.deepEqual(studentProfileDraft(payload).educationEntries, [entry])
+  const higher = studentProfileSavePayload({ ...draft, noHigherEducation: false })
+  assert.equal(Object.hasOwn(higher.educationEntries[0], 'city'), false)
 })
 
 test('legacy null education does not imply an explicit opt out', () => {

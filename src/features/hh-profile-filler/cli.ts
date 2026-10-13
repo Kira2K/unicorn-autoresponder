@@ -25,9 +25,14 @@ let suppressFatalReport = false
 
 export async function main(args = process.argv.slice(2)) {
   fatalClientName = undefined
+  if (args.includes('--pending') || args.includes('--scan-only')) {
+    suppressFatalReport = true
+    await runPending()
+    return
+  }
   const deferredTelegram = args.includes('--defer-telegram')
   const reportResultPath = value(args, '--report-result')
-  suppressFatalReport = args.includes('--live-smoke') || deferredTelegram || Boolean(reportResultPath)
+  suppressFatalReport = args.includes('--live-smoke') || args.includes('--dry-run') || deferredTelegram || Boolean(reportResultPath)
   if (reportResultPath) {
     const resultFile = path.resolve(reportResultPath)
     const markerFile = `${resultFile}.telegram-sent`
@@ -41,16 +46,6 @@ export async function main(args = process.argv.slice(2)) {
     console.log(JSON.stringify({ reported: true, resultFile }, null, 2))
     return
   }
-  if (args.includes('--live-smoke') && (args.includes('--pending') || args.includes('--scan-only'))) {
-    throw new Error('--live-smoke cannot be combined with --pending or --scan-only.')
-  }
-  if (args.includes('--pending') || args.includes('--scan-only')) {
-    const output = await runPending({ scanOnly: args.includes('--scan-only'),
-      statePath: value(args, '--state') })
-    console.log(JSON.stringify(output, null, 2))
-    if (output.results.some(result => !result.ok)) process.exitCode = 1
-    return
-  }
   const clientId = Number(value(args, '--client-id'))
   if (!Number.isInteger(clientId) || clientId <= 0) {
     throw new Error('Expected a positive --client-id.')
@@ -62,8 +57,8 @@ export async function main(args = process.argv.slice(2)) {
   const orderedResumeIds = String(value(args, '--resume-ids') ?? '')
     .split(',').map(item => item.trim()).filter(Boolean)
   if (resumeFromValue &&
-      !['work-permits', 'privacy', 'delete-old', 'verify-final'].includes(resumeFromValue)) {
-    throw new Error('Expected --resume-from work-permits, privacy, delete-old or verify-final.')
+      !['experience', 'skills', 'work-permits', 'privacy', 'delete-old', 'verify-final', 'title-variants', 'activate'].includes(resumeFromValue)) {
+    throw new Error('Expected --resume-from work-permits, privacy, delete-old, verify-final, title-variants or activate.')
   }
   if (resumeFromValue === 'work-permits' && !resumeId) {
     throw new Error('--resume-from work-permits requires --resume-id.')
@@ -71,15 +66,26 @@ export async function main(args = process.argv.slice(2)) {
   if (resumeFromValue === 'verify-final' && !orderedResumeIds.length) {
     throw new Error('--resume-from verify-final requires ordered --resume-ids.')
   }
+  if (['experience', 'skills'].includes(resumeFromValue ?? '') && !orderedResumeIds.length) {
+    throw new Error('--resume-from experience/skills requires ordered --resume-ids.')
+  }
+  if (resumeFromValue === 'title-variants' && !resumeId && !orderedResumeIds.length) {
+    throw new Error('--resume-from title-variants requires a known baseline --resume-id or ordered --resume-ids.')
+  }
   const result = args.includes('--live-smoke')
     ? await service.runLiveSmoke(clientId, selectedMarket)
     : await service.run(clientId, selectedMarket, args.includes('--dry-run'), undefined,
         args.includes('--use-noco-identity'), resumeId,
-        resumeFromValue as 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | undefined,
+        resumeFromValue as 'experience' | 'skills' | 'work-permits' | 'privacy' | 'delete-old' | 'verify-final' | 'title-variants' | 'activate' | undefined,
         orderedResumeIds)
   fatalClientName = result.clientName
   console.log(JSON.stringify(result, null, 2))
-  if (!result.dryRun && !deferredTelegram) await reportProfileFillerResult(result)
+  if (!result.dryRun && !deferredTelegram && (!result.ok || result.operationComplete === true)) {
+    await reportProfileFillerResult(result).catch(error => {
+      console.error(`Profile filler final report was not confirmed: ${safeErrorMessage(error)}`)
+      process.exitCode = 1
+    })
+  }
   if (!result.ok) process.exitCode = 1
 }
 

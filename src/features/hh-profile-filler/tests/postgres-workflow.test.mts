@@ -15,6 +15,7 @@ export async function runPostgresWorkflowTests() {
   for (const [id, market] of [[1, 'En'], [2, 'Ru']] as const) {
     const calls: string[][] = [[], []];
     const prepare = (repository: typeof sql, index: number) => createProfileFillerService({
+      loadDolphinProfile: async id => ({ id, name: `Mock Dolphin ${id}` }),
       repository,
       drive: {
         async loadCv(url) { calls[index].push(url); return { bytes: Buffer.from('fake CV'),

@@ -39,8 +39,8 @@ type SupportBotApiClient = {
   resumeResetTest(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string }>
   providerTasks(actor?: SupportBotActor, offset?: number): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string }>
   providerTask(workflowId: number, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string; workflow?: { id?: number; status?: string } }>
-  advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
-  rejectWorkflow(workflowId: number, expectedStatus: string, comment: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
+  advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor, expectedRevision?: string): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
+  rejectWorkflow(workflowId: number, expectedStatus: string, comment: string, actor?: SupportBotActor, expectedRevision?: string): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
   rejectResume(chatId: string, comment: string, actor?: SupportBotActor): Promise<{ found: boolean; message: string; parseMode?: string; workflow?: { status?: string } }>
   saveKiraComments(comments: string, actor?: SupportBotActor): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string }>
   saveResumeTaskInput(text: string, actor?: SupportBotActor, options?: { workflowId?: number; expectedStatus?: string }): Promise<{ message: string; replyMarkup?: unknown; parseMode?: string; workflow?: { id?: number; status?: string }; clearActiveTask?: boolean }>
@@ -58,7 +58,7 @@ type ActiveTaskContext = {
   openedAtMs: number
 }
 
-type ActiveRejectContext = ActiveTaskContext
+type ActiveRejectContext = ActiveTaskContext & { expectedRevision?: string }
 
 const activeTaskContexts = new Map<string, ActiveTaskContext>()
 const activeRejectContexts = new Map<string, ActiveRejectContext>()
@@ -131,11 +131,12 @@ function clearActiveRejectContext(actor: SupportBotActor): void {
   activeRejectContexts.delete(activeTaskContextKey(actor))
 }
 
-function rememberActiveRejectContext(actor: SupportBotActor, workflowId: number, expectedStatus = '', nowMs = Date.now()): void {
+function rememberActiveRejectContext(actor: SupportBotActor, workflowId: number, expectedStatus = '', expectedRevision = '', nowMs = Date.now()): void {
   if (!Number.isFinite(workflowId) || workflowId <= 0) return
   activeRejectContexts.set(activeTaskContextKey(actor), {
     workflowId,
     expectedStatus,
+    expectedRevision,
     openedAtMs: nowMs
   })
 }
@@ -402,18 +403,18 @@ function createSupportBotApiClient(options: {
         headers: actorHeaders(actor)
       })
     },
-    async advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor) {
+    async advanceWorkflow(workflowId: number, expectedStatus: string, actor?: SupportBotActor, expectedRevision?: string) {
       return await request(`/api/bot/telegram/resume/workflows/${encodeURIComponent(String(workflowId))}/advance`, {
         method: 'POST',
         headers: actorHeaders(actor),
-        body: JSON.stringify({ actor, expectedStatus })
+        body: JSON.stringify({ actor, expectedStatus, expectedRevision })
       })
     },
-    async rejectWorkflow(workflowId: number, expectedStatus: string, comment: string, actor?: SupportBotActor) {
+    async rejectWorkflow(workflowId: number, expectedStatus: string, comment: string, actor?: SupportBotActor, expectedRevision?: string) {
       return await request(`/api/bot/telegram/resume/workflows/${encodeURIComponent(String(workflowId))}/reject`, {
         method: 'POST',
         headers: actorHeaders(actor),
-        body: JSON.stringify({ actor, expectedStatus, comment })
+        body: JSON.stringify({ actor, expectedStatus, comment, expectedRevision })
       })
     },
     async rejectResume(chatId: string, comment: string, actor?: SupportBotActor) {
@@ -527,11 +528,25 @@ async function handleOpenTasks(actor: SupportBotActor, api: SupportBotApiClient)
     return '/open_my_tasks работает только в личном чате. Открой личный чат с ботом и отправь там /open_my_tasks.'
   }
   clearActiveTaskContext(actor)
+  clearActiveRejectContext(actor)
 
   return await withBackendStatusMessage(async () => {
     const result = await api.providerTasks(actor)
     return apiMessageResponse(result)
   })
+}
+
+async function submitPendingRejection(actor: SupportBotActor, context: ActiveRejectContext, comment: string, api: SupportBotApiClient) {
+  try {
+    const result = await api.rejectWorkflow(context.workflowId, context.expectedStatus, comment, actor, context.expectedRevision)
+    clearActiveRejectContext(actor)
+    return apiMessageResponse(result)
+  } catch (error: any) {
+    if (['resume_workflow_stale_revision', 'resume_workflow_stale_status', 'resume_reject_not_allowed'].includes(error?.code)) {
+      clearActiveRejectContext(actor)
+    }
+    throw error
+  }
 }
 
 async function handleSupportBotMessage(message: any, api: SupportBotApiClient): Promise<SupportBotResponse | null> {
@@ -553,16 +568,7 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
   if (!text.startsWith('/')) {
     const rejectContext = activeRejectContext(actor)
     if (rejectContext) {
-      return await withBackendStatusMessage(async () => {
-        const result = await api.rejectWorkflow(
-          rejectContext.workflowId,
-          rejectContext.expectedStatus,
-          text,
-          actor
-        )
-        clearActiveRejectContext(actor)
-        return apiMessageResponse(result)
-      })
+      return await withBackendStatusMessage(() => submitPendingRejection(actor, rejectContext, text, api))
     }
     if (actor.chatType !== 'private') {
       if (!isStudentApprovalText(text)) return null
@@ -648,14 +654,7 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
     return await withBackendStatusMessage(async () => {
       const rejectContext = activeRejectContext(actor)
       if (rejectContext) {
-        const result = await api.rejectWorkflow(
-          rejectContext.workflowId,
-          rejectContext.expectedStatus,
-          comment,
-          actor
-        )
-        clearActiveRejectContext(actor)
-        return apiMessageResponse(result)
+        return await submitPendingRejection(actor, rejectContext, comment, api)
       }
       if (actor.chatType === 'private') {
         return `Сначала открой конкретную задачу через /open_my_tasks и нажми «Вернуть с комментарием». ${rejectInstruction()}`
@@ -720,14 +719,14 @@ async function handleSupportBotCallback(callbackQuery: any, api: SupportBotApiCl
     clearActiveRejectContext(actor)
     const expectedStatus = decodeCallbackStatus(parts[3])
     return await withBackendStatusMessage(async () => {
-      const result = await api.advanceWorkflow(workflowId, expectedStatus, actor)
+      const result = await api.advanceWorkflow(workflowId, expectedStatus, actor, parts[4] ?? '')
       return apiMessageResponse(result)
     })
   }
 
   if (parts[1] === 'reject') {
     const expectedStatus = decodeCallbackStatus(parts[3])
-    rememberActiveRejectContext(actor, workflowId, expectedStatus)
+    rememberActiveRejectContext(actor, workflowId, expectedStatus, parts[4] ?? '')
     if (expectedStatus.includes('approve by Kira')) {
       return kiraRejectPromptMessage()
     }

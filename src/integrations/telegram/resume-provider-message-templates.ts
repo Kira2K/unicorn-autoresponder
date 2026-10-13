@@ -18,6 +18,8 @@ type ProviderTaskCardInput = {
   rootFolder?: string
   sourceFolder?: string
   kirasComments?: string
+  lastRejectionComment?: string
+  returnedCvUrl?: string
   draftUrl?: string
   emailEn?: string
   telegramEn?: string
@@ -136,6 +138,7 @@ function yuliaStudentDataRows(input: ProviderTaskCardInput): string[] {
 
 function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput): ProviderTelegramMessage {
   const config = STAGE_CONFIG[stage]
+  const lastRejectionComment = input.lastRejectionComment?.trim()
   const commonRows = [
     bold(config.heading),
     `Студент: ${escapeTelegramHtml(input.clientName)}`,
@@ -148,6 +151,8 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
   return htmlMessage([
     ...commonRows,
     ...stageRows,
+    lastRejectionComment ? `Комментарий возврата: ${escapeTelegramHtml(lastRejectionComment)}` : undefined,
+    lastRejectionComment && input.returnedCvUrl ? `Файл на доработку: ${escapeTelegramHtml(input.returnedCvUrl)}` : undefined,
     stage === 'en' ? `Черновик: ${escapeTelegramHtml(valueOrEmpty(input.draftUrl))}`
       : stage === 'ru' && input.draftUrl ? `Черновик: ${escapeTelegramHtml(input.draftUrl)}` : undefined,
     config.inputHint,

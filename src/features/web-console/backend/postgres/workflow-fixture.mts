@@ -34,6 +34,7 @@ export function workflowFixture(market = 'En') {
       login: 'fixture', linkedin_url: 'https://example.invalid/' + name, telegram_session_status: 'disconnected' });
   });
   let nextId = 100, mutations = 0, failWrite = false, failRead = false, failAfterWrite = false;
+  let transactionTail = Promise.resolve();
   let readError = Error('readback failed');
   const db = { listTables: () => tables,
     async getRecord(id: string, key: string[]) { if (failRead) throw readError; const r = rowset(id).get(key[0]); return r ? copy(r) : null; },
@@ -54,7 +55,13 @@ export function workflowFixture(market = 'En') {
       if (Object.values(data).some(v => v === undefined)) throw Error('undefined SQL parameter');
       const r = rowset(id).get(key[0]); if (!r) throw Error('missing row');
       Object.assign(r, data); if (failAfterWrite) throw Error('write result unknown'); return copy(r);
-    }, async transaction<T>(fn: (tx: unknown) => Promise<T>) { return fn(db); }
+    }, async lockRecord() {}, async transaction<T>(fn: (tx: unknown) => Promise<T>) {
+      const previous = transactionTail;
+      let release!: () => void;
+      transactionTail = new Promise<void>(resolve => { release = resolve; });
+      await previous;
+      try { return await fn(db); } finally { release(); }
+    }
   } as unknown as ConsoleSql;
   const grant: ConsoleWrites = { clientIds: new Set([7]), create: (tx, id, data) => tx.createRecord(id, data) };
   const legacy = createWebConsoleRepository({ nocoClient: {

@@ -32,12 +32,19 @@ export function createRuntimeReader(config: ConnectionOptions, open: (config: Co
 }
 // One pool per process; each AppDb retains its established per-instance data cache.
 let shared: ReturnType<typeof createRuntimeReader> | undefined;
+let sharedConfig: ConnectionOptions | undefined;
 export function createRuntimePostgresDb(sheets: SheetsReads) {
   return createPostgresAppDb(loadRuntimePostgresReader, sheets);
 }
 export function loadRuntimePostgresReader(): Promise<AppDbReader> {
-  shared ??= createRuntimeReader(readPostgresAppDbConfig(process.env));
+  if (!shared) {
+    sharedConfig = readPostgresAppDbConfig(process.env);
+    shared = createRuntimeReader(sharedConfig);
+  }
   return shared.read();
+}
+export function runtimePostgresSourceIdentity() {
+  return sharedConfig ? { host: sharedConfig.host, port: sharedConfig.port, database: sharedConfig.database } : undefined;
 }
 export async function closeRuntimePostgresDb() {
   if (shared) await shared.close();
