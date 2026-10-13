@@ -7,6 +7,9 @@ import { nocoRecordOrder } from './record-order.mts';
 const { TABLES } = createRequire(import.meta.url)('../../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { id: string }>;
 };
+const { isDolphinProfile } = createRequire(import.meta.url)('../../../integrations/noco/core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean;
+};
 export type AppDbReader = Pick<Awaited<ReturnType<typeof createPostgresClient>>, 'listTables' | 'listRecords' | 'listRelated'>;
 export type AppDbRow = Record<string, unknown> & { Id: number };
 const relations: Record<string, { title: string; type: string; target: string }[]> = {
@@ -37,6 +40,6 @@ export function createPostgresRecordSource(load: () => Promise<AppDbReader>) {
           reader.listRelated(tableId, field.id, records[i].key, { limit: 100, after }))).map(row));
       }
     }
-    return nocoRecordOrder(result);
+    return nocoRecordOrder(tableId === TABLES.dolphinProfiles.id ? result.filter(isDolphinProfile) : result);
   } };
 }

@@ -8,6 +8,7 @@ export async function createConfiguredApp(env = process.env, open = openSqlConso
   const runtime = !mock && env.APP_DB === 'postgres' ? await open(env) : undefined;
   try {
     const app = createWebConsoleApp({ ...runtime?.options, useMockData: mock, initializeConnectionInviter: true });
-    return { app, closeStorage: runtime?.close ?? (async () => {}) };
+    return { app, closeStorage: runtime?.close ?? (async () => {}),
+      startBackground: runtime && 'startBackground' in runtime ? runtime.startBackground : async () => {} };
   } catch (error) { await runtime?.close(); throw error; }
 }

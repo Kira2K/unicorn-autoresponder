@@ -1,6 +1,9 @@
 const { createNocoClient } = require('../core/client.ts') as {
   createNocoClient(): any
 }
+const { isDolphinProfile } = require('../core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean
+}
 const { describeError } = require('../core/errors.ts') as {
   describeError(error: any): string
 }
@@ -294,7 +297,7 @@ async function runAudit(apply: boolean): Promise<void> {
 
   const report = buildAuditReport({
     clients,
-    nocoProfiles,
+    nocoProfiles: nocoProfiles.filter(isDolphinProfile),
     dolphinProfiles,
     dolphinProfileTags
   })

@@ -1,0 +1,108 @@
+import { createActionLogListener } from '../octo-access-test/action-log.mts';
+import { createOctoService } from './service.mts';
+import { provisionProfile, safeCode } from './provision.mts';
+import { advanceGrant } from './grant-workflow.mts';
+import { OctoError } from './contracts.mts';
+import type { CloudApi, OctoConfig, OctoStore } from './contracts.mts';
+import type { WebClient } from '../web-console/backend/types.ts';
+export function createOctoRuntime({ store, api, config, token, getClient, now = Date.now,
+  listen = createActionLogListener, report = () => {} }: {
+  store: OctoStore; api: CloudApi; config: OctoConfig; token: string; getClient(id: number): Promise<WebClient>;
+  now?: () => number; listen?: typeof createActionLogListener; report?: (event: { code: string; profileId?: number }) => void;
+}) {
+  let lease: Awaited<ReturnType<OctoStore['leader']>>, listener: ReturnType<typeof listen> | undefined;
+  let signature = '', stopped = true, timer: ReturnType<typeof setTimeout> | undefined, work: Promise<void> | undefined;
+  let lastError: string | undefined;
+  let listenerGeneration = 0;
+  const jobs = new Map<number, Promise<void>>();
+  let creating = false;
+  const checked = async () => {
+    if (stopped || !lease) throw new OctoError('octo_leadership_lost');
+    try { await lease.check(); } catch { throw new OctoError('octo_leadership_lost'); }
+  };
+  const service = createOctoService({ store, config, getClient, now,
+    canGrant: uuid => !!lease && listener?.status().checkpoint !== undefined && signature.split(',').includes(uuid) && !lastError });
+  async function disconnect() {
+    await listener?.stop(); listener = undefined; signature = '';
+    const previous = lease; lease = undefined; await previous?.release();
+  }
+  const nextCheck = new Map<number, number>();
+  function launch(id: number, operation: (check: () => Promise<void>) => Promise<void>) {
+    const owned = lease;
+    const check = async () => { if (!owned || lease !== owned) throw new OctoError('octo_leadership_lost'); await checked(); };
+    const job = operation(check).catch(error => {
+      if ((error as any)?.code !== 'octo_stale_revision') report({ code: safeCode(error), profileId: id });
+    }).finally(() => { jobs.delete(id); });
+    jobs.set(id, job);
+  }
+  async function tick() {
+    if (stopped) return;
+    try {
+      lease ??= await store.leader();
+      if (!lease) return;
+      await checked();
+      const profiles = await store.list();
+      const ids = profiles.flatMap(p => p.uuid ? [p.uuid] : []).sort(), current = ids.join(',');
+      if (!listener || signature !== current) {
+        await listener?.stop();
+        let cursor = (await store.stream()).cursor;
+        listenerGeneration++;
+        listener = listen({ token, profileIds: ids, includeUpdates: true, requireCompleteHistory: true, now, loadCursor: () => cursor,
+          onReplayGap: since => store.setCoverage(since),
+          onPage: async page => {
+            await checked(); await store.recordPage(page); cursor = page.watermark;
+            for (const p of profiles) if (page.events.some(e => e.profileId.replaceAll('-', '') === p.uuid)) nextCheck.delete(p.id);
+          } });
+        signature = current; listener.start();
+      }
+      lastError = undefined;
+      // Expiry is independent of stream connectivity and of unrelated provisioning.
+      for (const p of profiles.filter(p => p.grant && p.grant.phase !== 'complete')) {
+        if (jobs.has(p.id) || (p.grant!.phase !== 'preparing' && (nextCheck.get(p.id) ?? 0) > now())) continue;
+        launch(p.id, async check => {
+          await advanceGrant(p, { store, api, config, now, check, historyCheckpoint: () => {
+            const checkpoint = listener?.status().checkpoint;
+            return checkpoint === undefined ? undefined : `${listenerGeneration}:${checkpoint}`;
+          } });
+          const current = await store.get(p.id), grant = current?.grant;
+          const delay = grant?.phase === 'granted' && !grant.error ? Math.min(30_000, Math.max(0, grant.expiresAt! - now())) : 30_000;
+          nextCheck.set(p.id, now() + delay);
+          if (grant?.error) report({ code: grant.error, profileId: p.id });
+        });
+      }
+      // Sequential creation makes pool-proxy reservation deterministic; it never
+      // serializes access grants or stores a transaction across a network call.
+      for (const p of profiles.filter(p => p.phase !== 'ready' && (!p.error || p.pending))) {
+        if (creating || jobs.has(p.id) || config.enabled === false || !config.allowedClientIds.has(p.clientId) || (nextCheck.get(p.id) ?? 0) > now()) continue;
+        creating = true;
+        launch(p.id, async check => {
+          try {
+            const folders = await api.listFolders();
+            if (![config.homeFolder, config.guestFolder].every(id => folders.some(f => f.uuid === id))) throw new OctoError('octo_folders_changed');
+            await provisionProfile(p, { store, api, config, check }); nextCheck.set(p.id, now() + 30_000);
+          } finally { creating = false; }
+        });
+      }
+    } catch (error) {
+      lastError = safeCode(error); report({ code: lastError });
+      await disconnect().catch(() => {});
+    }
+  }
+  function schedule() {
+    if (stopped) return;
+    timer = setTimeout(() => { work = tick().finally(() => { work = undefined; schedule(); }); }, 1000);
+    timer.unref();
+  }
+  return {
+    service,
+    status: () => ({ running: !stopped, leader: !!lease, connected: listener?.status().connected ?? false, error: lastError }),
+    async start() {
+      if (!stopped) return; await store.checkSchema(); stopped = false;
+      work = tick(); await work; work = undefined; schedule();
+    },
+    async stop() {
+      if (stopped) return; stopped = true; if (timer) clearTimeout(timer);
+      await work?.catch(() => {}); await Promise.all([...jobs.values()]); await disconnect();
+    }
+  };
+}

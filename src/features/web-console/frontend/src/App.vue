@@ -5,6 +5,7 @@ import FieldInfoLabel from './FieldInfoLabel.vue'
 import LinkedInAuthTab from './LinkedInAuthTab.vue'
 import StudentProfile from './StudentProfile.vue'
 import StudentWorkPlaces from './StudentWorkPlaces.vue'
+import OctoAccessCard from './components/OctoAccessCard.vue'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 import { usernamePayload } from './username-input.js'
 import AccountForm from './AccountForm.vue'
@@ -2947,6 +2948,7 @@ onUnmounted(() => {
 
         </template>
         <template #actions>
+        <OctoAccessCard v-if="isClient && dashboard?.client?.id" :key="dashboard.client.id" :client-id="dashboard.client.id" />
         <Card v-if="isClient" class="action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>
           <template #subtitle>{{ ui(dolphinActionMode === 'create_new' ? 'Create the missing automation profiles' : 'Open the connected automation profiles') }}</template>

@@ -9,11 +9,18 @@ import { openLinkLabIntake } from '../../../linkedin-automation/linklab/intake-r
 import { tableIds } from './tables.mts';
 import { studentProfileStore } from './student-profile-store.mts';
 import { withStudentProfile } from './student-profile-repository.mts';
+import { readOctoConfig } from '../../../octo-access/config.mts';
+import { createOctoPostgresStore } from '../../../octo-access/postgres-store.mts';
+import { createOctoRuntime } from '../../../octo-access/runtime.mts';
+import { createCloudApi } from '../../../octo-access/cloud-api.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const config = readPostgresAppDbConfig(env), pool = open(config);
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= pool.end();
+  let octo: ReturnType<typeof createOctoRuntime> | undefined, octoLockPool: ReturnType<typeof createPostgresPool> | undefined;
+  const close = () => closing ??= (async () => {
+    try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
+  })();
   try {
     const db = await createPostgresClient(pool, config.database, { writable: true });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
@@ -24,6 +31,21 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const store = studentProfileStore(pool, config.database);
     await store.checkSchema();
     options.repository = withStudentProfile(options.repository, store);
-    return { options, close };
+    const octoConfig = readOctoConfig(env);
+    if (octoConfig) {
+      // The advisory-lock connection must not occupy the two application pool slots.
+      octoLockPool = open(config);
+      const octoStore = createOctoPostgresStore(pool, config.database, octoLockPool);
+      await octoStore.checkSchema();
+      const clients = await Promise.all([...octoConfig.allowedClientIds].map(id => options.repository.getClientById(id)));
+      const emails = clients.map(c => c.calendarEmail.toLowerCase()).sort();
+      if (emails.join(',') !== 'alex.octo@example.com,bob.octo@example.com')
+        throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
+      octo = createOctoRuntime({ store: octoStore, api: createCloudApi(env.OCTO_API_TOKEN!), config: octoConfig,
+        token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
+        report: event => console.error(JSON.stringify({ feature: 'octo', ...event })) });
+    }
+    return { options: { ...options, ...(octo ? { octoService: octo.service } : {}) }, close,
+      startBackground: async () => { await octo?.start(); } };
   } catch (error) { await close(); throw error; }
 }

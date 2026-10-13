@@ -451,6 +451,7 @@ function createMockCvTailoringService(): CvTailoringService {
 }
 
 function createWebConsoleApp(options: {
+  octoService?: import('../../octo-access/service.mts').OctoService
   repository?: WebConsoleRepository
   linkedinStorage?: import('./storage-options.ts').LinkedInStorageOptions
   dolphinLeaseService?: DolphinLeaseService
@@ -1321,6 +1322,9 @@ function createWebConsoleApp(options: {
       next(error)
     }
   })
+
+  const { registerOctoRoutes } = require('./octo-routes.ts') as typeof import('./octo-routes.ts')
+  registerOctoRoutes(app, requireAuth, options.octoService)
 
   app.get('/api/dolphin/profiles/status', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {

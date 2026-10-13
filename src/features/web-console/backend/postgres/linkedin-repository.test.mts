@@ -13,6 +13,23 @@ test('SQL account selection, readiness, stacks and target equal the Noco reposit
   assert.deepEqual(await sql.getAccount(21, { fresh: true }), await old.getAccount(21, { fresh: true }));
   assert.equal(await sql.getAccount(999), undefined);
 });
+
+test('SQL and Noco LinkedIn selection ignores same-market Octo and unknown browser rows', async () => {
+  const baseline = linkedInFixture();
+  const expectedAccounts = await baseline.legacy.repository.listAccounts();
+  const expectedTarget = await baseline.legacy.repository.resolveTarget('SQL fixture', 21);
+  const f = linkedInFixture();
+  f.rows.get(t.profiles)!.get('31')!.browser = 'dolphin';
+  f.set(t.profiles, 32, { clients_id: 7, locale: 'En', browser: 'octo', octo_profile_id: 'octo-only' });
+  f.set(t.profiles, 33, { clients_id: 7, locale: 'En', browser: 'unknown', dolphin_profile_id: '7002' });
+  for (const repo of [f.legacy.repository, createSqlLinkedInStorage(f.db).repository]) {
+    assert.deepEqual(await repo.listAccounts(), expectedAccounts);
+    assert.deepEqual(await repo.resolveTarget('SQL fixture', 21), expectedTarget);
+    assert.deepEqual(await repo.getAccount(21, { fresh: true }), expectedAccounts.find(row => row.platformAccountId === 21));
+  }
+  assert.deepEqual((await linkedInRecords(f.db).fetchRecords(t.profiles)).map(row => row.Id), [31]);
+  assert.deepEqual(await linkedInRecords(f.db).fetchRecords(t.profiles, 1, { where: '(Id,eq,32)' }), []);
+});
 test('missing and ambiguous students/profiles, invalid URL and lost owner preserve domain errors', async () => {
   for (const change of ['missing', 'duplicate', 'profile', 'url', 'owner']) {
     const f = linkedInFixture();

@@ -7,6 +7,8 @@ import { tableIds as t } from './tables.mts';
 import { filterRows } from './query.mts';
 import type { ConsoleSql } from './contracts.mts';
 const require = createRequire(import.meta.url);
+const { isDolphinProfile } = require('../../../../integrations/noco/core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean };
 const { LINKEDIN_AUTH_COLUMNS } = require('../../../../integrations/noco/linkedin-auth-schema/logic.ts') as {
   LINKEDIN_AUTH_COLUMNS: Array<{ title: string }> };
 const { LINKEDIN_AUTH_RUN_COLUMNS } = require('../../../../integrations/noco/linkedin-auth-runs-schema/columns.ts') as {
@@ -50,7 +52,8 @@ export function linkedInRecords(db: ConsoleSql) {
     async fetchRecords(id: string, _pageSize?: number, query?: { where?: string; sort?: string }, _options?: { fresh?: boolean }) {
       const definition = table(id), byId = /^\(Id,eq,([1-9]\d*)\)$/.exec(query?.where ?? '');
       const one = byId ? await db.getRecord(id, [byId[1]]) : null;
-      const rows = filterRows((byId ? one ? [one] : [] : await all(id)).map(appDbRow), query?.where);
+      const records = (byId ? one ? [one] : [] : await all(id)).map(appDbRow);
+      const rows = filterRows(id === t.profiles ? records.filter(isDolphinProfile) : records, query?.where);
       for (const [source, title, target] of links) if (source === id)
         await attachBelongsTo(rows, definition, tables, title, target, all);
       for (const field of definition.columns.filter(c => c.sqlType === 'timestamptz'))
