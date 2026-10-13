@@ -24,6 +24,9 @@ export type ConnectionRuntime = {
   writerEnabled: boolean
   writerId: string
   assertWriterOwnership?(): void
+  cooperative?: boolean
+  yieldWait?(until: number): Promise<boolean>
+  cooperate?<T>(action: () => Promise<T>, until?: number, verifying?: boolean): Promise<T>
 }
 
 export type SaveRunMode = 'checkpoint' | 'critical'

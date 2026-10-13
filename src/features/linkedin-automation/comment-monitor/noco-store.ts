@@ -46,11 +46,8 @@ function createCommentMonitorStore(client = createNocoClient({
     })
     await client.patchRecord(await table(), id, monitorJobRow(job))
   }
-  async function purge(beforeIso: string) {
-    for (const job of await list()) if (job.createdAt && job.createdAt < beforeIso && job.recordId) {
-      await client.deleteRecord(await table(), job.recordId); ids.delete(job.jobId)
-    }
-  }
+  // Compatibility entry point: jobs contain recovery and deduplication evidence, not disposable logs.
+  async function purge(_beforeIso: string) {}
   return { create, get, list, purge, update }
 }
 

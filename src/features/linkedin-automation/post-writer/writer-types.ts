@@ -1,6 +1,7 @@
 export type Fact = { id: string; text: string; evidence: string }
 import type { ContentRules } from './content-rules.ts'
 export type Context = { revision: string; role: string; stack: string[]; facts: Fact[]
+  source?: 'stack'; warning?: { code: string; message: string }
   level?: string; audience?: string; style?: string; factsVersion?: string }
 export type Topic = { title: string; signature: string; factIds: string[]; score: number }
 export type Draft = { text: string; factIds: string[]; claims: { text: string; factId: string }[] }

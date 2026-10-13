@@ -105,7 +105,8 @@ async function run() {
   run.searchProgress.streams.recruiter.emptyCursorStreak = 0
   run.searchProgress.pendingCandidates = []
   const emptyDiscovery = await createCandidateDiscovery(runtime, run, save)
-  await emptyDiscovery.next('recruiter')
+  await assert.rejects(emptyDiscovery.next('recruiter'), { code: 'connection_search_contract_suspect' })
+  assert.equal(emptyCursorCalls.length, 6)
   assert.equal(emptyCursorCalls.slice(0, 2).every(item => item.startsWith('Recruiter:')), true)
   assert.equal(emptyCursorCalls[2].startsWith('Talent Acquisition:'), true)
 }

@@ -12,9 +12,10 @@ function clock(f: ReturnType<typeof fixture>) {
 }
 test('withdrawals use the existing Inviter backoff and preserve a longer Retry-After', () => {
   assert.deepEqual([1, 2, 3, 4, 5, 8].map(attempt => withdrawalRetryAt(limited(), 0, attempt)),
-    [180_000, 360_000, 720_000, 1_440_000, 1_800_000, 1_800_000])
+    [270_000, 540_000, 1_080_000, 2_160_000, 2_700_000, 2_700_000])
   assert.equal(withdrawalRetryAt(limited(3_600_000), 0), 3_600_000)
-  assert.equal(withdrawalRetryAt({ details: { httpStatus: 503 } }, 0), undefined)
+  assert.equal(withdrawalRetryAt({ details: { httpStatus: 503 } }, 0), 60_000)
+  assert.equal(withdrawalRetryAt({ details: { httpStatus: 400 } }, 0), undefined)
 })
 test('429 during verification or batch check pauses, then continues the same approved queue', async () => {
   for (const operation of ['verify', 'list'] as const) {
@@ -26,7 +27,7 @@ test('429 during verification or batch check pauses, then continues the same app
     await f.service.start(1, preview.token)
     assert.equal((await finished(f.service))?.status, 'completed')
     assert.deepEqual(f.calls, ['1', '2'])
-    assert.equal(f.delays.reduce((a, b) => a + b, 0), 187_500)
+    assert.equal(f.delays.reduce((a, b) => a + b, 0), 280_000)
     assert.equal(f.stored()?.retryAt, undefined)
   }
 })
@@ -50,8 +51,8 @@ test('429 after POST retries only read-back with saved growing waits, without a 
   }
   await f.service.start(1, (await f.service.preview(1)).token)
   assert.equal((await finished(f.service))?.status, 'completed')
-  assert.deepEqual(waits, [180_000, 360_000]); assert.deepEqual(f.calls, ['1', '2'])
-  assert.equal(f.delays.reduce((a, b) => a + b, 0), 547_500)
+  assert.deepEqual(waits, [270_000, 540_000]); assert.deepEqual(f.calls, ['1', '2'])
+  assert.equal(f.delays.reduce((a, b) => a + b, 0), 820_000)
   assert.equal(f.stored()?.run?.retryAttempt, undefined)
 })
 test('429 on cancel is followed only by read-back; absent continues, present stays uncertain', async () => {

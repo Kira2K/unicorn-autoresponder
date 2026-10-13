@@ -1,6 +1,7 @@
 import { PostError, object } from '../../features/linkedin-automation/post-writer/errors.ts'
 import type { Account, Log, PostAdapter, PostMedia, ProviderPost } from '../../features/linkedin-automation/post-writer/types.ts'
-import { reactionPresent } from './post-writer-reactions.ts'
+import { reactionPresent, reactionsPresent } from './post-writer-reactions.ts'
+import { listReadError } from './read-retry.ts'
 export type PostRequestScheduler = { run<T>(operation: () => Promise<T>): Promise<T> }
 export type PostHttp = { request<T>(method: 'GET' | 'POST', path: string, body?: unknown,
   options?: { fullRetryAfter: boolean; noCache: boolean }): Promise<T> }
@@ -30,20 +31,20 @@ export function parsePost(value: unknown): ProviderPost {
 }
 export function createPostAdapter(log: Log, client: PostHttp,
   scheduler: PostRequestScheduler): PostAdapter {
-  const request = async (method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> => {
+  const request = async (method: 'GET' | 'POST', path: string, body?: unknown, fresh = method === 'GET'): Promise<unknown> => {
     const start = Date.now()
     log('unipile_request_started', { method, operation: path.includes('reactions') ? 'reaction' : 'post' })
     try { return await scheduler.run(() => client.request(method, path, body,
-      { fullRetryAfter: true, noCache: method === 'GET' })) }
+      { fullRetryAfter: true, noCache: fresh })) }
     finally { log('unipile_request_finished', { method, durationMs: Date.now() - start }) }
   }
   const path = (account: Account) => `/${encodeURIComponent(account.unipileAccountId)}`
   return {
     async identity(account) {
-      const current = object(await request('GET', `/accounts/${encodeURIComponent(account.unipileAccountId)}`))
+      const current = object(await request('GET', `/accounts/${encodeURIComponent(account.unipileAccountId)}`, undefined, false))
       if (current.provider !== 'LINKEDIN' && current.provider !== 'linkedin') throw new PostError('post_identity_mismatch')
       if (current.status !== 'running' || current.is_locked) throw new PostError('post_account_not_ready')
-      const own = object(await request('GET', `${path(account)}/users/me?variant=linkedin_classic`))
+      const own = object(await request('GET', `${path(account)}/users/me?variant=linkedin_classic`, undefined, false))
       if (own.id !== account.verifiedProviderId) throw new PostError('post_identity_mismatch')
     },
     async publish(account, text, image) { return parsePost(await request('POST', `${path(account)}/posts`,
@@ -60,6 +61,9 @@ export function createPostAdapter(log: Log, client: PostHttp,
         const page = object(await request('GET', `${path(account)}/users/${encodeURIComponent(account.verifiedProviderId)}/posts?${query}`))
         if (!Array.isArray(page.data)) throw new PostError('post_page_invalid')
         result.push(...page.data.map(parsePost))
+        if (page.next_cursor != null && (typeof page.next_cursor !== 'string' ||
+          (page.next_cursor && (!page.next_cursor.trim() || !page.data.length))))
+          throw listReadError('post_page_invalid', 'cursor_invalid', { page: pages })
         cursor = String(page.next_cursor ?? '')
         if (cursor && cursors.has(cursor)) throw new PostError('post_cursor_repeated')
         cursors.add(cursor)
@@ -68,6 +72,7 @@ export function createPostAdapter(log: Log, client: PostHttp,
       return result
     },
     reacted: (account, id) => reactionPresent(account, id, request),
+    reactions: (account, id, actors) => reactionsPresent(account, id, actors, request),
     async like(account, id) {
       const response = object(await request('POST', `${path(account)}/posts/${encodeURIComponent(id)}/reactions`,
         { reaction: 'linkedin_like' }))

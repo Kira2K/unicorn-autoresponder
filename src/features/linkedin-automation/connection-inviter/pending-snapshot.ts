@@ -67,7 +67,7 @@ export async function createPendingSnapshotController(runtime: ConnectionRuntime
       result = await withConnectionRetry(runtime, run, save, 'unipile',
         options.operation ?? 'pending_invitations_read', async () => {
           try {
-            const value = await readPendingInvitations(runtime, accountId, targetPersonId)
+            const value = await readPendingInvitations(runtime, accountId, targetPersonId, run.runId)
             if (!pendingReadIsFresh(value, accountId, runtime.now().getTime())) {
               throw connectionError('unipile_pending_snapshot_expired',
                 'Pending invitations expired during the scan.', { httpStatus: 503 })

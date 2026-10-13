@@ -3,7 +3,7 @@ const { createConnectionInviterService } = require('../service.ts') as typeof im
 const { makeRun } = require('../run-model.ts') as typeof import('../run-model.ts')
 const { fixture, waitRun } = require('./fixtures.ts') as typeof import('./fixtures.ts')
 
-async function thresholdDoesNotIncreaseQuota() {
+async function loweredCapStopsAlreadySpentQuota() {
   const now = new Date('2026-08-29T09:00:00Z')
   const test = fixture({ stack: 'GO', connectionCount: 1000 })
   const seeded = makeRun({ platformAccountId: 7, clientId: 3, clientName: 'Test Client',
@@ -27,10 +27,10 @@ async function thresholdDoesNotIncreaseQuota() {
   const resumed: any = await service.start(7)
   const completed: any = await waitRun(service, resumed.runId)
   const internal: any = await test.store.getRun(resumed.runId)
-  assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.sent, 38)
-  assert.equal(test.metrics.sends, 1)
-  assert.equal(internal.connectionCount, 999); assert.equal(internal.dailyLimit, 38)
-  assert.deepEqual(internal.audienceQuota, { recruiter: 27, technical: 11 })
+  assert.equal(completed.status, 'succeeded'); assert.equal(completed.counters.sent, 37)
+  assert.equal(test.metrics.sends, 0)
+  assert.equal(internal.connectionCount, 999); assert.equal(internal.dailyLimit, 7)
+  assert.deepEqual(internal.audienceQuota, { recruiter: 27, technical: 10 })
 }
 
 async function recruiterOnlyCanResumeTechnicalAfterStackSelection() {
@@ -108,11 +108,11 @@ async function run() {
   assert.equal(internalResumed.searchProgress.locations.Berlin.id, 'location-Berlin')
   const completed: any = await waitRun(service, resumed.runId)
   assert.equal(completed.status, 'succeeded'); assert.equal(completed.stage, 'completed')
-  assert.equal(completed.counters.sent, 40); assert.equal(test.metrics.sends, 38)
+  assert.equal(completed.counters.sent, 7); assert.equal(test.metrics.sends, 5)
   assert.equal(firstSearch.includes('location-Berlin'), true, 'Exercise the saved location, not just its JSON')
   await service.start(7)
-  assert.equal(test.metrics.sends, 38)
-  await thresholdDoesNotIncreaseQuota()
+  assert.equal(test.metrics.sends, 5)
+  await loweredCapStopsAlreadySpentQuota()
   await recruiterOnlyCanResumeTechnicalAfterStackSelection()
 }
 

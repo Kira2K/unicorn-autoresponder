@@ -53,9 +53,9 @@ async function run() {
   assert.equal(guarded.status, 'partial')
   assert.equal(guarded.stage, 'search_contract_suspect')
   assert.equal(guarded.errorCode, 'connection_search_contract_suspect')
-  assert.equal(guarded.searchProgress.consecutiveEmptyRecruiterSearches, 20)
+  assert.equal(guarded.searchProgress.consecutiveEmptyRecruiterSearches, 6)
   assert.deepEqual(guarded.counters.shortfallByAudience, { recruiter: 4, technical: 1 })
-  assert.equal(emptySearches, 20)
+  assert.equal(emptySearches, 6)
   assert.equal(empty.metrics.sends, 0)
 
   const split = fixture({ stack: 'GO', connectionCount: 1663 })
@@ -80,11 +80,11 @@ async function run() {
     linkedinUrl: 'https://www.linkedin.com/in/test-client/', accountId: 'acc_test',
     stackId: 10, stack: 'GO' }, new Date('2026-08-29T09:00:00Z'), 'Europe/Moscow', false)
   splitRun.status = 'partial'; splitRun.stage = 'search_exhausted'
-  splitRun.connectionCount = 1663; splitRun.dailyLimit = 40; splitRun.dailyQuota = 40
-  splitRun.audienceQuota = { recruiter: 28, technical: 12 }
+  splitRun.connectionCount = 1663; splitRun.dailyLimit = 7; splitRun.dailyQuota = 7
+  splitRun.audienceQuota = { recruiter: 5, technical: 2 }
   splitRun.finishedAt = new Date('2026-08-29T09:00:00Z').toISOString()
   await split.store.createRun(splitRun)
-  for (let index = 0; index < 20; index += 1) {
+  for (let index = 0; index < 3; index += 1) {
     await split.store.claimHistory({ historyKey: `acc_test:existing-recruiter-${index}`,
       runId: splitRun.runId, platformAccountId: 7, accountId: 'acc_test',
       personId: `existing-recruiter-${index}`, audience: 'recruiter', searchKey: 'existing',
@@ -98,10 +98,10 @@ async function run() {
   const splitStarted: any = await splitService.start(7)
   const splitResult: any = await waitRun(splitService, splitStarted.runId)
   assert.equal(splitResult.status, 'partial')
-  assert.equal(splitResult.counters.sent, 32)
-  assert.deepEqual(splitResult.counters.sentByAudience, { recruiter: 20, technical: 12 })
-  assert.deepEqual(splitResult.counters.shortfallByAudience, { recruiter: 8, technical: 0 })
-  assert.equal(split.metrics.sends, 12)
+  assert.equal(splitResult.counters.sent, 5)
+  assert.deepEqual(splitResult.counters.sentByAudience, { recruiter: 3, technical: 2 })
+  assert.deepEqual(splitResult.counters.shortfallByAudience, { recruiter: 2, technical: 0 })
+  assert.equal(split.metrics.sends, 2)
 }
 
 run().then(() => console.log('connection partial catalog tests passed'))

@@ -29,7 +29,7 @@ export function createTextWorkspace(deps: TextWorkspaceDependencies, autoStart =
         catch (error) {
           job.errorCode = errorCode(error)
           deps.log?.('text_error', { jobId: job.id, code: job.errorCode })
-          const delay = job.errorCode === 'post_text_persistence_unavailable' ? 30_000 : retryDelay(error)
+          const delay = job.errorCode === 'post_text_persistence_unavailable' ? 30_000 : retryDelay(error, deps.now())
           job.status = controller.signal.aborted ? 'cancelled' : delay ? 'retrying' : 'blocked'
           job.nextActionAt = delay ? deps.now() + delay : undefined
           await persistence.save(job)

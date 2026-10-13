@@ -32,7 +32,7 @@ export async function requestRunStop(runtime: ConnectionRuntime, active: Map<str
 export async function finishRunStop(runtime: ConnectionRuntime, run: ConnectionRun, save: SaveRun) {
   if (!runtime.stopRequested(run.runId)) return false
   run.status = 'stopped'; run.stage = 'stopped_by_admin'
-  run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
+  // Stop freezes execution, not its provider deadline. Resume must wait the remainder.
   run.errorCode = undefined
   run.executorId = undefined; run.heartbeatAt = undefined
   run.finishedAt = runtime.now().toISOString()
@@ -53,6 +53,7 @@ export async function waitOrStop(runtime: ConnectionRuntime, runId: string, mill
   expectedLocalDate?: string) {
   let remaining = milliseconds
   while (remaining > 0) {
+    if (runtime.cooperative) runtime.assertWriterOwnership?.()
     if (runtime.stopRequested(runId)) return false
     if (expectedLocalDate && dateParts(runtime.now(), runtime.timeZone).localDate !== expectedLocalDate) {
       throw connectionError('connection_daily_window_closed',

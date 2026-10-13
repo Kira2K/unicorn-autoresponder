@@ -20,6 +20,16 @@ const dependencies = (failure: any, events: any[]) => ({ store: { async update()
   } } })
 
 async function run() {
+  const malformedJob = job(), malformedEvents: any[] = []
+  let replies = 0
+  const malformedDeps = dependencies(undefined, malformedEvents)
+  malformedDeps.adapter.listReplies = async () => { replies++; return {} as never }
+  const result = await pollMonitorJob({ job: malformedJob, ...malformedDeps })
+  assert.equal(result.status, 'waiting'); assert.equal(malformedJob.status, 'waiting')
+  assert.equal(malformedJob.errorCode, 'comment_monitor_list_invalid')
+  assert.ok(Date.parse(malformedJob.nextCheckAt) > Date.now()); assert.equal(replies, 1)
+  assert.equal(malformedJob.state.published, 0); assert.equal(malformedJob.state.checks, 0)
+  assert.equal(malformedEvents.find(event => event.stage === 'monitor_check').reasonCode, 'missing_items')
   const retryEvents: any[] = []; const retryJob = job()
   await pollMonitorJob({ job: retryJob, ...dependencies(
     providerError('unipile_api_internal_error', 500), retryEvents) })

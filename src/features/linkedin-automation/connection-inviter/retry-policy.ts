@@ -2,10 +2,11 @@ import type { ConnectionHistoryItem, ConnectionRun } from './types.ts'
 import { dailyAudienceTargets } from './limits.ts'
 
 function continuedInvitationState(run: ConnectionRun) {
-  const { verifiedAccount, invitationNotBefore, invitationPacingStarted,
-    invitationPauseAfterPersonId, carriedCandidatesChecked, carriedCandidateIds } = run.searchProgress
-  return { verifiedAccount, invitationNotBefore, invitationPacingStarted,
-    invitationPauseAfterPersonId, carriedCandidatesChecked, carriedCandidateIds }
+  const { automationId, verifiedAccount, invitationNotBefore, invitationPacingStarted,
+    invitationPauseAfterPersonId, carriedCandidatesChecked, carriedCandidateIds,
+    invitationVerification, reservedInvitations, actionRecovery } = run.searchProgress
+  return { automationId, verifiedAccount, invitationNotBefore, invitationPacingStarted,
+    invitationPauseAfterPersonId, carriedCandidatesChecked, carriedCandidateIds, invitationVerification, reservedInvitations, actionRecovery }
 }
 
 export function failedRunCanRetry(run: ConnectionRun, history: ConnectionHistoryItem[]) {

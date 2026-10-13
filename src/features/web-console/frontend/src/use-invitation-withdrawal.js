@@ -2,7 +2,9 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 export function useInvitationWithdrawal(account) {
   const visible = ref(false), busy = ref(false), error = ref(''), preview = ref(null), run = ref(null)
   const active = computed(() => run.value?.status === 'running')
-  const needsCheck = computed(() => ['uncertain', 'interrupted'].includes(run.value?.status))
+  const needsCheck = computed(() => !active.value && Boolean(run.value && (
+    ['uncertain', 'interrupted'].includes(run.value.status) || run.value.current ||
+    (run.value.confirmed?.length && !run.value.checkedAt))))
   let timer, disposed = false, statusVersion = 0
   const base = `/api/admin/linkedin/accounts/${account.platformAccountId}/invitation-withdrawal`
   async function request(suffix = '', body) {
@@ -40,7 +42,7 @@ export function useInvitationWithdrawal(account) {
   }) }
   const start = () => {
     const count = preview.value?.items.filter(item => item.eligible).length || 0
-    if (!count || !window.confirm(`Отозвать ${count} приглашений старше 14 дней у ${account.clientName}? ` +
+    if (!count || !window.confirm(`Отозвать ${count} приглашений старше 21 дня у ${account.clientName}? ` +
       'Повторное приглашение этим людям может быть недоступно до трёх недель.')) return
     return action(async () => {
       run.value = await request('', { token: preview.value.token, confirm: true }); preview.value = null

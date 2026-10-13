@@ -13,7 +13,7 @@ import * as httpModule from '../../../integrations/unipile/http-client.ts'
 import { acquirePostWriterLease } from './writer-lease.ts'
 import { registerWriterShutdown } from './shutdown-signals.ts'
 import { PostError, errorCode } from './errors.ts'
-import type { Gate, PostStore } from './types.ts'
+import type { Gate, PostStore, LikeEvent } from './types.ts'
 import type { LinkedInAuthAccountRow } from '../account-connection/types.ts'
 import { createJsonFiles } from './json-files.ts'
 import { createCvFiles } from './cv-files.ts'
@@ -28,7 +28,9 @@ const { createUnipileHttpClient } = commonJsExports<{ createUnipileHttpClient():
 export type PostWriterStorage = { store: PostStore; cvRows(): Promise<Record<string, unknown>[]> }
 
 export function createLivePostWriter(repository: { listAccounts(): Promise<LinkedInAuthAccountRow[]> },
-  gate: Gate, control: { env?: NodeJS.ProcessEnv; storage?: PostWriterStorage } = {}): PostWriterService {
+  gate: Gate, control: { env?: NodeJS.ProcessEnv; storage?: PostWriterStorage;
+    managedShutdown?: boolean; unknownLockGraceMs?: number; assertAutomaticLikes?(account: number): Promise<void>;
+    reportLikeEvent?(event: LikeEvent): void } = {}): PostWriterService {
   const env = control.env ?? process.env
   const log = createPostLogger()
   let service: Promise<PostWriterService> | undefined
@@ -41,7 +43,7 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
     const writerId = env.LINKEDIN_POST_WRITER_ID ?? ''
     if (writable) {
       release = await acquirePostWriterLease(writerId)
-      removeSignals = registerWriterShutdown(close, log)
+      if (!control.managedShutdown) removeSignals = registerWriterShutdown(close, log)
     }
     const storage = control.storage ?? (() => {
       const http = createPostNocoTransport(log)
@@ -65,7 +67,8 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
         loadCv: loadDriveCv, extractFacts: createFactsExtractor(model.respond) }) },
       generator: model, memes: createMemeServices(files, model.respond, log, env),
       adapter: createPostAdapter(log, unipile, scheduler), gate, writable,
-      writerId, now: Date.now, random: Math.random, log })
+      writerId, now: Date.now, random: Math.random, log, unknownLockGraceMs: control.unknownLockGraceMs,
+      assertAutomaticLikes: control.assertAutomaticLikes, reportLikeEvent: control.reportLikeEvent })
   })().catch(error => { removeSignals?.(); release?.(); service = undefined; throw error })
   function close() {
     closing = true
@@ -79,7 +82,13 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
     void initialize().catch(error => log('startup_blocked', { code: errorCode(error) }))
   }
   return {
+    resumeManaged: async id => (await initialize()).resumeManaged(id),
+    stopAutomaticLikes: async account => (await initialize()).stopAutomaticLikes(account),
+    transferAutomation: async account => (await initialize()).transferAutomation(account),
+    prepareManaged: async (...args) => (await initialize()).prepareManaged(...args),
+    stepManaged: async (id, stop, cooperate) => (await initialize()).stepManaged(id, stop, cooperate),
     get: async account => (await initialize()).get(account),
+    likeAccounts: async account => (await initialize()).likeAccounts(account),
     image: async id => (await initialize()).image(id),
     update: async (account, input) => (await initialize()).update(account, input),
     start: async (account, mode, key, input) => (await initialize()).start(account, mode, key, input),

@@ -44,7 +44,7 @@ test('failed queue save blocks likes; restart cannot invent an unsaved queue', a
   assert.equal((await f.run()).engagement.status, 'off'); assert.equal(f.counts.like, 0)
 })
 
-test('unknown reaction reply is read back after restart, never blindly repeated', async () => {
+test('unknown reaction reply survives Stop and restart, never blindly repeated or polled', async () => {
   const f = await published(), run = await f.run(), like = f.deps.adapter.like
   f.deps.adapter.like = async (account, id) => { await like(account, id); throw new PostError('lost', 30_000, 503) }
   await f.service.action(run.id, 'start-likes')
@@ -54,7 +54,8 @@ test('unknown reaction reply is read back after restart, never blindly repeated'
   await f.service.action(run.id, 'stop'); f.restart()
   await f.step(30_000); await f.step(90_001)
   assert.equal(f.counts.like, 1); assert.equal(f.counts.publish, 1)
-  assert.equal((await f.run()).engagement.items.filter(item => item.status === 'sent').length, 1)
+  assert.equal((await f.run()).engagement.items.filter(item => item.status === 'uncertain').length, 1)
+  assert.equal((await f.run()).engagement.status, 'cancelled')
 })
 
 test('account gate, Retry-After and existing reaction are respected', async () => {

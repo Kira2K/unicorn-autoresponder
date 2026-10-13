@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { once } from 'node:events'
@@ -42,6 +43,7 @@ export async function checkMemeRecovery() {
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD)
     await page.getByTestId('login-button').click()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     await page.getByTestId('post-meme-retry').click()
     mkdirSync('logs/post-writer-checks', { recursive: true })
@@ -59,6 +61,7 @@ export async function checkMemeRecovery() {
     assert.match(await page.getByTestId('post-meme-qa').innerText(), /есть замечания/)
     await page.reload()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     await page.getByTestId('post-meme-qa').waitFor()
     assert.equal(await page.getByTestId('post-meme-retry').count(), 0)

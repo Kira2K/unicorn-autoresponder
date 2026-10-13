@@ -20,7 +20,7 @@ export function useLinkedInAuth() {
     if (!needle) return accounts.value
     return accounts.value.filter(account => [
       account.clientName, account.linkedinUrl, account.unipileAccountId,
-      account.dolphinProfileId, account.authErrorCode
+      account.dolphinProfileId, account.authErrorCode, account.platformAccountId
     ].some(value => String(value ?? '').toLowerCase().includes(needle)))
   })
   const filteredHistory = computed(() => historyForAccounts(history.value, filtered.value))
@@ -97,6 +97,6 @@ export function useLinkedInAuth() {
   onUnmounted(() => { for (const timer of timers.values()) clearTimeout(timer) })
   return {
     accounts, active, drafts, editors, edit, error, filtered, filteredHistory, history,
-    historyAction, loading, nocoQueue, query, runs, save, saving, start
+    historyAction, loading, nocoQueue, query, runs, save, saving, start, load
   }
 }

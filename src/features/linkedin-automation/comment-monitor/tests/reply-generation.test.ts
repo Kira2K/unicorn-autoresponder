@@ -1,5 +1,65 @@
 const assert = require('node:assert/strict')
 const { generateReplies } = require('../reply-generation.ts') as typeof import('../reply-generation.ts')
+const { test } = require('node:test')
+
+function generationFixture(count: number) {
+  const items: any[] = Array.from({ length: count }, (_, i) => ({ incomingId: `quota-${i}`,
+    postId: 'post', parentId: `quota-${i}`, threadId: `quota-${i}`, status: 'detected',
+    incomingText: 'How do reliable retries work?', threadText: 'distributed systems' }))
+  const job: any = { status: 'checking', state: { items, posts: [{ id: 'post', text: 'distributed systems' }],
+    published: 0, failed: 0, threadReplies: {} } }
+  const inputs: any[] = []
+  const openai = { async generate(input: any) { inputs.push(input); return { replies: input.items.map((item: any) => ({
+    incoming_id: item.incoming_id, action: 'reply', reason: 'reply',
+    reply: 'Reliable retries keep distributed systems resilient.', grounding_phrase: 'distributed systems' })) } } }
+  return { job, items, inputs, openai, logger: { event() {} } }
+}
+
+test('generation only pays for the remaining session quota', async () => {
+  const f = generationFixture(70)
+  assert.equal((await generateReplies(f)).length, 30)
+  assert.equal(f.inputs.length, 6)
+  assert.equal(f.items.filter(item => item.reasonCode === 'comment_session_limit_reached').length, 40)
+})
+
+for (const repair of [false, true]) test(`Stop prevents the next model call, repair=${repair}`, async () => {
+  const f = generationFixture(10), generate = f.openai.generate
+  f.openai.generate = async input => { const result = await generate(input); f.job.status = 'disabled'
+    if (repair) result.replies[0].reply = 'Invalid.'
+    return result }
+  await generateReplies(f)
+  assert.equal(f.inputs.length, 1)
+  assert.ok(f.items.slice(5).every(item => item.status === 'detected'))
+  assert.equal(f.items.some(item => item.status === 'generating'), false)
+})
+
+test('model skips free budget for the next candidates', async () => {
+  const f = generationFixture(8), generate = f.openai.generate
+  f.job.state.published = 27
+  f.openai.generate = async input => { const result = await generate(input)
+    if (f.inputs.length === 1) result.replies[0] = { ...result.replies[0], action: 'skip', reason: 'provocation', reply: '' }
+    return result }
+  assert.equal((await generateReplies(f)).length, 3)
+  assert.deepEqual(f.inputs.map(input => input.items.length), [3, 1])
+})
+
+test('generation respects caller cancellation and retains already generated results', async () => {
+  const f = generationFixture(10), controller = new AbortController(), generate = f.openai.generate
+  f.openai.generate = async input => { const result = await generate(input); controller.abort(); return result }
+  const queued = await generateReplies({ ...f, canContinue: () => !controller.signal.aborted })
+  assert.equal(f.inputs.length, 1); assert.equal(queued.length, 5)
+})
+
+test('current unknown intents still reserve quota; archived intents still reserve their thread', async () => {
+  for (const quotaReleased of [false, true]) {
+    const f = generationFixture(1)
+    f.job.state.items.push(...Array.from({ length: 30 }, (_, i) => ({ ...f.items[0], incomingId: `old-${i}`,
+      status: 'uncertain', threadId: quotaReleased ? f.items[0].threadId : 'old-thread', verificationStopped: true, quotaReleased })))
+    const queued = await generateReplies({ ...f, items: [f.items[0]] })
+    assert.equal(queued.length, 0); assert.equal(f.inputs.length, 0)
+    assert.equal(f.items[0].reasonCode, quotaReleased ? 'comment_thread_limit_reached' : 'comment_session_limit_reached')
+  }
+})
 
 async function run() {
   const now = new Date().toISOString()

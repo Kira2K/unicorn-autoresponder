@@ -38,11 +38,18 @@ export function validateSettings(input: unknown, previous: Settings): Settings {
     (value.memes !== undefined && typeof value.memes !== 'boolean') ||
     !['generated', 'prepared'].includes(contentMode) ||
     (value.scheduled && contentMode === 'generated' && !value.days.length)) throw new PostError('post_settings_invalid')
+  if (previous.automationManaged && value.scheduled) throw new PostError('post_automation_managed')
+  const likeAccountIds = value.likeAccountIds ?? previous.likeAccountIds
+  if (likeAccountIds !== undefined && (!Array.isArray(likeAccountIds) || likeAccountIds.length > 500 ||
+    likeAccountIds.some(id => !Number.isSafeInteger(id) || id <= 0 || id === previous.account) ||
+    new Set(likeAccountIds).size !== likeAccountIds.length || (value.likes && !likeAccountIds.length)))
+    throw new PostError('post_like_accounts_invalid')
   const result = { ...previous, scheduled: value.scheduled, likes: value.likes, memes: value.memes ?? previous.memes ?? false,
     manualMode: value.manualMode!, days: [...new Set(value.days)].sort(),
     intervals: validateWindows(value.intervals ?? previous.intervals ?? defaultWindows()),
     forbiddenTopics: topicList(value.forbiddenTopics ?? previous.forbiddenTopics ?? []),
-    contentMode, preparedPosts: validatePreparedPosts(value.preparedPosts ?? previous.preparedPosts ?? []) }
+    contentMode, preparedPosts: validatePreparedPosts(value.preparedPosts ?? previous.preparedPosts ?? []),
+    ...(likeAccountIds === undefined ? {} : { likeAccountIds: [...likeAccountIds] }) }
   if (result.scheduled && !result.intervals.length) throw new PostError('post_intervals_invalid')
   if (result.slot?.state === 'planned') {
     const weekday = new Date(`${result.slot.date}T12:00:00Z`).getUTCDay() || 7

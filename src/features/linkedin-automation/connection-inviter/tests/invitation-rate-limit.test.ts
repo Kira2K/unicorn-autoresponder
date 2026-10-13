@@ -30,7 +30,7 @@ async function apiRateLimitRetriesAfterBackoff() {
     [invitationCandidate(run, 'api-rate-limited')], 1)
   assert.equal(result.sentCount, 1)
   assert.equal(postCalls, 2)
-  assert.equal(sleptMs, 180_000)
+  assert.equal(sleptMs, 60_000)
   assert.equal(run.counters.sent, 1)
 }
 
@@ -53,7 +53,7 @@ async function providerRateLimitRetriesAfterNegativeReadback() {
   const history = await test.store.listRunHistory(run.runId)
   assert.equal(result.sentCount, 1)
   assert.equal(postCalls, 2)
-  assert.equal(sleptMs, 180_000)
+  assert.equal(sleptMs, 270_000)
   assert.equal(history[0].status, 'sent')
   assert.equal(run.counters.sent, 1)
 }
@@ -95,10 +95,10 @@ async function readbackRetryDoesNotResetProviderBackoff() {
   assert.equal(result.sentCount, 1)
   assert.equal(postCalls, 3)
   assert.deepEqual(writeRetries, [
-    { attempt: 1, delayMs: 180_000 },
-    { attempt: 2, delayMs: 360_000 }
+    { attempt: 1, delayMs: 270_000 },
+    { attempt: 2, delayMs: 540_000 }
   ])
-  assert.equal(sleeps.reduce((total, milliseconds) => total + milliseconds, 0), 630_000)
+  assert.equal(sleeps.reduce((total, milliseconds) => total + milliseconds, 0), 900_000)
   assert.equal(run.retryState, undefined)
   assert.equal(run.invitationRetryState, undefined)
 }
@@ -128,6 +128,20 @@ async function apiBackoffStopsAtMidnight() {
 }
 
 async function run() {
+  const test = fixture({ stack: 'GO', connectionCount: 1663 }), run = invitationRun()
+  const send = test.adapter.sendInvitation; let posts = 0, time = Date.parse('2026-08-24T09:00:00Z')
+  const pauses: number[] = []
+  test.adapter.sendInvitation = async (...args: any[]) => {
+    if (++posts <= 3) throw providerRateLimit()
+    return send(...args)
+  }
+  const runtime = { ...invitationRuntime(test, { now: () => new Date(time),
+    sleep: async () => { throw new Error('managed wait must release the account') } }),
+    yieldWait: async (until: number) => { pauses.push(until - time); time = until; return true } }
+  const publisher = await createInvitationPublisher(runtime, run, async () => undefined)
+  await publisher.publish('recruiter', [invitationCandidate(run, 'three-429')], 1)
+  assert.deepEqual(pauses, [270_000, 540_000, 7_200_000]); assert.equal(posts, 4)
+  assert.equal(run.counters.sent, 1)
   await apiRateLimitRetriesAfterBackoff()
   await providerRateLimitRetriesAfterNegativeReadback()
   await readbackRetryDoesNotResetProviderBackoff()

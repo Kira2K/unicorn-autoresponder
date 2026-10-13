@@ -4,6 +4,7 @@ export type SourceAccount = {
   platformAccountId: number; clientId: number; clientName: string; linkedinUrl?: string
   unipileAccountId?: string; verifiedProviderId?: string; unipileAccountStatus?: string
   readinessErrorCode?: string; authErrorCode?: string
+  primaryStack?: string
 }
 export type CvDocument = { bytes: Buffer; revision: string; mimeType?: string; fileName?: string }
 export type ExtractedFacts = Omit<Context, 'revision'>

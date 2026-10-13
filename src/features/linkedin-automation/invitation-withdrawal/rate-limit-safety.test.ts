@@ -24,7 +24,7 @@ test('Stop/close interrupts a saved pause; restart neither sends nor reads befor
     const before = reads, closing = f.service.close(); release(); await closing
     await assert.rejects(restarted.recheck(1, preview.token), /Unipile ограничил/)
     assert.equal(reads, before)
-    assert.equal((await f.service.status(1))?.status, afterPost ? 'uncertain' : 'stopped')
+    assert.equal((await f.service.status(1))?.status, 'stopped')
     assert.deepEqual(f.calls, afterPost ? ['1', '2'] : [])
     assert.equal(f.service.busy(), false)
   }
@@ -64,8 +64,10 @@ test('stopped batch check can finish later without losing or repeating confirmed
   f.provider.list = async () => { if (f.calls.length) throw limited; return list() }
   f.runtime.sleep = async () => { await f.service.stop(1) }
   await f.service.start(1, (await f.service.preview(1)).token)
-  const run = (await finished(f.service))!, retryAt = f.stored()!.retryAt!
-  f.runtime.now = () => retryAt; f.provider.list = list
+  const run = (await finished(f.service))!
+  assert.equal(run.status, 'stopped'); assert.equal(run.checkedAt, undefined)
+  assert.equal(f.stored()!.retryAt, undefined, 'Stop does not start a batch check that could produce a new 429')
+  f.provider.list = list
   const result = await f.service.recheck(1, run.id)
   assert.equal(result?.withdrawn, 1); assert.equal(result?.retryAttempt, undefined)
   assert.equal(f.stored()?.retryAt, undefined); assert.deepEqual(f.calls, ['1'])
@@ -80,7 +82,7 @@ test('failure to save Stop before a POST is shown explicitly, without losing the
   }
   await f.service.start(1, preview.token)
   const result = await finished(f.service)
-  assert.match(result?.error ?? '', /^Не удалось сохранить итог/)
+  assert.match(result?.error ?? '', /Не удалось сохранить итог/)
   assert.equal(f.stored()?.retryAt, f.runtime.now() + 3_600_000)
   assert.deepEqual(f.calls, [])
 })

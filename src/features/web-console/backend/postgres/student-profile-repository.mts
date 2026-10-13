@@ -1,7 +1,8 @@
 import type { ClientDashboard, WebConsoleRepository } from '../types.ts';
 import type { studentProfileStore } from './student-profile-store.mts';
-import { validateStudentEducation, educationText } from '../../student-education.ts';
-import { profileToday } from '../../student-profile-validation.ts';
+import { createRequire } from 'node:module';
+const { validateStudentEducation, educationText } = createRequire(import.meta.url)('../../student-education.ts') as typeof import('../../student-education.ts');
+const { profileToday } = createRequire(import.meta.url)('../../student-profile-validation.ts') as typeof import('../../student-profile-validation.ts');
 
 export function withStudentProfile(base: WebConsoleRepository,
   store: Pick<ReturnType<typeof studentProfileStore>, 'load' | 'save'>): WebConsoleRepository {

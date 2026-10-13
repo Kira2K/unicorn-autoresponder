@@ -1,5 +1,6 @@
 import { errorLogDetails } from './errors.ts'
 import { activeStatus, type CommentLogger, type MonitorJob } from './types.ts'
+import { recordFailure, recoveryExpired, skipRecovery } from '../action-recovery.ts'
 
 const READY_TTL_MS = 24 * 60 * 60_000
 const NEGATIVE_TTL_MS = 30 * 60_000
@@ -32,6 +33,12 @@ export async function resolveAuthorContext(options: {
 }): Promise<AuthorContext> {
   const { job, logger } = options
   const now = options.now?.() ?? Date.now()
+  const recovery = job.state.readRecovery ??= {}
+  if (recoveryExpired(recovery.author_context, now)) {
+    skipRecovery(recovery.author_context, now)
+    logger.event('author_context_fallback', 'succeeded', { reasonCode: 'profile_unavailable_after_20_minutes' })
+    await options.save(); return {}
+  }
   const fetchedAt = Date.parse(job.authorContextFetchedAt ?? '')
   const age = Number.isFinite(fetchedAt) ? Math.max(0, now - fetchedAt) : Infinity
   const ready = job.authorContextStatus === 'ready' && fieldCount(job) > 0
@@ -49,6 +56,7 @@ export async function resolveAuthorContext(options: {
   logger.event('author_context_provider_read', 'started')
   try {
     const profile = await options.adapter.getOwnProfile(job.accountId, logger)
+    delete recovery.author_context
     logger.event('author_context_provider_read', 'succeeded')
     if (!activeStatus(job.status)) {
       clearAuthorContext(job, logger); return {}
@@ -62,6 +70,11 @@ export async function resolveAuthorContext(options: {
     if (job.authorContextStatus === 'empty') logger.event('author_context_fallback', 'succeeded', {
       reasonCode: 'profile_empty' })
   } catch (error) {
+    const failure = recordFailure(recovery.author_context, error, now)
+    if (failure) { recovery.author_context = failure; throw error }
+    const details = (error as any)?.details
+    if (details?.httpStatus === 429 || Number.isFinite(details?.retryAfterMs) ||
+      /too_many|rate_limit/.test(String((error as any)?.code ?? ''))) throw error
     if (!activeStatus(job.status)) {
       logger.event('author_context_provider_read', 'failed', errorLogDetails(error))
       clearAuthorContext(job, logger); return {}

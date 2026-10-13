@@ -2,19 +2,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { fixture, finished } from './test-fixture.ts'
 
-test('delayed visibility is confirmed by bounded reads without repeating a cancellation', async () => {
+test('delayed visibility is checked once per saved deadline without repeating a cancellation', async () => {
   const f = fixture(), list = f.provider.list, cancel = f.provider.cancel
   let stale = 0, old: Awaited<ReturnType<typeof list>> = []
-  f.provider.cancel = async (a, id) => { old = await list(); await cancel(a, id); stale = 2 }
+  f.provider.cancel = async (a, id) => { old = await list(); await cancel(a, id); stale = 1 }
   f.provider.list = async () => stale-- > 0 ? structuredClone(old) : list()
   await f.service.start(1, (await f.service.preview(1)).token)
-  assert.equal((await finished(f.service))?.status, 'completed')
+  const run = await finished(f.service)
+  assert.equal(run?.status, 'uncertain')
+  await f.service.recheck(1, run!.id)
+  assert.equal((await f.service.status(1))?.status, 'uncertain')
+  const time = f.runtime.now(); f.runtime.now = () => time + 60_000
+  await f.service.recheck(1, run!.id)
+  assert.equal((await f.service.status(1))?.status, 'completed')
   assert.equal((await f.service.status(1))?.withdrawn, 2)
   assert.deepEqual(f.calls, ['1', '2'])
-  assert.equal(f.delays.reduce((a, b) => a + b, 0), 10500)
+  assert.equal(f.delays.reduce((a, b) => a + b, 0), 10000)
 })
 
-test('still pending after three reads stops; non-429 read failures are not retried blindly', async () => {
+test('one pending read defers confirmation; non-429 failures are not retried blindly', async () => {
   for (const mode of ['pending', 'timeout']) {
     const f = fixture(), list = f.provider.list
     let checking = false, reads = 0
@@ -27,7 +33,7 @@ test('still pending after three reads stops; non-429 read failures are not retri
     }
     await f.service.start(1, (await f.service.preview(1)).token)
     assert.equal((await finished(f.service))?.status, 'uncertain')
-    assert.equal(reads, mode === 'pending' ? 3 : 1)
+    assert.equal(reads, 1)
     assert.deepEqual(f.calls, ['1', '2'])
     assert.deepEqual(f.stored()?.run?.confirmed, ['1', '2'])
     assert.equal(f.stored()?.run?.checkedAt, undefined)

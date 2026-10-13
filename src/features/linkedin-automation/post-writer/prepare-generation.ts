@@ -20,7 +20,8 @@ export async function prepareGeneration(run: PostRun, e: Preparation): Promise<W
     if (run.cvRef && !e.source.uploadedContext) throw new PostError('post_upload_unavailable')
     run.context = run.cvRef ? await e.source.uploadedContext!(run.cvRef, e.settings(run.account).context) :
       await e.source.context(run.account, e.settings(run.account).context)
-    if (!run.context.facts.length) throw new PostError('post_facts_missing')
+    if (!run.context.facts.length && !(run.context.source === 'stack' && run.context.stack.some(s => s.trim())))
+      throw new PostError('post_facts_missing')
     if (!run.cvRef) await e.saveContext(run.account, run.context)
     await e.save(run)
   }

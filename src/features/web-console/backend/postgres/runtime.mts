@@ -5,6 +5,11 @@ import { assertGeneratedIds } from '../../../../integrations/postgres/identity-p
 import { readPostgresAppDbConfig } from '../../../../platform/db/postgres/config.mts';
 import { sqlAppOptions } from './app-options.mts';
 import { runtimeCreateTables } from './runtime-tables.mts';
+import { createLinkedInAutomationStore } from '../../../../integrations/postgres/linkedin-automation.mts';
+import { createRequire } from 'node:module';
+import type { LinkedInAutomation } from '../linkedin-automation.ts';
+const { prepareLinkedInAutomation, unavailableLinkedInAutomation } = createRequire(import.meta.url)('../linkedin-automation.ts') as
+  typeof import('../linkedin-automation.ts');
 import { openLinkLabIntake } from '../../../linkedin-automation/linklab/intake-runtime.mts';
 import { tableIds } from './tables.mts';
 import { studentProfileStore } from './student-profile-store.mts';
@@ -13,7 +18,8 @@ import { withStudentProfile } from './student-profile-repository.mts';
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const config = readPostgresAppDbConfig(env), pool = open(config);
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= pool.end();
+  let automation: LinkedInAutomation | undefined;
+  const close = () => closing ??= (async () => { await automation?.close(); await pool.end(); })();
   try {
     const db = await createPostgresClient(pool, config.database, { writable: true });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
@@ -24,6 +30,8 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const store = studentProfileStore(pool, config.database);
     await store.checkSchema();
     options.repository = withStudentProfile(options.repository, store);
-    return { options, close };
+    try { automation = await prepareLinkedInAutomation(createLinkedInAutomationStore(pool), options.linkedinStorage.repository); }
+    catch (error) { automation = unavailableLinkedInAutomation(error); }
+    return { options: { ...options, linkedinAutomation: automation }, close };
   } catch (error) { await close(); throw error; }
 }

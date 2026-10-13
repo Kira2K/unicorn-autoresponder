@@ -80,6 +80,8 @@ for (const [target, expectedPages, complete] of [
 
 test('invalid and truncated lists never prove absence', async () => {
   for (const response of [
+    { data: [{ type: 'received', user: { id: 'wrong-direction' } }], total_count: 1 },
+    { data: [], next_cursor: { private: 'cursor' } },
     {}, { data: [{ id: 'request-without-person' }] },
     { data: [], total_count: 3 },
     { data: [], has_more: true },

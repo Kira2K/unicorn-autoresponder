@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { desktopProfileJob, profileJobsRoute } from './profile-desktop-fixture.ts'
@@ -40,6 +41,7 @@ export async function checkProfileDesktop(page: Page) {
     await page.reload()
     await page.getByTestId('admin-dashboard').waitFor()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page, 203, true)
     await page.getByTestId('profile-filler-203').click()
     await page.getByTestId('profile-source-upload').check()
     await page.getByTestId('profile-filler-cv-file').setInputFiles({ name: 'approved-en-cv.pdf',

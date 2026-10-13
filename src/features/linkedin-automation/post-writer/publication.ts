@@ -5,6 +5,13 @@ import { lock, unlock, type PublicationExecution } from './execution-types.ts'
 import type { PostRun } from './types.ts'
 import { policyCurrent } from './run-policy.ts'
 
+export function publicationCheckAt(run: PostRun, now: number, providerDelay?: number) {
+  const age = Math.max(0, now - (run.attemptedAt ?? now))
+  const delay = age < 15 * 60_000 ? (providerDelay ?? 5 * 60_000) : age < 3600_000 ? 15 * 60_000 :
+    age < 24 * 3600_000 ? 3600_000 : 6 * 3600_000
+  return now + Math.max(1000, delay, providerDelay ?? 0)
+}
+
 function requireCurrentPolicy(run: PostRun, e: PublicationExecution) {
   if (e.settings && !policyCurrent(run, { settings: e.settings })) {
     run.attemptedAt = undefined
@@ -15,7 +22,7 @@ function requireCurrentPolicy(run: PostRun, e: PublicationExecution) {
 
 export async function reconcilePost(run: PostRun, e: PublicationExecution) {
   if (!run.target || !run.hash || !run.attemptedAt) throw new PostError('post_intent_missing')
-  lock(e, run.account, run.id)
+  lock(e, run.account, run.id, run.trigger === 'scheduled' ? 'post_writer_automatic' : 'post_writer')
   const posts = run.postId ? [await e.adapter.read(run.target, run.postId)] : await e.adapter.recent(run.target)
   const matched = posts.filter(post => post.authorId === run.target!.verifiedProviderId &&
     contentHash(post.text) === contentHash(run.draft!.text) && imageConfirmed(run, post) &&
@@ -23,7 +30,7 @@ export async function reconcilePost(run: PostRun, e: PublicationExecution) {
   if (matched.length !== 1) {
     run.status = 'uncertain'
     run.errorCode = matched.length ? 'post_multiple_matches' : 'post_not_confirmed'
-    run.nextActionAt = e.now() + 5 * 60_000
+    run.nextActionAt = publicationCheckAt(run, e.now())
     await e.save(run)
     return
   }
@@ -48,7 +55,7 @@ export async function publish(run: PostRun, e: PublicationExecution) {
     (run.mode === 'approval_required' && (run.approvedHash !== run.hash ||
       (run.memeEnabled && run.memeReviewedHash !== run.hash)))) throw new PostError('post_not_approved')
   const image = await publicationMedia(run, e.memes?.assets)
-  lock(e, run.account, run.id)
+  lock(e, run.account, run.id, run.trigger === 'scheduled' ? 'post_writer_automatic' : 'post_writer')
   await e.adapter.identity(run.target)
   if (run.stop || e.isClosing?.()) { unlock(e, run.account); return }
   requireCurrentPolicy(run, e)
@@ -63,7 +70,7 @@ export async function publish(run: PostRun, e: PublicationExecution) {
     run.attemptedAt = undefined
     throw new PostError('post_duplicate_content')
   }
-  if (!claim.created) {
+  if (!claim.created && !run.publicationNotSent) {
     run.status = 'uncertain'
     run.postId = claim.value.postId
     await e.save(run)
@@ -72,7 +79,15 @@ export async function publish(run: PostRun, e: PublicationExecution) {
   if (run.stop || e.isClosing?.()) { run.status = 'stopped'; await e.save(run); unlock(e, run.account); return }
   // From this point every exception is ambiguous; never return this run to ready.
   requireCurrentPolicy(run, e)
-  const post = await e.adapter.publish(run.target, run.draft.text, image)
+  if (run.publicationNotSent) { run.publicationNotSent = false; await e.save(run) }
+  let post
+  try { post = await e.adapter.publish(run.target, run.draft.text, image) }
+  catch (error: any) {
+    if (error?.notSent === true) {
+      run.publicationNotSent = true; run.attemptedAt = undefined; run.status = 'ready'; await e.save(run)
+    }
+    throw error
+  }
   run.postId = post.id
   run.postImageId = run.memeEnabled && post.images?.length === 1 ? post.images[0].id : undefined
   run.status = 'verifying'

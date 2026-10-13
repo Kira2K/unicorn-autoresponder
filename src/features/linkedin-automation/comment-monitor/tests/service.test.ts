@@ -44,7 +44,8 @@ async function run() {
     status: 'publishing', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]
   const restoredStore = memoryStore([publishing])
   const restored = createCommentMonitorService({ autoStart: false, store: restoredStore, loggerFor,
-    repository: {}, adapter: {}, openai: {} })
+    repository: {}, adapter: { async listReplies() { return { items: [] } },
+      async listComments() { return { items: [] } } }, openai: {} })
   await wait()
   const paused = (await restored.list())[0]
   assert.equal(paused.status, 'paused')
@@ -67,6 +68,45 @@ async function run() {
   assert.equal(cleaned.authorContextStatus, undefined)
   assert.equal(cleaned.authorAbout, undefined)
   terminalService.stop()
+
+  // Stopped intent history must not spend the budget of every following session.
+  let clock = Date.parse('2026-10-08T08:00:00Z'), reads = 0
+  const quotaDeadline = clock + 3 * 3600_000
+  const old = { ...publishing, jobId: 'old-quota', status: 'disabled', expiresAt: new Date(quotaDeadline).toISOString() }
+  old.state = { ...publishing.state, automationId: 'old-task', knownIds: [], published: 0,
+    items: Array.from({ length: 30 }, (_, i) => ({ ...publishing.state.items[0], incomingId: `old-${i}`,
+      parentId: `old-${i}`, threadId: `old-${i}`, status: 'uncertain', replyId: `sent-${i}`,
+      attemptedAt: new Date(clock - 3 * 86400_000).toISOString() })) }
+  const quotaStore = memoryStore([old])
+  const quotaService = createCommentMonitorService({ autoStart: false, store: quotaStore, loggerFor, now: () => clock,
+    repository: { async listAccounts() { return [{ platformAccountId: 7, unipileAccountId: 'account',
+      unipileAccountStatus: 'running', lastVerifiedAt: 'now' }] } },
+    adapter: { async getAccount() { return { user_id: 'user' } },
+      async listPosts() { return { items: [{ id: 'new', text: 'Queues', created_at: new Date(clock).toISOString() }] } },
+      async listComments() { reads++; return { items: [] } },
+      async listReplies() { throw Error('stopped intent must not be polled') } }, openai: {} })
+  try {
+    for (let round = 0; round < 3; round++) {
+      const next = await quotaService.prepareManaged(7, 'new-task')
+      await quotaService.stepManaged(next.jobId)
+      if (round === 0) {
+        const held = await quotaStore.get(next.jobId)
+        assert.equal(held.stage, 'waiting_previous_session_quota')
+        assert.equal(Date.parse(held.nextCheckAt), quotaDeadline); assert.equal(reads, 0)
+        clock = quotaDeadline
+        await quotaService.stepManaged(next.jobId)
+      }
+      const saved = await quotaStore.get(next.jobId)
+      assert.notEqual(saved.stage, 'limit_reached')
+      assert.equal(saved.state.items.length, 30)
+      assert.ok(saved.state.items.every((item: any) => item.verificationStopped && item.quotaReleased))
+      assert.ok(saved.state.knownIds.includes('old-0'))
+      clock += 49 * 3600_000
+    }
+    assert.equal(reads, 3)
+    assert.ok(!(await quotaStore.get('old-quota')).state.items[0].quotaReleased,
+      'original session retains its reservation and unknown outcome')
+  } finally { quotaService.stop() }
 }
 
 run().then(() => console.log('comment monitor service tests passed'))

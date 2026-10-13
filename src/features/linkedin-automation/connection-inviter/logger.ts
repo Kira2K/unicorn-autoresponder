@@ -3,6 +3,9 @@ import type { ConnectionRun } from './types.ts'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { maintainDetailedLogs } from '../log-retention.ts'
+import * as requestControl from '../../../integrations/unipile/request-control.ts'
+const { withRequestContext } = (requestControl as any).default ?? requestControl
 
 export type ConnectionLogger = { event(stage: string, status: 'started' | 'succeeded' | 'failed',
   details?: Record<string, unknown>): void }
@@ -47,9 +50,10 @@ export function createConnectionLogger(options: {
   writeLine?: (line: string) => void; logDirectory?: string
 } = {}): ConnectionLogger {
   const directory = options.logDirectory ?? path.resolve(process.cwd(), 'logs/linkedin-connections')
-  const file = path.join(directory, `connection-inviter-${process.pid}.jsonl`)
   const active = new Map<string, { operationId: string; startedAt: number }>()
   const write = options.writeLine ?? ((line: string) => {
+    const file = path.join(directory, `connection-inviter-${new Date().toISOString().slice(0, 10)}-${process.pid}.jsonl`)
+    maintainDetailedLogs(directory)
     fs.mkdirSync(directory, { recursive: true }); fs.appendFileSync(file, `${line}\n`, 'utf8')
     console.log(`Connection Inviter: ${line}`)
   })
@@ -126,7 +130,7 @@ export async function withConnectionRequestTrace<T>(run: ConnectionRun, logger: 
   action: () => Promise<T>) {
   const trace: Trace = { details: { runId: run.runId, platformAccountId: run.platformAccountId,
     executionId: randomUUID() }, counts: new Map(), reuse: new Map(), retryAttempt: 1 }
-  return traces.run(trace, async () => {
+  return withRequestContext({ runId: run.runId, account: run.accountId, feature: 'invitations' }, () => traces.run(trace, async () => {
     try { return await action() }
     finally {
       for (const [operation, counts] of trace.counts) {
@@ -138,5 +142,5 @@ export async function withConnectionRequestTrace<T>(run: ConnectionRun, logger: 
       for (const [reasonCode, count] of trace.reuse) logger.event('pending_cache_summary', 'succeeded',
         { ...trace.details, reasonCode, cacheUses: count })
     }
-  })
+  }))
 }

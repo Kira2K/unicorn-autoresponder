@@ -20,6 +20,22 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  linkedInAutomation: () => request('/api/admin/linkedin/automation'),
+  linkedInAutomationHistory(params = {}) {
+    return request(`/api/admin/linkedin/automation/history?${new URLSearchParams(params)}`)
+  },
+  saveLinkedInSchedule(id, payload) {
+    return request(`/api/admin/linkedin/automation/schedule/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) })
+  },
+  applyLinkedInSchedule(payload) {
+    return request('/api/admin/linkedin/automation/apply', { method: 'POST', body: JSON.stringify(payload) })
+  },
+  previewLinkedInSchedule(payload) {
+    return request('/api/admin/linkedin/automation/preview', { method: 'POST', body: JSON.stringify(payload) })
+  },
+  resumeLinkedInAutomation(id) {
+    return request(`/api/admin/linkedin/automation/runs/${encodeURIComponent(id)}/resume`, { method: 'POST' })
+  },
   login(email, password) {
     return request('/api/auth/login', {
       method: 'POST',

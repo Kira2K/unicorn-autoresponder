@@ -20,7 +20,8 @@ const writer = usePostWriter(props.account)
       <Message v-if="writer.data.value.mock" severity="info" :closable="false">Тестовый режим: NocoDB, OpenAI и LinkedIn не вызываются. Данные исчезнут после остановки mock-сервера.</Message>
       <Message v-if="!writer.data.value.writable" severity="warn" :closable="false">Запись отключена или хранилище недоступно.</Message>
       <p v-if="writer.data.value.storageRetryAt">Повтор сохранения: {{ dateMsk(writer.data.value.storageRetryAt) }}. Stop доступен.</p>
-      <p class="writer-next">Следующий автозапуск: <strong>{{ writer.data.value.settings.scheduled && writer.data.value.settings.slot?.state === 'planned' ? dateMsk(writer.data.value.settings.slot.at) : 'Не назначен' }}</strong></p>
+      <p v-if="writer.data.value.settings.automationManaged" class="writer-next">Автозапуски управляются в карточке ученика → «Расписание».</p>
+      <p v-else class="writer-next">Следующий автозапуск: <strong>{{ writer.data.value.settings.scheduled && writer.data.value.settings.slot?.state === 'planned' ? dateMsk(writer.data.value.settings.slot.at) : 'Не назначен' }}</strong></p>
       <p v-if="writer.data.value.settings.lastMissedSlot">Пропущено: {{ dateMsk(writer.data.value.settings.lastMissedSlot.at) }} — окно завершилось.</p>
       <details v-if="writer.run.value" class="writer-result" open>
         <summary>Последний запуск · {{ stages[writer.run.value.status] }}</summary>
@@ -29,6 +30,7 @@ const writer = usePostWriter(props.account)
           :disabled="writer.busy.value || !writer.data.value.writable" @action="writer.action" />
       </details>
       <PostWriterSettings :settings="writer.data.value.settings" :disabled="writer.busy.value || !writer.data.value.writable"
+        :like-accounts="writer.likeAccounts.value" :like-accounts-error="writer.likeAccountsError.value"
         :memes-available="writer.data.value.memesAvailable" :runs="writer.data.value.runs" :client-name="account.clientName"
         @save="writer.save" @start="writer.start" @publish="writer.startPrepared" />
       <PostWriterPolicy :disabled="writer.busy.value || !writer.data.value.writable" />

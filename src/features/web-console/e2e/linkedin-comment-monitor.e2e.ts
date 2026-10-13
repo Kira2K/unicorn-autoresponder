@@ -1,3 +1,4 @@
+const { openLinkedInManual } = require('./linkedin-console-navigation.ts') as typeof import('./linkedin-console-navigation.ts')
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
@@ -109,6 +110,7 @@ async function run() {
     await page.getByTestId('email-input').fill('unicornveryevil@gmail.com')
     await page.locator('input[type="password"]').fill('101010')
     await page.getByTestId('login-button').click(); await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     page.once('dialog', (dialog: any) => dialog.accept())
     await page.getByTestId('comment-monitor-toggle-203').click()
     await page.getByTestId('comment-monitor-203').getByText('Waiting', { exact: true }).waitFor()

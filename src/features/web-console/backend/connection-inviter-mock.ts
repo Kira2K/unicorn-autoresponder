@@ -1,7 +1,9 @@
 import type { ConnectionInviterService } from './connection-inviter-types.ts'
 import { createMockWithdrawal } from './invitation-withdrawal-mock.ts'
+import { dailyAudienceTargets, dailyInvitationLimit } from '../../linkedin-automation/connection-inviter/limits.ts'
 
 export function createMockConnectionInviterService(): ConnectionInviterService {
+  const dailyLimit = dailyInvitationLimit(320), targets = dailyAudienceTargets(dailyLimit)
   const runs = new Map<string, any>()
   const listeners = new Map<string, Set<(event: any) => void>>()
   const completionTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -21,8 +23,8 @@ export function createMockConnectionInviterService(): ConnectionInviterService {
       if (run.status !== 'running') return
       run.status = 'succeeded'; run.stage = 'completed'; run.finishedAt = new Date().toISOString()
       run.counters = { searched: 5, discovered: 20, eligible: 11,
-        sent: stack ? 11 : 8, skipped: 4,
-        sentByAudience: { recruiter: 8, technical: stack ? 3 : 0 } }
+        sent: stack ? dailyLimit : targets.recruiter, skipped: 4,
+        sentByAudience: { recruiter: targets.recruiter, technical: stack ? targets.technical : 0 } }
       run.searchProgress = { ...run.searchProgress,
         keyIndex: { recruiter: 3, technical: stack ? 2 : 0 }, found: 20,
         checked: 20, eligible: 11, skipped: 4 }
@@ -94,8 +96,8 @@ export function createMockConnectionInviterService(): ConnectionInviterService {
         safeRecruiterOnly: !stack && input.safeRecruiterOnly === true, localDate,
         weekKey: localDate, status: !stack && !input.safeRecruiterOnly ? 'paused' : 'running',
         stage: !stack && !input.safeRecruiterOnly ? 'stack_required' : 'searching',
-        connectionCount: 320, dailyLimit: 11, dailyQuota: stack ? 11 : 8,
-        audienceQuota: { recruiter: 8, technical: stack ? 3 : 0 },
+        connectionCount: 320, dailyLimit, dailyQuota: stack ? dailyLimit : targets.recruiter,
+        audienceQuota: { recruiter: targets.recruiter, technical: stack ? targets.technical : 0 },
         counters: { searched: 0, discovered: 0, eligible: 0, sent: 0, skipped: 0,
           sentByAudience: { recruiter: 0, technical: 0 } },
         searchProgress: { keyIndex: { recruiter: 0, technical: 0 },

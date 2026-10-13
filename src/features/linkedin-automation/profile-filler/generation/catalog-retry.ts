@@ -1,4 +1,6 @@
 import type { ProfileLogger } from '../profile-logger.ts'
+import { providerRetryAt } from '../../../../integrations/unipile/retry-after.ts'
+import { listReadDiagnostic } from '../../../../integrations/unipile/read-retry.ts'
 
 export type CatalogRetry = {
   attempt: number
@@ -12,7 +14,7 @@ const RETRYABLE_CODES = new Set([
 
 export function isRetryableCatalogFailure(error: any) {
   const status = Number(error?.details?.httpStatus)
-  return RETRYABLE_CODES.has(String(error?.code ?? error ?? '')) || status >= 500
+  return Boolean(listReadDiagnostic(error)) || RETRYABLE_CODES.has(String(error?.code ?? error ?? '')) || status >= 500
 }
 
 export async function withCatalogRetry<T>(operation: () => Promise<T>, options: {
@@ -41,12 +43,12 @@ export async function withCatalogRetry<T>(operation: () => Promise<T>, options: 
         ? Math.round(base)
         : Math.max(0, Math.round(base * (0.9 + random() * 0.2)))
       const retry = { attempt: attempt + 1,
-        nextRetryAt: new Date(now() + delayMs).toISOString() }
+        nextRetryAt: new Date(providerRetryAt(error, now(), delayMs)).toISOString() }
       options.logger.event('unipile_retry_scheduled', 'succeeded', {
         attempt: retry.attempt, durationMs: delayMs, httpStatus: error?.details?.httpStatus
       })
       await options.onRetry?.(retry)
-      await sleep(delayMs)
+      await sleep(Math.max(0, Date.parse(retry.nextRetryAt) - now()))
       options.logger.event('unipile_retry_attempt', 'started', { attempt: retry.attempt })
     }
   }

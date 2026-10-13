@@ -6,6 +6,7 @@ import { dayWindows } from './time-windows.ts'
 
 type SchedulingExecution = Pick<Execution, 'now' | 'random' | 'writerId' | 'save' | 'saveSettings' | 'log'>
 export async function schedulePosts(settings: Settings, runs: Map<string, PostRun>, e: SchedulingExecution) {
+  if (settings.automationManaged) return
   let slot = settings.slot
   if (slot?.state === 'planned' && !runs.has(scheduledId(settings.account, slot.date)) && e.now() >= windowEnd(slot.date, settings)) {
     slot = { ...slot, state: 'missed' }
@@ -25,16 +26,20 @@ export async function schedulePosts(settings: Settings, runs: Map<string, PostRu
     if (slot.at > e.now() || !dayWindows(slot.date, settings.intervals)
       .some(window => e.now() >= window.start && e.now() < window.end)) return
     if (accountActive(runs.values(), settings.account)) return
-    const run = newRun(id, settings.account, 'scheduled', 'automatic', settings.likes, e)
-    run.memeEnabled = settings.memes === true
-    if (settings.contentMode === 'prepared') {
-      const post = settings.preparedPosts?.find(item => item.date === slot.date)
-      if (!post) return
-      run.preparedPost = { ...post }
-      run.memeEnabled = true
-    }
+    const run = scheduledRun(settings, slot.date, e)
+    if (!run) return
     await e.save(run)
     runs.set(id, run)
   }
   await e.saveSettings({ ...settings, slot: { ...slot, state: 'started' } })
+}
+export function scheduledRun(settings: Settings, date: string, e: SchedulingExecution) {
+  const run = newRun(scheduledId(settings.account, date), settings.account, 'scheduled', 'automatic', settings.likes, e)
+  run.memeEnabled = settings.memes === true
+  if (settings.contentMode === 'prepared') {
+    const post = settings.preparedPosts?.find(item => item.date === date)
+    if (!post) return
+    run.preparedPost = { ...post }; run.memeEnabled = true
+  }
+  return run
 }

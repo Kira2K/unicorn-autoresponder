@@ -259,10 +259,16 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
   }
 
   return {
-    async next(audience: SearchAudience): Promise<ConnectionHistoryItem[]> {
+    async next(audience: SearchAudience, onePage = false): Promise<ConnectionHistoryItem[]> {
       await reusePreviousCandidates()
       const cached = run.searchProgress.pendingCandidates.filter(item => item.audience === audience)
       if (cached.length) return cached
+      const emptyPages = run.searchProgress.emptySearchPages ??= {}
+      const assertSearchBudget = () => {
+        if ((emptyPages[audience] ?? 0) >= 6) throw connectionError('connection_search_contract_suspect',
+          'Six consecutive search pages returned no candidates; search paused for review.')
+      }
+      assertSearchBudget()
       while (!run.searchProgress.exhausted[audience]) {
         if (runtime.stopRequested(run.runId)) return []
         const stream = run.searchProgress.streams[audience]
@@ -330,6 +336,7 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
         run.counters.searched += 1; stream.page = page
         const parsed = parseConnectionPeopleSearchResponse(response)
         const items = parsed.items; run.searchProgress.found += items.length
+        emptyPages[audience] = items.length ? 0 : (emptyPages[audience] ?? 0) + 1
         const nextCursor = parsed.nextCursor
         stream.emptyCursorStreak = items.length === 0 && nextCursor
           ? (stream.emptyCursorStreak ?? 0) + 1 : 0
@@ -347,7 +354,7 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
           candidateCount: items.length, eligibleCount: result.candidates.length,
           skippedCount: result.skipped, cursorPresent: Boolean(nextCursor),
           responseShape: parsed.responseShape,
-          consecutiveEmptyCount: run.searchProgress.consecutiveEmptyRecruiterSearches,
+          consecutiveEmptyCount: emptyPages[audience],
           emptyCursorStreak: stream.emptyCursorStreak, termFinishReason })
         if (termFinished) {
           stream.termIndex = termIndex + 1; stream.term = undefined
@@ -361,18 +368,12 @@ export async function createCandidateDiscovery(runtime: ConnectionRuntime, run: 
             }
           }
         }
-        // Cursor and empty-page state are included in the mandatory reservation persisted
-        // immediately before the next provider request. A crash before that point can only
-        // repeat this read-only page, so an extra critical PATCH here adds load without
-        // protecting an external mutation.
+        // The next dispatch persists this progress with its existing reservation.
+        // At the empty-page limit, persist immediately before stopping.
         run.searchProgress.searchReservedUntil = undefined
-        await save(run, 'progress', 'checkpoint')
-        if (audience === 'recruiter' &&
-          run.searchProgress.consecutiveEmptyRecruiterSearches >= 20) {
-          throw connectionError('connection_search_contract_suspect',
-            'Twenty consecutive recruiter searches returned no candidates.')
-        }
-        if (result.candidates.length) return result.candidates
+        await save(run, 'progress', (emptyPages[audience] ?? 0) >= 6 ? 'critical' : 'checkpoint')
+        assertSearchBudget()
+        if (result.candidates.length || onePage) return result.candidates
       }
       return []
     }

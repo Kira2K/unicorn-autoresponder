@@ -15,7 +15,7 @@ async function failure(cap?: number) {
 }
 
 Promise.all([failure(), failure(Number.POSITIVE_INFINITY)]).then(([shared, connection]) => {
-  assert.equal(shared.details.retryAfterMs, 120_000)
+  assert.equal(shared.details.retryAfterMs, 3_600_000)
   assert.equal(connection.details.retryAfterMs, 3_600_000)
   console.log('connection Retry-After HTTP option tests passed')
 }).catch((error: unknown) => { console.error(error); process.exitCode = 1 })

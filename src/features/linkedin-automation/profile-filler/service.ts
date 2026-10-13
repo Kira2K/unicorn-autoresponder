@@ -61,6 +61,7 @@ function createProfileFillerService(options: any = {}) {
       jobs.set(job.jobId, job)
       runMutation({ client: getClient(), store: getStore(), job,
         update: patch => update(job, patch), release, resumeVerification: true,
+        acquire: () => acquire('profile_verify', job.jobId, job.platformAccountId),
         executorOptions: { ...options.executorOptions, logger,
           onSettled: () => verificationStarts.delete(job.jobId) } })
       return true
@@ -166,7 +167,7 @@ function createProfileFillerService(options: any = {}) {
       jobs.set(jobId, job)
       verificationStarts.add(jobId)
       runMutation({ client: getClient(), store: getStore(), job, update: patch => update(job, patch),
-        release, executorOptions: { ...options.executorOptions, logger,
+        release, acquire: () => acquire('profile_fill', jobId, job.platformAccountId), executorOptions: { ...options.executorOptions, logger,
           onSettled: () => verificationStarts.delete(jobId) } })
       logger.event('apply_request', 'succeeded', { stepCount: plan.steps.length })
       return publicProfileJob(job)

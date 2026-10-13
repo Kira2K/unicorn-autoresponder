@@ -12,6 +12,8 @@ const id = (req: Request) => {
 export function postFailure(res: Response, error: unknown) {
   const code = errorCode(error)
   const messages: Record<string, string> = {
+    post_like_accounts_invalid: 'Выберите разные подключённые аккаунты для лайков. Сам автор не может быть выбран.',
+    post_automation_managed: 'Расписание этого ученика управляется во вкладке «Автоматизация».',
     post_likes_start_invalid: 'Лайки доступны только для опубликованного вручную поста, если их ещё не запускали и не останавливали.',
     post_meme_retry_invalid: 'Продолжение недоступно: это не ошибка описания мема либо отправка уже могла начаться. Обновите историю.',
     post_prepared_invalid: 'Нужно не больше семи постов за одну неделю: разные даты и до 3000 знаков в каждом тексте.',
@@ -24,7 +26,7 @@ export function postFailure(res: Response, error: unknown) {
   }
   const status = code === 'post_run_not_found' ? 404 : ['post_meme_retry_invalid', 'post_likes_start_invalid'].includes(code) ? 409 : code.includes('invalid') ? 400 :
     ['post_hash_mismatch', 'post_action_invalid', 'meme_review_required', 'post_prepared_day_started',
-      'post_prepared_manual_unavailable', 'post_prepared_changed', 'post_prepared_past', 'post_account_busy'].includes(code) ? 409 : 503
+      'post_prepared_manual_unavailable', 'post_prepared_changed', 'post_prepared_past', 'post_account_busy', 'post_automation_managed'].includes(code) ? 409 : 503
   res.status(status).json({ error: code, message: messages[code] ?? (code === 'post_writer_read_only'
     ? 'Post Writer работает только на чтение.' : code === 'post_schema_missing'
       ? 'Нужна миграция таблиц Post Writer. Другие функции доступны.'
@@ -39,6 +41,9 @@ export function registerPostWriterRoutes(app: Express, requireAdmin: RequestHand
     catch (error) { postFailure(res, error) }
   })
   const base = '/api/admin/linkedin/accounts/:id/post-writer'
+  app.get(`${base}/like-accounts`, requireAdmin, async (req, res) => {
+    try { res.json(await service.likeAccounts(id(req))) } catch (error) { postFailure(res, error) }
+  })
   app.get(base, requireAdmin, async (req, res) => {
     try { res.json(await service.get(id(req))) } catch (error) { postFailure(res, error) }
   })

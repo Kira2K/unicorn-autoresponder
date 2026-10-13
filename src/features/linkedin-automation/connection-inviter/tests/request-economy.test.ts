@@ -10,6 +10,123 @@ const { invitationCandidate, invitationRun, invitationRuntime, INVITATION_TEST_S
   require('./invitation-test-fixtures.ts') as typeof import('./invitation-test-fixtures.ts')
 const save = async () => undefined
 
+test('six recoveries share checked sent profiles but always refresh the pending list', async (t: import('node:test').TestContext) => {
+  const setup = fixture(); let run = invitationRun(), now = INVITATION_TEST_STARTED_AT.getTime()
+  let profiles = 0, lists = 0
+  const history = Array.from({ length: 20 }, (_, i) => ({ ...invitationCandidate(run, `old-${i}`),
+    status: 'sent' as const, sentAt: run.createdAt }))
+  setup.adapter.listPendingInvitations = async () => { lists++; return { data: [] } }
+  setup.adapter.getProfile = async () => { profiles++; return { network_distance: 2 } }
+  const runtime = invitationRuntime(setup, { now: () => new Date(now) })
+  const persist = async (value: typeof run) => { run = structuredClone(value) }
+  for (let i = 0; i < 6; i++) {
+    await reconcileInvitations(runtime, run, persist, { openHistory: history }); now += 5 * 60_000
+    run = structuredClone(run)
+  }
+  t.diagnostic(`six recoveries: profile=${profiles}, pending-list=${lists}, total=${profiles + lists}`)
+  assert.equal(profiles, 20); assert.equal(lists, 6); assert.equal(setup.metrics.sends, 0)
+  now = INVITATION_TEST_STARTED_AT.getTime() + 2 * 3600_000 - 1
+  await reconcileInvitations(runtime, run, persist, { openHistory: history })
+  assert.equal(profiles, 20, 'Profile checks remain usable until the two-hour boundary.')
+  now += 1
+  await reconcileInvitations(runtime, run, persist, { openHistory: history })
+  assert.equal(profiles, 40, 'Expired profile checks must be refreshed.')
+})
+
+test('recovery cache never bypasses uncertainty, a changed receipt, another run or failed save', async () => {
+  const setup = fixture(), run = invitationRun(); let profiles = 0
+  const item = { ...invitationCandidate(run, 'known'), status: 'sent' as any, sentAt: run.createdAt }
+  setup.adapter.listPendingInvitations = async () => ({ data: [] })
+  setup.adapter.getProfile = async () => { profiles++; return { network_distance: 2 } }
+  const runtime = invitationRuntime(setup)
+  await reconcileInvitations(runtime, run, save, { openHistory: [item] })
+  item.status = 'uncertain'
+  assert.equal((await reconcileInvitations(runtime, run, save, { openHistory: [item], singlePass: true })).unresolved, 1)
+  assert.equal(profiles, 2)
+  item.status = 'sent'; item.requestId = 'changed-receipt'
+  await reconcileInvitations(runtime, run, save, { openHistory: [item] }); assert.equal(profiles, 3)
+  const other = { ...structuredClone(run), runId: 'other-run' }
+  await reconcileInvitations(runtime, other, save, { openHistory: [item] }); assert.equal(profiles, 4)
+  const fresh = invitationRun()
+  await assert.rejects(reconcileInvitations(runtime, fresh, async () => { throw Error('save failed') },
+    { openHistory: [item] }), /save failed/)
+  await reconcileInvitations(runtime, fresh, save, { openHistory: [item] }); assert.equal(profiles, 6)
+  assert.equal(setup.metrics.sends, 0)
+})
+
+test('profile cache survives SQL row conversion and never hides a fresh pending receipt', async () => {
+  const { runRow, runFromRow } = require('../store-rows.ts') as typeof import('../store-rows.ts')
+  const setup = fixture(), run = invitationRun(); let profiles = 0, pending = false
+  const item = { ...invitationCandidate(run, 'old'), status: 'sent' as const, sentAt: run.createdAt }
+  setup.adapter.listPendingInvitations = async () => pending ? { data: [{ user_id: item.personId }], total_count: 1 } : { data: [] }
+  setup.adapter.getProfile = async () => { profiles++; return { network_distance: 2 } }
+  const runtime = invitationRuntime(setup)
+  await reconcileInvitations(runtime, run, save, { openHistory: [item] })
+  const restored = runFromRow(runRow(run)); pending = true
+  const result = await reconcileInvitations(runtime, restored, save, { openHistory: [item] })
+  assert.equal(result.snapshot!.personIds.has(item.personId), true); assert.equal(profiles, 1)
+  pending = false; await reconcileInvitations(runtime, restored, save, { openHistory: [item] })
+  assert.equal(profiles, 1)
+  const other = { ...structuredClone(restored), accountId: 'another-account' }
+  await reconcileInvitations(runtime, other, save, { openHistory: [item] }); assert.equal(profiles, 2)
+})
+
+test('missing profile relation and future-dated cache never suppress a profile check', async () => {
+  const setup = fixture(), run = invitationRun(); let reads = 0
+  const item = { ...invitationCandidate(run, 'old'), status: 'sent' as const, sentAt: run.createdAt }
+  setup.adapter.listPendingInvitations = async () => ({ data: [] })
+  setup.adapter.getProfile = async () => { reads++; return {} }
+  const runtime = invitationRuntime(setup)
+  await reconcileInvitations(runtime, run, save, { openHistory: [item] })
+  await reconcileInvitations(runtime, run, save, { openHistory: [item] }); assert.equal(reads, 2)
+  setup.adapter.getProfile = async () => { reads++; return { network_distance: 2 } }
+  await reconcileInvitations(runtime, run, save, { openHistory: [item] })
+  run.searchProgress.historyProfileChecks![item.historyKey].checkedAt += 3600_000
+  await reconcileInvitations(runtime, run, save, { openHistory: [item] }); assert.equal(reads, 4)
+})
+
+test('a nonempty page resets only its audience empty-page budget', async () => {
+  const { createCandidateDiscovery } = require('../discovery.ts') as typeof import('../discovery.ts')
+  const setup = fixture(), run = invitationRun()
+  run.searchProgress.emptySearchPages = { recruiter: 5, technical: 4 }
+  setup.store.listCatalog = async () => [{ sourceKey: 'recruiter-berlin', audience: 'recruiter',
+    city: 'Berlin', keywordTemplate: 'unused', priority: 1, enabled: true }]
+  setup.adapter.searchPeople = async () => ({ items: [{ id: 'one', display_name: 'Recruiter',
+    headline: 'Recruiter', network_distance: 2, location: 'Berlin' }], next_cursor: 'two' })
+  const discovery = await createCandidateDiscovery(invitationRuntime(setup), run, save)
+  await discovery.next('recruiter', true)
+  assert.deepEqual(run.searchProgress.emptySearchPages, { recruiter: 0, technical: 4 })
+})
+
+for (const audience of ['recruiter', 'technical'] as const) {
+  test(`empty ${audience} pages stop after six across terms and restarts`, async () => {
+    const { createCandidateDiscovery } = require('../discovery.ts') as typeof import('../discovery.ts')
+    const setup = fixture(); let run = invitationRun(), searches = 0
+    let persisted = structuredClone(run)
+    const persist: import('../runtime.ts').SaveRun = async (value, _event, mode) => {
+      if (mode === 'critical') persisted = structuredClone(value)
+    }
+    setup.store.listCatalog = async () => ['Berlin', 'Paris'].map((city, index) => ({ sourceKey: `${audience}-${city}`, audience,
+      city, keywordTemplate: 'unused', priority: index + 1, enabled: true }))
+    setup.adapter.searchPeople = async () => {
+      assert.equal(persisted.searchProgress.emptySearchPages?.[audience] ?? 0, searches,
+        'The next external search must persist the preceding page count.')
+      searches++; return { items: [], next_cursor: `page-${searches}` }
+    }
+    const runtime = invitationRuntime(setup)
+    for (let i = 0; i < 5; i++) {
+      const discovery = await createCandidateDiscovery(runtime, run, persist)
+      await discovery.next(audience, true); run = structuredClone(run)
+    }
+    const discovery = await createCandidateDiscovery(runtime, run, persist)
+    await assert.rejects(discovery.next(audience, true), { code: 'connection_search_contract_suspect' })
+    assert.equal(persisted.searchProgress.emptySearchPages![audience], 6)
+    const restored = await createCandidateDiscovery(runtime, persisted, persist)
+    await assert.rejects(restored.next(audience, true), { code: 'connection_search_contract_suspect' })
+    assert.equal(searches, 6); assert.equal(setup.metrics.sends, 0)
+  })
+}
+
 test('missing profile count uses all relations pages, deduplicates and ignores followers', async () => {
   const setup = fixture(); const run = invitationRun(); const own = setup.adapter.getOwnProfile
   setup.adapter.getOwnProfile = async () => ({ ...(await own()), connections_count: null, followers_count: 9000 })
@@ -149,7 +266,7 @@ for (const staleDuringSave of [false, true]) {
     })
     const result = await publisher.publish('recruiter', [invitationCandidate(run, 'target')])
     assert.equal(result.sentCount, 1); assert.equal(posts, 1); assert.equal(profiles, 2)
-    assert.equal(reads, staleDuringSave ? 3 : 2)
+    assert.equal(reads, 2, 'uncertainty is saved before the first read; there is no second handler or duplicate scan')
   })
 }
 
@@ -239,7 +356,12 @@ test('empty profile response cannot bypass an unknown previous POST during recov
   setup.adapter.getAccount = setup.adapter.sendInvitation = async () => {
     throw new Error('Unknown history must be resolved before new sending preparation.')
   }
-  await executeConnectionRun(invitationRuntime(setup), run, new Set(), save)
+  let now = INVITATION_TEST_STARTED_AT.getTime()
+  const runtime = invitationRuntime(setup, { now: () => new Date(now) })
+  await executeConnectionRun(runtime, run, new Set(), save)
+  assert.equal(run.status, 'running'); assert.equal(profiles, 1)
+  now = Date.parse(run.nextActionAt!)
+  await executeConnectionRun(runtime, run, new Set(), save)
   assert.equal(run.status, 'succeeded'); assert.equal(profiles, 2)
   assert.equal((await setup.store.findHistory(run.accountId, 'unknown'))?.status, 'accepted')
 })
@@ -364,7 +486,9 @@ test('skipping a candidate consumes only the remaining shared invitation pause',
   }
   t.run.counters.sent = 1
   const publisher = await createInvitationPublisher(t.runtime, t.run, save)
-  const result = await publisher.publish('recruiter', ['connected', 'target'].map(id => invitationCandidate(t.run, id)))
+  const first = await publisher.publish('recruiter', ['connected', 'target'].map(id => invitationCandidate(t.run, id)))
+  assert.equal(first.sentCount, 0); assert.deepEqual(first.processedPersonIds, ['connected'])
+  const result = await publisher.publish('recruiter', [invitationCandidate(t.run, 'target')])
   assert.equal(result.sentCount, 1)
   assert.equal(t.posts[0].at - INVITATION_TEST_STARTED_AT.getTime(), 100_000)
 })
@@ -372,7 +496,9 @@ test('skipping a candidate consumes only the remaining shared invitation pause',
 test('a rejected actual POST still starts a new invitation pause', async () => {
   const t = receiptFixture({ mode: 'reject-first' })
   const publisher = await createInvitationPublisher(t.runtime, t.run, save)
-  const result = await publisher.publish('recruiter', ['rejected', 'target'].map(id => invitationCandidate(t.run, id)))
+  const first = await publisher.publish('recruiter', ['rejected', 'target'].map(id => invitationCandidate(t.run, id)))
+  assert.equal(first.sentCount, 0); assert.deepEqual(first.processedPersonIds, ['rejected'])
+  const result = await publisher.publish('recruiter', [invitationCandidate(t.run, 'target')])
   assert.equal(result.sentCount, 1); assert.equal(t.posts.length, 2)
   assert.equal(t.posts[1].at - t.posts[0].at, 100_000)
 })

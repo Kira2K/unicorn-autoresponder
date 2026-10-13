@@ -1,3 +1,4 @@
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import assert from 'node:assert/strict'
 import { chromium, request } from 'playwright'
 import { startIsolatedPostTestProcesses, waitPostHttp, postRoot } from './post-writer-processes.ts'
@@ -19,6 +20,7 @@ export async function checkPreparedNow() {
     await page.locator('input[type="password"]').fill('101010')
     await page.getByTestId('login-button').click()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     await checkPreparedPosts(page, base)
     const api = `${base}/api/admin/linkedin/accounts/203/post-writer`
@@ -69,6 +71,7 @@ export async function checkPreparedNow() {
     assert.equal((await read()).runs.length, 1)
     await page.reload()
     await page.getByTestId('admin-linkedin-tab').click()
+    await openLinkedInManual(page)
     await page.getByTestId('post-writer-203').click()
     await page.getByTestId('post-prepared-day-1').click()
     assert.equal(await page.getByTestId('post-prepared-1').isDisabled(), true)

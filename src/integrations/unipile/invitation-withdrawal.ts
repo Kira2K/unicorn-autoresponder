@@ -2,7 +2,9 @@ import * as httpModule from './http-client.ts'
 import * as validationModule from '../../features/linkedin-automation/account-connection/account-validation.ts'
 import type { Provider } from '../../features/linkedin-automation/invitation-withdrawal/contracts.ts'
 import { readAllSentInvitations } from './sent-invitations.ts'
-const { createUnipileHttpClient } = httpModule as unknown as { createUnipileHttpClient(): Http }
+// Native Node can expose CJS exports under default when the backend loads through require().
+const { createUnipileHttpClient } = ((httpModule as { default?: unknown }).default ?? httpModule) as {
+  createUnipileHttpClient(): Http }
 const { assertAccountOperational, verifiedIdentity } = validationModule as unknown as {
   assertAccountOperational(value: any): void; verifiedIdentity(account: any, own: any, target: any): unknown }
 type Http = { request(method: 'GET' | 'POST', path: string, body?: unknown, options?: any): Promise<any> }
@@ -21,9 +23,9 @@ export function createWithdrawalProvider(http: Http = createUnipileHttpClient())
         verifiedProviderId: account.verifiedProviderId })
     },
     list(accountId) {
-      return readAllSentInvitations(offset => request('GET',
+      return readAllSentInvitations((offset, cursor) => request('GET',
         `/${encodeURIComponent(accountId)}/users/me/relation-requests?` +
-        new URLSearchParams({ type: 'sent', limit: '100', offset: String(offset) })))
+        new URLSearchParams({ type: 'sent', limit: '100', ...(cursor ? { cursor } : { offset: String(offset) }) })))
     },
     async cancel(accountId, requestId) {
       const result = await request('POST', `/${encodeURIComponent(accountId)}/users/me/relation-requests/` +

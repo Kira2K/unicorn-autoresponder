@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
+import { openLinkedInManual } from './linkedin-console-navigation.ts'
 import { desktopProfileJob, profileJobsRoute } from './profile-desktop-fixture.ts'
 
 export async function checkParallelProfiles(page: Page) {
@@ -48,6 +49,7 @@ export async function checkParallelProfiles(page: Page) {
   try {
     await reload()
     for (const id of [203, 103]) {
+      await openLinkedInManual(page, id, true)
       assert.equal(await page.getByTestId(`profile-filler-${id}`).isEnabled(), true)
       await page.getByTestId(`profile-filler-${id}`).click()
       await page.getByTestId('profile-filler-generate').click()
@@ -58,9 +60,13 @@ export async function checkParallelProfiles(page: Page) {
       await page.getByTestId('profile-progress').waitFor()
       await close()
     }
-    for (const id of [203, 103]) await page.getByTestId(`profile-filler-${id}`).getByText('Открыть прогресс').waitFor()
+    for (const id of [203, 103]) {
+      await openLinkedInManual(page, id, true)
+      await page.getByTestId(`profile-filler-${id}`).getByText('Открыть прогресс').waitFor()
+    }
     await reload()
     for (const id of [203, 103]) {
+      await openLinkedInManual(page, id, true)
       await page.getByTestId(`profile-filler-${id}`).click()
       await page.getByTestId('profile-progress').waitFor()
       assert.equal(await page.getByTestId('profile-filler-apply').count(), 0)
@@ -69,11 +75,13 @@ export async function checkParallelProfiles(page: Page) {
     const first = jobs.get('parallel-203')!
     first.status = 'succeeded'; first.phase = 'completed_verified'; first.result!.status = 'verified'
     first.result!.steps.forEach(step => { step.status = 'verified' })
+    await openLinkedInManual(page, 203, true)
     await page.getByTestId('profile-filler-203').click()
     await page.getByTestId('profile-result-title').getByText('Профиль заполнен и проверен', { exact: true }).waitFor()
     await close()
     const second = jobs.get('parallel-103')!
     assert.equal(second.status, 'verifying')
+    await openLinkedInManual(page, 103, true)
     await page.getByTestId('profile-filler-103').getByText('Открыть прогресс').waitFor()
     second.status = 'needs_expert_review'; second.phase = 'verification_failed'
     second.result!.status = 'failed'; second.result!.steps[0].status = 'failed'

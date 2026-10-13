@@ -9,6 +9,7 @@ async function request(path, method = 'GET', body) {
 }
 export const postApi = {
   get: account => request(root(account)),
+  likeAccounts: account => request(`${root(account)}/like-accounts`),
   settings: (account, settings) => request(`${root(account)}/settings`, 'PUT', settings),
   start: (account, mode, requestKey, input = {}) => request(`${root(account)}/runs`, 'POST', { ...input, mode, requestKey }),
   startPrepared: (account, post) => request(`${root(account)}/prepared-runs`, 'POST', post),

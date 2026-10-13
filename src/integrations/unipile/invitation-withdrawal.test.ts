@@ -7,6 +7,53 @@ import { fixture, finished } from '../../features/linkedin-automation/invitation
 const { createUnipileHttpClient } = httpModule as unknown as { createUnipileHttpClient(options: any): any }
 const row = (id: number) => ({ type: 'sent', id: `inv-${id}`, created_at: '2026-08-01T00:00:00Z',
   user: { display_name: `Person ${id}` } })
+
+test('overlapping pages can finish only with every distinct ID from the declared total', async () => {
+  const offsets: number[] = []
+  const result = await readAllSentInvitations(async offset => {
+    offsets.push(offset)
+    return { data: offset === 0 ? [row(1), row(2)] : [row(2), row(3)], total_count: 3 }
+  })
+  assert.deepEqual(result.map(item => item.id), ['inv-1', 'inv-2', 'inv-3'])
+  assert.deepEqual(offsets, [0, 2])
+})
+
+test('invalid list explains the page and field without retaining private response values', async () => {
+  await assert.rejects(readAllSentInvitations(async () => ({ data: [
+    { ...row(1), id: '', user: { display_name: 'PRIVATE' } }
+  ] })), (error: any) => {
+    assert.equal(error.code, 'withdrawal_list_invalid')
+    assert.equal(error.details.readFailure.reason, 'invalid_id')
+    assert.equal(error.details.readFailure.page, 1)
+    assert.equal(error.details.readFailure.item, 1)
+    assert.equal(JSON.stringify(error).includes('PRIVATE'), false)
+    assert.equal(error.details.httpStatus, undefined, 'a parser failure is not HTTP 500')
+    return true
+  })
+})
+
+test('withdrawal follows V2 cursor when present, never replaces it with an offset', async () => {
+  const paths: string[] = []
+  const provider = createWithdrawalProvider({ async request(_method, path) {
+    paths.push(path)
+    return paths.length === 1 ? { data: [row(1)], next_cursor: 'page-two', total_count: 2 }
+      : { data: [row(2)], total_count: 2 }
+  } })
+  assert.equal((await provider.list('acc_test')).length, 2)
+  const query = new URL(paths[1], 'https://mock.invalid').searchParams
+  assert.equal(query.get('cursor'), 'page-two'); assert.equal(query.has('offset'), false)
+})
+
+test('overlap cannot hide missing rows or conflicting invitation dates', async () => {
+  for (const pages of [
+    [{ data: [row(1)], total_count: 2 }, { data: [row(1)], total_count: 2 }],
+    [{ data: [row(1)] }, { data: [row(1)] }],
+    [{ data: [row(1)], total_count: 2 }, { data: [{ ...row(1), created_at: '2026-10-01T00:00:00Z' }, row(2)], total_count: 2 }]
+  ]) { let reads = 0
+    await assert.rejects(readAllSentInvitations(async () => pages[Math.min(reads++, 1)]))
+    assert.ok(reads <= 2, 'no unbounded requests on repeated pages')
+  }
+})
 test('all pages are read, including short pages; date is returned without inference', async () => {
   const offsets: number[] = []
   const result = await readAllSentInvitations(async offset => {
