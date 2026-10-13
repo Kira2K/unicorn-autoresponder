@@ -21,7 +21,7 @@ cloud; the test driver alone used the desktop API to open and normally close win
 - Ordinary closure caused the cloud listener to clear protection automatically.
   The second grant used the same stored password and a new anonymous name.
 - A third authenticated client could neither see the card nor call the Octo API.
-  Cross-client grants and duplicate requests were also rejected/handled correctly.
+  Requests for the other client's grant details returned 404.
 - Final state: both profiles closed, private, original metadata restored, protection
   removed, grants complete. Stored passwords retained. No force-stop used.
 
