@@ -7,6 +7,7 @@ import StudentProfile from './StudentProfile.vue'
 import StudentWorkPlaces from './StudentWorkPlaces.vue'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 import { usernamePayload } from './username-input.js'
+import { isAccountPhoneField, phoneInputValue, phonePayload, updateContactInput } from './contact-input.js'
 import AccountForm from './AccountForm.vue'
 import StudentDashboardLayout from './StudentDashboardLayout.vue'
 import { studentPreviewLabel } from './student-preview-labels.js'
@@ -113,10 +114,8 @@ const accountMessage = ref('')
 const accountError = ref('')
 const profileEditorOpen = ref('')
 const profileEditing = ref(false)
-const profileWorkPlaces = ref([])
-const workplaceEditor = ref({ editing: false, saving: false, error: '' })
-const workPlacesSection = ref(null)
 const accountEditorOpen = ref(false)
+const platformAccountsEditing = ref(false)
 const selectedTelegramAccountId = ref(null)
 const telegramStateByAccount = ref({})
 const adminTelegramModalOpen = ref(false)
@@ -1426,7 +1425,7 @@ async function connectTelegram() {
   try {
     state.status = await api.telegramConnect({
       ...telegramTargetPayloadFor(account),
-      phone: state.phone || account.phone || account.foreignNumber || '',
+      phone: phonePayload(state.phone) || phonePayload(account.phone) || phonePayload(account.foreignNumber),
       code: state.code || undefined,
       password: state.password || undefined
     })
@@ -1804,7 +1803,9 @@ function accountPayload() {
   const selectedPlatform = selectPlatformLabel(accountForm.value.platformId)
   const policy = selectedAccountPolicy.value
   const fields = Object.fromEntries(
-    (policy?.fields || []).map(field => [field, accountForm.value[field]])
+    (policy?.fields || []).map(field => [field, isAccountPhoneField(field, selectedAccountPlatform.value)
+      ? phonePayload(accountForm.value[field], field === 'foreignNumber' ? undefined : selectedAccountPlatform.value)
+      : accountForm.value[field]])
   )
   if (validatedProfileEnabled.value && policy?.fields.includes('nickname')) fields.nickname = usernamePayload(fields.nickname)
   if (editingAccount.value) return fields
@@ -2525,7 +2526,7 @@ onUnmounted(() => {
           </template>
           <template #subtitle>{{ isAdmin ? 'Latest created client' : ui('Your profile') }}</template>
           <template #content>
-            <StudentProfile v-if="validatedProfileEnabled" v-model:work-places="profileWorkPlaces" :client="dashboard.client" :english-levels="englishLevels" :save="api.updateClientProfile" @saved="dashboard = $event" @editor-state="workplaceEditor = $event" @focus-workplaces="workPlacesSection?.focusError()">
+            <StudentProfile v-if="validatedProfileEnabled" :client="dashboard.client" :english-levels="englishLevels" :save="api.updateClientProfile" @saved="dashboard = $event">
               <dl class="info-list compact-info student-section">
                 <div><dt>GitHub</dt><dd>{{ githubUrl || '—' }}</dd></div>
                 <div><dt>LinkedIn</dt><dd>{{ linkedInProfileUrl || '—' }}</dd></div>
@@ -2806,7 +2807,7 @@ onUnmounted(() => {
 
         </template>
         <template #workplaces>
-          <StudentWorkPlaces v-if="validatedProfileEnabled" ref="workPlacesSection" v-model:work-places="profileWorkPlaces" :client="dashboard.client" :editing="workplaceEditor.editing" :saving="workplaceEditor.saving" :error="workplaceEditor.error" />
+          <StudentWorkPlaces v-if="validatedProfileEnabled" :client="dashboard.client" :save="api.updateClientProfile" @saved="dashboard = $event" />
         </template>
         <template #telegram>
         <Card v-if="isClient" class="action-card telegram-card" data-testid="telegram-card">
@@ -2843,7 +2844,7 @@ onUnmounted(() => {
                 <Button icon="pi pi-refresh" :label="ui('Refresh')" size="small" severity="secondary" :loading="currentTelegramState.loading" data-testid="telegram-refresh-button" @click="refreshTelegramStatus" />
               </div>
               <div class="telegram-connect-row">
-                <InputText v-model="currentTelegramState.phone" :placeholder="ui('Phone')" data-testid="telegram-phone" />
+                <InputText :model-value="phoneInputValue(currentTelegramState.phone)" inputmode="tel" placeholder="+кодномер" data-testid="telegram-phone" @input.capture="updateContactInput($event, phoneInputValue)" @update:model-value="currentTelegramState.phone = $event" />
                 <InputText v-if="telegramStatusLabel === 'needs_code'" v-model="currentTelegramState.code" :placeholder="ui('Code')" data-testid="telegram-code" />
                 <Password v-if="telegramStatusLabel === 'needs_password'" v-model="currentTelegramState.password" :placeholder="ui('Cloud password')" toggle-mask :feedback="false" data-testid="telegram-password" />
                 <Button :label="ui('Connect Telegram')" icon="pi pi-link" :loading="currentTelegramState.loading" data-testid="telegram-connect-button" @click="connectTelegram" />
@@ -3075,7 +3076,15 @@ onUnmounted(() => {
         </template>
         <template #accounts>
         <Card class="accounts-card">
-          <template #title>{{ ui('Platform accounts') }}</template>
+          <template #title>
+            <div class="accounts-heading">
+              <span>{{ ui('Platform accounts') }}</span>
+              <template v-if="validatedProfileEnabled && isClient">
+                <button v-if="!platformAccountsEditing" type="button" class="student-button" data-testid="edit-platform-accounts-button" @click="platformAccountsEditing = true">Редактировать</button>
+                <button v-else type="button" class="student-button" data-testid="finish-platform-accounts-button" @click="platformAccountsEditing = false">Готово</button>
+              </template>
+            </div>
+          </template>
           <template #subtitle>{{ validatedProfileEnabled ? 'Подключено аккаунтов: ' + accountRows.length : accountRows.length + ' connected rows' }}</template>
           <template #content>
             <div v-if="isClient" class="feature-toolbar">
@@ -3083,6 +3092,7 @@ onUnmounted(() => {
               <span v-if="accountMessage" class="success-text" data-testid="account-save-message">{{ accountMessage }}</span>
               <span v-if="accountError && !(validatedProfileEnabled && accountEditorOpen)" class="error-text" data-testid="account-error">{{ accountError }}</span>
             </div>
+            <p v-if="validatedProfileEnabled && platformAccountsEditing" class="student-hint" role="status">{{ accountRows.length ? 'Нажми на карандаш рядом с аккаунтом, чтобы изменить его данные.' : 'Аккаунтов пока нет. Нажми «Добавить аккаунт», чтобы создать первый.' }}</p>
             <Dialog v-if="validatedProfileEnabled" :visible="accountEditorOpen" modal class="student-account-dialog" :header="editingAccount ? 'Редактировать аккаунт' : 'Добавить аккаунт'" :dismissable-mask="false" :closable="!accountSaving" :close-on-escape="!accountSaving" :pt="{ pcCloseButton: { root: { 'aria-label': 'Закрыть' } } }" @update:visible="closeAccountForm">
               <AccountForm v-if="accountEditorOpen" v-model:form="accountForm" :editing="editingAccount" :preview="validatedProfileEnabled" :saving="accountSaving" :secrets-loading="accountSecretsLoading" :secrets-ready="accountSecretsReady" :error="accountError" :platforms="platforms" :policy="selectedAccountPolicy" :display-label="accountDisplayLabel" :phone-ru-selected="phoneRuSelected" :phone-ru-exists="phoneRuExists" :phone-ru-validation-message="phoneRuValidationMessage" @save="saveAccount" @cancel="closeAccountForm" @phone="updateAccountPhone" />
             </Dialog>
@@ -3108,7 +3118,7 @@ onUnmounted(() => {
                   <span v-else>{{ ui('empty') }}</span>
                 </template>
               </Column>
-              <Column v-if="isClient" :header="ui('Actions')">
+              <Column v-if="isClient && (!validatedProfileEnabled || platformAccountsEditing)" :header="ui('Actions')">
                 <template #body="{ data }">
                   <div class="row-actions">
                     <Button icon="pi pi-pencil" :aria-label="ui('Edit account')" size="small" severity="secondary" :disabled="!canEditPlatformAccount(data)" :title="ui(canEditPlatformAccount(data) ? 'Edit account' : 'Unsupported platform is read-only')" data-testid="edit-account-button" @click="editAccount(data)" />

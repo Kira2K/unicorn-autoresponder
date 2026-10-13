@@ -9,10 +9,9 @@ test('existing company columns restore workplace order and current flags without
   assert.deepEqual(draft.workPlaces, [{ companyName: 'Sber', isCurrent: false }, { companyName: 'Yandex', isCurrent: true }])
   assert.equal(draft.birthDate, '20.04.2000')
   const profile = validateStudentProfile({ ...draft, noHigherEducation: true }, { today: '2026-10-05', englishLevelIds: [] }).value
-  const payload = studentProfileSavePayload(profile)
+  const payload = workPlacesSavePayload(profile.workPlaces)
   assert.equal(payload.stopListCompany, 'Sber,Yandex')
   assert.equal(payload.currentCompany, 'Yandex'); assert.equal(payload.previousCompanies, 'Sber')
-  assert.ok(Array.isArray(payload.educationEntries))
   assert.deepEqual(studentProfileDraft(payload).workPlaces, draft.workPlaces)
 })
 
@@ -42,7 +41,7 @@ test('legacy null education does not imply an explicit opt out', () => {
 
 test('workplace selections replace both lists after toggling, deletion and clearing', () => {
   const draft = studentProfileDraft({ currentCompany: 'Alpha,Beta', previousCompanies: 'Gamma,Delta' })
-  const payload = () => studentProfileSavePayload({ ...draft, noHigherEducation: true })
+  const payload = () => workPlacesSavePayload(draft.workPlaces)
   assert.equal(payload().currentCompany, 'Alpha,Beta')
   assert.equal(payload().previousCompanies, 'Gamma,Delta')
   draft.workPlaces[0].isCurrent = false
@@ -59,12 +58,10 @@ test('workplace selections replace both lists after toggling, deletion and clear
   assert.deepEqual(studentProfileDraft(payload()).workPlaces, [])
 })
 
-test('shared profile save includes personal data and the current workplace draft', () => {
-  const personal = studentProfileSavePayload({ firstName: 'Кира', noHigherEducation: true, workPlaces: [{ companyName: 'Alpha', isCurrent: true }] })
+test('personal and workplace patches contain only their own section fields', () => {
+  const personal = studentProfileSavePayload({ firstName: 'Кира', noHigherEducation: true, workPlaces: [{ companyName: 'Alpha', isCurrent: true }], currentCompany: 'Old', previousCompanies: 'Old', stopListCompany: 'Old' })
   assert.equal(personal.firstName, 'Кира')
-  assert.equal(personal.currentCompany, 'Alpha')
-  assert.equal(personal.previousCompanies, '')
-  assert.equal(personal.stopListCompany, 'Alpha')
+  for (const field of ['workPlaces', 'currentCompany', 'previousCompanies', 'stopListCompany']) assert.equal(Object.hasOwn(personal, field), false)
   assert.deepEqual(workPlacesSavePayload([{ companyName: 'Alpha', isCurrent: true }, { companyName: 'Beta', isCurrent: false }]), {
     stopListCompany: 'Alpha,Beta', currentCompany: 'Alpha', previousCompanies: 'Beta'
   })

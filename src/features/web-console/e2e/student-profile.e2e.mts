@@ -25,7 +25,7 @@ const client = () => ({ id: clientId, studentProfileEnabled: enabled, clientName
   calendarEmail: `student${clientId}@gmail.com`, telegramPersonalChatId: '@kira_test', noHigherEducation: true,
   educationEntries: [{ uni: 'School', faculty: '', grade: '', yearOfEnd: '2020', city: 'Moscow' }], currentCompany: 'Alpha,Beta', previousCompanies: 'Gamma,Delta', stopListCompany: 'Alpha,Beta,Gamma,Delta' });
 let dashboard: any = { client: client(), platformAccounts: [], linkedInEmail: '' };
-const platforms = [{ id: 30, label: 'phone_ru' }, { id: 28, label: 'phone_en' }, { id: 24, label: 'telegram_ru' },
+const platforms = [{ id: 30, label: 'phone_ru' }, { id: 28, label: 'phone_en' }, { id: 24, label: 'telegram_ru' }, { id: 23, label: 'telegram_en' },
   { id: 10, label: 'hh_en' }, { id: 11, label: 'hh_ru' }, { id: 16, label: 'linkedin' }, { id: 29, label: 'github' }];
 try {
   browser = await chromium.launch({ headless: true });
@@ -70,29 +70,59 @@ try {
   const submitAccount = () => byId('account-form').dispatchEvent('submit');
   await page.goto(url);
   await byId('validated-student-profile').waitFor();
+  await byId('edit-platform-accounts-button').click();
+  await byId('finish-platform-accounts-button').waitFor();
+  await byId('finish-platform-accounts-button').click();
   assert.equal(await byId('profile-form').count(), 0);
   assert.equal(await byId('accounts-table').getByText('Название', { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'desktop-profile.png'), fullPage: true });
   await byId('open-profile-editor-button').click();
+  assert.equal(await byId('workplaces-editor').count(), 0);
+  await page.locator('#student-firstName').fill('123');
+  await byId('open-workplaces-editor-button').click();
   await byId('workplaces-editor').waitFor();
+  assert.equal(await byId('profile-form').count(), 1);
+  assert.equal(await byId('open-workplaces-editor-button').count(), 0);
+  assert.equal(await byId('work-company-0').evaluate((input: HTMLInputElement) => input === document.activeElement), true);
   assert.equal(await page.locator('[data-profile-field="realAge"] .auto-badge').count(), 0);
   const telegram = byId('profile-telegram'); await telegram.fill('@@kira_test'); assert.equal(await telegram.inputValue(), '@kira_test');
   const checks = byId('workplaces-editor').locator('input[type="checkbox"]');
   assert.deepEqual(await checks.evaluateAll((items: HTMLInputElement[]) => items.map(e => e.checked)), [true, true, false, false]);
   await checks.nth(0).uncheck(); await checks.nth(2).check();
-  failProfile = true; await byId('profile-form').dispatchEvent('submit');
+  await byId('work-company-1').fill('Alpha');
+  await byId('save-workplaces-button').click();
+  await byId('workplaces-editor').getByRole('alert').waitFor();
+  assert.equal(profileWrites.length, 0);
+  await byId('work-company-1').fill('Beta');
+  failProfile = true; await byId('save-workplaces-button').click();
   await page.getByText('Тестовая ошибка профиля', { exact: true }).waitFor();
   assert.equal(await byId('profile-form').count(), 1);
-  failProfile = false; await byId('profile-form').dispatchEvent('submit');
-  await byId('profile-form').waitFor({ state: 'detached' });
+  failProfile = false; await byId('save-workplaces-button').click();
+  await byId('workplaces-editor').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('#student-firstName').inputValue(), '123');
+  await byId('open-workplaces-editor-button').waitFor();
+  assert.deepEqual(Object.keys(profileWrites.at(-1)).sort(), ['currentCompany', 'previousCompanies', 'stopListCompany']);
   assert.equal(profileWrites.at(-1).currentCompany, 'Beta,Gamma');
   assert.equal(profileWrites.at(-1).previousCompanies, 'Alpha,Delta');
-  await byId('open-profile-editor-button').click();
+  await byId('open-workplaces-editor-button').click();
   assert.deepEqual(await checks.evaluateAll((items: HTMLInputElement[]) => items.map(e => e.checked)), [false, true, true, false]);
+  await byId('work-company-0').fill('Unsent company');
   await page.locator('#student-firstName').fill('123'); await byId('profile-form').dispatchEvent('submit');
   await byId('profile-validation-summary').waitFor(); assert.equal(profileWrites.length, 2);
   await page.locator('#student-firstName').fill('Кира');
   await byId('profile-form').getByRole('button', { name: 'Отмена', exact: true }).click();
+  assert.equal(await byId('work-company-0').inputValue(), 'Unsent company');
+  await byId('open-profile-editor-button').click();
+  await page.locator('#student-firstName').fill('Анна');
+  await byId('save-profile-button').click();
+  await byId('profile-form').waitFor({ state: 'detached' });
+  for (const field of ['workPlaces', 'currentCompany', 'previousCompanies', 'stopListCompany']) assert.equal(Object.hasOwn(profileWrites.at(-1), field), false);
+  assert.equal(dashboard.client.previousCompanies, 'Alpha,Delta');
+  assert.equal(await byId('work-company-0').inputValue(), 'Unsent company');
+  await byId('cancel-workplaces-button').click();
+  await byId('open-workplaces-editor-button').click();
+  assert.equal(await byId('work-company-0').inputValue(), 'Alpha');
+  await byId('cancel-workplaces-button').click();
 
   await checkStudentEducation(page, profileWrites);
 
@@ -103,6 +133,25 @@ try {
   await byId('account-platform').selectOption('10');
   assert.match(await page.getByRole('dialog').innerText(), /Email для зарубежного рынка/);
   await byId('account-platform').selectOption('11'); assert.match(await page.getByRole('dialog').innerText(), /Email для ру рынка/);
+  for (const platform of ['10', '11', '28', '30']) {
+    await byId('account-platform').selectOption(platform);
+    await byId('account-phone').fill('++7 (999) abc 123-45-67');
+    assert.equal(await byId('account-phone').inputValue(), '+79991234567');
+    await byId('account-phone').fill(''); assert.equal(await byId('account-phone').inputValue(), '+');
+  }
+  await byId('account-platform').selectOption('10');
+  await byId('account-login').fill('test@example.invalid');
+  assert.equal(await byId('account-login').inputValue(), 'test@example.invalid');
+  await byId('account-password-widget').locator('input').fill('test-password');
+  await submitAccount(); assert.equal(accountWrites.length, 0);
+  for (const platform of ['23', '24']) {
+    await byId('account-platform').selectOption(platform);
+    await byId('account-login').fill('++44 (123) abc 45-67');
+    assert.equal(await byId('account-login').inputValue(), '+441234567');
+    await byId('account-login').fill(''); assert.equal(await byId('account-login').inputValue(), '+');
+    await byId('account-nickname').fill('@tester');
+    await submitAccount(); assert.equal(accountWrites.length, 0);
+  }
   for (const platform of ['16', '29']) {
     await byId('account-platform').selectOption(platform);
     assert.match(await page.getByRole('dialog').innerText(), /ссылка без https:\/\//);
@@ -124,6 +173,8 @@ try {
   await submitAccount(); assert.equal(accountWrites.length, 2);
   assert.ok(releaseAccount); releaseAccount(); pendingAccount = false;
   await page.getByRole('dialog').waitFor({ state: 'detached' });
+  assert.equal(await byId('edit-account-button').count(), 0);
+  await byId('edit-platform-accounts-button').click();
   await byId('edit-account-button').first().click();
   assert.equal(await byId('account-platform-locked').isDisabled(), true);
   await byId('account-phone').fill('+71111111111'); await page.keyboard.press('Escape');
@@ -132,8 +183,9 @@ try {
   await byId('close-account-editor-button').click();
 
   // Preserve master password-loading behavior after extracting the form.
-  dashboard.platformAccounts = [{ id: 2001, platformId: 10, platform: 'hh_en', accountLabel: 'hh_en', login: 'test@example.invalid', phone: '+4412345', password: '********' }];
-  await page.reload(); await byId('edit-account-button').first().waitFor();
+  dashboard.platformAccounts = [{ id: 2001, platformId: 10, platform: 'hh_en', accountLabel: 'hh_en', login: 'test@example.invalid', phone: '+44 (123) 45', password: '********' }];
+  await page.reload(); await byId('edit-platform-accounts-button').click();
+  await byId('edit-account-button').first().waitFor();
   pendingSecrets = true; await byId('edit-account-button').first().click();
   assert.equal(await byId('save-account-button').isDisabled(), true);
   await submitAccount(); assert.equal(accountWrites.length, 2);
@@ -144,6 +196,7 @@ try {
   const box = await page.getByRole('dialog').boundingBox(); assert.ok(box && box.width <= 390 && box.x >= 0);
   await byId('save-account-button').click(); await page.getByRole('dialog').waitFor({ state: 'detached' });
   assert.equal(accountWrites.at(-1).password, 'saved-secret');
+  assert.equal(accountWrites.at(-1).phone, '+4412345');
   failSecrets = true; await byId('edit-account-button').first().click(); await byId('account-form-error').waitFor();
   assert.equal(await byId('save-account-button').isDisabled(), true); await byId('close-account-editor-button').click(); failSecrets = false;
   await page.getByRole('dialog').waitFor({ state: 'detached' });
@@ -156,6 +209,9 @@ try {
   await byId('validated-student-profile').waitFor();
   assert.ok(dolphinReads > priorDolphinReads);
   await page.waitForTimeout(100); assert.ok(telegramReads > 0);
+  await byId('telegram-phone').fill('++44 (123) abc 45-67');
+  assert.equal(await byId('telegram-phone').inputValue(), '+441234567');
+  await byId('telegram-phone').fill(''); assert.equal(await byId('telegram-phone').inputValue(), '+');
   await byId('open-profile-editor-button').click();
   await page.locator('#student-firstName').fill('Анна');
   await byId('profile-form').dispatchEvent('submit');
@@ -166,14 +222,28 @@ try {
   await byId('account-platform').selectOption('24'); await byId('account-nickname').fill('@@Other123');
   assert.equal(await byId('account-nickname').inputValue(), '@Other123');
   await byId('close-account-editor-button').click();
+  await byId('edit-platform-accounts-button').click();
+  await byId('finish-platform-accounts-button').click();
+  assert.equal(await byId('edit-account-button').count(), 0);
   dashboard.platformAccounts = [];
   for (const nextRole of ['provider', 'admin']) {
     role = nextRole;
     await page.reload(); await byId(`${role}-dashboard`).waitFor();
     assert.equal(await byId('validated-student-profile').count(), 0);
     assert.equal(await page.locator('.student-preview').count(), 0);
+    assert.equal(await byId('edit-platform-accounts-button').count(), 0);
   }
   role = 'client';
+  dashboard.client = { ...client(), currentCompany: '', previousCompanies: '', stopListCompany: '', workPlaces: [] };
+  await page.reload(); await byId('open-workplaces-editor-button').click();
+  await byId('workplaces-editor').waitFor();
+  assert.equal(await byId('add-work-place').evaluate((button: HTMLButtonElement) => button === document.activeElement), true);
+  await byId('add-work-place').click();
+  await byId('work-company-0').fill('New company');
+  assert.equal(await byId('profile-form').count(), 0);
+  await byId('cancel-workplaces-button').click();
+  await byId('open-workplaces-editor-button').click();
+  assert.equal(await byId('work-company-0').count(), 0);
   clientId = 1; enabled = false; dashboard.client = client();
   await page.reload(); await byId('open-account-editor-button').waitFor();
   assert.equal(await byId('validated-student-profile').count(), 0);
