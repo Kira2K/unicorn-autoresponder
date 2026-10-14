@@ -20,9 +20,10 @@ async function getDolphinProfileWithProxy(
   if (hasProxyConnection(profile?.proxy)) return profile
 
   const proxyId = profile?.proxyId ?? profile?.proxy?.id
-  if (proxyId === undefined || proxyId === null || proxyId === '') return profile
+  // Dolphin uses zero for a profile without an attached proxy.
+  if (proxyId === undefined || proxyId === null || proxyId === '' || proxyId === 0 || proxyId === '0') return profile
   const response = await dependencies.request<any>('/proxy', {
-    query: { ids: String(proxyId) }
+    query: { 'ids[]': String(proxyId) }
   })
   const proxies = Array.isArray(response?.data) ? response.data : [response?.data]
   const proxy = proxies.find((item: any) => String(item?.id ?? '') === String(proxyId))
@@ -36,7 +37,7 @@ async function getDolphinProfileWithProxyLastCheck(
 ) {
   const profile = await dependencies.getProfile(profileId)
   const proxyId = profile?.proxyId ?? profile?.proxy?.id
-  if (proxyId === undefined || proxyId === null || proxyId === '') return profile
+  if (proxyId === undefined || proxyId === null || proxyId === '' || proxyId === 0 || proxyId === '0') return profile
   const response = await dependencies.request<any>('/proxy', {
     query: { 'ids[]': String(proxyId) }
   })

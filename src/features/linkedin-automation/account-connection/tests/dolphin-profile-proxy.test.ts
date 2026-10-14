@@ -17,7 +17,7 @@ async function run(): Promise<void> {
     }
   })
   assert.equal(profile.proxy.host, 'proxy.test')
-  assert.deepEqual(calls, [{ path: '/proxy', options: { query: { ids: '91' } } }])
+  assert.deepEqual(calls, [{ path: '/proxy', options: { query: { 'ids[]': '91' } } }])
 
   const embedded = { proxy: { id: 1, host: 'ready.test', port: 80 } }
   const same = await getDolphinProfileWithProxy(8, {

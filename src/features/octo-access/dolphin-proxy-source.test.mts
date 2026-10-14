@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { createDolphinProxySource } from './dolphin-proxy-source.mts';
+import { createOctoService } from './service.mts';
+import { createMemoryStore, testConfig } from './testing.mts';
+const { getDolphinProfileWithProxy } = createRequire(import.meta.url)('../../integrations/dolphin/profile-proxy.ts');
 
 const profile = { id: 10, proxy: { type: 'SOCKS5:', server: 'proxy.example', port: '1080', username: 'private-login', password: 'private-password' } };
 
@@ -12,6 +16,28 @@ test('lists only owned DB profile IDs and exposes no credentials', async () => {
   assert.deepEqual(owners, [5]); assert.deepEqual(reads.sort(), [10, 11]);
   assert.deepEqual(result, [{ id: 10, locale: 'en', hasProxy: true }, { id: 11, locale: 'ru', hasProxy: false }]);
   assert.doesNotMatch(JSON.stringify(result), /private|proxy.example|1080/);
+});
+
+test('Octo status accepts Dolphin Ru without a proxy (zero ID) alongside En with a proxy, without writes', async () => {
+  for (const proxyId of [0, '0']) {
+    const store = createMemoryStore();
+    const dolphin = createDolphinProxySource({ profiles: async () => [{ id: 10, locale: 'en' }, { id: 11, locale: 'ru' }],
+      readProfile: id => getDolphinProfileWithProxy(id, {
+        getProfile: async () => id === 10 ? profile : { id, proxy: null, proxyId },
+        request: async () => assert.fail('Embedded En proxy and absent Ru proxy require no /proxy request')
+      }) });
+    const unused = async (): Promise<never> => assert.fail('Status must not check, create or change a proxy');
+    const service = createOctoService({ store, config: { ...testConfig, allowAll: true },
+      getClient: async () => ({ id: 5, market: 'Both' }) as any,
+      onboarding: { dolphin, checker: { check: unused, best: unused }, catalogue: { list: unused, validate: unused } } });
+    const status = await service.status(5);
+    assert.deepEqual(status.onboarding.dolphinProfiles, [
+      { id: 10, locale: 'en', hasProxy: true }, { id: 11, locale: 'ru', hasProxy: false }
+    ]);
+    assert.deepEqual(status.profiles, []);
+    assert.equal(await store.clientState(5), undefined);
+    assert.doesNotMatch(JSON.stringify(status), /private-login|private-password|proxy.example/);
+  }
 });
 
 test('list caches cloud reads for 30 seconds while always refreshing ownership', async () => {
@@ -55,7 +81,7 @@ test('no profiles defers cloud access, and API failures never become an absent p
 });
 
 test('malformed cloud data and unresolved attached proxies fail safely', async () => {
-  for (const data of [null, [], {}, { ...profile, id: 11 }, { proxyId: 5 }, { proxy: { id: 5 } }, { proxy: { type: 'ftp', host: 'proxy.example', port: 1080 } }]) {
+  for (const data of [null, [], {}, { ...profile, id: 11 }, { proxyId: 5 }, { proxyId: 0, proxy: { id: 5 } }, { proxy: { id: 5 } }, { proxy: { type: 'ftp', host: 'proxy.example', port: 1080 } }]) {
     const source = createDolphinProxySource({ profiles: async () => [{ id: 10, locale: 'en' }], readProfile: async () => data });
     await assert.rejects(source.proxy(10), (error: any) => /^octo_dolphin_(profile|proxy)_invalid$/.test(error.code));
   }
