@@ -5,6 +5,7 @@ import { canContinueOctoOnboarding, createOctoLocationPicker, missingOctoLocales
 
 const props = defineProps({ status: { type: Object, required: true } })
 const emit = defineEmits(['queued', 'denied'])
+const windowsRequirement = 'Для работы с новыми профилями Octo нужен компьютер с Windows. Создавай профиль только если будешь открывать его в Octo на Windows.'
 const warningVisible = ref(false)
 const wizardVisible = ref(false)
 const confirmDolphin = ref(false)
@@ -130,6 +131,7 @@ onUnmounted(() => { mounted = false; picker.cancel(); controller.abort(); nodeKe
 
 <template>
   <div class="octo-onboarding" data-testid="octo-onboarding">
+    <p v-if="missingLocales.length" class="octo-warning" role="note">{{ windowsRequirement }}</p>
     <div v-if="onboarding.developmentHelp" class="octo-warning" role="alert" data-testid="octo-checker-local-help">
       <p>{{ onboarding.developmentHelp.message }}</p>
       <a :href="onboarding.developmentHelp.repositoryUrl" target="_blank" rel="noopener noreferrer">Установить proxy-checker — репозиторий и инструкции</a>
@@ -166,6 +168,7 @@ onUnmounted(() => { mounted = false; picker.cancel(); controller.abort(); nodeKe
     <Dialog :visible="wizardVisible" modal header="Настройка прокси для Octo" :style="{ width: 'min(680px, 94vw)' }" :closable="!submitting" :close-on-escape="!submitting" :dismissable-mask="false" @update:visible="closeWizard"
       :pt="{ pcCloseButton: { root: { 'aria-label': 'Закрыть настройку прокси' } } }">
       <form class="octo-setup-form" data-testid="octo-setup-form" @submit.prevent="submit()">
+        <p class="octo-warning" role="note">{{ windowsRequirement }}</p>
         <p>Сначала проверим прокси, затем создадим недостающие профили. Проверка может занять до 4 минут.</p>
         <fieldset :disabled="submitting || keySaving"><legend>Откуда взять прокси</legend>
           <label><input v-model="source" type="radio" value="nodemaven"> Сгенерировать прокси NodeMaven</label>
