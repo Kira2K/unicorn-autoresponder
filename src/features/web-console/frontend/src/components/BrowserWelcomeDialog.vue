@@ -13,7 +13,7 @@ function close() {
 </script>
 
 <template>
-  <Dialog :visible="visible" modal header="Новый браузер Octo" :style="{ width: 'min(760px, 94vw)' }" :dismissable-mask="false"
+  <Dialog :visible="visible" modal header="Новый браузер Octobrowser" :style="{ width: 'min(760px, 94vw)' }" :dismissable-mask="false"
     :pt="{ pcCloseButton: { root: { 'aria-label': 'Закрыть уведомление о браузере' } } }" @update:visible="close">
     <div class="browser-welcome" data-testid="octo-welcome">
       <span class="browser-welcome-badge"><i class="pi pi-sparkles" aria-hidden="true" /> Скоро станет ещё удобнее</span>
