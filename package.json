@@ -10,6 +10,7 @@
     "octo:console:db-test": "node src/features/octo-access/postgres.integration.mts",
     "octo:console:e2e:mock": "node src/features/web-console/e2e/octo-mock.e2e.mts",
     "octo:console:preflight": "node --env-file=.env src/features/octo-access/preflight.mts",
+    "octo:checker:preflight": "node src/features/octo-access/checker-preflight.mts",
     "octo:console:migrate": "node --env-file=.env src/features/octo-access/migration.mts",
     "octo:console:migrate-onboarding": "node --env-file=.env src/features/octo-access/migrate-onboarding.mts",
     "octo:console:seed": "node --env-file=.env src/features/octo-access/seed-pilot.mts",

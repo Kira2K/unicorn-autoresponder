@@ -122,10 +122,27 @@ and `.js` extensions on type imports for the project's NodeNext configuration.
    except Guest credentials and the individual profile password intentionally shown to
    authorized clients during their grant. `APP_DB=postgres` is required.
    Also configure `PROXY_CHECKER_BASE_URL` and `UNICORN_PROXY_CHECKER_SECRET_KEY`.
-   Currently the checker is local (`http://127.0.0.1:8002`). Render cannot use this
-   workstation address: a reachable authenticated service URL is required before rollout.
+   On Render, use the checker's **Service Address** with its protocol and port:
+   `PROXY_CHECKER_BASE_URL=http://<internal-host>:<port>` (no `/docs` or endpoint suffix).
+   Set both variables on the **Console backend**, and the identical secret on the checker.
+   Keep both services in the same workspace/region with private network access allowed.
+   The secret is sent server-to-server in JSON, never in a `VITE_*` variable or browser request.
+   No public checker URL, browser CORS setup, extra Console worker, or localhost fallback is needed.
+   Local development can still use `http://127.0.0.1:8002` with its local secret.
 5. `npm run octo:console:preflight` checks the token, Guest folder-only rights, folders
    and proxy pool through cloud GET requests. It never accesses the local desktop API.
+6. From **Console's Render Shell**, run `npm run octo:checker:preflight` using the deployed
+   environment. It checks `/health`, then authenticates with a deliberately incomplete
+   proxy URL. Expected output: `{"reachable":true,"secretAccepted":true,"proxyChecksStarted":0}`.
+   The expected `422 invalid_proxy` proves the request passed authentication without
+   starting a check, spending NodeMaven traffic or creating profiles. This command makes
+   no database writes and is not an automatic startup dependency or periodic probe.
+   A wrong secret, invalid URL, unreachable service or unexpected response gives
+   a sanitized error and a nonzero exit code. No secret or internal URL is printed.
+   This proves connectivity/authentication; the existing Console onboarding workflow
+   is still required to validate actual generation in the deployed environment.
+
+Render network reference: https://render.com/docs/private-network
 
 ## First Octo profiles and proxy setup
 

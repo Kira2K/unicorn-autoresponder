@@ -22,10 +22,10 @@ test('best uses the refreshed default of 20 residential IPv4 sticky SOCKS5 candi
   assert.equal(OCTO_PROXY_CANDIDATE_COUNT, count.default);
   assert.equal(count.maximum, 100);
   let calls = 0;
-  const adapter = createProxyChecker({ baseUrl: 'https://checker.example/', secret: 'service-secret',
+  const adapter = createProxyChecker({ baseUrl: 'http://checker-private:10000/', secret: 'service-secret',
     fetch: (async (url, init) => {
       calls++;
-      assert.equal(url, 'https://checker.example/v1/proxies/best');
+      assert.equal(url, 'http://checker-private:10000/v1/proxies/best');
       assert.equal(init?.method, 'POST');
       assert.ok(init?.signal instanceof AbortSignal);
       assert.deepEqual(JSON.parse(String(init?.body)), { unicorn_proxy_checker_secret_key: 'service-secret', api_key: 'provider-key',
