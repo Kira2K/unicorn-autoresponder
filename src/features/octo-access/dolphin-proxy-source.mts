@@ -13,7 +13,7 @@ function connection(profile: unknown): ProxyInput | undefined {
     throw new OctoError('octo_dolphin_profile_invalid', 502);
   const proxy = profile.proxy;
   if (proxy == null) {
-    if (profile.proxyId !== undefined && profile.proxyId !== null && profile.proxyId !== '')
+    if (![undefined, null, '', 0, '0'].includes(profile.proxyId))
       throw new OctoError('octo_dolphin_proxy_invalid', 502);
     return undefined;
   }
