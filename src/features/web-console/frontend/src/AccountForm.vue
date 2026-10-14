@@ -6,7 +6,7 @@ import Button from 'primevue/button'
 import FieldInfoLabel from './FieldInfoLabel.vue'
 import { usernameDisplay, updateUsernameInput } from './username-input.js'
 import { studentPreviewLabel } from './student-preview-labels.js'
-import { phoneInputValue, updateContactInput } from './contact-input.js'
+import { isAccountPhoneField, phoneInputValue, updateContactInput } from './contact-input.js'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 const form = defineModel('form', { type: Object, required: true })
 const props = defineProps({
@@ -27,10 +27,10 @@ const loginHint = computed(() => {
   const emailPlatform = { hh_ru: 'email_ru', hh_en: 'email_en' }[props.displayLabel]
   return emailPlatform ? platformDisplayLabel(emailPlatform) : ''
 })
-const digitsOnlyPhone = computed(() => props.preview && ['phone_en', 'phone_ru'].includes(props.displayLabel))
+const phoneLogin = computed(() => isAccountPhoneField('login', props.displayLabel))
 const formatPhone = value => phoneInputValue(value, props.displayLabel)
 function capturePhone(event) {
-  if (digitsOnlyPhone.value) updateContactInput(event, formatPhone)
+  updateContactInput(event, formatPhone)
 }
 </script>
 <template>
@@ -57,11 +57,14 @@ function capturePhone(event) {
   </label>
   <label class="field">
     <span>{{ ui('Login') }}<small v-if="loginHint" class="account-login-hint"> — {{ loginHint }}</small></span>
-    <InputText v-model="form.login" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" data-testid="account-login" />
+    <InputText v-if="phoneLogin" :model-value="formatPhone(form.login)" inputmode="tel" placeholder="+кодномер" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" data-testid="account-login" @input.capture="capturePhone" @update:model-value="form.login = $event" />
+    <InputText v-else v-model="form.login" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" data-testid="account-login" />
+    <small v-if="phoneLogin">Формат: +кодномер, без пробелов и скобок.</small>
   </label>
   <label class="field">
     <span>{{ ui('Phone') }}<span v-if="phoneRuSelected" class="required-star"> *</span></span>
-    <InputText :model-value="digitsOnlyPhone ? formatPhone(form.phone) : form.phone" :inputmode="digitsOnlyPhone ? 'numeric' : undefined" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" :class="{ 'phone-ru-invalid': phoneRuValidationMessage }" :aria-invalid="Boolean(phoneRuValidationMessage)" data-testid="account-phone" @input.capture="capturePhone" @update:model-value="emit('phone', $event)" />
+    <InputText :model-value="accountFieldEnabled('phone') ? formatPhone(form.phone) : form.phone" inputmode="tel" :placeholder="accountFieldEnabled('phone') ? '+кодномер' : undefined" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" :class="{ 'phone-ru-invalid': phoneRuValidationMessage }" :aria-invalid="Boolean(phoneRuValidationMessage)" data-testid="account-phone" @input.capture="capturePhone" @update:model-value="emit('phone', $event)" />
+    <small v-if="accountFieldEnabled('phone') && !phoneRuSelected">Формат: +кодномер, без пробелов и скобок.</small>
     <small v-if="phoneRuSelected" class="phone-ru-hint">Российский номер в формате +7XXXXXXXXXX. Этот номер используется для HH на ру рынке (вход и подтверждение по SMS).</small>
     <small v-if="phoneRuValidationMessage" class="phone-ru-error" role="alert">{{ phoneRuValidationMessage }}</small>
   </label>
@@ -85,7 +88,7 @@ function capturePhone(event) {
   </label>
   <label class="field">
     <span>{{ ui('Foreign number') }}</span>
-    <InputText v-model="form.foreignNumber" :disabled="!accountFieldEnabled('foreignNumber')" :required="accountFieldRequired('foreignNumber')" data-testid="account-foreign-number" />
+    <InputText :model-value="accountFieldEnabled('foreignNumber') ? phoneInputValue(form.foreignNumber) : form.foreignNumber" inputmode="tel" :disabled="!accountFieldEnabled('foreignNumber')" :required="accountFieldRequired('foreignNumber')" data-testid="account-foreign-number" @input.capture="updateContactInput($event, phoneInputValue)" @update:model-value="form.foreignNumber = $event" />
   </label>
   <label class="field">
     <span>{{ ui('Recovery codes') }}</span>

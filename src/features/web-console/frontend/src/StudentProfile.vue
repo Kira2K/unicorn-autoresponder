@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import StudentProfileField from './StudentProfileField.vue'
 import { formatBirthDate, profileAge, profileFullName, profileFieldLabels, validateStudentProfile } from '../../student-profile-validation.ts'
 import { studentProfileDraft, studentProfileSavePayload } from './student-profile-draft.js'
@@ -8,16 +8,14 @@ import './student-profile.css'
 import { telegramInputValue, updateContactInput } from './contact-input.js'
 
 const props = defineProps({ client: { type: Object, required: true }, englishLevels: { type: Array, default: () => [] }, save: { type: Function, required: true } })
-const emit = defineEmits(['saved', 'editor-state', 'focus-workplaces'])
-const workPlaces = defineModel('workPlaces', { type: Array, default: () => [] })
+const emit = defineEmits(['saved'])
 const editing = ref(false), submitted = ref(false), saving = ref(false), failure = ref(''), success = ref(''), formElement = ref(null)
 const draft = ref(studentProfileDraft(props.client))
 const levels = computed(() => props.englishLevels.filter(level => /\b[ABC][12]\b/i.test(level.label)))
 const options = computed(() => ({ englishLevelIds: levels.value.map(level => Number(level.id)) }))
-const validation = computed(() => validateStudentProfile({ ...draft.value, workPlaces: workPlaces.value }, options.value))
-const savedValidation = computed(() => validateStudentProfile(studentProfileDraft(props.client), options.value))
+const validation = computed(() => validateStudentProfile({ ...draft.value, workPlaces: [] }, options.value))
+const savedValidation = computed(() => validateStudentProfile({ ...studentProfileDraft(props.client), workPlaces: [] }, options.value))
 const errors = computed(() => submitted.value ? validation.value.errors : {})
-watchEffect(() => emit('editor-state', { editing: editing.value, saving: saving.value, error: errors.value.workPlaces || '' }))
 const errorNames = computed(() => Object.keys(errors.value).map(key => profileFieldLabels[key]))
 const autoName = computed(() => profileFullName(draft.value))
 const autoAge = computed(() => profileAge(draft.value.birthDate))
@@ -26,7 +24,7 @@ const educationLabels = { uni: 'Университет', faculty: 'Факуль�
 const otherEducationLabels = { uni: 'Название учебного заведения', yearOfEnd: 'Год окончания', city: 'Город' }
 let educationDrafts = {}
 watch(() => props.client, client => { if (!editing.value) draft.value = studentProfileDraft(client) })
-function openEditor() { draft.value = studentProfileDraft(props.client); educationDrafts = {}; workPlaces.value = draft.value.workPlaces; submitted.value = false; failure.value = ''; success.value = ''; editing.value = true }
+function openEditor() { draft.value = studentProfileDraft(props.client); educationDrafts = {}; submitted.value = false; failure.value = ''; success.value = ''; editing.value = true }
 function cancel() { editing.value = false; failure.value = ''; submitted.value = false }
 function setNoEducation() {
   const mode = draft.value.noHigherEducation
@@ -45,7 +43,6 @@ async function submit() {
     const first = formElement.value?.querySelector('.invalid')
     first?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     first?.querySelector('input,select,button')?.focus({ preventScroll: true })
-    if (!first && errors.value.workPlaces) emit('focus-workplaces')
     return
   }
   saving.value = true
@@ -130,7 +127,7 @@ const viewFields = computed(() => [
           <StudentProfileField name="realLocation" label="Реальная локация" required :error="errors.realLocation" hint="Формат: City, Country — на английском. Например: Tbilisi, Georgia" v-slot="field">
             <input :id="field.id" v-model="draft.realLocation" placeholder="Tbilisi, Georgia" :aria-invalid="field.invalid" :aria-describedby="field.describedby" aria-required="true" data-testid="profile-real-location" />
           </StudentProfileField>
-          <StudentProfileField name="desiredLocation" label="Желаемая локация" required :error="errors.desiredLocation" hint="Формат: City, Country — на английском. Укажите Remote, если рассматриваете исключительно удалённую работу, используй &quot;; &quot; как разделитель" v-slot="field">
+          <StudentProfileField name="desiredLocation" label="Желаемая локация" required :error="errors.desiredLocation" hint="Формат: City, Country — на английском. Укажи Remote, если рассматриваешь исключительно удалённую работу, используй &quot;; &quot; как разделитель" v-slot="field">
             <input :id="field.id" v-model="draft.desiredLocation" placeholder="City, Country или Remote" :aria-invalid="field.invalid" :aria-describedby="field.describedby" aria-required="true" data-testid="profile-desired-location" />
             <button type="button" class="student-chip" @click="draft.desiredLocation = 'Remote'">Remote</button>
           </StudentProfileField>

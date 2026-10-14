@@ -23,12 +23,12 @@ export function studentProfileDraft(client) {
 }
 
 export function studentProfileSavePayload(profile) {
+  const { workPlaces, currentCompany, previousCompanies, stopListCompany, ...personal } = profile
   const entries = validateStudentEducation(profile.educationEntries, profile.noHigherEducation === true, new Date().getFullYear()).value
   return {
-    ...profile,
+    ...personal,
     education: educationText(entries),
-    educationEntries: entries,
-    ...workPlacesSavePayload(profile.workPlaces)
+    educationEntries: entries
   }
 }
 
