@@ -275,6 +275,23 @@ form. It reads the Dolphin source without changing its binding. An interrupted f
 verification may resume the exact recorded binding with `OCTO_E2E_RESUME_PROFILE_ID`;
 this does not create another profile/proxy or repeat a successful write.
 
+`hh-responses/octo` reuses HH authentication, scenario injection, responder and stop-list
+logic on an already opened Octo CDP session. A desktop runner still owns profile start
+and ordinary close; the cloud-only Console backend does not launch desktop browsers.
+This manual runner does not enable scheduled HH work or migrate Dolphin targets.
+Its scoped submission guard counts attempts before dispatch, including ambiguous results.
+LinkedIn requests are blocked in the Kira test; no LinkedIn connection is created.
+
+`web-console/e2e/octo-hh-live.e2e.mts` is deliberately scoped to the inspected Kira
+pilot binding. `OCTO_E2E_KIRA=1` plus `OCTO_E2E_HH_AUTH_ONLY=1` tests Console login,
+grant, desktop opening, HH login and ordinary-close cleanup without submissions.
+For the separately approved single application, set `OCTO_E2E_HH_ONE_APPLICATION=1`
+and leave auth-only off. `OCTO_E2E_HH_COVER_TEXT` is a run-only override; it never
+updates the database. Both HH schedule flags remain disabled. A durable one-run marker
+prevents silently repeating the application budget after an interrupted/uncertain run.
+Inspect the saved report before any operator-authorized retry; a successful profile
+launch or auth-only test is not evidence of a successful application.
+
 LinkedIn onboarding still selects a Dolphin En binding and uses its inspector/session
 collector. Octo needs its own target selection and collector (UUID, grant/password,
 proxy mapping and desktop CDP session); the existing Unipile account adapter and later
