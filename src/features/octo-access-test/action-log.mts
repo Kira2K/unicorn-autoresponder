@@ -22,6 +22,7 @@ export interface ActionLogOptions {
   now?: () => number;
   reconnectMs?: number;
   includeUpdates?: boolean;
+  includeDeletions?: boolean;
   requireCompleteHistory?: boolean;
   onReplayGap?: (coverageSince: number) => Promise<void>;
 }
@@ -35,6 +36,7 @@ export function createActionLogListener(options: ActionLogOptions) {
   const profileIds = new Set(options.profileIds.map(id => id.replaceAll('-', '').toLowerCase()));
   const actions = new Set(ACTIONS);
   if (options.includeUpdates) actions.add('profiles.updated');
+  if (options.includeDeletions) { actions.add('profiles.trashed'); actions.add('profiles.deleted'); }
   const now = options.now ?? Date.now;
   const connect = options.connect ?? ((url, opts) => new WebSocket(url, opts) as unknown as SocketLike);
   const reconnectMs = Math.max(100, Math.min(60_000, options.reconnectMs ?? 1_000));

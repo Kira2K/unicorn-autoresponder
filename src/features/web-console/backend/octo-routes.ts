@@ -19,7 +19,17 @@ export function registerOctoRoutes(app: Express, requireAuth: RequestHandler, se
     }
   };
   app.get('/api/octo/profiles/status', requireAuth, guard, run(req => service!.status(Number(req.webSession!.clientId))));
+  app.post('/api/octo/onboarding', requireAuth, guard,
+    run(req => service!.startOnboarding(Number(req.webSession!.clientId), req.body), 202));
+  app.post('/api/octo/onboarding/:id/continue', requireAuth, guard,
+    run(req => service!.continueOnboarding(Number(req.webSession!.clientId), String(req.params.id), req.body?.acceptLowScore), 202));
+  app.put('/api/octo/nodemaven-key', requireAuth, guard,
+    run(req => service!.saveNodeMavenKey(Number(req.webSession!.clientId), req.body?.key)));
+  app.get('/api/octo/locations', requireAuth, guard,
+    run(req => service!.locations(Number(req.webSession!.clientId), req.query.level, req.query.country, req.query.region)));
   app.post('/api/octo/profiles/ensure', requireAuth, guard, run(req => service!.ensure(Number(req.webSession!.clientId), req.body?.ownProxy === true), 202));
   app.post('/api/octo/grants', requireAuth, guard, run(req => service!.acquire(Number(req.webSession!.clientId), Number(req.body?.profileId)), 202));
+  app.post('/api/octo/profiles/:id/proxy', requireAuth, guard,
+    run(req => service!.saveProxy(Number(req.webSession!.clientId), Number(req.params.id), req.body), 202));
   app.get('/api/octo/grants/:id', requireAuth, guard, run(req => service!.grant(Number(req.webSession!.clientId), String(req.params.id))));
 }

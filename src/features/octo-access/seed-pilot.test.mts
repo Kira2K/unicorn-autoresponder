@@ -3,9 +3,14 @@ import assert from 'node:assert/strict';
 import { seedPilot, parseSeedArgs } from './seed-pilot.mts';
 import type { WorkingTable } from '../../integrations/postgres/working-catalog.mts';
 import type { PostgresTransaction } from '../../integrations/postgres/working-client.mts';
+import { createRequire } from 'node:module';
+const { getRequiredClientDataIssues } = createRequire(import.meta.url)('../web-console/backend/dolphin-profile-provisioning.ts') as {
+  getRequiredClientDataIssues(client: unknown, options: { requireCalendarEmail: boolean }): unknown[];
+};
 
 function fixture(fallback = false) {
-  const data: Record<string, Record<string, unknown>[]> = { clients: [], stacks: [{ Id: 4, name: 'FRONTEND' }], market: [{ Id: 1, market: 'ru' }] };
+  const data: Record<string, Record<string, unknown>[]> = { clients: [], stacks: [{ Id: 4, name: 'FRONTEND' }],
+    market: [{ Id: 1, market: 'ru' },{ Id: 2,market:'En' }] };
   const columns = ['client_name', 'first_name', 'last_name', 'calendar_email', 'telegram_general_chat_id', 'client_status',
     ...(fallback ? [] : ['legend_info'])].map(dataKey => ({ id: dataKey, title: dataKey, dataKey, sqlName: dataKey, sqlType: 'text' }));
   columns.push(...['stacks_id', 'market_id'].map(dataKey => ({ id: dataKey, title: dataKey, dataKey, sqlName: dataKey, sqlType: 'bigint' })));
@@ -79,4 +84,56 @@ test('second insert failure rolls both clients back; missing stack fails before 
   const g = fixture(); g.data.stacks = [];
   await assert.rejects(seedPilot(g.db, true), /octo_pilot_frontend_stack_required/);
   assert.ok(!g.calls.includes('create'));
+});
+
+test('proxy fixture CLI is opt-in and rejects ambiguous modes and repeated flags', () => {
+  assert.equal(parseSeedArgs(['--proxy-fixture']),false);
+  assert.equal(parseSeedArgs(['--proxy-fixture','--dry-run']),false);
+  assert.equal(parseSeedArgs(['--apply','--proxy-fixture']),true);
+  for (const args of [['--apply','--dry-run'],['--proxy-fixture','--proxy-fixture'],['--apply','--apply']])
+    assert.throws(() => parseSeedArgs(args), /octo_pilot_invalid_arguments/);
+});
+
+test('proxy group previews one client and idempotently creates only the paused En fixture', async () => {
+  for (const fallback of [false,true]) {
+    const f = fixture(fallback);
+    assert.deepEqual(await seedPilot(f.db,false,'proxy-fixture'), { mode:'preview',clients:[
+      { fixture:'Test For Octo Proxy creation',clientId:null,action:'would_create' }] });
+    assert.ok(f.calls.every(c => c.startsWith('read:')));
+    await seedPilot(f.db,true);
+    const defaults = structuredClone(f.data.clients);
+    const result = await seedPilot(f.db,true,'proxy-fixture');
+    assert.deepEqual(result.clients,[{ fixture:'Test For Octo Proxy creation',clientId:102,action:'created' }]);
+    assert.deepEqual(f.data.clients.slice(0,2),defaults);
+    const created = f.data.clients[2];
+    assert.equal(created.first_name,'Test');
+    assert.equal(created.last_name,'For Octo Proxy creation');
+    assert.deepEqual(getRequiredClientDataIssues({
+      id:created.Id, clientName:created.client_name, firstName:created.first_name,
+      lastName:created.last_name, calendarEmail:created.calendar_email,
+      commonChatId:created.telegram_general_chat_id, primaryStack:'FRONTEND', market:'En'
+    }, { requireCalendarEmail:true }), []);
+    assert.deepEqual([created.client_name,created.calendar_email,created.telegram_general_chat_id,
+      created.client_status,created.stacks_id,created.market_id],
+      ['Test For Octo Proxy creation','octo.proxy.test@example.com','invalid-octo-proxy-fixture-v1','paused',4,2]);
+    assert.ok(f.calls.includes('lock:clients:octo-proxy-fixture-v1'));
+    const before = structuredClone(f.data.clients);
+    assert.deepEqual((await seedPilot(f.db,true,'proxy-fixture')).clients,
+      [{ fixture:'Test For Octo Proxy creation',clientId:102,action:'existing' }]);
+    assert.deepEqual(f.data.clients,before);
+    assert.equal(f.calls.filter(c => c==='create').length,3);
+  }
+});
+
+test('proxy fixture name, email, chat and altered marker collisions fail without writes', async () => {
+  for (const collision of [{ client_name:'Test For Octo Proxy creation' },
+    { calendar_email:'OCTO.PROXY.TEST@EXAMPLE.COM' },{ telegram_general_chat_id:'invalid-octo-proxy-fixture-v1' },
+    { legend_info:'octo-proxy-fixture-v1:proxy-creation',client_status:'active' }]) {
+    const f = fixture(); f.data.clients.push({ Id:99,...collision });
+    await assert.rejects(seedPilot(f.db,true,'proxy-fixture'),/octo_pilot_fixture_collision/);
+    assert.ok(!f.calls.includes('create'));
+  }
+  const f = fixture(); f.data.market = f.data.market.filter(m => m.market==='ru');
+  await assert.rejects(seedPilot(f.db,true,'proxy-fixture'),/octo_pilot_en_market_required/);
+  assert.ok(!f.calls.includes('create'));
 });

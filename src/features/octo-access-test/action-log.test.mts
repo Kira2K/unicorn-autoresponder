@@ -8,6 +8,22 @@ class FakeSocket extends EventEmitter implements SocketLike {
   page(value: unknown) { this.emit('message', Buffer.from(JSON.stringify(value))); }
 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+test('deletion events are opt-in, scoped to managed UUIDs and exclude raw data', async () => {
+  for (const includeDeletions of [false, true]) {
+    const socket = new FakeSocket(), seen: any[] = [];
+    const listener = createActionLogListener({ token: 't', profileIds: ['AB-CD'], includeDeletions,
+      loadCursor: () => undefined, connect: () => socket, onPage: async page => { seen.push(page); } });
+    listener.start(); socket.emit('open');
+    socket.page({ items: [
+      { uuid: 'trash', object_id: 'abcd', action: 'profiles.trashed', time: 1, data: { password: 'private' } },
+      { uuid: 'delete', object_id: 'AB-CD', action: 'profiles.deleted', time: 2 },
+      { uuid: 'other', object_id: 'foreign', action: 'profiles.deleted', time: 3 }
+    ], watermark: { uuid: 'page', time: 3 } });
+    await tick();
+    assert.deepEqual(seen[0].events.map((e: any) => e.id), includeDeletions ? ['trash', 'delete'] : []);
+    assert.equal(JSON.stringify(seen).includes('private'), false); await listener.stop();
+  }
+});
 const page = (id: string, object_id = 'profile-1') => ({ items: [
   { uuid: `event-${id}`, action: 'profiles.started', time: 100, object_id, user_email: 'secret@example.com', object_title: 'secret title', data: { proxy: 'secret' } },
   { uuid: 'ignored', action: 'profiles.proxy_changed', time: 100, object_id },

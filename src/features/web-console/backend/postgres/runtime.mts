@@ -13,6 +13,11 @@ import { readOctoConfig } from '../../../octo-access/config.mts';
 import { createOctoPostgresStore } from '../../../octo-access/postgres-store.mts';
 import { createOctoRuntime } from '../../../octo-access/runtime.mts';
 import { createCloudApi } from '../../../octo-access/cloud-api.mts';
+import { createProxyChecker } from '../../../octo-access/proxy-checker.mts';
+import { createCheckerDevelopmentHelp } from '../../../octo-access/checker-development-help.mts';
+import { createNodeMavenCatalogue } from '../../../octo-access/nodemaven-locations.mts';
+import { createDolphinProxySource } from '../../../octo-access/dolphin-proxy-source.mts';
+import { OctoError } from '../../../octo-access/contracts.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const config = readPostgresAppDbConfig(env), pool = open(config);
@@ -37,12 +42,20 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       octoLockPool = open(config);
       const octoStore = createOctoPostgresStore(pool, config.database, octoLockPool);
       await octoStore.checkSchema();
-      const clients = await Promise.all([...octoConfig.allowedClientIds].map(id => options.repository.getClientById(id)));
-      const emails = clients.map(c => c.calendarEmail.toLowerCase()).sort();
-      if (emails.join(',') !== 'alex.octo@example.com,bob.octo@example.com')
+      const clients = await Promise.all((octoConfig.allowAll ? [] : [...octoConfig.allowedClientIds]).map(id => options.repository.getClientById(id)));
+      if (clients.some(c => !c.id || !c.calendarEmail))
         throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
       octo = createOctoRuntime({ store: octoStore, api: createCloudApi(env.OCTO_API_TOKEN!), config: octoConfig,
         token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
+        onboarding: {
+          developmentHelp: createCheckerDevelopmentHelp(env),
+          checker: env.PROXY_CHECKER_BASE_URL && env.UNICORN_PROXY_CHECKER_SECRET_KEY
+            ? createProxyChecker({ baseUrl: env.PROXY_CHECKER_BASE_URL, secret: env.UNICORN_PROXY_CHECKER_SECRET_KEY })
+            : { check: async () => { throw new OctoError('octo_checker_configuration_required', 503); },
+              best: async () => { throw new OctoError('octo_checker_configuration_required', 503); } },
+          catalogue: createNodeMavenCatalogue(),
+          dolphin: createDolphinProxySource({ profiles: id => options.repository.getDolphinProfilesForClient(id) })
+        },
         report: event => console.error(JSON.stringify({ feature: 'octo', ...event })) });
     }
     return { options: { ...options, ...(octo ? { octoService: octo.service } : {}) }, close,

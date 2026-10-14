@@ -92,7 +92,54 @@ test('isolated PostgreSQL migration rerun and real storage contracts', { timeout
     for (const definition of [clients, profiles])
       await admin.query('INSERT INTO copy_meta.inventory(id,definition) VALUES($1,$2::jsonb)', [definition.id, JSON.stringify(definition)]);
     const migration = await readFile(new URL('./sql/001-octo.up.sql', import.meta.url), 'utf8');
-    await admin.query(migration); await admin.query(migration); await admin.query('RESET ROLE');
+    await admin.query(migration); await admin.query(migration);
+    const onboardingMigration = await readFile(new URL('./sql/002-octo-onboarding.up.sql', import.meta.url), 'utf8');
+    const onboardingBody = onboardingMigration.replace(/^BEGIN;\r?$/m,'').replace(/^COMMIT;\r?$/m,'');
+    // First-application preservation and pending-operation rejection on disposable fixture rows.
+    const inherited = { ...newProfile(8,'ru','34567'), id:90, revision:1, phase:'ready' };
+    await admin.query('BEGIN');
+    await admin.query(`INSERT INTO noco.dolphin_profiles(id,"02_clients_id",locale,browser,_copy_id)
+      VALUES(90,8,'Ru','octo','["90"]')`);
+    await admin.query(`INSERT INTO noco.octo_profiles(profile_id,client_id,locale,revision,state)
+      VALUES(90,8,'ru',1,$1::jsonb)`, [JSON.stringify(inherited)]);
+    const beforeMigration = (await admin.query('SELECT to_jsonb(p) AS row FROM noco.dolphin_profiles p ORDER BY id')).rows;
+    await admin.query(onboardingBody); await admin.query(onboardingBody);
+    assert.deepEqual((await admin.query('SELECT state FROM noco.octo_profiles WHERE profile_id=90')).rows[0].state, inherited);
+    assert.equal((await admin.query('SELECT password FROM noco.octo_clients WHERE client_id=8')).rows[0].password,'34567');
+    assert.deepEqual((await admin.query('SELECT to_jsonb(p) AS row FROM noco.dolphin_profiles p ORDER BY id')).rows, beforeMigration);
+    await admin.query('ROLLBACK');
+    for (const patch of [{ phase:'creating' }, { pending:'create' },
+      { grant:{ phase:'granted' } }, { proxyChange:{ phase:'attaching' } }]) {
+      await admin.query('BEGIN');
+      await admin.query(`INSERT INTO noco.dolphin_profiles(id,"02_clients_id",locale,browser,_copy_id)
+        VALUES(90,8,'Ru','octo','["90"]')`);
+      await admin.query(`INSERT INTO noco.octo_profiles(profile_id,client_id,locale,revision,state)
+        VALUES(90,8,'ru',1,$1::jsonb)`, [JSON.stringify({ ...inherited, ...patch })]);
+      await assert.rejects(admin.query(onboardingBody), /Pending Octo operations/);
+      await admin.query('ROLLBACK');
+    }
+    await admin.query('BEGIN');
+    for (const [id,locale,password] of [[90,'ru','34567'],[91,'en','45678']] as const) {
+      await admin.query(`INSERT INTO noco.dolphin_profiles(id,"02_clients_id",locale,browser,_copy_id)
+        VALUES($1,8,$2,'octo',$3)`, [id,locale==='ru'?'Ru':'En',JSON.stringify([String(id)])]);
+      await admin.query(`INSERT INTO noco.octo_profiles(profile_id,client_id,locale,revision,state)
+        VALUES($1,8,$2,1,$3::jsonb)`, [id,locale,JSON.stringify({ ...inherited,id,locale,password })]);
+    }
+    await assert.rejects(admin.query(onboardingBody), /different passwords/);
+    await admin.query('ROLLBACK');
+    await admin.query('BEGIN');
+    await admin.query('CREATE TABLE noco.octo_clients(client_id text,password text,revision bigint,state jsonb)');
+    await assert.rejects(admin.query(onboardingBody), /Incompatible client column/);
+    await admin.query('ROLLBACK');
+    await admin.query(onboardingMigration); await admin.query(onboardingMigration);
+    const deletionMigration = await readFile(new URL('./sql/003-octo-deletion.up.sql', import.meta.url), 'utf8');
+    await admin.query(deletionMigration); await admin.query(deletionMigration); await admin.query('RESET ROLE');
+    const privateGrants = (await admin.query(`SELECT
+      has_table_privilege('unicorn_sql_app','noco.octo_clients','SELECT') AS can_select,
+      has_table_privilege('unicorn_sql_app','noco.octo_clients','INSERT') AS can_insert,
+      has_table_privilege('unicorn_sql_app','noco.octo_clients','UPDATE') AS can_update,
+      has_table_privilege('unicorn_sql_app','noco.octo_clients','DELETE') AS can_delete`)).rows[0];
+    assert.deepEqual(privateGrants,{ can_select:true,can_insert:true,can_update:true,can_delete:false });
     const legacy = (await admin.query('SELECT browser,dolphin_profile_id,_copy_id FROM noco.dolphin_profiles WHERE id=10')).rows[0];
     assert.deepEqual(legacy, { browser: 'dolphin', dolphin_profile_id: '7001', _copy_id: '["10"]' });
     const config = { ...connection, user: 'unicorn_sql_app', password: appPassword };
@@ -103,6 +150,16 @@ test('isolated PostgreSQL migration rerun and real storage contracts', { timeout
     const first = (await store.reserve([newProfile(7,'ru','12345')]))[0]; assert.equal(first.id, 11);
     const pair = await store.reserve([newProfile(7,'ru','54321'),newProfile(7,'en','67890')]);
     assert.deepEqual(pair.map(p => p.id), [first.id,12]);
+    assert.deepEqual(pair.map(p => p.password), ['12345','12345']);
+    const client = await store.clientState(7); assert.ok(client); assert.equal(client.password,'12345');
+    assert.deepEqual(await store.claimClientPassword(7,'77777'),client);
+    const withKey = await store.saveClientState({ ...client, nodeMavenKey:'private-fixture-key',
+      setup:{ id:'setup-fixture',source:'nodemaven',phase:'queued',createdAt:1,confirmDolphin:false } });
+    assert.equal(withKey.revision,2);
+    await assert.rejects(store.saveClientState({ ...client, nodeMavenKey:'stale-key' }), { code:'octo_stale_revision' });
+    await assert.rejects(store.saveClientState({ ...withKey, password:'55555' }), { code:'octo_stale_revision' });
+    await assert.rejects(store.claimClientPassword(8,'12345'), { code:'octo_password_conflict' });
+    assert.equal(await store.clientState(8),undefined);
     await assert.rejects(store.reserve([newProfile(8,'ru','12345')]), { code: 'octo_password_conflict' });
     assert.equal((await store.list(8)).length, 0);
     assert.equal((await admin.query('SELECT count(*)::integer AS n FROM noco.dolphin_profiles')).rows[0].n, 3);
@@ -110,6 +167,8 @@ test('isolated PostgreSQL migration rerun and real storage contracts', { timeout
     assert.equal(saved.revision, 2);
     await assert.rejects(store.save({ ...first, uuid: 'stale' }), { code: 'octo_stale_revision' });
     assert.equal((await store.get(first.id))?.uuid, 'AB-CD');
+    await assert.rejects(store.save({ ...saved,password:'55555' }), { code:'record_is_referenced' });
+    assert.equal((await store.get(first.id))?.password,'12345');
     await assert.rejects(store.save({ ...pair[1], proxy: { uuid: 'pxyz', title: 'duplicate' } }), { code: 'duplicate_record' });
     assert.equal((await store.get(pair[1].id))?.revision, 1);
     const page = { events: [
@@ -143,9 +202,50 @@ test('isolated PostgreSQL migration rerun and real storage contracts', { timeout
       store.reserve([newProfile(8,'ru','11111')]),store.reserve([newProfile(8,'ru','22222')])
     ]);
     assert.equal(reservationA[0].id,reservationB[0].id); assert.equal((await store.list(8)).length,1);
+    const owner8 = await store.clientState(8); assert.ok(owner8);
+    assert.equal(owner8.password,reservationA[0].password);
+    assert.equal(owner8.nodeMavenKey,undefined);
+    assert.equal((await store.clientState(7))?.nodeMavenKey,'private-fixture-key');
+    const [casA,casB] = await Promise.allSettled([
+      store.saveClientState({ ...owner8,nodeMavenKey:'owner-eight-A' }),
+      store.saveClientState({ ...owner8,nodeMavenKey:'owner-eight-B' })
+    ]);
+    assert.equal([casA,casB].filter(r => r.status==='fulfilled').length,1);
+    const failedCas = [casA,casB].find(r => r.status==='rejected');
+    assert.equal(failedCas?.status==='rejected' && failedCas.reason.code,'octo_stale_revision');
+    assert.deepEqual((await store.clientStates()).map(c => c.clientId),[7,8]);
+    // Reruns accept new queued creations/setup after the migration has been applied.
+    await admin.query('SET ROLE unicorn_noco_copy_owner');
+    await admin.query(onboardingMigration); await admin.query(onboardingMigration); await admin.query('RESET ROLE');
     assert.equal((await admin.query('SELECT octo_profile_id FROM noco.dolphin_profiles WHERE id=$1',[first.id])).rows[0].octo_profile_id,'AB-CD');
     const persisted = (await admin.query('SELECT state->>\'password\' AS password FROM noco.octo_profiles WHERE profile_id=$1',[first.id])).rows[0];
     assert.equal(persisted.password,'12345');
+    // Event and deletion contracts run under the real application role, not the owner.
+    const beforeOther = await store.get(pair[1].id);
+    const deletionPage = { events: [{ id: 'delete-profile', profileId: 'AB-CD', action: 'profiles.trashed', time: 100 }],
+      watermark: { uuid: 'delete-page', time: 100 } };
+    await store.recordPage(deletionPage); await store.recordPage(deletionPage);
+    const marked = (await store.get(first.id))!;
+    assert.equal(marked.deletion?.phase, 'verify');
+    await assert.rejects(store.save(saved), { code: 'octo_stale_revision' });
+    await assert.rejects(store.saveClientState(withKey), { code: 'octo_stale_revision' });
+    const purge = await store.save({ ...marked, deletion: { ...marked.deletion!, phase: 'purge' } });
+    // A dependent foreign key proves that partial purges and setup cleanup roll back together.
+    await admin.query('CREATE TABLE noco.fixture_reference(profile_id bigint REFERENCES noco.dolphin_profiles(id))');
+    await admin.query('INSERT INTO noco.fixture_reference VALUES($1)', [first.id]);
+    await assert.rejects(store.remove(purge), { code: 'record_is_referenced' });
+    assert.deepEqual(await store.get(first.id), purge); assert.ok((await store.clientState(7))?.setup);
+    assert.ok((await store.events('abcd')).length);
+    await admin.query('DELETE FROM noco.fixture_reference');
+    await Promise.all([store.remove(purge), store.recordPage({ events: [{ ...deletionPage.events[0], id: 'late-delete' }],
+      watermark: { uuid: 'late-delete-page', time: 110 } })]);
+    assert.equal(await store.get(first.id), undefined); assert.deepEqual(await store.events('abcd'), []);
+    assert.equal((await admin.query('SELECT count(*)::integer AS n FROM noco.dolphin_profiles WHERE id=$1', [first.id])).rows[0].n, 0);
+    assert.equal((await store.clientState(7))?.setup, undefined);
+    assert.equal((await store.clientState(7))?.nodeMavenKey, 'private-fixture-key');
+    assert.deepEqual(await store.get(pair[1].id), beforeOther);
+    assert.deepEqual((await admin.query('SELECT browser,dolphin_profile_id,_copy_id FROM noco.dolphin_profiles WHERE id=10')).rows[0], legacy);
+    await store.remove(purge);
   } finally {
     for (const leader of leaders) { try { await leader.release(); } catch {} }
     for (const pool of pools) await pool.end();

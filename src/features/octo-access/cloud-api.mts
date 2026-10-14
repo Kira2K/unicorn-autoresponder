@@ -1,6 +1,8 @@
 import { createOctoApi } from '../octo-access-test/octo-api.mts';
 import { OctoError } from './contracts.mts';
-import type { CloudApi } from './contracts.mts';
+import type { CloudApi, SavedProxy } from './contracts.mts';
+import { parseProxyInput } from './proxy-input.mts';
+import { upstreamNotFound } from './deletion-state.mts';
 export const normalizeUuid = (id: string) => id.replaceAll('-', '').toLowerCase();
 export function createCloudApi(token: string, fetchImpl: typeof fetch = fetch): CloudApi {
   const base = createOctoApi(token, fetchImpl, { cloudOnly: true });
@@ -9,8 +11,21 @@ export function createCloudApi(token: string, fetchImpl: typeof fetch = fetch): 
     if (!Array.isArray(rows)) throw new OctoError('invalid_octo_response', 502);
     return rows as Record<string, any>[];
   };
+  const proxy = (row: Record<string, any>): SavedProxy => {
+    if (typeof row.uuid !== 'string' || typeof row.title !== 'string' || !Number.isInteger(row.profiles_count))
+      throw new OctoError('invalid_octo_response', 502);
+    let input;
+    try { input = parseProxyInput({ ...row, type: row.type === 'socks' ? 'socks4' : row.type, changeIpUrl: row.change_ip_url }); }
+    catch { throw new OctoError('invalid_octo_response', 502); }
+    return { ...input, uuid: row.uuid, title: row.title, profiles_count: row.profiles_count,
+      ...(typeof row.external_id === 'string' ? { externalId: row.external_id } : {}) };
+  };
   return {
     listFolders: base.listFolders, createProfile: base.createProfile,
+    async profileExists(uuid) {
+      try { await base.getProfile(uuid); return true; }
+      catch (error) { if (upstreamNotFound(error)) return false; throw error; }
+    },
     async getProfile(uuid) {
       const profile = await base.getProfile(uuid), folder = profile.folder;
       if (folder === null || (typeof folder === 'object' && folder.uuid)) return profile;
@@ -42,6 +57,19 @@ export function createCloudApi(token: string, fetchImpl: typeof fetch = fetch): 
       });
     },
     async updateProxy(uuid, title) { await base.cloudRequest(`/proxies/${encodeURIComponent(uuid)}`, 'PATCH', { title }); },
+    async deleteProxy(uuid) {
+      try { await base.cloudRequest(`/proxies/${encodeURIComponent(uuid)}`, 'DELETE'); }
+      catch (error) { if (!upstreamNotFound(error)) throw error; }
+    },
+    async proxyConnections(externalId) { return (await list('/proxies')).filter(p => p.external_id === externalId).map(proxy); },
+    async createProxy(input) {
+      const { type, host, port, login, password, title, externalId, changeIpUrl } = input;
+      return proxy(await base.cloudRequest('/proxies', 'POST', { type: type === 'socks4' ? 'socks' : type,
+        host, port, login, password, title, external_id: externalId, ...(changeIpUrl ? { change_ip_url: changeIpUrl } : {}) }));
+    },
+    async attachProxy(profileUuid, proxyUuid) {
+      await base.cloudRequest(`/profiles/${encodeURIComponent(profileUuid)}`, 'PATCH', { proxy: proxyUuid });
+    },
     async validateGuest(email, guestFolder) {
       const guest = (await list('/teams/subaccounts')).find(p => String(p.email).toLowerCase() === email.toLowerCase());
       const p = guest?.permissions;

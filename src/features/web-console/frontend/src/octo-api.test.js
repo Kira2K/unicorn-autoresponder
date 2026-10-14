@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { octoApi, octoGrantForDisplay } from './octo-api.js'
+import { octoApi, octoGrantForDisplay, octoProxyDraft, octoProxyPayload } from './octo-api.js'
 
 test('Octo credentials are kept only during a valid granted window, preserving leading zeros', () => {
   const grant = { id: 'g1', profileId: 1, phase: 'granted', expiresAt: 2000, password: '00123', guest: { email: 'guest@example.test', password: 'guest-secret' } }
@@ -18,6 +18,47 @@ test('Octo credentials are kept only during a valid granted window, preserving l
     assert.equal(result.id, 'g1')
   }
   assert.equal(grant.password, '00123', 'sanitizing does not mutate transport data')
+})
+
+test('Proxy drafts use safe metadata only; submission validates fields and preserves entered credentials', () => {
+  const proxy = { type: 'socks5', host: 'proxy.example.test', port: 1080, login: 'saved-login', password: 'saved-password', changeIpUrl: 'https://private.example.test/secret' }
+  const draft = octoProxyDraft(proxy)
+  assert.deepEqual(draft, { type: 'socks5', host: 'proxy.example.test', port: 1080, login: '', password: '', changeIpUrl: '' })
+  assert.deepEqual(octoProxyDraft(), { type: 'http', host: '', port: '', login: '', password: '', changeIpUrl: '' })
+  const entered = { ...draft, host: ' proxy.example.test ', port: '1080', login: ' entered login ', password: ' entered password ', changeIpUrl: ' https://proxy.example.test/change ' }
+  const payload = octoProxyPayload(entered)
+  assert.deepEqual(payload, { type: 'socks5', host: 'proxy.example.test', port: 1080, login: ' entered login ', password: ' entered password ', changeIpUrl: 'https://proxy.example.test/change' })
+  assert.equal(entered.port, '1080', 'payload preparation does not mutate user input')
+  assert.equal('changeIpUrl' in octoProxyPayload(draft), false)
+  assert.deepEqual(octoProxyPayload({ ...draft, type: 'https', port: '443' }), {
+    type: 'https', host: 'proxy.example.test', port: 443, login: '', password: ''
+  })
+  for (const fields of [{ type: 'ftp' }, { host: '' }, { host: 'bad host' }, { port: '' }, { port: 0 }, { port: 65536 }, { port: 1.5 }, { changeIpUrl: 'bad-url' }, { changeIpUrl: 'file:///secret' }]) {
+    assert.throws(() => octoProxyPayload({ ...draft, ...fields }), /^Error: invalid_proxy_fields$/)
+  }
+})
+
+test('Proxy save uses authenticated profile-scoped POST and rejects invalid input before fetch', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (path, options) => {
+    calls.push({ path, options })
+    return { ok: true, json: async () => ({ proxy: { configured: false, phase: 'queued' } }) }
+  }
+  try {
+    const signal = new AbortController().signal
+    const draft = { type: 'http', host: 'proxy.example.test', port: '8080', login: 'login', password: 'password', changeIpUrl: '' }
+    await octoApi.saveProxy(19, draft, { signal })
+    assert.equal(calls[0].path, '/api/octo/profiles/19/proxy')
+    assert.equal(calls[0].options.method, 'POST')
+    assert.equal(calls[0].options.credentials, 'include')
+    assert.equal(calls[0].options.signal, signal)
+    assert.deepEqual(JSON.parse(calls[0].options.body), { type: 'http', host: 'proxy.example.test', port: 8080, login: 'login', password: 'password' })
+    assert.throws(() => octoApi.saveProxy(19, { ...draft, port: 0 }), /^Error: invalid_proxy_fields$/)
+    assert.equal(calls.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('Octo requests use existing cookies and expected payloads; a forbidden response remains recognizable', async () => {
@@ -48,4 +89,28 @@ test('Octo requests use existing cookies and expected payloads; a forbidden resp
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('Onboarding requests send only selected source data, server key storage and location query; continue is explicit', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (path, options) => {
+    calls.push({ path, options })
+    return { ok: true, json: async () => ({ saved: true }) }
+  }
+  try {
+    const signal = new AbortController().signal
+    await octoApi.startOnboarding({ source: 'none', confirmDolphin: false }, { signal })
+    await octoApi.startOnboarding({ source: 'own', confirmDolphin: true, proxy: 'socks5://user:pass@host:1080' }, { signal })
+    await octoApi.saveNodeMavenKey(' secret-key ', { signal })
+    await octoApi.locations('cities', { country: 'US', region: 'New York' }, { signal })
+    await octoApi.continueOnboarding('setup/1', { signal })
+    assert.deepEqual(calls.map(call => call.path), ['/api/octo/onboarding', '/api/octo/onboarding', '/api/octo/nodemaven-key', '/api/octo/locations?level=cities&country=US&region=New+York', '/api/octo/onboarding/setup%2F1/continue'])
+    assert.deepEqual(JSON.parse(calls[0].options.body), { source: 'none', confirmDolphin: false })
+    assert.deepEqual(JSON.parse(calls[1].options.body), { source: 'own', confirmDolphin: true, proxy: 'socks5://user:pass@host:1080' })
+    assert.equal(calls[2].options.method, 'PUT')
+    assert.deepEqual(JSON.parse(calls[2].options.body), { key: 'secret-key' })
+    assert.deepEqual(JSON.parse(calls[4].options.body), { acceptLowScore: true })
+    for (const { options } of calls) { assert.equal(options.credentials, 'include'); assert.equal(options.signal, signal); assert.equal(options.headers.Authorization, undefined) }
+  } finally { globalThis.fetch = originalFetch }
 })

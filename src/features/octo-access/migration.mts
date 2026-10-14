@@ -15,6 +15,8 @@ export async function migrateOcto(env: NodeJS.ProcessEnv, apply: boolean) {
   try {
     await s.query('BEGIN READ WRITE'); await assertCopyDatabase(s,config.database);
     await s.query('SET LOCAL ROLE unicorn_noco_copy_owner');
+    if ((await s.query("SELECT to_regclass('noco.octo_clients') AS onboarding")).rows[0]?.onboarding)
+      throw Object.assign(new Error('octo_001_superseded_by_002'), { code: 'octo_001_superseded_by_002' });
     const snapshot=async()=>({profiles:(await s.query(`SELECT to_jsonb(p)-'browser'-'octo_profile_id' AS row
       FROM noco.dolphin_profiles p ORDER BY id`)).rows,
       inventory:(await s.query("SELECT id,definition FROM copy_meta.inventory WHERE id<>'octo_browser_local' ORDER BY id")).rows});

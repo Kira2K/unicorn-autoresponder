@@ -61,7 +61,7 @@ async function jsonGet(context: BrowserContext, url: string) {
   check(response.ok(), 'console_read_failed');
   return response.json();
 }
-async function signIn(context: BrowserContext, url: string, email: string, password: string) {
+export async function signIn(context: BrowserContext, url: string, email: string, password: string) {
   const page = await context.newPage();
   page.setDefaultTimeout(15_000);
   await page.goto(url);
@@ -70,13 +70,18 @@ async function signIn(context: BrowserContext, url: string, email: string, passw
   const login = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/login' && response.request().method() === 'POST');
   await page.getByTestId('login-button').click();
   check((await login).ok(), 'console_login_failed');
+  const welcome = page.getByTestId('octo-welcome');
+  // The real SQL dashboard can load after the login response; wait for its UI,
+  // not an arbitrary five-second window that misses the later modal.
+  await welcome.or(page.locator('.octo-card')).first().waitFor({ state: 'visible', timeout: 60_000 });
+  if (await welcome.isVisible()) await page.getByRole('button', { name: 'Понятно, продолжить', exact: true }).click();
   return page;
 }
 async function accessFor(fixture: Fixture, url: string): Promise<Access> {
   await profile(fixture.page).getByRole('button', { name: 'Получить доступ', exact: true }).click();
-  await until(async () => await profile(fixture.page).getByRole('textbox', { name: 'Пароль доступа', exact: true }).count() === 1,
+  await until(async () => await profile(fixture.page).getByRole('textbox', { name: 'Пароль к профилям (пароли идентичны для всех твоих профилей)', exact: true }).count() === 1,
     90_000, 'grant_not_displayed');
-  const password = await profile(fixture.page).getByRole('textbox', { name: 'Пароль доступа', exact: true }).inputValue();
+  const password = await profile(fixture.page).getByRole('textbox', { name: 'Пароль к профилям (пароли идентичны для всех твоих профилей)', exact: true }).inputValue();
   check(/^\d{5}$/.test(password), 'invalid_displayed_password');
   const status = await jsonGet(fixture.context, `${url}/api/octo/profiles/status`);
   const grantId = status.profiles.find((p: { id: number }) => p.id === fixture.profileId)?.grantId;
@@ -89,7 +94,7 @@ async function accessFor(fixture: Fixture, url: string): Promise<Access> {
 }
 
 export async function runConsoleFlow(options: {
-  url?: string; password?: string; driver?: ConsoleDriver; unauthorizedEmail?: string; outputDir?: string;
+  url?: string; password?: string; driver?: ConsoleDriver; unauthorizedEmail?: string; outputDir?: string; headful?: boolean;
 } = {}) {
   const url = (options.url ?? process.env.OCTO_E2E_CONSOLE_URL ?? 'http://127.0.0.1:4300').replace(/\/$/, '');
   const consoleUrl = new URL(url);
@@ -97,7 +102,7 @@ export async function runConsoleFlow(options: {
   const resumeIds = new Set(options.driver?.resumeProfileIds ?? readResumeProfileIds(process.env.OCTO_E2E_RESUME_PROFILE_IDS));
   check(resumeIds.size === 0 || options.driver?.kind === 'live', 'resume_requires_live_driver');
   const startedAt = Date.now(), output = options.outputDir ?? 'tmp/octo-console';
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ headless: !options.headful });
   const fixtures: Fixture[] = [];
   const contexts: BrowserContext[] = [];
   const report = { passed: false, live: options.driver?.kind === 'live', users: ['Alex', 'Bob'], cycles: 0,
@@ -131,7 +136,6 @@ export async function runConsoleFlow(options: {
       await card(page).waitFor();
       progress('ensure', name);
       if (!resumed) {
-        await card(page).getByRole('checkbox', { name: 'Использовать свой прокси' }).check();
         await card(page).getByRole('button', { name: 'Создать профили', exact: true }).click();
       }
       await until(async () => {
@@ -194,7 +198,7 @@ export async function runConsoleFlow(options: {
       for (const access of accesses) {
         progress('expiry', access.fixture.name, cycle + 1);
         await until(async () => Date.now() >= access.expiresAt &&
-          await profile(access.fixture.page).getByRole('textbox', { name: 'Пароль доступа', exact: true }).count() === 0,
+          await profile(access.fixture.page).getByRole('textbox', { name: 'Пароль к профилям (пароли идентичны для всех твоих профилей)', exact: true }).count() === 0,
         Math.max(15_000, access.expiresAt - Date.now() + 20_000), 'credentials_not_removed_at_expiry');
         await options.driver?.afterExpiry(access);
         if (!options.driver) {

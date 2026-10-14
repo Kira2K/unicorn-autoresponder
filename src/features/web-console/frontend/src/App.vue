@@ -6,6 +6,7 @@ import LinkedInAuthTab from './LinkedInAuthTab.vue'
 import StudentProfile from './StudentProfile.vue'
 import StudentWorkPlaces from './StudentWorkPlaces.vue'
 import OctoAccessCard from './components/OctoAccessCard.vue'
+import BrowserWelcomeDialog from './components/BrowserWelcomeDialog.vue'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 import { usernamePayload } from './username-input.js'
 import AccountForm from './AccountForm.vue'
@@ -235,6 +236,7 @@ const dolphinLeaseSecondsLeft = computed(() => {
   return Math.max(0, Math.ceil((Number(dolphinLease.value.expiresAt) - nowMs.value) / 1000))
 })
 const dolphinActionMode = computed(() => {
+  if (isClient.value) return 'open_existing'
   const status = dolphinProfileStatus.value
   if (!status) return 'open_existing'
   if (status.action === 'create_new') return 'create_new'
@@ -1916,7 +1918,7 @@ async function openDolphinProfile(clientName, clientId, mode = 'open_existing') 
     const status = isProvider.value
       ? providerDolphinProfileStatuses.value[clientId] || await loadDolphinStatus(clientId)
       : dolphinProfileStatus.value || await loadDolphinStatus(clientId)
-    const blocker = firstRequiredDataField(status)
+    const blocker = isClient.value && mode === 'open_existing' ? null : firstRequiredDataField(status)
     if (blocker) {
       blockRequiredDataAction(blocker, status?.targetClientId || clientId)
       return
@@ -2948,18 +2950,12 @@ onUnmounted(() => {
 
         </template>
         <template #actions>
-        <OctoAccessCard v-if="isClient && dashboard?.client?.id" :key="dashboard.client.id" :client-id="dashboard.client.id" />
-        <Card v-if="isClient" class="action-card">
+        <BrowserWelcomeDialog v-if="isClient && !pageLoading && dashboard?.client?.id" :key="`browser-welcome-${dashboard.client.id}`" :client-id="dashboard.client.id" />
+        <Card v-if="isClient && dolphinProfileStatus?.existingProfiles?.length" class="action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>
-          <template #subtitle>{{ ui(dolphinActionMode === 'create_new' ? 'Create the missing automation profiles' : 'Open the connected automation profiles') }}</template>
+          <template #subtitle>{{ ui('Open the connected automation profiles') }}</template>
           <template #content>
-            <div v-if="dolphinActionMode === 'create_new'" class="proxy-choice-panel" data-testid="own-proxy-panel">
-              <label class="checkbox-field">
-                <input v-model="ownProxy" type="checkbox" data-testid="own-proxy-checkbox" />
-                <span>{{ ui('I have my own proxy') }}</span>
-              </label>
-            </div>
-            <Button v-if="!hasActiveDolphinLease" :label="ui(dolphinActionLabel)" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, dolphinActionMode)" />
+            <Button v-if="!hasActiveDolphinLease" :label="ui('Open Dolphin profiles')" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, 'open_existing')" />
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
               <h3>{{ ui('Dolphin access') }}</h3>
               <p>{{ ui('Open Dolphin Anty and enter the credentials below.') }}</p>
@@ -3003,6 +2999,7 @@ onUnmounted(() => {
           </template>
         </Card>
 
+        <OctoAccessCard v-if="isClient && dashboard?.client?.id" :key="dashboard.client.id" :client-id="dashboard.client.id" />
         <Card v-if="adminCanOpenDolphinProfiles" class="action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>
           <template #subtitle>Open profiles for the latest client</template>

@@ -2,7 +2,7 @@ import {createConsoleFixture} from '../../octo-access/console-fixture.mts';
 import {runConsoleFlow} from './octo-console.e2e.mts';
 const f=await createConsoleFixture();
 try {
-  const report=await runConsoleFlow({url:f.url,password:'1234',outputDir:'tmp/octo-console-mock',driver:{kind:'mock',
+  const report=await runConsoleFlow({url:f.url,password:'1234',headful:true,outputDir:'tmp/octo-console-mock',driver:{kind:'mock',
     async beforeEnsure(){},async bind(){},
     async open(access){const p=await f.store.get(access.fixture.profileId);await f.cloud.start(p!.uuid!);},
     async afterExpiry(access){

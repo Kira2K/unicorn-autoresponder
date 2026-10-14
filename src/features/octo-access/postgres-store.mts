@@ -6,6 +6,8 @@ import { createWorkingCatalog } from '../../integrations/postgres/working-catalo
 import { workingCrud } from '../../integrations/postgres/working-crud.mts';
 import type { ManagedProfile, NewProfile, OctoStore, StoredEvent, StreamState } from './contracts.mts';
 import type { ActionPage } from '../octo-access-test/action-log.mts';
+import { clientState, claimClientPassword, saveClientState } from './postgres-clients.mts';
+import { initialDeletion, isDeletionEvent, setupUsesProfile } from './deletion-state.mts';
 
 const PROFILE_TABLE = 'm4thvbutfyb15qz';
 // Session lock differs from the per-client transaction locks used by reservation.
@@ -44,8 +46,15 @@ export function createOctoPostgresStore(pool: SqlPool, database: CopyDatabase, l
       await read(async s => {
         const result = await s.query(`SELECT
           to_regclass('noco.octo_profiles') IS NOT NULL AND
+          to_regclass('noco.octo_clients') IS NOT NULL AND
+          has_table_privilege(current_user,to_regclass('noco.octo_clients'),'SELECT') AND
+          has_table_privilege(current_user,to_regclass('noco.octo_clients'),'INSERT') AND
+          has_table_privilege(current_user,to_regclass('noco.octo_clients'),'UPDATE') AND
           to_regclass('noco.octo_event_inbox') IS NOT NULL AND
           to_regclass('noco.octo_stream') IS NOT NULL AND
+          has_table_privilege(current_user,to_regclass('noco.octo_profiles'),'DELETE') AND
+          has_table_privilege(current_user,to_regclass('noco.octo_event_inbox'),'DELETE') AND
+          has_table_privilege(current_user,to_regclass('noco.dolphin_profiles'),'DELETE') AND
           EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='noco'
             AND table_name='dolphin_profiles' AND column_name='browser' AND data_type='text'
             AND is_nullable='NO' AND column_default='''dolphin''::text') AND
@@ -53,8 +62,22 @@ export function createOctoPostgresStore(pool: SqlPool, database: CopyDatabase, l
             AND table_name='dolphin_profiles' AND column_name='octo_profile_id' AND data_type='text') AND
           (SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
             JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='noco' AND i.indisvalid AND i.indisunique
-            AND c.relname IN ('octo_profiles_password_unique','octo_profiles_proxy_unique','octo_profiles_uuid_unique',
-              'octo_common_client_locale_unique','octo_common_uuid_unique'))=5 AND
+            AND c.relname IN ('octo_clients_password_unique','octo_clients_client_password_unique',
+              'octo_profiles_proxy_unique','octo_profiles_uuid_unique',
+              'octo_common_client_locale_unique','octo_common_uuid_unique'))=6 AND
+          to_regclass('noco.octo_profiles_password_unique') IS NULL AND
+          EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('noco.octo_profiles')
+            AND conname='octo_profiles_client_password_fk' AND contype='f' AND convalidated
+            AND confrelid=to_regclass('noco.octo_clients')) AND
+          EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='noco'
+            AND table_name='octo_profiles' AND column_name='password' AND data_type='text'
+            AND is_generated='ALWAYS' AND is_nullable='NO') AND
+          (SELECT count(*) FROM information_schema.columns WHERE table_schema='noco' AND table_name='octo_clients'
+            AND is_nullable='NO' AND ((column_name IN ('client_id','revision') AND data_type='bigint')
+            OR (column_name='password' AND data_type='text') OR (column_name='state' AND data_type='jsonb')))=4 AND
+          (SELECT count(*) FROM pg_constraint WHERE conrelid=to_regclass('noco.octo_clients') AND convalidated
+            AND conname IN ('octo_clients_pkey','octo_clients_client_id_fkey','octo_clients_password_check',
+              'octo_clients_revision_check','octo_clients_state_check'))=5 AND
           EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('noco.octo_profiles')
             AND conname='octo_profiles_client_locale_unique' AND contype='u') AND
           EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('noco.octo_event_inbox')
@@ -67,11 +90,24 @@ export function createOctoPostgresStore(pool: SqlPool, database: CopyDatabase, l
           throw new PostgresReadError('octo_schema_required');
         // These bounded reads also verify grants and the actual column names/types.
         await s.query('SELECT profile_id, client_id, locale, revision, state FROM noco.octo_profiles LIMIT 0');
+        await s.query('SELECT client_id,password,revision,state FROM noco.octo_clients LIMIT 0');
         await s.query('SELECT seq, event_id, object_uuid, action, event_time, title FROM noco.octo_event_inbox LIMIT 0');
         const stream = await s.query('SELECT cursor, coverage_since FROM noco.octo_stream WHERE singleton=true');
         if (stream.rows.length !== 1) throw new PostgresReadError('octo_schema_required');
       });
     },
+    async clientState(id) {
+      integer(id);
+      return read(async s => {
+        const row = (await s.query('SELECT client_id,password,revision,state FROM noco.octo_clients WHERE client_id=$1', [id])).rows[0];
+        return row && clientState(row);
+      });
+    },
+    async clientStates() {
+      return read(async s => (await s.query('SELECT client_id,password,revision,state FROM noco.octo_clients ORDER BY client_id')).rows.map(clientState));
+    },
+    async claimClientPassword(id, candidate) { return write(s => claimClientPassword(s, id, candidate)); },
+    async saveClientState(input) { return write(s => saveClientState(s, input)); },
     async list(clientId) {
       if (clientId !== undefined) integer(clientId);
       return read(async s => (await s.query(`SELECT profile_id, revision, state FROM noco.octo_profiles
@@ -90,7 +126,7 @@ export function createOctoPostgresStore(pool: SqlPool, database: CopyDatabase, l
       if (inputs.some(p => p.clientId !== inputs[0].clientId) || new Set(inputs.map(p => p.locale)).size !== inputs.length)
         throw new PostgresReadError('octo_invalid_state');
       return write(async s => {
-        await s.query('SELECT pg_advisory_xact_lock(730644, $1::integer)', [inputs[0].clientId]);
+        const client = await claimClientPassword(s, inputs[0].clientId, inputs[0].password);
         const catalog = createWorkingCatalog((await s.query(
           "SELECT definition FROM copy_meta.inventory WHERE definition ? 'sqlTable' OR definition ? 'sqlOnlyFor' ORDER BY id")).rows);
         const crud = workingCrud(s, catalog), result: ManagedProfile[] = [];
@@ -101,7 +137,7 @@ export function createOctoPostgresStore(pool: SqlPool, database: CopyDatabase, l
           const common = await crud.createRecord(PROFILE_TABLE, {
             clients_id: input.clientId, locale: input.locale === 'ru' ? 'Ru' : 'En', browser: 'octo'
           });
-          const id = integer(common.key[0]), state: ManagedProfile = { ...structuredClone(input), id, revision: 1 };
+          const id = integer(common.key[0]), state: ManagedProfile = { ...structuredClone(input), password: client.password, id, revision: 1 };
           await passwordConflict(() => s.query(`INSERT INTO noco.octo_profiles
             (profile_id, client_id, locale, revision, state) VALUES ($1,$2,$3,1,$4::jsonb)`,
           [id, input.clientId, input.locale, JSON.stringify(state)]));
@@ -132,6 +168,31 @@ export function createOctoPostgresStore(pool: SqlPool, database: CopyDatabase, l
           time: Number(row.event_time), ...(row.title == null ? {} : { title: String(row.title) })
         } as StoredEvent)));
     },
+    async remove(input) {
+      integer(input.id); integer(input.revision); integer(input.clientId);
+      if (!input.uuid || input.deletion?.phase !== 'purge') throw new PostgresReadError('octo_invalid_state');
+      return write(async s => {
+        // Same order as event ingestion: stream -> client -> profile. No cloud calls inside.
+        await s.query('SELECT singleton FROM noco.octo_stream WHERE singleton=true FOR UPDATE');
+        await s.query('SELECT pg_advisory_xact_lock(730644, $1::integer)', [input.clientId]);
+        const client = (await s.query('SELECT client_id,password,revision,state FROM noco.octo_clients WHERE client_id=$1 FOR UPDATE', [input.clientId])).rows[0];
+        const existing = (await s.query('SELECT profile_id,revision,state FROM noco.octo_profiles WHERE profile_id=$1 FOR UPDATE', [input.id])).rows[0];
+        if (!existing) return;
+        const current = profile(existing);
+        if (current.revision !== input.revision || current.clientId !== input.clientId || normalize(current.uuid ?? '') !== normalize(input.uuid!) ||
+            current.deletion?.phase !== 'purge') throw new PostgresReadError('octo_stale_revision');
+        if (client) {
+          const state = clientState(client);
+          if (setupUsesProfile(state.setup, current)) { delete state.setup; await saveClientState(s, state); }
+        }
+        await s.query('DELETE FROM noco.octo_event_inbox WHERE object_uuid=$1', [normalize(input.uuid!)]);
+        await s.query('DELETE FROM noco.octo_profiles WHERE profile_id=$1', [input.id]);
+        const deleted = await s.query(`DELETE FROM noco.dolphin_profiles
+          WHERE id=$1 AND browser='octo' AND "02_clients_id"=$2
+            AND lower(replace(octo_profile_id,'-',''))=$3 RETURNING id`, [input.id, input.clientId, normalize(input.uuid!)]);
+        if (deleted.rows.length !== 1) throw new PostgresReadError('octo_binding_missing');
+      });
+    },
     async stream() {
       return read(async s => {
         const rows = (await s.query('SELECT cursor, coverage_since FROM noco.octo_stream WHERE singleton=true')).rows;
@@ -148,9 +209,27 @@ export function createOctoPostgresStore(pool: SqlPool, database: CopyDatabase, l
         if (locked.rows.length !== 1) throw new PostgresReadError('octo_schema_required');
         for (const event of page.events) {
           if (!event.id || !event.profileId || !Number.isFinite(event.time)) throw new PostgresReadError('octo_invalid_page');
-          await s.query(`INSERT INTO noco.octo_event_inbox (event_id,object_uuid,action,event_time,title)
-            VALUES ($1,$2,$3,$4,$5) ON CONFLICT (event_id) DO NOTHING`,
+          const inserted = await s.query(`INSERT INTO noco.octo_event_inbox (event_id,object_uuid,action,event_time,title)
+            SELECT $1,$2,$3,$4,$5 WHERE EXISTS
+              (SELECT 1 FROM noco.octo_profiles WHERE lower(replace(state->>'uuid','-',''))=$2)
+            ON CONFLICT (event_id) DO NOTHING RETURNING seq`,
           [event.id, normalize(event.profileId), event.action, event.time, (event as StoredEvent).title ?? null]);
+          if (inserted.rows.length && isDeletionEvent(event.action)) {
+            const row = (await s.query(`SELECT profile_id,revision,state FROM noco.octo_profiles
+              WHERE lower(replace(state->>'uuid','-',''))=$1`, [normalize(event.profileId)])).rows[0];
+            if (!row) continue;
+            const candidate = profile(row);
+            await s.query('SELECT pg_advisory_xact_lock(730644, $1::integer)', [candidate.clientId]);
+            const client = (await s.query('SELECT client_id,password,revision,state FROM noco.octo_clients WHERE client_id=$1 FOR UPDATE', [candidate.clientId])).rows[0];
+            const current = profile((await s.query('SELECT profile_id,revision,state FROM noco.octo_profiles WHERE profile_id=$1 FOR UPDATE', [candidate.id])).rows[0]);
+            if (current.deletion) continue;
+            const next = { ...current, revision: current.revision + 1, deletion: initialDeletion(event.id) };
+            await s.query(`UPDATE noco.octo_profiles SET revision=revision+1,state=$5::jsonb
+              WHERE profile_id=$1 AND revision=$2 AND client_id=$3 AND locale=$4`,
+            [current.id, current.revision, current.clientId, current.locale, JSON.stringify(next)]);
+            // Invalidate any in-flight onboarding save that still contains this profile's secrets.
+            if (client && setupUsesProfile(clientState(client).setup, current)) await saveClientState(s, clientState(client));
+          }
         }
         await s.query('UPDATE noco.octo_stream SET cursor=$1::jsonb WHERE singleton=true', [JSON.stringify(page.watermark)]);
       });

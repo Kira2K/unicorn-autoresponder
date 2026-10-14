@@ -153,7 +153,7 @@ test('proxy selection prefers unused named, then Ready order, excludes reserved/
   assert.equal(selectOctoProxy(proxies,p,new Set(['c']))?.uuid,'b');
 });
 
-test('En/Both retain Ru and En; pool proxies are reserved independently and restored only after normal close',async()=>{
+test('legacy En/Both pool reservations remain independent and restore only after normal close',async()=>{
   let time=1_800_000_000_000;const now=()=>time,store=createMemoryStore(),cloud=createMockCloud(store,now);
   const proxies=[{uuid:'proxy1',title:'Ready 1',profiles_count:0},{uuid:'proxy2',title:'Ready 2',profiles_count:0}];
   cloud.api.listProxies=async()=>structuredClone(proxies);
@@ -161,7 +161,9 @@ test('En/Both retain Ru and En; pool proxies are reserved independently and rest
   const create=cloud.api.createProfile;
   cloud.api.createProfile=async input=>{const id=await create(input);if(input.proxy)proxies.find(p=>p.uuid===input.proxy)!.profiles_count++;return id;};
   const service=createOctoService({store,config:testConfig,now,getClient:async id=>({...mockClient(id),market:id===901?'Both':'En'})});
-  await service.ensure(901);await service.ensure(902);const deps={store,api:cloud.api,config:testConfig,check:async()=>{},now};
+  const { reserveClientProfiles } = await import('./profile-reservation.mts');
+  for (const id of [901,902]) await reserveClientProfiles(store,{...mockClient(id),market:id===901?'Both':'En'},false,now);
+  const deps={store,api:cloud.api,config:testConfig,check:async()=>{},now};
   for(const p of await store.list())await provisionProfile(p,deps);
   const all=await store.list();assert.equal(all.length,4);assert.ok(all.every(p=>p.phase==='ready'));
   const en=all.filter(p=>p.locale==='en');assert.equal(new Set(en.map(p=>p.proxy!.uuid)).size,2);
