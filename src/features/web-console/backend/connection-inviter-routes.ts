@@ -2,10 +2,13 @@ type App = import('express').Express
 type Handler = import('express').RequestHandler
 type Service = import('./connection-inviter-types.ts').ConnectionInviterService
 import { nocoRouteFailure } from './noco-route-failure.ts'
+import { linkedInBrowserFailure } from './linkedin-browser-failure.mts'
 import { connectionErrorCode } from '../../linkedin-automation/connection-inviter/errors.ts'
 import { registerInvitationWithdrawalRoutes } from './invitation-withdrawal-routes.ts'
 
 function failure(error: any) {
+  const browserFailure = linkedInBrowserFailure(error)
+  if (browserFailure) return browserFailure
   const nocoFailure = nocoRouteFailure(error)
   if (nocoFailure) return nocoFailure
   if (connectionErrorCode(error) === 'connection_storage_read_unavailable') return { status: 503,

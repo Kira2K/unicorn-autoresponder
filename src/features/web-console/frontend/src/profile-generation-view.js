@@ -1,3 +1,5 @@
+import { linkedinBrowserErrorText } from '../../../linkedin-automation/core/browser-error-display.mts'
+
 const ERRORS = {
   profile_generation_stopped: 'Подготовка остановлена. Можно запустить новую генерацию.',
   profile_generation_stop_unavailable: 'Кнопка останавливает только подготовку Preview, не заполнение LinkedIn.',
@@ -66,7 +68,8 @@ const STAGES = {
   interrupted_retryable: 'Сохранённую подготовку можно продолжить',
   building_preview: 'Сравниваем с LinkedIn', preview_ready: 'Проверьте изменения перед применением'
 }
-export const generationErrorText = code => Object.hasOwn(ERRORS, code) ? ERRORS[code] : undefined
+export const generationErrorText = code => linkedinBrowserErrorText(code) ||
+  (Object.hasOwn(ERRORS, code) ? ERRORS[code] : undefined)
 export const profileStageText = stage => STAGES[stage] || 'Обрабатываем задание'
 export function profileRequestError(error, fallback = 'Не удалось выполнить действие. Попробуйте позже.') {
   const code = error?.body?.errorCode || error?.body?.error || error?.code

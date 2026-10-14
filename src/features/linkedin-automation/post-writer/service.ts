@@ -79,10 +79,12 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
     })) },
     startPrepared(account: number, input: unknown) { return work.run(() => serial(account, async () => {
       await writable()
+      await e.source.assertBrowser?.(account)
       return startPreparedPost(e.settings(account), input, runs, e)
     })) },
     start(account: number, mode: ManualMode, key: string, input?: ManualInput) { return work.run(() => serial(account, async () => {
       await writable()
+      await e.source.assertBrowser?.(account)
       if (e.settings(account).contentMode === 'prepared') throw new PostError('post_prepared_manual_unavailable')
       if (!['automatic', 'approval_required'].includes(mode) || !/^[a-z0-9_-]{8,100}$/i.test(key)) {
         throw new PostError('post_start_invalid')
@@ -105,6 +107,7 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
       const run = runs.get(id)
       if (!run) throw new PostError('post_run_not_found')
       if (action === 'start-likes') return serial(run.account, async () => {
+        await e.source.assertBrowser?.(run.account)
         await writable()
         if ((canStartManualLikes(run) || canResumeManualLikes(run)) &&
           (busy.has(id) || accountActive(runs.values(), run.account))) {
@@ -116,6 +119,7 @@ export function createPostWriterService(deps: Dependencies, autoStart = true) {
         finally { busy.delete(id) }
       })
       if (action === 'retry-meme') return serial(run.account, async () => {
+        await e.source.assertBrowser?.(run.account)
         if (busy.has(id) || accountActive(runs.values(), run.account)) throw new PostError('post_account_busy')
         busy.add(id)
         try {

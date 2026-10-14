@@ -158,6 +158,7 @@ async function run() {
     step: verificationRecord.plan.steps[0], savedAt: new Date(0).toISOString()
   }
   const recoveredVerifier = createProfileFillerService({ store: verificationStore,
+    repository: { async getAccount(id: number) { return { platformAccountId: id, dolphinProfileId: 7001 } } },
     client: { async updateOwnProfile() { recoveryWrites += 1 },
       async getOwnProfile() { return { description: 'Recovered' } } },
     gate: { acquire(kind: string) { assert.equal(kind, 'profile_verify'); return () => undefined } },

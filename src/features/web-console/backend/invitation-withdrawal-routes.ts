@@ -1,5 +1,6 @@
 import type { Express, RequestHandler } from 'express'
 import type { WithdrawalService } from '../../linkedin-automation/invitation-withdrawal/contracts.ts'
+import { linkedInBrowserFailure } from './linkedin-browser-failure.mts'
 export function registerInvitationWithdrawalRoutes(app: Express, requireAdmin: RequestHandler,
   service: () => WithdrawalService | undefined) {
   const base = '/api/admin/linkedin/accounts/:id/invitation-withdrawal'
@@ -23,6 +24,8 @@ export function registerInvitationWithdrawalRoutes(app: Express, requireAdmin: R
         ? await operations.recheck(id, req.body.runId) : await operations[action](id)
       res.status(action === 'start' ? 202 : 200).json(result ?? null)
     } catch (error: any) {
+      const browserFailure = linkedInBrowserFailure(error)
+      if (browserFailure) { res.status(browserFailure.status).json(browserFailure.body); return }
       const code = String(error?.code ?? '')
       const known = code.startsWith('withdrawal_')
       const forbidden = code === 'connection_account_not_allowed'

@@ -11,6 +11,7 @@ export type FactsExtractor = (document: CvDocument) => Promise<ExtractedFacts>
 export type ModelResponder = (input: unknown, schema: unknown, instructions: string) => Promise<unknown>
 export type SourceDependencies = {
   accounts(): Promise<SourceAccount[]>
+  getAccount?(id: number, options: { fresh: boolean }): Promise<SourceAccount | undefined>
   cvRows(): Promise<Record<string, unknown>[]>
   selectCv(rows: Record<string, unknown>[], clientId: number): { url: string; revision: string }
   loadCv(url: string, maxBytes: number): Promise<CvDocument>

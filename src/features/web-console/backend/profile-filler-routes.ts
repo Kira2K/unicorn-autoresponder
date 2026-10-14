@@ -1,6 +1,8 @@
 type App = import('express').Express
 type Handler = import('express').RequestHandler
 type Service = import('./profile-filler-types').ProfileFillerService
+const { linkedInBrowserFailure } = require('./linkedin-browser-failure.mts') as
+  typeof import('./linkedin-browser-failure.mts')
 const { runProfileAnalysis } = require('../../linkedin-automation/profile-filler/profile-analysis.ts') as
   typeof import('../../linkedin-automation/profile-filler/profile-analysis.ts')
 const { cvUploadFailure, parseCvBody, readCvUpload } = require('./profile-generation-upload.ts') as
@@ -26,6 +28,8 @@ const CONFLICT_MESSAGES: Record<string, string> = {
   profile_retry_unavailable: 'The saved generation checkpoint is unavailable.'
 }
 function failure(error: any) {
+  const browserFailure = linkedInBrowserFailure(error)
+  if (browserFailure) return browserFailure
   const code = String(error?.code ?? 'profile_filler_internal_error')
   if (code === 'profile_field_invalid') return { status: 422, body: { error: code,
     message: 'Поле не прошло проверку.', issues: Array.isArray(error.details) ? error.details : [] } }

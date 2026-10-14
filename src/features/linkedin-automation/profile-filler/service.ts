@@ -29,6 +29,9 @@ const { resolveProfileAccount } = require('./profile-account.ts') as {
     id: number, sections: string[]): Promise<{ account: import('./plan-types.ts').ProfileAccount;
       profile: import('./input-types.ts').JsonObject }>
 }
+const { readDolphinAccount } = require('../core/browser-eligibility.mts') as {
+  readDolphinAccount(repository: any, id: number): Promise<any>
+}
 const { startRollback } = require('./rollback.ts') as { startRollback(options: any): Promise<any> }
 type ProfileJob = import('./job-types.ts').ProfileJob
 const { createLinkedInAuthNocoRepository } = require('../account-connection/noco-repository.ts') as
@@ -56,6 +59,7 @@ function createProfileFillerService(options: any = {}) {
     verificationStarts.add(job.jobId)
     const logger = loggerFor(job.jobId)
     try {
+      await readDolphinAccount(getRepository(), job.platformAccountId)
       const release = await logAction(logger, 'verification_operation_gate', () =>
         acquire('profile_verify', job.jobId, job.platformAccountId))
       jobs.set(job.jobId, job)
@@ -179,9 +183,16 @@ function createProfileFillerService(options: any = {}) {
     return await startRollback({ sourceJobId, jobs, store: getStore(), client: getClient(),
       repository: getRepository(), acquire, executorOptions: options.executorOptions })
   }
+  async function assertJobBrowser(jobId: string) {
+    const job = jobs.get(jobId) ?? await getStore().get(jobId)
+    if (!job) throw codedError('profile_job_not_found', 'Profile job was not found.')
+    await readDolphinAccount(getRepository(), job.platformAccountId)
+  }
   return { apply, recoverPending: recovery.start,
-    editField: (jobId: string, hash: string, change: import('./field-change.ts').FieldChange) =>
-      editProfileField({ jobId, hash, change, jobs, store: getStore(), client: getClient(), acquire, logger: loggerFor(jobId) }),
+    editField: async (jobId: string, hash: string, change: import('./field-change.ts').FieldChange) => {
+      await assertJobBrowser(jobId)
+      return editProfileField({ jobId, hash, change, jobs, store: getStore(), client: getClient(), acquire, logger: loggerFor(jobId) })
+    },
     stopGeneration: (jobId: string) => stopProfileGeneration({ jobId, jobs, store: getStore() }),
     get: getJob,
     list: listJobs,

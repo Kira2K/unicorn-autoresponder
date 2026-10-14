@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
 import InvitationWithdrawal from './InvitationWithdrawal.vue'
-import { connectionAudienceLabel, connectionCountdown, connectionEta, connectionFilterDiagnostics,
+import { connectionAudienceLabel, connectionCountdown, connectionErrorText, connectionEta, connectionFilterDiagnostics,
   connectionFunnelLabel, connectionProgressPercent, connectionQuotaLabel, connectionRunCanStart,
   connectionRunActive, connectionRunFromPreviousDay, connectionRunLabel } from './connection-inviter-view'
 
@@ -139,7 +139,8 @@ function loadHistory(event) {
     </div>
     <small v-if="run?.errorCode" class="comment-monitor-error">
       {{ latestConfirmed ? 'Search after the last confirmed invitation' : 'Last run error' }}:
-      {{ run.errorCode }}
+      {{ connectionErrorText(run.errorCode) }}
+      <code v-if="connectionErrorText(run.errorCode) !== run.errorCode">{{ run.errorCode }}</code>
     </small>
     <small v-if="pause" class="comment-monitor-warning">{{ pause.message }}</small>
     <small v-if="inviter.errors.value[account.platformAccountId]" class="comment-monitor-error">

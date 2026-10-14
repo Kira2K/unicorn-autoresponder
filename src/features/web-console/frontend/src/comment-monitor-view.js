@@ -1,3 +1,5 @@
+import { linkedinBrowserErrorText } from '../../../linkedin-automation/core/browser-error-display.mts'
+
 const ACTIVE = new Set(['starting', 'waiting', 'checking', 'replying', 'paused'])
 const LABELS = {
   starting: 'Starting', waiting: 'Waiting', checking: 'Checking', replying: 'Replying',
@@ -16,7 +18,8 @@ const ERRORS = {
 
 export const monitorActive = job => Boolean(job && ACTIVE.has(job.status))
 export const monitorLabel = job => job ? LABELS[job.status] || job.status : 'Off'
-export const monitorError = code => code ? `${ERRORS[code] || 'Comment monitoring stopped.'} (${code})` : ''
+export const monitorError = code => code ?
+  `${linkedinBrowserErrorText(code) || ERRORS[code] || 'Comment monitoring stopped.'} (${code})` : ''
 
 export function durationUntil(value, now = Date.now()) {
   if (!value) return '—'

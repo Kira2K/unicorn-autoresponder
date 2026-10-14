@@ -16,7 +16,8 @@ export function createFeatureCv(db: ConsoleSql, repository: AuthRepository, gran
   return {
     generationRepository: createNocoGenerationRepository(repository, records),
     source: { ...createCvFiles(providers.files, providers.cv.extractFacts), ...createPostSource({
-      accounts: () => repository.listAccounts(), selectCv: selectFinalEnglishCv, ...providers.cv,
+      accounts: () => repository.listAccounts(), getAccount: (id, options) => repository.getAccount(id, options),
+      selectCv: selectFinalEnglishCv, ...providers.cv,
       cvRows: async () => {
         const rows = [];
         for (const id of grant.clientIds) rows.push(...await records.fetchRecords(tableIds.cv, 100, { where: `(clients_id,eq,${id})` }));

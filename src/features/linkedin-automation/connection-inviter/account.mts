@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 const load = createRequire(import.meta.url)
+import { assertDolphinAccount, readDolphinAccount } from '../core/browser-eligibility.mts'
 const { assertAccountOperational, verifiedIdentity } = load('../account-connection/account-validation.ts') as {
   assertAccountOperational(account: any): void
   verifiedIdentity(account: any, profile: any, target: any): any
@@ -12,6 +13,7 @@ import { withConnectionRetry } from './retry-state.ts'
 
 export function accountContext(row: any): ConnectionAccountContext {
   if (!row) throw connectionError('linkedin_account_not_found', 'LinkedIn account was not found.')
+  assertDolphinAccount(row)
   if (!row.unipileAccountId || row.unipileAccountStatus !== 'running' || !row.lastVerifiedAt) {
     throw connectionError('connection_inviter_auth_required', 'Verify or reconnect LinkedIn first.')
   }
@@ -26,8 +28,7 @@ export function accountContext(row: any): ConnectionAccountContext {
 }
 
 export async function resolveContext(runtime: ConnectionRuntime, platformAccountId: number) {
-  return accountContext((await runtime.repository.listAccounts()).find((row: any) =>
-    Number(row.platformAccountId) === platformAccountId))
+  return accountContext(await readDolphinAccount(runtime.repository, platformAccountId))
 }
 
 // V2 may omit relations_count even on a valid own profile. Count the actual
@@ -64,12 +65,12 @@ async function readConnectionCount(runtime: ConnectionRuntime, run: ConnectionRu
 
 export async function verifyConnectionAccount(runtime: ConnectionRuntime, run: ConnectionRun,
   save: SaveRun = async () => undefined) {
+  const context = await withConnectionRetry(runtime, run, save, 'storage', 'account_context_read',
+    () => resolveContext(runtime, run.platformAccountId))
   let remote = await withConnectionRetry(runtime, run, save, 'unipile', 'account_verification',
     () => runtime.adapter().getAccount(run.accountId))
   assertAccountOperational(remote)
   let checkedAt = runtime.now().getTime()
-  const context = await withConnectionRetry(runtime, run, save, 'storage', 'account_context_read',
-    () => resolveContext(runtime, run.platformAccountId))
   if (context.accountId !== run.accountId) {
     throw connectionError('connection_account_changed', 'LinkedIn account binding changed.')
   }

@@ -7,14 +7,18 @@ type JsonObject = import('./input-types.ts').JsonObject
 type ProfileAccount = import('./plan-types.ts').ProfileAccount
 type ProfileClient = import('./plan-types.ts').ProfileClient
 type AccountRow = import('../account-connection/types.ts').LinkedInAuthAccountRow
+const { assertDolphinAccount } = require('../core/browser-eligibility.mts') as {
+  assertDolphinAccount(row: AccountRow): void
+}
 export type ProfileAccountReader = typeof readProfileAccount
 
-async function readProfileAccount(repository: any, id: number, fresh = false): Promise<AccountRow> {
+async function readProfileAccount(repository: any, id: number, fresh = true): Promise<AccountRow> {
   const row = repository.getAccount ? await repository.getAccount(id, { fresh }) :
     (await repository.listAccounts()).find((item: AccountRow) => Number(item.platformAccountId) === id)
   if (!row || Number(row.platformAccountId) !== id) {
     throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
   }
+  assertDolphinAccount(row)
   return row
 }
 
@@ -29,6 +33,7 @@ async function resolveProfileAccount(
   if (Number(row.platformAccountId) !== platformAccountId) {
     throw codedError('linkedin_account_not_found', 'LinkedIn account does not match the job.')
   }
+  assertDolphinAccount(row)
   if (!row.unipileAccountId || row.unipileAccountStatus !== 'running' || !row.lastVerifiedAt) {
     throw codedError('profile_filler_auth_required', 'Verify or reconnect LinkedIn first.')
   }

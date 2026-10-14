@@ -16,6 +16,9 @@ const { restoreMonitorJobs } = require('./restore.ts') as typeof import('./resto
 const { startCommentRetention } = require('./retention.ts') as typeof import('./retention.ts')
 const { createServiceActions } = require('./service-actions.ts') as typeof import('./service-actions.ts')
 const { clearAuthorContext } = require('./author-context.ts') as typeof import('./author-context.ts')
+const { readDolphinAccount } = require('../core/browser-eligibility.mts') as {
+  readDolphinAccount(repository: any, id: number): Promise<any>
+}
 const { createCommentUnipileAdapter } = require('./unipile-adapter.ts') as
   { createCommentUnipileAdapter(options?: any): any }
 
@@ -40,13 +43,19 @@ function createCommentMonitorService(options: any = {}) {
   async function save(job: MonitorJob, logger = loggerFor(job)) {
     await saveJob(store, job, logger); jobs.set(job.jobId, job)
   }
+  const canRun = (job: MonitorJob) => activeStatus(job.status) && job.status !== 'paused'
   async function run(job: MonitorJob) {
-    if (running.has(job.jobId) || !activeStatus(job.status) || job.status === 'paused') return
+    if (running.has(job.jobId) || !canRun(job)) return
     running.add(job.jobId)
     const logger = loggerFor(job)
-    try { await pollMonitorJob({ job, store, adapter: getAdapter(), openai: getOpenAi(), gate,
-      logger, random: options.random, sleep: options.sleep }) }
+    try {
+      await readDolphinAccount(repository, job.platformAccountId)
+      if (!canRun(job)) return // Stop may have completed while the fresh read was pending.
+      await pollMonitorJob({ job, store, adapter: getAdapter(), openai: getOpenAi(), gate,
+        logger, random: options.random, sleep: options.sleep })
+    }
     catch (error) {
+      if (job.status === 'disabled') return
       job.status = 'error'; job.stage = 'monitor_failed'; job.errorCode = commentErrorCode(error)
       job.finishedAt = new Date().toISOString(); clearAuthorContext(job, logger)
       await save(job, logger).catch(() => undefined)
@@ -60,7 +69,7 @@ function createCommentMonitorService(options: any = {}) {
   async function assertReady() { await ready; if (restoreError) throw restoreError }
   async function tick() {
     await assertReady().catch(() => undefined)
-    for (const job of jobs.values()) if (job.status !== 'paused' && activeStatus(job.status) &&
+    for (const job of jobs.values()) if (canRun(job) &&
       (!job.nextCheckAt || Date.parse(job.nextCheckAt) <= Date.now())) void run(job)
   }
   const timer = options.autoStart === false ? undefined : setInterval(tick, 15_000)

@@ -1,3 +1,7 @@
+import { linkedinBrowserErrorText } from '../../../linkedin-automation/core/browser-error-display.mts'
+
+export const connectionErrorText = code => linkedinBrowserErrorText(code) || code
+
 const LABELS = {
   running: 'Running', paused: 'Needs stack', succeeded: 'Completed', failed: 'Failed',
   partial: 'Partial', uncertain: 'Read-back required', stopped: 'Stopped'

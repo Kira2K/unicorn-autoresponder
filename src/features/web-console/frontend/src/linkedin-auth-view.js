@@ -1,3 +1,7 @@
+import { linkedinBrowserErrorDisplay, linkedinBrowserErrorText } from '../../../linkedin-automation/core/browser-error-display.mts'
+
+export const authErrorText = code => linkedinBrowserErrorText(code)
+
 export function primaryAction(account) {
   if (!account.unipileAccountId) return { action: 'connect', label: 'Connect' }
   if (account.unipileAccountStatus === 'running') return { action: 'connect', label: 'Verify owner' }
@@ -51,7 +55,8 @@ export function statusView(account, run) {
     }
   }
   if (run?.status === 'failed') {
-    return { tone: run.error?.tone || 'danger', label: run.error?.category || 'Error', error: run.error }
+    const error = run.error || linkedinBrowserErrorDisplay(run.errorCode)
+    return { tone: error?.tone || 'danger', label: error?.category || 'Error', error }
   }
   if (run?.status === 'succeeded') return { tone: 'success', label: 'Completed' }
   const tones = {

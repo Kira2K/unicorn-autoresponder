@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useInvitationWithdrawal } from './use-invitation-withdrawal'
+import { connectionErrorText } from './connection-inviter-view'
 const props = defineProps({ account: Object })
 const control = useInvitationWithdrawal(props.account)
 const count = computed(() => control.preview.value?.items.filter(item => item.eligible).length || 0)
@@ -44,7 +45,9 @@ const reasons = { already_attempted: 'Уже была попытка: повто
       <p v-if="control.active.value && control.run.value.retryAttempt" data-testid="withdrawal-retry">
         После паузы проверка продолжится автоматически. Уже отправленный отзыв повторять не будем.
       </p>
-      <p v-if="control.run.value.error" role="alert">{{ control.run.value.error }}</p>
+      <p v-if="control.run.value.error" role="alert">{{ connectionErrorText(control.run.value.error) }}
+        <small v-if="connectionErrorText(control.run.value.error) !== control.run.value.error">Код: {{ control.run.value.error }}</small>
+      </p>
       <p v-if="control.run.value.checkedAt && !control.needsCheck.value">Результат проверен. Оставшаяся очередь сама не запускается.</p>
       <Button v-if="control.needsCheck.value" label="Проверить результат" data-testid="withdrawal-recheck"
         :loading="control.busy.value" :disabled="control.busy.value" @click="control.recheck" />

@@ -42,7 +42,12 @@ export async function testStartupVerification() {
   let writes = 0
   let clock = 1_000
   const pauses: number[] = []
-  const service = createProfileFillerService({ store: {
+  const service = createProfileFillerService({ repository: {
+    async getAccount(id: number, options: { fresh: boolean }) {
+      assert.equal(options.fresh, true)
+      return { platformAccountId: id, dolphinProfileId: 7001 }
+    }
+  }, store: {
     async listPendingVerification() { listCalls += 1; return [job, oldGeneration] },
     async get() { getCalls += 1; return job },
     async update(id: string, patch: Partial<ProfileJob>) {

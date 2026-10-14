@@ -27,7 +27,8 @@ const { TABLES } = commonJsExports<{
 const { createUnipileHttpClient } = commonJsExports<{ createUnipileHttpClient(): PostHttp }>(httpModule)
 export type PostWriterStorage = { store: PostStore; cvRows(): Promise<Record<string, unknown>[]> }
 
-export function createLivePostWriter(repository: { listAccounts(): Promise<LinkedInAuthAccountRow[]> },
+export function createLivePostWriter(repository: { listAccounts(): Promise<LinkedInAuthAccountRow[]>;
+  getAccount?(id: number, options?: { fresh?: boolean }): Promise<LinkedInAuthAccountRow | undefined> },
   gate: Gate, control: { env?: NodeJS.ProcessEnv; storage?: PostWriterStorage } = {}): PostWriterService {
   const env = control.env ?? process.env
   const log = createPostLogger()
@@ -61,6 +62,7 @@ export function createLivePostWriter(repository: { listAccounts(): Promise<Linke
     const uploads = createCvFiles(files, createFactsExtractor(model.respond))
     return createPostWriterService({ store: storage.store,
       source: { ...uploads, ...createPostSource({ accounts: () => repository.listAccounts(),
+        ...(repository.getAccount ? { getAccount: (id: number, options: { fresh: boolean }) => repository.getAccount!(id, options) } : {}),
         cvRows: storage.cvRows, selectCv: selectFinalEnglishCv,
         loadCv: loadDriveCv, extractFacts: createFactsExtractor(model.respond) }) },
       generator: model, memes: createMemeServices(files, model.respond, log, env),

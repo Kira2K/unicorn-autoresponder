@@ -16,6 +16,9 @@ const { isRetryableCatalogFailure } = require('./generation/catalog-retry.ts') a
   typeof import('./generation/catalog-retry.ts')
 const { validCheckpoint } = require('./generation/checkpoint.ts') as
   typeof import('./generation/checkpoint.ts')
+const { readDolphinAccount } = require('../core/browser-eligibility.mts') as {
+  readDolphinAccount(repository: any, id: number): Promise<any>
+}
 
 async function resumeProfileGeneration(options: any) {
   const { jobId, jobs, store, acquire, update, logger } = options
@@ -23,7 +26,10 @@ async function resumeProfileGeneration(options: any) {
   const job = jobs.get(jobId) ?? await logAction(logger, 'job_read', () => store.get(jobId))
   if (!job) throw codedError('profile_job_not_found', 'Profile job was not found.')
   checkPreparation(job)
-  if (previewSaveRecovery(job)) return resumePreview({ ...options, job })
+  if (previewSaveRecovery(job)) {
+    await readDolphinAccount(options.repository, job.platformAccountId)
+    return resumePreview({ ...options, job })
+  }
   const retryableFailure = job.status === 'failed' &&
     isRetryableCatalogFailure(job.errorCode)
   if (job.status !== 'waiting_retry' && !retryableFailure) {
@@ -32,6 +38,7 @@ async function resumeProfileGeneration(options: any) {
   if (!validCheckpoint(job.checkpoint)) {
     throw codedError('profile_retry_unavailable', 'Profile generation checkpoint is unavailable.')
   }
+  await readDolphinAccount(options.repository, job.platformAccountId)
   const release = await logAction(logger, 'operation_gate', () =>
     acquire('profile_generate', jobId, job.platformAccountId))
   const now = new Date().toISOString()
