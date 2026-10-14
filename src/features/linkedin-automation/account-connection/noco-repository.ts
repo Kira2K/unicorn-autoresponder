@@ -50,17 +50,17 @@ function createLinkedInAuthNocoRepository(
   let rowsRequest: Promise<any> | undefined
   let stacksCache: { expiresAt: number; value: any[] } | undefined
   let stacksRequest: Promise<any[]> | undefined
-  async function fetchRows() {
+  async function fetchRows(options: { fresh?: boolean } = {}) {
     try {
       const accounts = await client.fetchRecords(TABLES.platformAccounts.id, 1000, {
         where: '(platforms_id,eq,16)'
-      })
+      }, options)
       await client.wait(300)
       const profiles = await client.fetchRecords(TABLES.dolphinProfiles.id, 1000, {
         where: '(locale,eq,En)~or(locale,eq,en)'
-      })
+      }, options)
       await client.wait(300)
-      const clients = await client.fetchRecords(TABLES.clients.id, 1000)
+      const clients = await client.fetchRecords(TABLES.clients.id, 1000, undefined, options)
       return { clients, accounts, profiles: profiles.filter(isDolphinProfile) }
     } catch (error) {
       throw linkedInNocoError(error)
@@ -95,7 +95,7 @@ function createLinkedInAuthNocoRepository(
     }
   }
   async function resolveTarget(clientName: string, platformAccountId?: number) {
-    return resolveLinkedInAuthTarget({ ...(await loadRows()), clientName, platformAccountId })
+    return resolveLinkedInAuthTarget({ ...(await fetchRows({ fresh: true })), clientName, platformAccountId })
   }
   async function getAccount(id: number, options: { fresh?: boolean } = {}) {
     if (!Number.isSafeInteger(id) || id <= 0) throw new RangeError('Invalid account ID')

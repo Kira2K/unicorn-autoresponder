@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import PostWriterMeme from './PostWriterMeme.vue'
 import PostWriterMemeRecovery from './PostWriterMemeRecovery.vue'
 import PostWriterLikes from './PostWriterLikes.vue'
-import { stages, engagementLabels, dateMsk, countdown, runActive, memeNotes } from './post-writer-view'
+import { stages, engagementLabels, dateMsk, countdown, runActive, memeNotes, postErrorText } from './post-writer-view'
 const props = defineProps({ run: Object, now: Number, disabled: Boolean, stopDisabled: Boolean })
 const emit = defineEmits(['action'])
 const memeLoaded = ref(false), memeReviewed = ref(false)
@@ -33,13 +33,21 @@ function onMemeLoaded(value) { memeLoaded.value = value; if (!value) memeReviewe
       Мем просмотрен. Подтверждаю текст и изображение вместе.
     </label>
     <ul v-if="run.issues.length"><li v-for="issue in run.issues" :key="issue">{{ issue }}</li></ul>
-    <p v-if="run.errorCode" role="alert">{{ run.errorCode }}</p>
+    <p v-if="run.errorCode" role="alert">{{ postErrorText(run.errorCode) }}
+      <small v-if="postErrorText(run.errorCode) !== run.errorCode">Код: {{ run.errorCode }}</small>
+    </p>
     <a v-if="run.url" :href="run.url" target="_blank" rel="noreferrer">Открыть опубликованный пост</a>
     <p>Лайки: {{ engagementLabels[run.engagement.status] }}<template v-if="run.engagement.target">
       · {{ run.engagement.items.filter(item => item.status === 'sent').length }} из {{ run.engagement.target }}</template></p>
-    <p v-for="item in run.engagement.items.filter(row => row.status === 'failed' && row.errorCode === 'post_account_not_ready')"
+    <p v-for="item in run.engagement.items.filter(row => row.errorCode === 'linkedin_browser_unsupported' ||
+      (row.status === 'failed' && row.errorCode === 'post_account_not_ready'))"
       :key="item.account.platformAccountId" data-testid="post-like-skipped">
-      {{ item.account.clientName }}: пропущен — аккаунт отключён или заблокирован. Лайк не отправлялся.
+      {{ item.account.clientName }}:
+      <template v-if="item.errorCode === 'linkedin_browser_unsupported'">{{ postErrorText(item.errorCode) }}
+        <small v-if="item.status === 'uncertain'">Прежний результат лайка неизвестен; повторно не отправляем.</small>
+        <small>Код: {{ item.errorCode }}</small>
+      </template>
+      <template v-else>пропущен — аккаунт отключён или заблокирован. Лайк не отправлялся.</template>
     </p>
     <small v-if="run.engagement.requestedManually && runActive(run)">Разовый запуск лайков. Остановить — кнопкой Stop.</small>
     <div class="post-actions">

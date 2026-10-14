@@ -1,8 +1,11 @@
 type App = import('express').Express
 type Handler = import('express').RequestHandler
 type Service = import('./comment-monitor-types.ts').CommentMonitorService
+import { linkedInBrowserFailure } from './linkedin-browser-failure.mts'
 
 function failure(error: any) {
+  const browserFailure = linkedInBrowserFailure(error)
+  if (browserFailure) return browserFailure
   const code = String(error?.code ?? 'comment_monitor_internal_error')
   if (code === 'comment_monitor_job_not_found') return { status: 404,
     body: { error: code, message: 'Comment monitor was not found.' } }

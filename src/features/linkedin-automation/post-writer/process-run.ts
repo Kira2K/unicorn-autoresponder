@@ -9,6 +9,7 @@ import { policyCurrent } from './run-policy.ts'
 export async function processRun(run: PostRun, e: Execution) {
   if (!e.writable || (run.nextActionAt && run.nextActionAt > e.now())) return
   try {
+    await e.source.assertBrowser?.(run.account)
     if (['publishing', 'verifying', 'uncertain'].includes(run.status)) {
       await reconcilePost(run, e)
       return

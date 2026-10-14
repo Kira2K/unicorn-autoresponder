@@ -43,6 +43,7 @@ export interface PostStore {
 }
 export interface PostSource {
   accounts(): Promise<Account[]>
+  assertBrowser?(account: number): Promise<void>
   context(account: number, previous?: Context): Promise<Context>
   uploadCv?(value: unknown): Promise<string>
   uploadedContext?(reference: string, previous?: Context): Promise<Context>

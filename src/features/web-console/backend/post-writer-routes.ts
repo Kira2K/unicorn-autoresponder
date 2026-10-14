@@ -3,6 +3,7 @@ import type { PostWriterService } from '../../linkedin-automation/post-writer/se
 import { errorCode, PostError } from '../../linkedin-automation/post-writer/errors.ts'
 import { registerPostEvents } from './post-writer-events.ts'
 import { defaults } from '../../linkedin-automation/post-writer/types.ts'
+import { linkedInBrowserFailure } from './linkedin-browser-failure.mts'
 
 const id = (req: Request) => {
   const value = Number(req.params.id)
@@ -10,6 +11,8 @@ const id = (req: Request) => {
   return value
 }
 export function postFailure(res: Response, error: unknown) {
+  const browserFailure = linkedInBrowserFailure(error)
+  if (browserFailure) { res.status(browserFailure.status).json(browserFailure.body); return }
   const code = errorCode(error)
   const messages: Record<string, string> = {
     post_likes_start_invalid: 'Лайки доступны только для опубликованного вручную поста, если их ещё не запускали и не останавливали.',

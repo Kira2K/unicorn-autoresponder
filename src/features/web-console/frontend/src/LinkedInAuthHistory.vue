@@ -1,5 +1,5 @@
 <script setup>
-import { failedRunAction, formatDate } from './linkedin-auth-view'
+import { authErrorText, failedRunAction, formatDate } from './linkedin-auth-view'
 
 const props = defineProps({
   runs: { type: Array, default: () => [] },
@@ -29,7 +29,8 @@ const retry = run => failedRunAction(run, accountFor(run))
             <td>{{ run.clientName }}<small>#{{ run.platformAccountId }}</small></td>
             <td>{{ actionLabel[run.action] || run.action }}</td>
             <td><span :class="`linkedin-history-status linkedin-history-${run.status}`">{{ statusLabel[run.status] || run.status }}</span></td>
-            <td><code v-if="run.errorCode">{{ run.errorCode }}</code><span v-else>—</span></td>
+            <td><template v-if="run.errorCode"><small v-if="authErrorText(run.errorCode)">{{ authErrorText(run.errorCode) }}</small>
+              <code>{{ run.errorCode }}</code></template><span v-else>—</span></td>
             <td><Button v-if="retry(run)" :label="retry(run).label" size="small" outlined
               :disabled="busy" :data-testid="`linkedin-history-retry-${run.runId}`"
               @click="emit('action', run, retry(run).action)" /></td>

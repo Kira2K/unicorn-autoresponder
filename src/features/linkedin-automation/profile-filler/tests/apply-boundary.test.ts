@@ -61,7 +61,7 @@ async function testApplyBoundary() {
   for (let attempt = 0; attempt < 50 && records.get(created.jobId)?.status !== 'succeeded'; attempt += 1) {
     await new Promise(resolve => setImmediate(resolve))
   }
-  assert.deepEqual(accountReads, [false, true], 'Apply performs a fresh account read')
+  assert.deepEqual(accountReads, [true, true], 'Preview and Apply both recheck the browser freshly')
   assert.equal(writes, 2)
   assert.equal(saves.length, 6)
   assert.equal(records.get(created.jobId)?.status, 'succeeded')

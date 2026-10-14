@@ -8,6 +8,7 @@ export type ConnectionRunEventType = 'snapshot' | 'stage_changed' | 'progress' |
 export type ConnectionRuntime = {
   store: ConnectionInviterStore
   repository: {
+    getAccount?(id: number, options?: { fresh?: boolean }): Promise<any>
     listAccounts(): Promise<any[]>
     listStacks(): Promise<Array<{ id: number; name: string }>>
     updatePrimaryStack(clientId: number, stackId: number): Promise<{ id: number; name: string }>

@@ -1,3 +1,7 @@
+const { linkedinBrowserErrorDisplay } = require('../core/browser-error-display.mts') as {
+  linkedinBrowserErrorDisplay(code: unknown): ErrorDisplay | undefined
+}
+
 type ErrorTone = 'warning' | 'danger'
 type ErrorDisplay = {
   code: string
@@ -10,7 +14,7 @@ type ErrorDisplay = {
 const GROUPS = [
   {
     category: 'Settings',
-    prefixes: ['noco_', 'linkedin_account_', 'linkedin_url_', 'dolphin_en_profile_'],
+    prefixes: ['noco_', 'linkedin_account_', 'linkedin_browser_', 'linkedin_url_', 'dolphin_en_profile_'],
     message: 'Required LinkedIn or Dolphin configuration is incomplete.',
     action: 'Fix the account row and the En Dolphin profile.'
   },
@@ -49,6 +53,8 @@ const GROUPS = [
 function linkedinAuthErrorDisplay(value: unknown): ErrorDisplay | undefined {
   const code = String(value ?? '').trim().toLowerCase()
   if (!code) return undefined
+  const browserError = linkedinBrowserErrorDisplay(code)
+  if (browserError) return browserError
   if (code === 'dolphin_local_api_unavailable' || code === 'dolphin_local_session_invalid') {
     return {
       code, category: 'Dolphin', tone: 'warning',

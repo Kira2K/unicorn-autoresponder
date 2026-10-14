@@ -20,7 +20,7 @@ export type PublicationExecution = GateExecution & Pick<Execution, 'save' | 'now
   adapter: Pick<PostAdapter, 'identity' | 'publish' | 'read' | 'recent'>
 }
 export type EngagementExecution = GateExecution & Pick<Execution, 'save' | 'now' | 'random' | 'settings' | 'isClosing'> & {
-  source: Pick<PostSource, 'accounts'>
+  source: Pick<PostSource, 'accounts' | 'assertBrowser'>
   adapter: Pick<PostAdapter, 'identity' | 'reacted' | 'like'>
 }
 export function unlock(execution: Pick<GateExecution, 'release'>, account: number) {

@@ -1,3 +1,7 @@
+import { linkedinBrowserErrorText } from '../../../linkedin-automation/core/browser-error-display.mts'
+
+export const postErrorText = code => linkedinBrowserErrorText(code) || code
+
 export const stages = { queued: 'В очереди', generating: 'Готовим пост', awaiting_approval: 'Ждёт подтверждения',
   ready: 'Готов к публикации', publishing: 'Публикуем', verifying: 'Проверяем публикацию',
   uncertain: 'Выясняем результат публикации', published: 'Пост опубликован', blocked: 'Нужна проверка',

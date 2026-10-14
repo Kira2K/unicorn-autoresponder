@@ -3,10 +3,21 @@ import type { SourceDependencies } from './source-types.ts'
 import { PostError } from './errors.ts'
 import { digest } from './content-identity.ts'
 import { FACTS_VERSION } from './fact-instructions.ts'
+import { assertDolphinAccount } from '../core/browser-eligibility.mts'
 const MAX_CV_BYTES = 20 * 1024 * 1024
 
 export function createPostSource(deps: SourceDependencies): PostSource {
+  async function readAccount(account: number) {
+    const row = deps.getAccount ? await deps.getAccount(account, { fresh: true }) :
+      (await deps.accounts()).find(item => item.platformAccountId === account)
+    if (!row) throw new PostError('post_account_missing')
+    assertDolphinAccount(row)
+    return row
+  }
   return {
+    async assertBrowser(account) {
+      await readAccount(account)
+    },
     async accounts() {
       return (await deps.accounts()).filter(row => row.unipileAccountId &&
         row.verifiedProviderId && !row.readinessErrorCode && !row.authErrorCode &&
@@ -15,8 +26,7 @@ export function createPostSource(deps: SourceDependencies): PostSource {
           verifiedProviderId: row.verifiedProviderId!, linkedinUrl: row.linkedinUrl }))
     },
     async context(account, previous) {
-      const row = (await deps.accounts()).find(item => item.platformAccountId === account)
-      if (!row) throw new PostError('post_account_missing')
+      const row = await readAccount(account)
       const cv = deps.selectCv(await deps.cvRows(), row.clientId)
       // Download/read-only metadata detects in-place edits even if the Noco link did not change.
       const document = await deps.loadCv(cv.url, MAX_CV_BYTES)

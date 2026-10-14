@@ -4,6 +4,7 @@ import { CATALOG_TYPES, type CatalogType } from './mcp-contract.ts'
 import type { ProfileClient } from './plan-types.ts'
 import type { ProfileLogger } from './profile-logger.ts'
 import { jobTitleQueries } from './generation/job-title-queries.ts'
+import { readDolphinAccount } from '../core/browser-eligibility.mts'
 
 const TYPES = new Set<string>(CATALOG_TYPES)
 const unique = (items: Array<{ id: string; name: string }>) => [...new Map(
@@ -24,11 +25,8 @@ export async function findParameterOptions(options: {
   if (!TYPES.has(type) || keywords.length < 2 || keywords.length > 80) {
     throw codedError('profile_parameter_search_invalid', 'Invalid parameter search.')
   }
-  const row = await logAction(logger, 'parameter_account_read', () => repository.getAccount
-    ? repository.getAccount(platformAccountId)
-    : repository.listAccounts().then((rows: Array<{ platformAccountId: number }>) =>
-      rows.find(item => Number(item.platformAccountId) === platformAccountId)))
-  if (!row) throw codedError('linkedin_account_not_found', 'LinkedIn account was not found.')
+  const row = await logAction(logger, 'parameter_account_read', () =>
+    readDolphinAccount(repository, platformAccountId))
   if (!row.unipileAccountId || row.unipileAccountStatus !== 'running' || !row.lastVerifiedAt) {
     throw codedError('profile_filler_auth_required', 'Verify or reconnect LinkedIn first.')
   }

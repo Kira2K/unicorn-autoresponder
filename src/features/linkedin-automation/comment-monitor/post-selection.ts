@@ -2,15 +2,14 @@ import { allPages } from './pagination.ts'
 import { commentError } from './errors.ts'
 import { logged } from './logger.ts'
 import type { CommentLogger, TrackedPost } from './types.ts'
+import { readDolphinAccount } from '../core/browser-eligibility.mts'
 
 export async function selectPosts(options: {
   platformAccountId: number; repository: any; adapter: any; logger: CommentLogger
 }) {
   const { platformAccountId, repository, adapter, logger } = options
-  const rows = await logged(logger, 'noco_account_read', () => repository.listAccounts(), {
+  const row = await logged(logger, 'noco_account_read', () => readDolphinAccount(repository, platformAccountId), {
     level: 'debug' })
-  const row = rows.find((item: any) => Number(item.platformAccountId) === platformAccountId)
-  if (!row) throw commentError('linkedin_account_not_found', 'LinkedIn account was not found.')
   if (!row.unipileAccountId || row.unipileAccountStatus !== 'running' || !row.lastVerifiedAt) {
     throw commentError('comment_monitor_auth_required', 'Verify or reconnect LinkedIn first.')
   }

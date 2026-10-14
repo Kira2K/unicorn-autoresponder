@@ -1,5 +1,5 @@
 const SAFE_CODES = new Set([
-  'linkedin_account_not_found', 'profile_filler_auth_required', 'profile_validation_failed',
+  'linkedin_account_not_found', 'linkedin_browser_unsupported', 'profile_filler_auth_required', 'profile_validation_failed',
   'profile_job_not_found', 'profile_job_not_ready', 'profile_plan_hash_mismatch',
   'profile_entry_ambiguous', 'profile_entry_id_missing',
   'profile_entry_missing', 'profile_preview_stale', 'profile_section_unavailable',

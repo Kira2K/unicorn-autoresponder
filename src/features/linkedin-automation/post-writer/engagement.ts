@@ -9,6 +9,14 @@ export async function engage(run: PostRun, e: EngagementExecution) {
   if (!run.postId || !['pending', 'running', 'uncertain'].includes(run.engagement.status)) return
   const uncertain = run.engagement.items.find(item => ['sending', 'uncertain'].includes(item.status))
   if (uncertain) {
+    try { await e.source.assertBrowser?.(uncertain.account.platformAccountId) }
+    catch (error) {
+      if (errorCode(error) !== 'linkedin_browser_unsupported') throw error
+      // Keep the unknown intent; do not contact Octo or pretend its like is confirmed.
+      uncertain.errorCode = 'linkedin_browser_unsupported'
+      run.engagement.status = 'partial'; run.nextActionAt = undefined
+      await e.save(run); unlock(e, uncertain.account.platformAccountId); return
+    }
     lock(e, uncertain.account.platformAccountId, run.id)
     const found = await e.adapter.reacted(uncertain.account, run.postId)
     if (!found) {
@@ -55,6 +63,13 @@ export async function engage(run: PostRun, e: EngagementExecution) {
     run.nextActionAt = undefined
     await e.save(run)
     return
+  }
+  try { await e.source.assertBrowser?.(item.account.platformAccountId) }
+  catch (error) {
+    if (errorCode(error) !== 'linkedin_browser_unsupported') throw error
+    item.status = 'cancelled'; item.errorCode = 'linkedin_browser_unsupported'
+    run.nextActionAt = e.now() + 5000
+    await e.save(run); return
   }
   lock(e, item.account.platformAccountId, run.id)
   try { await e.adapter.identity(item.account) }

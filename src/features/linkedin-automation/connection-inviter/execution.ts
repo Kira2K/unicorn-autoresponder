@@ -1,4 +1,5 @@
 import { verifyConnectionAccount } from './account.mts'
+import { readDolphinAccount } from '../core/browser-eligibility.mts'
 import { nextConnectionAudience } from './audience-sequence.ts'
 import { createCandidateDiscovery } from './discovery.ts'
 import { confirmedQuotaExceeded, confirmedQuotaReached,
@@ -54,6 +55,7 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
   running: Set<string>, save: SaveRun, initialOpenHistory?: ConnectionHistoryItem[]) {
   if (running.has(run.runId) || run.status !== 'running' || !runtime.writerEnabled) return
   running.add(run.runId); let release: (() => void) | undefined
+  let browserValidated = false
   const details = { runId: run.runId, platformAccountId: run.platformAccountId }
   const nocoStart = runtime.store.requestStats?.()
   const holdUnsafeTerminal = async (stage: 'resolving_uncertain' | 'stop_requested',
@@ -113,6 +115,9 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
   }
   runtime.logger.event('run', 'started', details)
   try {
+    // Includes restored runs: do not reconcile/read Unipile before browser eligibility.
+    await readDolphinAccount(runtime.repository, run.platformAccountId)
+    browserValidated = true
     const recoveringClosedDay = !connectionRunDayIsOpen(runtime, run)
     runtime.logger.event('operation_gate_acquire', 'started', details)
     release = await acquireAccountGate(runtime, run, save, recoveringClosedDay)
@@ -269,6 +274,17 @@ async function executeConnectionRunWithBudget(runtime: ConnectionRuntime, run: C
       recruiterShortfall: progress.remaining.recruiter,
       technicalShortfall: progress.remaining.technical })
   } catch (error) {
+    if (!browserValidated) {
+      // Stop/recovery must not bypass the browser check with provider read-back.
+      // Previously unknown invitation intents stay in the durable history unchanged.
+      run.status = 'failed'; run.stage = 'failed'; run.errorCode = connectionErrorCode(error)
+      run.executorId = undefined; run.heartbeatAt = undefined
+      run.retryState = undefined; run.timerState = undefined; run.nextActionAt = undefined
+      run.finishedAt = runtime.now().toISOString()
+      await save(run, 'stage_changed', 'critical')
+      runtime.logger.event('run', 'failed', { ...details, errorCode: run.errorCode })
+      return
+    }
     if (runtime.stopRequested(run.runId)) {
       await finishStopSafely()
       return
