@@ -1,6 +1,9 @@
 const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
   createNocoClient(options?: any): any
 }
+const { isDolphinProfile } = require('../../../integrations/noco/core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean
+}
 const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { id: string }>
 }
@@ -1128,7 +1131,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
   }
 
   async function fetchDolphinProfiles(): Promise<NocoRecord[]> {
-    return await nocoClient.fetchRecords(TABLES.dolphinProfiles.id, 1000)
+    return (await nocoClient.fetchRecords(TABLES.dolphinProfiles.id, 1000)).filter(isDolphinProfile)
   }
 
   async function fetchEnglishLevels(): Promise<NocoRecord[]> {

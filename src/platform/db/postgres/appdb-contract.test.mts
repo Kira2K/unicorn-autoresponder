@@ -23,6 +23,20 @@ test('SQL source rejection is propagated, never interpreted as an empty table', 
   await assert.rejects(db.getAutomationTargets(), error => error === failure);
   await assert.rejects(db.getHHAuthCredentialsByClientName('Fake'), error => error === failure);
 });
+
+test('Noco and SQL automation ignore Octo and unknown profiles sharing a Dolphin market', async () => {
+  const f = makeFixture();
+  f.data.dolphinProfiles[0].browser = 'dolphin';
+  f.data.dolphinProfiles.push(
+    { Id: 90, clients_id: 1, locale: 'Ru', browser: 'octo', octo_profile_id: 'octo-only' },
+    { Id: 91, clients_id: 1, locale: 'En', browser: 'unknown', dolphin_profile_id: '999' });
+  const noco = createNocoDb({ nocoClient: f.records });
+  const sql = createPostgresAppDb(async () => f.reader, unusedSheets);
+  const expected = await createNocoDb({ nocoClient: makeFixture().records }).getAutomationTargets({ workWithRuOnly: false });
+  for (const db of [noco, sql]) {
+    assert.deepEqual(await db.getAutomationTargets({ workWithRuOnly: false }), expected);
+  }
+});
 test('SQL preserves existing missing/ambiguous record rules', async () => {
   for (const change of [
     (f: ReturnType<typeof makeFixture>) => f.data.dolphinProfiles.push({ ...f.data.dolphinProfiles[0], Id: 99 }),

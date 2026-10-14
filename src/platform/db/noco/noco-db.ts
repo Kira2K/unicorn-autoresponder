@@ -1,4 +1,7 @@
 const { hhLoginKind } = require('../../../../shared/hh-login.ts')
+const { isDolphinProfile } = require('../../../integrations/noco/core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean
+}
 const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
   createNocoClient(options?: any): any
 }
@@ -281,6 +284,7 @@ function findClientDolphinProfile(
 ): NocoRecord {
   const matches = profiles.filter(
     profile =>
+      isDolphinProfile(profile) &&
       getProfileClientId(profile) === clientId &&
       normalizeMarket(profile.locale) === market
   )
@@ -371,7 +375,7 @@ async function fetchNocoAutomationState(client: any): Promise<{
     TABLES.hhAutoresponses.id,
     1000
   )
-  const profiles = await client.fetchRecords(TABLES.dolphinProfiles.id, 1000)
+  const profiles = (await client.fetchRecords(TABLES.dolphinProfiles.id, 1000)).filter(isDolphinProfile)
   const stacks = await client.fetchRecords(TABLES.stacks.id, 1000)
   const restrictions = await client.fetchRecords(TABLES.restrictions.id, 1000)
 

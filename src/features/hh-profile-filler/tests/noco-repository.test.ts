@@ -17,7 +17,9 @@ export async function runNocoRepositoryTests() {
     [TABLES.hhAutoresponses.id]: [{ Id: 70, clients_id: 7,
       'Stack Override': { Id: 2, name: 'FullStack' } }],
     [TABLES.dolphinProfiles.id]: [{ Id: 71, clients_id: 7, locale: 'en',
-      dolphin_profile_id: '123' }],
+      dolphin_profile_id: '123' },
+      { Id: 81, clients_id: 7, locale: 'en', browser: 'octo', octo_profile_id: 'octo-only' },
+      { Id: 82, clients_id: 7, locale: 'en', browser: 'unknown', dolphin_profile_id: '999' }],
     [TABLES.platformAccounts.id]: [
       { Id: 72, clients_id: 7, platforms_id: 10, account_label: 'Client hh_en',
         login: 'login@example.com', password: 'secret' },

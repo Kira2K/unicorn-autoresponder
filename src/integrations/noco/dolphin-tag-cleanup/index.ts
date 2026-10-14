@@ -14,6 +14,9 @@ const { createNocoClient } = require('../core/client.ts') as {
 const { TABLES } = require('../core/schema.ts') as {
   TABLES: Record<string, { key: string; id: string; title: string }>
 }
+const { isDolphinProfile } = require('../core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean
+}
 const { describeError } = require('../core/errors.ts') as {
   describeError(error: any): string
 }
@@ -172,7 +175,7 @@ async function loadReport(client = createNocoClient()): Promise<TagCleanupReport
     client.fetchRecords(TABLES.clients.id, 1000)
   ])
 
-  return buildTagCleanupReport({ profiles, nocoProfiles, clients })
+  return buildTagCleanupReport({ profiles, nocoProfiles: nocoProfiles.filter(isDolphinProfile), clients })
 }
 
 async function applyTagUpdates(report: TagCleanupReport): Promise<Record<string, unknown>> {

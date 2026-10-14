@@ -346,6 +346,9 @@ async function ensureProfileAccessInput(options: {
   ownProxy?: boolean
 }) {
   const mode = options.mode ?? 'create_new'
+  if (mode === 'open_existing' && options.actorRole === 'client') {
+    return await buildProfileAccessInput(options.repository, options.client.id)
+  }
   const status = await getDolphinProfileStatus({
     repository: options.repository,
     client: options.client,
@@ -451,6 +454,7 @@ function createMockCvTailoringService(): CvTailoringService {
 }
 
 function createWebConsoleApp(options: {
+  octoService?: import('../../octo-access/service.mts').OctoService
   repository?: WebConsoleRepository
   linkedinStorage?: import('./storage-options.ts').LinkedInStorageOptions
   dolphinLeaseService?: DolphinLeaseService
@@ -1326,6 +1330,9 @@ function createWebConsoleApp(options: {
     }
   })
 
+  const { registerOctoRoutes } = require('./octo-routes.ts') as typeof import('./octo-routes.ts')
+  registerOctoRoutes(app, requireAuth, options.octoService)
+
   app.get('/api/dolphin/profiles/status', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       const session = req.webSession!
@@ -1381,6 +1388,10 @@ function createWebConsoleApp(options: {
       const mode = req.body?.mode === 'open_existing' ? 'open_existing' : 'create_new'
       const ownProxy = Boolean(req.body?.ownProxy)
       if (session.role === 'client') {
+        if (mode !== 'open_existing') {
+          res.status(409).json({ error: 'new_profiles_use_octo', message: 'Создавайте новые профили в Octo.' })
+          return
+        }
         const dashboard = await repository.getClientDashboard(Number(session.clientId), { fullAccess: false })
         const credential = resolveClientDolphinCredentials(dashboard.client)
         const profileAccess = await ensureProfileAccessInput({
@@ -1406,10 +1417,7 @@ function createWebConsoleApp(options: {
           profileIds: profileAccess.profileIds,
           knownProfileIds: profileAccess.knownProfileIds
         })
-        const ownProxyName = mode === 'create_new' && ownProxy
-          ? await buildOwnProxyName(repository, dashboard.client)
-          : ''
-        res.json(ownProxyName ? { ...(lease as any), ownProxyName } : lease)
+        res.json(lease)
         return
       }
 

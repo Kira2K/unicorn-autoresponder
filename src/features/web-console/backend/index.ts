@@ -41,6 +41,17 @@ async function startBackend() {
     }
 
     bound.attach(app)
+    await runtime.startBackground()
+    let stopping = false
+    const shutdown = () => {
+      if (stopping) return
+      stopping = true
+      void (async () => {
+        await Promise.all([bound.close(), runtime.closeStorage()])
+      })().catch(() => { process.exitCode = 1 })
+    }
+    process.once('SIGTERM', shutdown)
+    process.once('SIGINT', shutdown)
     console.log(`Web console backend listening at http://${host}:${port}`)
     void app.locals.recoverProfileVerification().catch(() => {
       console.error('Profile verification recovery could not be started; inspect safe Profile Filler logs.')

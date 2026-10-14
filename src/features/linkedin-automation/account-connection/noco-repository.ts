@@ -1,6 +1,9 @@
 const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
   createNocoClient(options?: any): any
 }
+const { isDolphinProfile } = require('../../../integrations/noco/core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean
+}
 const { TABLES } = require('../../../integrations/noco/core/schema.ts') as {
   TABLES: Record<'clients' | 'dolphinProfiles' | 'platformAccounts' | 'stacks', { id: string }>
 }
@@ -58,7 +61,7 @@ function createLinkedInAuthNocoRepository(
       })
       await client.wait(300)
       const clients = await client.fetchRecords(TABLES.clients.id, 1000)
-      return { clients, accounts, profiles }
+      return { clients, accounts, profiles: profiles.filter(isDolphinProfile) }
     } catch (error) {
       throw linkedInNocoError(error)
     }
@@ -106,7 +109,7 @@ function createLinkedInAuthNocoRepository(
         { where: `(Id,eq,${owner})` }, options)
       const profiles = await client.fetchRecords(TABLES.dolphinProfiles.id, 100,
         { where: `(clients_id,eq,${owner})` }, options)
-      return listLinkedInAuthAccounts({ accounts: [row], clients, profiles })
+      return listLinkedInAuthAccounts({ accounts: [row], clients, profiles: profiles.filter(isDolphinProfile) })
         .find(account => account.platformAccountId === id)
     } catch (error) { throw linkedInNocoError(error) }
   }

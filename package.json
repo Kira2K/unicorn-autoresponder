@@ -3,6 +3,18 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "octo:test:serve": "node --env-file=.env src/features/octo-access-test/index.mts",
+    "octo:timed:serve": "node --env-file=.env src/features/octo-access-test/timed-index.mts",
+    "octo:test": "node --test src/features/octo-access-test/*.test.mts",
+    "octo:console:test": "node --test src/features/octo-access/*.test.mts src/features/web-console/frontend/src/octo-api.test.js src/features/web-console/frontend/src/octo-onboarding.test.js src/features/web-console/backend/dolphin-browser-filter.test.mts",
+    "octo:console:db-test": "node src/features/octo-access/postgres.integration.mts",
+    "octo:console:e2e:mock": "node src/features/web-console/e2e/octo-mock.e2e.mts",
+    "octo:console:preflight": "node --env-file=.env src/features/octo-access/preflight.mts",
+    "octo:checker:preflight": "node src/features/octo-access/checker-preflight.mts",
+    "octo:console:migrate": "node --env-file=.env src/features/octo-access/migration.mts",
+    "octo:console:migrate-onboarding": "node --env-file=.env src/features/octo-access/migrate-onboarding.mts",
+    "octo:console:seed": "node --env-file=.env src/features/octo-access/seed-pilot.mts",
+    "octo:console:e2e:live": "node --env-file=.env --env-file=.env.octo-pilot src/features/web-console/e2e/octo-live.e2e.mts",
     "linkedin:withdrawals:test": "node --test src/features/linkedin-automation/invitation-withdrawal/*.test.ts src/integrations/unipile/invitation-withdrawal.test.ts src/features/web-console/backend/invitation-withdrawal-routes.test.ts",
     "linkedin:withdrawals:e2e": "node src/features/web-console/e2e/linkedin-invitation-withdrawal.e2e.mts",
     "linkedin:posts:standalone": "node src/features/linkedin-automation/post-writer/standalone-cli.ts",
@@ -156,10 +168,12 @@
     "tdl": "^8.1.0",
     "telegram": "^2.26.22",
     "vite": "^8.0.16",
-    "vue": "^3.5.38"
+    "vue": "^3.5.38",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }

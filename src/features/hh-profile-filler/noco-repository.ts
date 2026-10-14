@@ -1,6 +1,9 @@
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { createNocoClient } = require('../../integrations/noco/core/client.ts')
+const { isDolphinProfile } = require('../../integrations/noco/core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean
+}
 const { TABLES } = require('../../integrations/noco/core/schema.ts') as {
   TABLES: Record<string, { id: string }>
 }
@@ -164,7 +167,7 @@ export function createProfileFillerNocoRepository(
       cached = (async () => {
         const clients = await listClients()
         const autoresponses = await readTable(TABLES.hhAutoresponses.id, 'hh_autoresponses')
-        const profiles = await readTable(TABLES.dolphinProfiles.id, 'dolphin_profiles')
+        const profiles = (await readTable(TABLES.dolphinProfiles.id, 'dolphin_profiles')).filter(isDolphinProfile)
         const accounts = await readTable(TABLES.platformAccounts.id, 'platform_accounts')
         const cvRows = await readTable(TABLES.cvProcessing.id, 'cv_processing')
         const stacks = await readTable(TABLES.stacks.id, 'stacks')

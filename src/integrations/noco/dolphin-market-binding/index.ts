@@ -1,6 +1,9 @@
 const { getDolphinProfile } = require('../../dolphin/profiles.ts') as {
   getDolphinProfile(profileId: number): Promise<any>
 }
+const { isDolphinProfile } = require('../core/profile-browser.ts') as {
+  isDolphinProfile(row: Record<string, unknown>): boolean
+}
 const { createNocoClient } = require('../core/client.ts') as {
   createNocoClient(options?: any): any
 }
@@ -106,7 +109,7 @@ async function loadNocoState(client = createNocoClient()): Promise<NocoState> {
     client.fetchRecords(TABLES.stacks.id, 1000)
   ])
 
-  return { clients, autoresponseRows, profiles, stacks }
+  return { clients, autoresponseRows, profiles: profiles.filter(isDolphinProfile), stacks }
 }
 
 async function fetchRequiredDolphinProfiles(
