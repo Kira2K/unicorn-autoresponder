@@ -16,6 +16,7 @@ const { kiraRejectPromptMessage } = require('./resume-kira-message-templates.ts'
 type TelegramIntegration = import('./integration.ts').TelegramIntegration
 type SendOneInput = import('./types.ts').SendOneInput
 type SendOneResult = import('./types.ts').SendOneResult
+const { securedGroupResponse } = require('./secured-group-info.ts') as import('./secured-group-info.ts').SecuredGroupModule
 
 type SupportBotActor = {
   userId: string
@@ -31,6 +32,7 @@ type SupportBotResponse = string | {
 }
 
 type SupportBotApiClient = {
+  myGroupInfo(username: string): Promise<import('./secured-group-info.ts').SecuredGroupResult>
   backendStatus(): Promise<{ ok: boolean; service?: string; checkedAt?: string }>
   findClient(chatId: string, actor?: SupportBotActor): Promise<{ found: boolean; chatId: string; client?: { id: number; name: string; chatId: string; googleFolder: string } }>
   updateGoogleFolder(chatId: string, googleFolder: string, actor?: SupportBotActor): Promise<{ success: boolean; error?: string; chatId?: string; client?: { id: number; name: string; chatId: string; googleFolder: string } }>
@@ -361,6 +363,9 @@ function createSupportBotApiClient(options: {
     async backendStatus() {
       return await request('/api/bot/status')
     },
+    async myGroupInfo(username: string) {
+      return await request('/api/bot/telegram/my-group-info', { method: 'POST', body: JSON.stringify({ username }) })
+    },
     async findClient(chatId: string, actor?: SupportBotActor) {
       return await request(`/api/bot/telegram/chats/${encodeURIComponent(chatId)}/client`, {
         headers: actorHeaders(actor)
@@ -606,6 +611,10 @@ async function handleSupportBotMessage(message: any, api: SupportBotApiClient): 
   }
 
   if (name === '/start' || name === '/student') {
+    if (name === '/start' && actor.chatType === 'private') {
+      if (!actor.username) return securedGroupResponse({ kind: 'missing-username' })
+      return await withBackendStatusMessage(async () => securedGroupResponse(await api.myGroupInfo(actor.username)))
+    }
     return await withBackendStatusMessage(async () => {
       const result = await api.findClient(chatId, actor)
       if (!result.found || !result.client) {

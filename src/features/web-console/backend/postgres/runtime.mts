@@ -9,6 +9,7 @@ import { openLinkLabIntake } from '../../../linkedin-automation/linklab/intake-r
 import { tableIds } from './tables.mts';
 import { studentProfileStore } from './student-profile-store.mts';
 import { withStudentProfile } from './student-profile-repository.mts';
+import { createSecuredGroupReader } from './secured-group.mts';
 import { readOctoConfig } from '../../../octo-access/config.mts';
 import { createOctoPostgresStore } from '../../../octo-access/postgres-store.mts';
 import { createOctoRuntime } from '../../../octo-access/runtime.mts';
@@ -36,6 +37,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const store = studentProfileStore(pool, config.database);
     await store.checkSchema();
     options.repository = withStudentProfile(options.repository, store);
+    options.repository.findSecuredGroupByTelegramTag = createSecuredGroupReader(pool, config.database);
     const octoConfig = readOctoConfig(env);
     if (octoConfig) {
       // The advisory-lock connection must not occupy the two application pool slots.

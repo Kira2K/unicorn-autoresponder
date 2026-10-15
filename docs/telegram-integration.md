@@ -172,6 +172,11 @@ by `requireBotApiToken`. Bot credentials are read from server configuration;
 `WEB_CONSOLE_BOT_API_TOKEN` remains the sole endpoint credential; no new
 authentication mechanism is introduced.
 
+Private `/start` also uses the protected
+`POST /api/bot/telegram/my-group-info` read endpoint to resolve the original
+sender's secured group invitation from SQL. This does not extend the Telegram
+facade. See [My group info](my-group-info.md) for its contract and rollout.
+
 - `POST /api/bot/telegram/send-one` accepts `SendOneInput`. A valid Telegram
   response always uses HTTP 200. Client failures map to 400 `validation`, 503
   `configuration`, 502 `transport`/`response`, or 500 `internal`.
