@@ -1,7 +1,6 @@
-import { google } from 'googleapis'
-import fs from 'node:fs'
 import path from 'node:path'
 import { profileFillerError } from './errors.ts'
+import { createProfileDriveClient } from './drive-client.ts'
 
 export type SourceDocument = {
   bytes: Buffer
@@ -41,39 +40,29 @@ function normalizedTitle(value: unknown): string {
     .replace(/\s+/g, ' ')
 }
 
+function driveReadError(error: any, folder = false) {
+  const status = Number(error?.response?.status ?? error?.code)
+  return profileFillerError([401, 403, 404].includes(status)
+    ? 'profile_drive_access_denied'
+    : folder ? 'profile_drive_folder_unavailable' : 'profile_drive_download_failed',
+  folder ? 'The Google Drive folder cannot be listed with the selected authorization.'
+    : 'The Google Drive source cannot be read with the selected authorization.', 'load_sources')
+}
+
 export function createDriveSourceLoader(options: {
   maxBytes?: number
   drive?: any
 } = {}) {
   const maxBytes = options.maxBytes ?? Number(process.env.HH_PROFILE_CV_MAX_BYTES ?? 20 * 1024 * 1024)
-  const credentialRoots = [process.cwd()]
-  if (process.env.DOTENV_CONFIG_PATH) {
-    credentialRoots.push(path.dirname(path.resolve(process.env.DOTENV_CONFIG_PATH)))
-  }
-  const localCredentialCandidates = [...new Set(credentialRoots.flatMap(root =>
-    fs.existsSync(root) ? fs.readdirSync(root, { withFileTypes: true })
-      .filter(item => item.isFile() && /^project-.*\.json$/i.test(item.name))
-      .map(item => path.resolve(root, item.name)) : []))]
-  const credentialsFile = String(process.env.GOOGLE_APPLICATION_CREDENTIALS ?? '').trim() ||
-    (localCredentialCandidates.length === 1 ? localCredentialCandidates[0] : undefined)
-  const drive = options.drive ?? google.drive({
-    version: 'v3',
-    auth: new google.auth.GoogleAuth({
-      keyFile: credentialsFile,
-      scopes: ['https://www.googleapis.com/auth/drive.readonly']
-    })
-  })
+  const drive = options.drive ?? createProfileDriveClient()
 
   async function download(fileId: string, source: SourceDocument['source']): Promise<SourceDocument> {
     let metadata: any
     try {
       metadata = await drive.files.get({ fileId,
         fields: 'id,name,mimeType,modifiedTime,version,size' })
-    } catch (error: any) {
-      const status = Number(error?.code ?? error?.response?.status)
-      throw profileFillerError([401, 403, 404].includes(status)
-        ? 'profile_drive_access_denied' : 'profile_drive_download_failed',
-      'The Google Drive source cannot be read by the service account.', 'load_sources')
+    } catch (error) {
+      throw driveReadError(error)
     }
     const mimeType = String(metadata.data.mimeType ?? '')
     const size = Number(metadata.data.size ?? 0)
@@ -84,14 +73,19 @@ export function createDriveSourceLoader(options: {
     let response: any
     let outputMime: SourceDocument['mimeType']
     if (mimeType === GOOGLE_DOC) {
-      response = await drive.files.export({ fileId, mimeType: PDF }, { responseType: 'arraybuffer' })
       outputMime = PDF
     } else if (mimeType === PDF || mimeType === DOCX) {
-      response = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' })
       outputMime = mimeType
     } else {
       throw profileFillerError('profile_drive_format_unsupported',
         `Unsupported Drive source format: ${mimeType || 'unknown'}.`, 'load_sources')
+    }
+    try {
+      response = mimeType === GOOGLE_DOC
+        ? await drive.files.export({ fileId, mimeType: PDF }, { responseType: 'arraybuffer' })
+        : await drive.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' })
+    } catch (error) {
+      throw driveReadError(error)
     }
     const bytes = Buffer.from(response.data as ArrayBuffer)
     if (bytes.length > maxBytes) {
@@ -118,16 +112,27 @@ export function createDriveSourceLoader(options: {
     const folderId = driveId(folderUrl)
     async function listChildren(parentId: string): Promise<any[]> {
       try {
-        const response = await drive.files.list({
-          q: `'${parentId.replace(/'/g, "\\'")}' in parents and trashed = false`,
-          fields: 'files(id,name,mimeType,modifiedTime)',
-          orderBy: 'modifiedTime desc',
-          pageSize: 100
-        })
-        return response.data.files ?? []
-      } catch {
-        throw profileFillerError('profile_drive_folder_unavailable',
-          'The student Google Drive folder cannot be listed.', 'load_sources')
+        const files: any[] = []
+        const seenTokens = new Set<string>()
+        let pageToken: string | undefined
+        do {
+          const response = await drive.files.list({
+            q: `'${parentId.replace(/'/g, "\\'")}' in parents and trashed = false`,
+            fields: 'files(id,name,mimeType,modifiedTime),nextPageToken',
+            orderBy: 'modifiedTime desc',
+            pageSize: 100,
+            ...(pageToken ? { pageToken } : {})
+          })
+          files.push(...(response.data.files ?? []))
+          pageToken = response.data.nextPageToken || undefined
+          if (pageToken) {
+            if (seenTokens.has(pageToken)) throw new Error('Repeated Drive page token')
+            seenTokens.add(pageToken)
+          }
+        } while (pageToken)
+        return files
+      } catch (error) {
+        throw driveReadError(error, true)
       }
     }
 

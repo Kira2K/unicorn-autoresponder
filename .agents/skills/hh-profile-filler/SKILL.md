@@ -56,6 +56,11 @@ or automatically retry jobs based on database status or elapsed time.
 - All modes use this choice: preparation, filling, recovery and live smoke. A SQL failure must not fall back to Noco.
 - Record IDs are preserved from Noco. `--client-id` means that same ID in the selected database.
 - CV files still come from Drive. Artifacts remain local files, not SQL records; legacy queue state is not processed.
+- Drive reads use the local runner's Google Drive API v3 client. `HH_PROFILE_DRIVE_AUTH=auto`
+  (default) prefers a nonempty `GOOGLE_DRIVE_API_KEY`; otherwise it retains GoogleAuth credentials.
+  Explicit `api-key` and `service-account` modes select only that method, without switching after errors.
+  API keys can read only documents accessible without user authorization. See
+  [operations.md](references/operations.md#google-drive-access) for setup and read-only diagnosis.
 - The legacy `--use-noco-identity` flag is rejected; correct conflicting approved source identities before filling.
 - Use the existing SQL connection settings from the runtime. Do not change the database schema or create a second client for this feature.
 
