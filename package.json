@@ -39,6 +39,7 @@
     "tg:chat-id-checker": "node src/integrations/telegram/tools/chat-id-checker.ts",
     "tg:responses": "node src/integrations/telegram/tools/responses-application/index.ts",
     "tg:integration:test": "node src/integrations/telegram/integration.test.ts && node src/features/web-console/backend/telegram-integration-routes.test.ts",
+    "tg:my-group-info:test": "node src/integrations/telegram/secured-group-info.test.ts && node src/features/web-console/backend/postgres/secured-group.test.mts && node src/features/web-console/backend/secured-group-routes.test.ts",
     "tg:integration:live-smoke": "node src/integrations/telegram/live-smoke.ts",
     "tg:support-bot": "node src/integrations/telegram/support-bot.ts",
     "tg:support-bot:test": "node src/integrations/telegram/support-bot.test.ts && node --test src/integrations/telegram/resume-rejection-history.test.ts src/integrations/telegram/resume-workflow-state.test.ts",

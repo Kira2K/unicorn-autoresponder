@@ -1067,6 +1067,24 @@ function createWebConsoleApp(options: {
     res.status(200).json(await telegramIntegration.sendMany(req.body))
   })
 
+  app.post('/api/bot/telegram/my-group-info', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store')
+    if (typeof req.body?.username !== 'string') {
+      res.status(400).json({ error: 'telegram_username_required' })
+      return
+    }
+    if (!repository.findSecuredGroupByTelegramTag) {
+      res.status(503).json({ error: 'secured_group_source_unavailable' })
+      return
+    }
+    try {
+      res.json(await repository.findSecuredGroupByTelegramTag(req.body.username))
+    } catch {
+      // SQL errors can contain row values; never pass invitation data to logging.
+      res.status(503).json({ error: 'secured_group_source_unavailable' })
+    }
+  })
+
   app.get('/api/bot/telegram/chats/:chatId/client', requireBotApiToken, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const chatId = String(req.params.chatId ?? '').trim()

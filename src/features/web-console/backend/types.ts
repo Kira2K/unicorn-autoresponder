@@ -246,6 +246,7 @@ export type ResumeWorkflowRecord = {
 }
 
 export type WebConsoleRepository = {
+  findSecuredGroupByTelegramTag?(username: string): Promise<import('../../../integrations/telegram/secured-group-info.ts').SecuredGroupResult>
   findClientByCalendarEmail(email: string): Promise<WebClient | null>
   getAllDolphinProfileIds(): Promise<number[]>
   getClientDashboard(clientId: number, options?: { fullAccess?: boolean }): Promise<ClientDashboard>
