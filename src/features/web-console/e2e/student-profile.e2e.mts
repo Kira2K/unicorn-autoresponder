@@ -41,6 +41,7 @@ try {
     if (pathname === '/api/admin/latest-client') return reply(dashboard);
     if (pathname === '/api/admin/telegram/senders') return reply({ senders: [] });
     if (pathname === '/api/telegram/status') { telegramReads++; return reply({ status: 'disconnected' }); }
+    if (pathname === '/api/octo/profiles/status') return reply({ profiles: [], requiredLocales: [] });
     if (pathname === '/api/client/profile-options') return reply({ englishLevels: [{ id: 1, label: 'A1' }], platforms });
     if (pathname.startsWith('/api/dolphin/profiles/status')) { dolphinReads++; return reply({ action: 'open_existing' }); }
     if (pathname === '/api/client/me') {
@@ -70,6 +71,10 @@ try {
   const submitAccount = () => byId('account-form').dispatchEvent('submit');
   await page.goto(url);
   await byId('validated-student-profile').waitFor();
+  const profileSummary = () => byId('validated-student-profile').locator('dl.student-section');
+  assert.equal(await profileSummary().count(), 0, 'Client 1: hide the lower personal-data summary');
+  assert.equal(await byId('validated-student-profile').getByText('Личные данные', { exact: true }).count(), 1);
+  await page.getByRole('button', { name: 'Понятно, продолжить', exact: true }).click();
   await byId('edit-platform-accounts-button').click();
   await byId('finish-platform-accounts-button').waitFor();
   await byId('finish-platform-accounts-button').click();
@@ -207,6 +212,9 @@ try {
   const priorDolphinReads = dolphinReads;
   await page.reload(); await byId('open-account-editor-button').waitFor();
   await byId('validated-student-profile').waitFor();
+  assert.equal(await profileSummary().count(), 0, 'Other students: also hide the lower personal-data summary');
+  assert.equal(await byId('validated-student-profile').getByText('Личные данные', { exact: true }).count(), 1);
+  await page.getByRole('button', { name: 'Понятно, продолжить', exact: true }).click();
   assert.ok(dolphinReads > priorDolphinReads);
   await page.waitForTimeout(100); assert.ok(telegramReads > 0);
   await byId('telegram-phone').fill('++44 (123) abc 45-67');
