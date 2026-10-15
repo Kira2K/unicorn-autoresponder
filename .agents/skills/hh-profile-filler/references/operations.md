@@ -17,6 +17,25 @@
 - On NocoDB HTTP 429, honor `Retry-After` within the active manual operation or report the terminal failure;
   do not create an automatic retry job.
 
+## Google Drive access
+
+- The local runner reads CV and experience-description documents directly through `googleapis`
+  (Drive API v3), independently of the chat's Drive connector and browser. Links still come from
+  the selected read-only repository; the authorization mode does not change source selection.
+- `HH_PROFILE_DRIVE_AUTH=auto` is the default: use nonempty `GOOGLE_DRIVE_API_KEY` first,
+  otherwise use the existing GoogleAuth path. `api-key` requires that key; `service-account`
+  explicitly selects GoogleAuth even when an API key exists. No request failure switches methods.
+- GoogleAuth retains `GOOGLE_APPLICATION_CREDENTIALS`, discovery of one `project-*.json` in
+  the runtime/`DOTENV_CONFIG_PATH` directories, and Application Default Credentials. Do not ask
+  for a JSON key before checking whether the existing API key can read the required documents.
+- API keys read only documents accessible without user authorization; they do not grant private
+  file access. A 401/403/404 is an access failure, not an empty folder. Do not change sharing rights.
+- One selected client handles metadata, Google Docs export to PDF, PDF/DOCX downloads and every
+  page of folder listings. Read all pages before selecting `Самопрезентация` and `Описание опыта`.
+- Diagnose through `createDriveSourceLoader().loadCv` and `.loadExperienceDescriptions` using
+  repository-resolved URLs. Check nonempty bytes and counts in memory; never print keys, document
+  contents or raw Google errors. This isolated check does not open HH or send files to OpenAI/Telegram.
+
 ## Full wizard live smoke
 
 - Reserve a separate client in the selected database and a Dolphin/HH profile that are not used for production filling.
