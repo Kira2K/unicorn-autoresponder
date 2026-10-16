@@ -1058,7 +1058,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
       telegramService,
       config,
       command: '/resume',
-      expectedStatus: 'moved to filling',
+      expectedStatus: 'CV done',
       observedUpdates: observed.updates,
       observedSends: observed.sends,
       studentUserId: discoveredStudentUserId,
@@ -1067,7 +1067,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
     }))
 
     const finalWorkflow: any = await retryTransient('final workflow read', () => repository.getResumeWorkflowByTelegramChatId(config.testChatId, { ensure: true }))
-    if (finalWorkflow.status !== 'moved to filling') throw new Error(`Final status is ${finalWorkflow.status}, expected moved to filling.`)
+    if (finalWorkflow.status !== 'CV done') throw new Error(`Final status is ${finalWorkflow.status}, expected CV done.`)
     if (finalWorkflow.studentDataFolderUrl !== googleFolder) {
       throw new Error(`Final student_data_folder_url mismatch. Expected ${googleFolder}, got ${finalWorkflow.studentDataFolderUrl}`)
     }

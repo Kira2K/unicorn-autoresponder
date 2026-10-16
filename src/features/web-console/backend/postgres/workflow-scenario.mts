@@ -35,7 +35,7 @@ export async function workflowScenario(repo: WebConsoleRepository, market: strin
   const states = ["collection student's data", "collection Kira's comments", 'Draft in process', 'Draft in approve by Kira',
     'Draft in approve by student', ...(market === 'Ru' ? [] : ['English version in progress', 'English version in approve by Kira',
       'English version in approve by student']), 'Russian version in process', 'Russian version in approve by Kira',
-    'Russian version in approve by student', 'moved to filling'];
+    'Russian version in approve by student', 'CV done'];
   const owner = (status: string) => status === "collection student's data" || status.includes('by student') ? '9001'
     : status.includes('Kira') ? '9002' : status === 'Russian version in process' && market !== 'Ru' ? '9004' : '9003';
   for (let i = 0; i < states.length - 1; i++) {
@@ -51,8 +51,7 @@ export async function workflowScenario(repo: WebConsoleRepository, market: strin
     await assert.rejects(action('advance', { actor: actor(owner(states[i])), expectedStatus: states[i] }), { code: 'resume_workflow_stale_status' });
   }
   await assert.rejects(action('advance', { actor: actor('9002') }), { code: 'resume_workflow_noop' });
-  // The bot stops at moved to filling. An external filler owns the eventual filled status.
-  await repo.patchResumeWorkflow(w.id, { status: 'filled' });
+  // CV completion is the terminal state, independent of profile-filling tasks.
   const final = await action('status'); assert.equal(final.completed, true);
   assert.equal(final.workflow.ruVersionUrl, 'https://example.invalid/ru');
   assert.equal(final.workflow.enVersionUrl, market === 'Ru' ? '' : 'https://example.invalid/en');

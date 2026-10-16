@@ -1758,9 +1758,9 @@ async function runTests(): Promise<void> {
 
       result = await resumeByChat(studentHeaders)
       assert.equal(result.response.status, 200, JSON.stringify(result.body))
-      assert.equal(result.body.completed, false)
-      assert.equal(result.body.workflow.status, 'moved to filling')
-      assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> moved to filling')
+      assert.equal(result.body.completed, true)
+      assert.equal(result.body.workflow.status, 'CV done')
+      assert.equal(result.body.transitions.at(-1), 'Russian version in approve by student -> CV done')
       assert(result.body.notifications.some((notification: any) => notification.kind === 'private_kira'))
       assert(result.body.notifications.some((notification: any) => notification.kind === 'linkedin_ready'))
       const kiraFillingMessage = telegramBotMessages.find((message: any) => /Резюме ушло на заполнение/.test(message.text))

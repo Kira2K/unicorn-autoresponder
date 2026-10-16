@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "clients:check": "node src/features/client-lifecycle/cli.mts",
+    "clients:test": "node --test src/features/client-lifecycle/*.test.ts src/features/client-lifecycle/*.test.mts",
     "octo:test:serve": "node --env-file=.env src/features/octo-access-test/index.mts",
     "octo:timed:serve": "node --env-file=.env src/features/octo-access-test/timed-index.mts",
     "octo:test": "node --test src/features/octo-access-test/*.test.mts",

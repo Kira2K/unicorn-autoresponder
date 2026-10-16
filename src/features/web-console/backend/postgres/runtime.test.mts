@@ -6,6 +6,7 @@ import { runtimeFixture } from './runtime-fixture.mts';
 import { openSqlAuth } from '../../../linkedin-automation/account-connection/postgres-runtime.mts';
 import { createLivePostWriter } from '../../../linkedin-automation/post-writer/runtime.ts';
 import { createConfiguredApp } from '../configured-app.mts';
+import { testMessageConfig } from '../../../client-lifecycle/message-config.test-helper.mts';
 
 test('SQL startup resolves every store before services; allocator failure closes pool and never migrates', async () => {
   const f = runtimeFixture();
@@ -28,6 +29,16 @@ test('normal configured entrypoint fails closed on SQL errors; mock never opens 
   await mock.closeStorage(); assert.equal(calls, 1);
 });
 
+test('Clients notifications are disabled by default and startup never activates them', async () => {
+  const f = runtimeFixture(), runtime = await openSqlConsole(f.env, () => f.pool);
+  await runtime.startBackground(); await runtime.close();
+  assert.ok(!f.calls.some(sql => /client_notification|client_account_indicators/.test(sql)));
+  const invalid = runtimeFixture();
+  await assert.rejects(openSqlConsole({ ...invalid.env, CLIENT_LIFECYCLE_ENABLED: '1' }, () => invalid.pool), /client_notification_settings_required/);
+  assert.equal(invalid.state.ends, 1);
+  assert.ok(!invalid.calls.some(sql => /INSERT|UPDATE|CREATE|ALTER/.test(sql)));
+});
+
 test('LinkLab is opt-in and missing schema stops only its enabled startup', async () => {
   const off = runtimeFixture(), normal = await openSqlConsole(off.env, () => off.pool);
   assert.equal(normal.options.repository.approveEnglishResumeWorkflow, undefined);
@@ -48,6 +59,29 @@ test('LinkLab is opt-in and missing schema stops only its enabled startup', asyn
   };
   await assert.rejects(openSqlConsole({ ...missing.env, LINKLAB_ENABLED: '1' }, () => missing.pool), /postgres_read_failed/);
   assert.equal(missing.state.ends, 1);
+});
+test('enabled Clients runtime reads SQL settings without activating or sending', async () => {
+  const f = runtimeFixture(), connect = f.pool.connect;
+  f.pool.connect = async () => {
+    const session = await connect(), query = session.query;
+    session.query = async (sql, values) => {
+      const result = await query(sql, values);
+      return sql.includes('FROM noco.client_notification_settings') ? { rows: [{
+        instructions_url: testMessageConfig.instructionsUrl,
+        hh_instructions_url: testMessageConfig.hhInstructionsUrl,
+        cabinet_url: testMessageConfig.cabinetUrl,
+        cabinet_password: testMessageConfig.cabinetPassword,
+        support_tag: testMessageConfig.supportTag,
+        support_chat_id: '-9005',
+      }] } : result;
+    };
+    return session;
+  };
+  const runtime = await openSqlConsole({ ...f.env, CLIENT_LIFECYCLE_ENABLED: '1' }, () => f.pool);
+  await runtime.close();
+  assert.ok(f.calls.some(sql => sql.includes('FROM noco.client_notification_settings')));
+  assert.ok(!f.calls.some(sql => /INSERT|UPDATE|CREATE|ALTER/.test(sql)));
+  assert.equal(f.state.ends, 1);
 });
 test('SQL CLI uses the SQL account repository and closes it; no ID or external provider in check setup', async () => {
   const f = runtimeFixture(), runtime = await openSqlAuth({ apply: false }, f.env, () => f.pool);

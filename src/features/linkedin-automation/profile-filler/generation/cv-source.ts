@@ -1,6 +1,5 @@
 import { codedError } from '../errors.ts'
-
-const FINAL_STATUSES = new Set(['moved to filling', 'filled'])
+import { isFinalCvStatus } from '../../../../integrations/telegram/resume-final-status.ts'
 
 function text(value: unknown) {
   return String(value ?? '').trim()
@@ -23,7 +22,7 @@ function timestamp(row: any) {
 
 export function selectFinalEnglishCv(rows: any[], expectedClientId: number) {
   const candidates = rows.filter(row => clientId(row) === expectedClientId &&
-    FINAL_STATUSES.has(text(row.status).toLowerCase()) && text(row.en_version_url))
+    isFinalCvStatus(row.status) && text(row.en_version_url))
   candidates.sort((left, right) => timestamp(right) - timestamp(left) ||
     Number(right.Id ?? 0) - Number(left.Id ?? 0))
   const selected = candidates[0]
