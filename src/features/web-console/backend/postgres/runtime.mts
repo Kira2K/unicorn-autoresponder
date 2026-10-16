@@ -19,13 +19,21 @@ import { createCheckerDevelopmentHelp } from '../../../octo-access/checker-devel
 import { createNodeMavenCatalogue } from '../../../octo-access/nodemaven-locations.mts';
 import { createDolphinProxySource } from '../../../octo-access/dolphin-proxy-source.mts';
 import { OctoError } from '../../../octo-access/contracts.mts';
+import { clientLifecycleStore } from '../../../client-lifecycle/postgres-store.mts';
+import { runLifecyclePass } from '../../../client-lifecycle/pass.mts';
+import { createLifecycleRuntime } from '../../../client-lifecycle/runtime.mts';
+import { createClientSender } from '../../../client-lifecycle/sender.mts';
+import { loadClientNotificationSettings } from '../../../client-lifecycle/postgres-settings.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const config = readPostgresAppDbConfig(env), pool = open(config);
   let closing: Promise<void> | undefined;
   let octo: ReturnType<typeof createOctoRuntime> | undefined, octoLockPool: ReturnType<typeof createPostgresPool> | undefined;
+  let lifecycle: ReturnType<typeof createLifecycleRuntime> | undefined;
   const close = () => closing ??= (async () => {
-    try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
+    try { await lifecycle?.stop(); } finally {
+      try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
+    }
   })();
   try {
     const db = await createPostgresClient(pool, config.database, { writable: true });
@@ -38,6 +46,15 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     await store.checkSchema();
     options.repository = withStudentProfile(options.repository, store);
     options.repository.findSecuredGroupByTelegramTag = createSecuredGroupReader(pool, config.database);
+    if (env.CLIENT_LIFECYCLE_ENABLED === '1') {
+      const { messageConfig, supportChatId } = await loadClientNotificationSettings(pool, config.database);
+      const lifecycleStore = clientLifecycleStore(pool, config.database);
+      const send = createClientSender(supportChatId, env);
+      lifecycle = createLifecycleRuntime({ enabled: true,
+        pass: ({ now, reminders, reminderAt }) => runLifecyclePass({ store: lifecycleStore, supportChatId, send,
+          messageConfig, now, apply: true, statuses: true, reminders, reminderAt }),
+        report: event => console.error(JSON.stringify(event)) });
+    }
     const octoConfig = readOctoConfig(env);
     if (octoConfig) {
       // The advisory-lock connection must not occupy the two application pool slots.
@@ -61,6 +78,6 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         report: event => console.error(JSON.stringify({ feature: 'octo', ...event })) });
     }
     return { options: { ...options, ...(octo ? { octoService: octo.service } : {}) }, close,
-      startBackground: async () => { await octo?.start(); } };
+      startBackground: async () => { await octo?.start(); await lifecycle?.start(); } };
   } catch (error) { await close(); throw error; }
 }

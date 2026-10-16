@@ -12,10 +12,10 @@ import { ProfileFillerError, profileFillerError } from './errors.ts'
 import { parseStopListCompany } from './employer-stop-list.ts'
 import { marketForStatus } from './state-store.ts'
 import type { ContactData, ProfileFillerMarket, ResolvedClient } from './types.ts'
+import { isFinalCvStatus } from '../../integrations/telegram/resume-final-status.ts'
 
 type NocoRecord = Record<string, any> & { Id: number }
 
-const FINAL_CV_STATUSES = new Set(['moved to filling', 'filled'])
 const HH_PLATFORM_IDS: Record<ProfileFillerMarket, number> = { Ru: 11, En: 10 }
 
 function text(value: unknown): string {
@@ -227,7 +227,7 @@ export function createProfileFillerNocoRepository(
 
     const cvCandidates = data.cvRows.filter(row =>
       clientId(row, 'rel_cvProcessing_client') === expectedClientId &&
-      FINAL_CV_STATUSES.has(normalized(row.status)) &&
+        isFinalCvStatus(row.status) &&
       text(market === 'Ru' ? row.ru_version_url : row.en_version_url))
       .sort((left, right) => recordTimestamp(right) - recordTimestamp(left) ||
         Number(right.Id) - Number(left.Id))

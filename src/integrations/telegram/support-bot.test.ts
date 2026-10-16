@@ -1073,6 +1073,11 @@ async function testTaskListCancelsPendingRejection() {
 }
 
 async function runTests() {
+  // These fixtures are staff only under an explicit test role configuration.
+  // Do not depend on credentials/roles loaded from a developer's .env.
+  process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = kiraActor.userId
+  process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = providerActor.userId
+  process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = ruTranslatorActor.userId
   await testTaskListCancelsPendingRejection()
   await testTelegramPollingRecoveryContract()
   testKiraMessageTemplateContract()
@@ -1081,7 +1086,8 @@ async function runTests() {
   clearActiveTaskContextsForTest()
   assert.equal(commandName('/student@veu_support_bot hello'), '/student')
   assert.equal(commandArgument('/change_google_folder https://drive.google.com/drive/folders/abc'), 'https://drive.google.com/drive/folders/abc')
-  assert.equal(RESUME_STATUSES.includes('filled'), true)
+  assert.equal(RESUME_STATUSES.includes('CV done'), true)
+  assert.equal(RESUME_STATUSES.includes('filled'), false)
   assert.equal(RESUME_STATUSES.includes('stopped'), true)
   assert.equal(
     resolveActorForWorkflow({
@@ -2508,8 +2514,8 @@ async function runTests() {
       enVersionUrl: ''
     }))
     const ruOnlyFillingResult = await resumeWorkflowById(98, ruOnlyFillingRepository, { actor: studentActor })
-    assert.equal(ruOnlyFillingResult.workflow.status, 'moved to filling')
-    assert.deepEqual(ruOnlyFillingResult.transitions, ['Russian version in approve by student -> moved to filling'])
+    assert.equal(ruOnlyFillingResult.workflow.status, 'CV done')
+    assert.deepEqual(ruOnlyFillingResult.transitions, ['Russian version in approve by student -> CV done'])
     assert.equal(ruOnlyFillingResult.notifications.some((item: any) => item.kind === 'private_kira'), true)
     assert.equal(ruOnlyFillingResult.notifications.some((item: any) => item.kind === 'linkedin_ready'), false)
 
@@ -2520,8 +2526,8 @@ async function runTests() {
       enVersionUrl: 'https://docs.google.com/document/d/test-english-version'
     }))
     const bothMarketFillingResult = await resumeWorkflowById(98, bothMarketFillingRepository, { actor: studentActor })
-    assert.equal(bothMarketFillingResult.workflow.status, 'moved to filling')
-    assert.deepEqual(bothMarketFillingResult.transitions, ['Russian version in approve by student -> moved to filling'])
+    assert.equal(bothMarketFillingResult.workflow.status, 'CV done')
+    assert.deepEqual(bothMarketFillingResult.transitions, ['Russian version in approve by student -> CV done'])
     const bothMarketLinkedInNotification = bothMarketFillingResult.notifications.find((item: any) => item.kind === 'linkedin_ready')
     assert.equal(bothMarketLinkedInNotification.chatId, '-1003187558078')
     assert.equal(bothMarketLinkedInNotification.messageThreadId, 777)
@@ -2675,7 +2681,7 @@ async function runTests() {
       { actor: studentActor, after: 'Russian version in process', notification: 'private_provider' },
       { actor: ruTranslatorActor, after: 'Russian version in approve by Kira', notification: 'private_kira' },
       { actor: manualKiraActor, after: 'Russian version in approve by student', notification: 'common_chat' },
-      { actor: studentActor, after: 'moved to filling', notification: 'private_kira' }
+      { actor: studentActor, after: 'CV done', notification: 'private_kira' }
     ]
 
     let lastResult: any
@@ -2694,7 +2700,7 @@ async function runTests() {
               'Draft in approve by Kira': '🔍 Черновик на проверке',
               'English version in approve by Kira': '🇬🇧 Проверка EN-версии',
               'Russian version in approve by Kira': '🇷🇺 Проверка RU-версии',
-              'moved to filling': '📤 Резюме ушло на заполнение'
+              'CV done': '📤 Резюме ушло на заполнение'
             }[step.after]
             assert.match(notification.text, new RegExp(`^<b>${expectedHeading}</b>`))
           }
@@ -2749,7 +2755,7 @@ async function runTests() {
           const notification = lastResult.notifications.find((item: any) => item.kind === 'common_chat')
           assert.doesNotMatch(notification.text, /Это драфт резюме и одновременно твоя легенда|Это последний этап, когда можно внести правки|Финальное резюме ты получишь на аппрув/)
         }
-        if (step.after === 'moved to filling') {
+        if (step.after === 'CV done') {
           const kiraNotification = lastResult.notifications.find((item: any) => item.kind === 'private_kira')
           assert.match(kiraNotification.text, /Студент: Test/)
           assert.match(kiraNotification.text, /• EN:/)
@@ -2787,7 +2793,7 @@ async function runTests() {
     assertKiraTasksFooter(filledNotification.text)
     assert.equal(filledNotification.parseMode, 'HTML')
 
-    assert.equal(lastResult.completed, false)
+    assert.equal(lastResult.completed, true)
     assert.equal(repository.workflowRecord.studentDataFolderUrl, 'https://drive.google.com/drive/folders/manual-source')
     assert.equal(repository.workflowRecord.cvDraftUrl, 'https://docs.google.com/document/d/test-draft')
     assert.equal(repository.workflowRecord.enVersionUrl, 'https://docs.google.com/document/d/test-english-version')
@@ -2797,7 +2803,7 @@ async function runTests() {
     assert.match(repository.workflowRecord.workflowTrace, /provider/)
     assert.match(repository.workflowRecord.workflowTrace, /kira/)
 
-    const fillingPatch = repository.patches.find((patch: any) => patch.status === 'moved to filling')
+    const fillingPatch = repository.patches.find((patch: any) => patch.status === 'CV done')
     assert.equal(Boolean(fillingPatch), true)
     const filledPatch = repository.patches.find((patch: any) => patch.status === 'filled')
     assert.equal(Boolean(filledPatch), false)

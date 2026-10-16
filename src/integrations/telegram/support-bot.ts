@@ -179,7 +179,8 @@ const RESUME_STATUS_CALLBACK_STATUSES: Record<string, string> = {
   ras: 'Russian version in approve by student',
   mtf: 'moved to filling',
   stp: 'stopped',
-  fld: 'filled'
+  fld: 'filled',
+  cvd: 'CV done'
 }
 
 function decodeCallbackStatus(value: string | undefined): string {

@@ -203,6 +203,8 @@ async function runTests() {
   process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
   process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
   process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
+  // The expected final report needs an explicit mock recipient, not an ambient .env.
+  process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = '-9005'
   const repository = makeRepository()
   repository.client.googleFolder = 'https://drive.google.com/drive/folders/visible-root-test'
   repository.workflow.studentDataFolderUrl = 'https://drive.google.com/drive/folders/visible-fake-test'
@@ -219,7 +221,7 @@ async function runTests() {
   })
 
   assert.equal(result.ok, true)
-  assert.equal(result.final.status, 'moved to filling')
+  assert.equal(result.final.status, 'CV done')
   assert.equal(result.final.studentDataFolderUrl, 'https://drive.google.com/drive/folders/visible-fake-test')
   assert.deepEqual(harness.studentSends, [
     '/whoami',

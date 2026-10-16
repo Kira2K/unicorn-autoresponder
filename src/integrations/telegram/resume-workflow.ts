@@ -3,6 +3,7 @@ const { appendResumeRejectionHistory, activeResumeRejection } = require('./resum
 const { resumeWorkflowRevision, staleResumeWorkflowError } = require('./resume-workflow-state.ts') as
   typeof import('./resume-workflow-state.ts')
 const { isResumeUrl } = require('./resume-url.ts') as typeof import('./resume-url.ts')
+const { CV_DONE_STATUS } = require('./resume-final-status.ts') as typeof import('./resume-final-status.ts')
 const {
   KIRA_REJECTION_COMMENT,
   kiraCommentNotRequiredMessage,
@@ -74,6 +75,7 @@ type ResumeStatus =
   | 'Russian version in approve by student'
   | 'moved to filling'
   | 'filled'
+  | 'CV done'
 
 type ResumeActorRole = 'student' | 'kira' | 'provider' | 'unknown'
 type ResumeNotificationKind = 'common_chat' | 'private_kira' | 'private_provider' | 'linkedin_ready' | 'hh_summary'
@@ -238,9 +240,9 @@ const RESUME_STATUSES: ResumeStatus[] = [
   'Russian version in process',
   'Russian version in approve by Kira',
   'Russian version in approve by student',
-  'moved to filling',
-  'filled'
+  'CV done'
 ]
+const READABLE_RESUME_STATUSES: ResumeStatus[] = [...RESUME_STATUSES, 'moved to filling', 'filled']
 
 const PROVIDER_RESPONSIBLE_STATUSES = new Set([
   'Draft in process',
@@ -502,6 +504,7 @@ function publicWorkflow(record: ResumeWorkflowRecord) {
 }
 
 function statusResponsibility(status: string): ResumeActorRole | 'done' | 'admin' {
+  if (status === CV_DONE_STATUS) return 'done'
   if (status === 'moved to filling') return 'done'
   if (status === 'filled') return 'done'
   if (status === 'stopped') return 'admin'
@@ -523,6 +526,8 @@ function displayResponsibility(status: string): string {
 
 function displayStatus(status: string): string {
   switch (status) {
+    case 'CV done':
+      return 'CV done'
     case "collection student's data":
       return 'сбор данных ученика'
     case "collection Kira's comments":
@@ -635,6 +640,8 @@ function nextActionForStatus(status: string): string {
       return 'Дальше: ученик должен согласовать русскую версию.'
     case 'moved to filling':
       return 'Дальше: финальные версии нужно перенести на заполнение.'
+    case 'CV done':
+      return 'Дальше: финальные версии готовы к заполнению профилей.'
     default:
       return ''
   }
@@ -692,7 +699,7 @@ function statusBlockingInstruction(record: ResumeWorkflowRecord, status: string)
 
 function statusInstruction(record: ResumeWorkflowRecord): string {
   const status = statusText(record)
-  if (!RESUME_STATUSES.includes(status as ResumeStatus)) {
+  if (!READABLE_RESUME_STATUSES.includes(status as ResumeStatus)) {
     return `У резюме для ${record.clientName} неизвестный статус «${status}». Нужна проверка администратором; задача не изменена.`
   }
   if (status === 'moved to filling') {
@@ -702,7 +709,7 @@ function statusInstruction(record: ResumeWorkflowRecord): string {
       record.ruVersionUrl ? `Русская версия: ${record.ruVersionUrl}` : ''
     ].filter(Boolean).join('\n')
   }
-  if (status === 'filled') {
+  if (status === 'filled' || status === CV_DONE_STATUS) {
     return [
       `Работа над резюме для ${record.clientName} завершена.`,
       !isRuOnlyWorkflow(record) && record.enVersionUrl ? `Английская версия: ${record.enVersionUrl}` : '',
@@ -913,7 +920,7 @@ function ensureExpectedStatus(workflow: ResumeWorkflowRecord, expectedStatus?: s
 }
 
 function ensureWorkflowAction(workflow: ResumeWorkflowRecord, options: ResumeWorkflowOptions): void {
-  if (!RESUME_STATUSES.includes(statusText(workflow) as ResumeStatus)) {
+  if (!READABLE_RESUME_STATUSES.includes(statusText(workflow) as ResumeStatus)) {
     throw Object.assign(new Error(statusInstruction(workflow)), { code: 'resume_workflow_unknown_status' })
   }
   // Undefined is an explicit command acting on current state; empty means a legacy button.
@@ -998,7 +1005,7 @@ function plannedPatch(record: ResumeWorkflowRecord, fakeDataMode: boolean): Resu
   const status = statusText(record)
   const fake = fakeConfig()
 
-  if (status === 'filled' || status === 'stopped' || status === 'moved to filling') return null
+  if (status === CV_DONE_STATUS || status === 'filled' || status === 'stopped' || status === 'moved to filling') return null
 
   switch (status) {
     case "collection student's data":
@@ -1057,7 +1064,7 @@ function plannedPatch(record: ResumeWorkflowRecord, fakeDataMode: boolean): Resu
       return { status: 'Russian version in approve by student', lastResponsible: 'student' }
     case 'Russian version in approve by student':
       if (missingAdvanceFields(record, fakeDataMode).length) return null
-      return { status: 'moved to filling', lastResponsible: 'done', lastRejectionComment: '' }
+      return { status: CV_DONE_STATUS, lastResponsible: 'done', lastRejectionComment: '' }
     default:
       return null
   }
@@ -1154,7 +1161,8 @@ const RESUME_STATUS_CALLBACK_CODES: Record<string, string> = {
   'Russian version in approve by student': 'ras',
   'moved to filling': 'mtf',
   stopped: 'stp',
-  filled: 'fld'
+  filled: 'fld',
+  'CV done': 'cvd'
 }
 
 const RESUME_STATUS_CALLBACK_STATUSES = Object.fromEntries(
@@ -1205,7 +1213,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCv
   const intro = `${mention}, резюме для ${clientMarketLabel(record)} перешло в статус «${displayStatus(status)}».`
   const action = nextActionForStatus(status)
 
-  if (status === 'moved to filling') {
+  if (status === 'moved to filling' || status === CV_DONE_STATUS) {
     const chatId = defaultKiraNotifyChatId()
     if (!chatId) return null
     const message = kiraMovedToFillingMessage({
@@ -1289,7 +1297,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCv
 }
 
 function movedToFillingSummary(record: ResumeWorkflowRecord, testMode: boolean): ResumeWorkflowNotification | null {
-  if (!testMode || statusText(record) !== 'moved to filling') return null
+  if (!testMode || !['moved to filling', CV_DONE_STATUS].includes(statusText(record))) return null
   return {
     kind: 'hh_summary',
     text: `Тестовый режим, ничего делать не нужно. Аккаунт ${clientMarketLabel(record)} готов к заполнению, ссылки RU: ${record.ruVersionUrl || 'n/a'}, EN: ${record.enVersionUrl || 'n/a'}. @kirasamsonova fyi`
@@ -1297,7 +1305,7 @@ function movedToFillingSummary(record: ResumeWorkflowRecord, testMode: boolean):
 }
 
 function linkedInReadyNotification(record: ResumeWorkflowRecord): ResumeWorkflowNotification | null {
-  if (statusText(record) !== 'moved to filling') return null
+  if (!['moved to filling', CV_DONE_STATUS].includes(statusText(record))) return null
   if (!isEnMarketWorkflow(record)) return null
   const chatId = linkedinReadyNotifyChatId()
   if (!chatId) return null
@@ -1687,7 +1695,7 @@ async function getResumeStatus(chatId: string, repository: ResumeWorkflowReposit
     found: true,
     chatId,
     testMode: resumeWorkflowTestMode(),
-    completed: status === 'filled',
+    completed: status === 'filled' || status === CV_DONE_STATUS,
     stopped: status === 'stopped',
     client: { id: workflow.clientId, name: workflow.clientName },
     workflow,
@@ -1749,7 +1757,7 @@ async function advanceWorkflow(workflow: ResumeWorkflowRecord, repository: Resum
     found: true,
     chatId: normalizeText(workflow.commonChatId),
     testMode,
-    completed: status === 'filled',
+    completed: status === 'filled' || status === CV_DONE_STATUS,
     stopped: status === 'stopped',
     client: { id: workflow.clientId, name: workflow.clientName },
     workflow,
