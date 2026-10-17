@@ -2529,22 +2529,7 @@ onUnmounted(() => {
           </template>
           <template #subtitle>{{ isAdmin ? 'Latest created client' : ui('Your profile') }}</template>
           <template #content>
-            <StudentProfile v-if="validatedProfileEnabled" :client="dashboard.client" :english-levels="englishLevels" :save="api.updateClientProfile" @saved="dashboard = $event">
-              <dl class="info-list compact-info student-section">
-                <div><dt>GitHub</dt><dd>{{ githubUrl || '—' }}</dd></div>
-                <div><dt>LinkedIn</dt><dd>{{ linkedInProfileUrl || '—' }}</dd></div>
-                <div><dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_ru') : 'Telegram RU' }}</dt><dd>{{ telegramRuContact || '—' }}</dd></div>
-                <div><dt>{{ validatedProfileEnabled ? platformDisplayLabel('telegram_en') : 'Telegram EN' }}</dt><dd>{{ telegramEnContact || '—' }}</dd></div>
-                <div><dt>{{ ui('Client Id') }}</dt><dd>{{ dashboard.client.id }}</dd></div>
-                <div><dt>Стэк</dt><dd>{{ dashboard.client.primaryStack || '—' }}</dd></div>
-                <div><dt>Рынок</dt><dd>{{ dashboard.client.market || '—' }}</dd></div>
-                <div><dt>Статус</dt><dd>{{ dashboard.client.clientStatus || '—' }}</dd></div>
-                <div><dt>{{ ui('Common Chat') }}</dt><dd>{{ dashboard.client.commonChatId || '—' }}</dd></div>
-                <div><dt>{{ ui('Mentors') }}</dt><dd>{{ (dashboard.client.mentors || []).join(', ') || '—' }}</dd></div>
-                <div><dt>{{ ui('Resume status') }}</dt><dd>{{ dashboard.client.resumeStatus || '—' }}</dd></div>
-                <div><dt>{{ ui('LinkedIn status') }}</dt><dd>{{ dashboard.client.linkedInStatus || '—' }}</dd></div>
-              </dl>
-            </StudentProfile>
+            <StudentProfile v-if="validatedProfileEnabled" :client="dashboard.client" :english-levels="englishLevels" :save="api.updateClientProfile" @saved="dashboard = $event" />
             <Accordion v-else-if="isClient" v-model:value="profileEditorOpen" class="profile-accordion" data-testid="profile-accordion">
               <AccordionPanel value="details">
                 <AccordionHeader data-testid="profile-details-accordion-header">
