@@ -31,8 +31,8 @@ Commands:
 - `/open_my_tasks` or `/tasks`: Kira/Provider private command that lists
   owned CV workflow tasks and shows inline buttons to open/advance a selected
   client. Provider task visibility is lane-aware: the main provider sees draft
-  and English-version tasks, while the Russian translator sees Russian-version
-  tasks.
+  and English-version tasks plus RU-version tasks for RU-only clients, while
+  the Russian translator sees Russian-version tasks for EN/both clients.
 
 ## Live Facts
 
@@ -70,13 +70,21 @@ Commands:
 - `google_folder`: root Google folder managed in Console/Noco; this is
   separate from the resume workflow source-data field.
 - Platform accounts required before leaving `collection student's data`:
-  GitHub platform `github`, a LinkedIn platform account, `telegram_ru`, and
-  `telegram_en`. GitHub/LinkedIn validation checks account existence; URL
-  fields are used for display when present.
+  GitHub platform `github` and `telegram_ru` for every market. Non-RU clients
+  also require a LinkedIn platform account and `telegram_en`. RU-only clients
+  do not need LinkedIn or Telegram EN accounts or placeholder values.
+  GitHub/LinkedIn validation checks account existence; URL fields are
+  used for display when present. Other required profile fields are unchanged.
 - Yulia's initial draft card always shows the platform fields Email EN from
   `email_en.login`, Telegram EN strictly from `telegram_en.nickname`, Phone EN
   from `phone_en`, LinkedIn URL, and GitHub URL. A missing platform value is
   shown as `empty` and does not block the workflow.
+- Yulia's RU-only draft and Russian-version cards and rework messages also
+  show Email RU strictly from `email_ru.login`, Telegram RU with the existing
+  nickname-first contact fallback, and Phone RU from `hh_ru.phone`, falling
+  back to the existing Phone RU contact (`phone_ru` / legacy `phone`). These
+  optional rows show `empty` when unavailable. EN contacts, LinkedIn and
+  English-interview readiness remain visible even for RU-only clients.
 - Polina's Russian-version task card can show optional RU contacts: Email RU
   strictly from `email_ru.login` and Phone RU strictly from `hh_ru.phone`.
   Empty values are omitted and do not block the workflow.
@@ -161,8 +169,9 @@ Commands:
   is assigned to the main provider/creator, not the translator.
 - Provider client visibility is additionally limited by
   `RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS`, using
-  `clientId:platformAccountId` pairs. With the live test default `102:473`, the
-  provider queue only exposes client `102`.
+  `clientId:platformAccountId` pairs. The default is empty: all clients within
+  the provider's allowed lane are visible. An explicit value such as `102:473`
+  restricts the provider queue to client `102`.
 - Kira/Provider tasks are hidden from common groups. Kira and Providers use
   `/open_my_tasks` in a private chat with the bot.
 
@@ -284,8 +293,9 @@ use the visible e2e runner; it sends the student-owned commands through the
 student Telegram account and lets the support bot reply in the common chat.
 
 Before leaving `collection student's data`, the workflow validates education,
-real age, English level, real/desired location, GitHub, LinkedIn, Telegram RU,
-Telegram EN, root Google folder, and student source folder. If a profile field
+real age, English level, real/desired location, GitHub, Telegram RU, root Google
+folder, and student source folder. LinkedIn and Telegram EN are additionally
+required for non-RU clients. If a profile field
 is missing, the bot asks the user to add it in the Console and appends the
 clickable `Ссылка на ЛК` link to `https://very-evil-unicorn.onrender.com/` after
 the missing-field list. The Telegram bot only accepts the student source-folder
@@ -333,7 +343,8 @@ HTML-escaped. Task cards and state/error replies use the footer
 `Все задачи: /open_my_tasks`; new-task notifications use
 `Открой /open_my_tasks, чтобы взять задачу в работу.`
 
-The draft and English-version cards always show the student's stack, real and desired
+The draft and English-version cards, and the RU-only Russian-version card,
+always show the student's stack, real and desired
 locations, real age, English level, readiness for an English interview in two
 months, education, root folder, source-data folder, and Kira's comments. For
 every market they also always show `Email EN`, `Telegram EN`, `Phone EN`,
@@ -346,9 +357,14 @@ every market. The transition from `Draft in approve by student` to
 `English version in progress` likewise includes the full English-version card
 in Yulia's new-task notification. Its draft CV link is kept, or shown as `empty`
 when missing. Opening either task through `/open_my_tasks` shows the same card.
-Russian-version new-task notifications remain short, and Yulia's Russian-version
-card omits the expanded student-data block. Rework notifications retain their returned-file
-link and current rejection comment.
+For RU-only clients, the transition from `Draft in approve by student` to
+`Russian version in process` includes the same full Russian-version card in
+Yulia's notification, with the draft link retained. RU-only draft and RU cards
+also include the optional RU contact rows described above, after education and
+before the existing EN rows. Opening either task shows the same full card.
+Rework notifications and reopened cards retain the exact returned draft/RU file
+link from rejection history and the current rejection comment, even after a
+corrected link is uploaded. Polina's EN/both-market notifications are unchanged.
 
 ### Polina message template contract
 
@@ -488,8 +504,8 @@ default where `@veu_support` owns both provider lanes.
 4. Keep `RESUME_WORKFLOW_FAKE_DATA_MODE=false` for manual testing.
 5. Send `/resume` in chat `-5216637594`.
 6. If the bot asks for required profile data, fill education rows, real age,
-   English level, real/desired location, GitHub, LinkedIn, Telegram RU, and
-   Telegram EN in the Console and retry.
+   English level, real/desired location, GitHub, and Telegram RU in the Console
+   and retry. Non-RU clients also need LinkedIn and Telegram EN.
 7. Use the Kira account for Kira-owned statuses. Add `kiras_comments` before
    advancing the comments step. On approval steps, use `Согласовать` or
    `Вернуть с комментарием`.
@@ -509,6 +525,7 @@ Run:
 ```bash
 npm run tg:support-bot:test
 node --test src/integrations/telegram/resume-workflow-state.test.ts src/features/web-console/backend/postgres/workflow-hardening.test.mts src/features/web-console/backend/postgres/workflow-hardening-api.test.mts
+node --test src/features/web-console/backend/postgres/workflow-ru-provider.test.mts src/features/web-console/backend/postgres/workflow-return-links.test.mts src/features/web-console/backend/postgres/workflow-hardening-compat.test.mts
 npm run tg:resume:e2e:test
 npm run web:test
 npm run web:e2e
