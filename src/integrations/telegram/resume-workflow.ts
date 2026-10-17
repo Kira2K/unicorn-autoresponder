@@ -938,9 +938,9 @@ function requiredClientDataIssues(record: ResumeWorkflowRecord): string[] {
   if (!normalizeText(record.realLocation)) issues.push('Real location')
   if (!normalizeText(record.desiredLocation)) issues.push('Desired location')
   if (!accountExists(record.clientGithubAccountExists)) issues.push('Github')
-  if (!accountExists(record.clientLinkedInAccountExists)) issues.push('LinkedIn')
+  if (!isRuOnlyWorkflow(record) && !accountExists(record.clientLinkedInAccountExists)) issues.push('LinkedIn')
   if (!normalizeText(record.clientTelegramRu)) issues.push('Telegram RU')
-  if (!normalizeText(record.clientTelegramEn)) issues.push('Telegram EN')
+  if (!isRuOnlyWorkflow(record) && !normalizeText(record.clientTelegramEn)) issues.push('Telegram EN')
   return issues
 }
 
@@ -1265,7 +1265,7 @@ function notificationForNextResponsible(record: ResumeWorkflowRecord, returnedCv
             returnedCvUrl
           )
         : yuliaNewTaskMessage(providerStage, record.clientName, market)
-      if ((providerStage === 'draft' || providerStage === 'en') && !isRework) {
+      if (!isRework) {
         const card = yuliaTaskCardForWorkflow(record)
         if (card) message.text += `\n\n${card.text}`
       }
@@ -1431,6 +1431,7 @@ function yuliaTaskCardInputForWorkflow(workflow: ResumeWorkflowRecord, stage: 'd
     market: stage === 'ru' && isRuOnlyWorkflow(workflow)
       ? 'ru'
       : normalizeText(workflow.clientMarket) || 'рынок не указан',
+    ruOnly: isRuOnlyWorkflow(workflow),
     stack: normalizeText(workflow.clientStack),
     realLocation: normalizeText(workflow.realLocation),
     desiredLocation: normalizeText(workflow.desiredLocation),
@@ -1444,6 +1445,9 @@ function yuliaTaskCardInputForWorkflow(workflow: ResumeWorkflowRecord, stage: 'd
     lastRejectionComment: rejection?.comment,
     returnedCvUrl: rejection?.returnedCvUrl,
     draftUrl: normalizeText(workflow.cvDraftUrl),
+    emailRu: normalizeText(workflow.clientEmailRu),
+    telegramRu: normalizeText(workflow.clientTelegramRu),
+    phoneRu: normalizeText(workflow.clientHhRuPhone) || normalizeText(workflow.clientPhoneRu),
     emailEn: normalizeText(workflow.clientEmailEn),
     telegramEn: normalizeText(workflow.clientTelegramEnNickname),
     phoneEn: normalizeText(workflow.clientPhoneEn),

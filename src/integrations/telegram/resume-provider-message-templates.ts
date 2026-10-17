@@ -8,6 +8,7 @@ type ProviderStage = 'draft' | 'en' | 'ru'
 type ProviderTaskCardInput = {
   clientName: string
   market: string
+  ruOnly?: boolean
   stack?: string
   realLocation?: string
   desiredLocation?: string
@@ -21,6 +22,9 @@ type ProviderTaskCardInput = {
   lastRejectionComment?: string
   returnedCvUrl?: string
   draftUrl?: string
+  emailRu?: string
+  telegramRu?: string
+  phoneRu?: string
   emailEn?: string
   telegramEn?: string
   phoneEn?: string
@@ -125,6 +129,11 @@ function yuliaStudentDataRows(input: ProviderTaskCardInput): string[] {
     `Уровень английского: ${escapeTelegramHtml(valueOrEmpty(input.englishLevel))}`,
     `Ready for interview in English in 2 months: ${escapeTelegramHtml(valueOrEmpty(input.readyForInterviewInEnglishIn2Months))}`,
     `Образование: ${escapeTelegramHtml(valueOrEmpty(input.education))}`,
+    ...(input.ruOnly ? [
+      `Email RU: ${escapeTelegramHtml(valueOrEmpty(input.emailRu))}`,
+      `Telegram RU: ${escapeTelegramHtml(valueOrEmpty(input.telegramRu))}`,
+      `Phone RU: ${escapeTelegramHtml(valueOrEmpty(input.phoneRu))}`
+    ] : []),
     `Email EN: ${escapeTelegramHtml(valueOrEmpty(input.emailEn))}`,
     `Telegram EN: ${escapeTelegramHtml(valueOrEmpty(input.telegramEn))}`,
     `Phone EN: ${escapeTelegramHtml(valueOrEmpty(input.phoneEn))}`,
@@ -145,7 +154,7 @@ function yuliaTaskCardMessage(stage: ProviderStage, input: ProviderTaskCardInput
     `Рынок: ${escapeTelegramHtml(input.market)}`,
     `Статус: ${config.status}`
   ]
-  const stageRows = stage === 'draft' || stage === 'en'
+  const stageRows = stage === 'draft' || stage === 'en' || input.ruOnly
     ? yuliaStudentDataRows(input)
     : []
   return htmlMessage([
