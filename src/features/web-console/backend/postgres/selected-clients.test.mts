@@ -15,3 +15,33 @@ test('full client volume does not hydrate unrelated mentors; old normalized chat
   assert.equal((await f.sql.findClientByTelegramChatId('-7007.0'))?.id,7);
   assert.equal(relations,3);
 });
+
+test('secured group is used by client, CV and incoming folder commands', async () => {
+  const f = workflowFixture();
+  f.rows.get(tableIds.clients)!.get('7')!.secured_general_chat_id = ' -10070 ';
+  for (const repo of [f.sql, f.legacy]) {
+    assert.equal((await repo.getClientById(7)).commonChatId, '-10070');
+    assert.equal((await repo.findClientByTelegramChatId('-10070.0'))?.id, 7);
+    const wf = await repo.getResumeWorkflowByTelegramChatId('-10070', { ensure: true });
+    assert.equal(wf?.commonChatId, '-10070');
+    assert.equal((await repo.getResumeWorkflowById(wf!.id))?.commonChatId, '-10070');
+    assert.equal(await repo.findClientByTelegramChatId('-7007'), null);
+    assert.equal(await repo.getResumeWorkflowByTelegramChatId('-7007', { ensure: true }), null);
+    const writes = f.count();
+    assert.equal(await repo.updateGoogleFolderByTelegramChatId('-7007', 'https://example.invalid/retired'), null);
+    assert.equal(f.count(), writes, 'retired group cannot trigger a write');
+    await repo.updateGoogleFolderByTelegramChatId('-10070', 'https://example.invalid/new');
+    assert.equal((await repo.getClientById(7)).googleFolder, 'https://example.invalid/new');
+    assert.equal((await repo.patchResumeWorkflow(wf!.id, { status: 'Draft in process' })).commonChatId, '-10070');
+  }
+});
+
+test('empty secured values preserve original client and CV lookup', async () => {
+  for (const secured of [undefined, null, '', '  ']) {
+    const f = workflowFixture(); f.rows.get(tableIds.clients)!.get('7')!.secured_general_chat_id = secured;
+    for (const repo of [f.sql, f.legacy]) {
+      assert.equal((await repo.findClientByTelegramChatId('-7007'))?.commonChatId, '-7007');
+      assert.equal((await repo.getResumeWorkflowByTelegramChatId('-7007', { ensure: true }))?.commonChatId, '-7007');
+    }
+  }
+});

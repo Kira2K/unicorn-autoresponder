@@ -14,6 +14,7 @@ type BotApiRequester = (
 type SendMessageInput = {
   chatId: string
   text: string
+  editMessageId?: number
   messageThreadId?: number
   replyMarkup?: unknown
   parseMode?: import('./types.ts').SendOneInput['parseMode']
@@ -167,6 +168,22 @@ export function createTelegramBotApi(options: {
   }
 
   return {
+    async editMessageTextResponse(input: SendMessageInput): Promise<unknown> {
+      if (!Number.isSafeInteger(input.editMessageId) || Number(input.editMessageId) <= 0 ||
+        !input.chatId?.trim() || !input.text?.trim() || ('attachment' in input && input.attachment !== undefined) || input.messageThreadId !== undefined)
+        throw botError('telegram_edit_message_invalid', 'Editing requires a chat, positive message ID and text, without attachments or a thread ID.')
+      const richMessage = prepareTelegramRichMessage(input)
+      return await requestResponse('editMessageText', {
+        chat_id: input.chatId,
+        message_id: input.editMessageId,
+        ...(richMessage ? { rich_message: richMessage } : {
+          text: input.text,
+          ...(input.parseMode ? { parse_mode: input.parseMode } : {})
+        }),
+        ...(input.linkPreviewOptions !== undefined ? { link_preview_options: input.linkPreviewOptions } : {}),
+        ...(input.replyMarkup !== undefined ? { reply_markup: input.replyMarkup } : {})
+      })
+    },
     async sendMessageResponse(input: SendMessageInput): Promise<unknown> {
       return await sendResponse(input)
     },

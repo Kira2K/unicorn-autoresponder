@@ -1,5 +1,11 @@
 # Required Proxy Check
 
+> **Use carefully: legacy Sheets diagnostic.** Client/profile expectations still
+> come from `ПЕРС ДАННЫЕ` even with `APP_DB=postgres` and may be stale. Verify
+> results against PostgreSQL and actual Dolphin state before acting. Historical
+> proxy names may contain original chat IDs: a mismatch alone does not establish
+> that a proxy is wrong. The warning appears at startup and in `run.log`.
+
 Read-only diagnostic feature for finding profiles that need proxy work.
 
 ## Command

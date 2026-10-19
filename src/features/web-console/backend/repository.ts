@@ -1,3 +1,4 @@
+const { selectTelegramGroupChatId } = require('../../../../shared/telegram-group-chat.ts')
 const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
   createNocoClient(options?: any): any
 }
@@ -327,7 +328,7 @@ function toClient(record: NocoRecord): WebClient {
     calendarEmail: normalizeText(record.calendar_email),
     googleFolder: normalizeText(record.google_folder),
     telegramPersonalChatId: normalizeText(record.telegram_personal_chat_id),
-    commonChatId: normalizeText(record.telegram_general_chat_id),
+    commonChatId: normalizeText(selectTelegramGroupChatId(record)),
     primaryStack: linkedName(record.rel_clients_primary_stack) || undefined,
     market: linkedName(record.market) || normalizeText(record.market) || undefined,
     clientStatus: displayText(record.client_status) || undefined,
@@ -700,7 +701,7 @@ function toResumeWorkflow(record: NocoRecord, client?: NocoRecord | WebClient, p
     clientPhoneRu: platformContact(platformAccounts, ['phone_ru', 'phone']) || undefined,
     clientPhoneEn: platformContact(platformAccounts, ['phone_en']) || undefined,
     clientGoogleFolder: normalizeText((client as any)?.google_folder ?? (client as any)?.googleFolder) || undefined,
-    commonChatId: normalizeText((client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId) || undefined,
+    commonChatId: normalizeText(selectTelegramGroupChatId(client, (client as any)?.telegram_general_chat_id ?? (client as any)?.commonChatId)) || undefined,
     education: educationSummary(educationEntries, (client as any)?.education) || undefined,
     educationEntries,
     realAge: Number.isFinite(realAge) ? realAge : undefined,
@@ -1236,7 +1237,7 @@ function createWebConsoleRepository(options: { nocoClient?: any } = {}): WebCons
     const normalized = normalizeId(chatId)
     if (!normalized) return null
     const clients = await fetchClients()
-    return clients.find(candidate => normalizeId(candidate.telegram_general_chat_id) === normalized) ?? null
+    return clients.find(candidate => normalizeId(selectTelegramGroupChatId(candidate)) === normalized) ?? null
   }
 
   async function findCvProcessingRecordByClientId(clientId: number): Promise<NocoRecord | null> {

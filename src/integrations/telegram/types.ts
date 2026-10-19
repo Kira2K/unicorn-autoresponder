@@ -26,6 +26,8 @@ export type SendOneInput = {
   chatId: string
 
   text: string
+  /** Edit this bot-owned message instead of creating a new message. */
+  editMessageId?: number
   messageThreadId?: number
   parseMode?: ParseMode
   replyMarkup?: TelegramReplyMarkup

@@ -32,10 +32,22 @@ framework. Feature code must not add direct Bot API requests: use this facade.
 
 ## TypeScript inputs
 
+Student-group routing is resolved before calling this facade. Database-backed
+features use nonblank `clients.secured_general_chat_id`, falling back to
+`clients.telegram_general_chat_id` only when the secured field is empty or absent.
+The same effective ID is used for incoming command lookups; a migrated client's
+old group no longer resolves. Existing ID normalization is unchanged. Delivery
+errors never trigger a retry against the original group. Explicit destinations,
+private staff chats and fixed reporting channels keep their existing meaning.
+PostgreSQL projects only this optional secured key, even without catalog
+registration; reads require no migration and grant no additional write access.
+Historical imports and restoration tools retain the original group IDs.
+
 ```ts
 type SendOneInput = {
   chatId: string
   text: string
+  editMessageId?: number
   messageThreadId?: number
   parseMode?: ParseMode
   replyMarkup?: InlineKeyboardMarkup | ReplyKeyboardMarkup |
@@ -49,6 +61,14 @@ type SendManyInput = Record<string, Omit<SendOneInput, 'chatId'>>
 `chatId` is always a Telegram destination ID. It is never a student, client,
 user, mentor, workflow, or database record ID. Link previews are disabled by
 default; an explicit `linkPreviewOptions` object takes precedence.
+
+To edit a bot-owned text message, pass its positive `editMessageId` to `sendOne`
+with the existing `chatId` and replacement `text`. The same HTTP client calls
+`editMessageText`; it never creates a replacement post or retries an uncertain
+edit. Inline keyboards and rich text are supported; attachments, thread IDs and
+regular reply keyboards are rejected for edits. Custom legacy adapters without
+edit support fail closed. The four-operation facade and native result contract
+are unchanged.
 
 ## Result contract
 

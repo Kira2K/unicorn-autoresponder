@@ -18,7 +18,9 @@ Admin Console -> web-console API -> Telegram Bot API -> Telegram group
 ```
 
 The bot matches a Telegram group to a student by comparing the current Telegram
-chat ID with `clients.telegram_general_chat_id` in NocoDB. Resume workflow
+chat ID with nonblank `clients.secured_general_chat_id`, otherwise
+`clients.telegram_general_chat_id`. Outgoing client notifications use this same
+effective ID, without falling back after delivery errors. Resume workflow
 commands are documented in [resume-workflow.md](./resume-workflow.md).
 
 ## Environment
@@ -196,7 +198,9 @@ but does not start Dolphin or HH automation.
 
 On `clients`:
 
-- `telegram_general_chat_id`: linked Telegram group chat ID.
+- `secured_general_chat_id`: preferred Telegram group chat ID when nonblank.
+- `telegram_general_chat_id`: original group ID, used when the secured ID is blank
+  or absent. Historical imports and restoration tools still use this raw field.
 - `telegram_personal_chat_id`: client Telegram username used to authorize the
   student actor inside the linked common chat.
 - `google_folder`: Google Drive folder URL updated by the bot.
@@ -303,8 +307,8 @@ Set the same `WEB_CONSOLE_BOT_API_TOKEN` on both services. Set
 - TDLib says a message was sent but nobody sees it: inspect the message state.
   If it is `messageSendingStatePending`, it is still local to TDLib. Wait for
   `updateMessageSendSucceeded` or treat it as not delivered.
-- Chat ID not found: run `/whoami` and copy the exact chat ID into
-  `clients.telegram_general_chat_id`.
+- Chat ID not found: run `/whoami` and check the effective ID: nonblank
+  `clients.secured_general_chat_id`, otherwise `clients.telegram_general_chat_id`.
 - Resume step says "This step must be advanced by ...": the current Telegram
   account is not the role responsible for the status. Use the linked student in
   the common chat, a configured Kira account, or a configured provider account.
@@ -315,7 +319,7 @@ Set the same `WEB_CONSOLE_BOT_API_TOKEN` on both services. Set
   `/start`, then retry the workflow step.
 - NocoDB update failed: confirm the client row exists and `google_folder` is a
   valid URL.
-- Admin Console message not sent: confirm the client has
-  `telegram_general_chat_id`, and check the Bot API token.
+- Admin Console message not sent: confirm the client has a valid effective group
+  ID (secured first, original only when secured is blank), and check the Bot API token.
 - Unauthorized bot API response: make sure the worker sends
   `X-Bot-Api-Token` and the web service has `WEB_CONSOLE_BOT_API_TOKEN`.

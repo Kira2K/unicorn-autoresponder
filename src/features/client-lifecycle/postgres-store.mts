@@ -1,4 +1,5 @@
 import { createReadSession } from "../../integrations/postgres/read-session.mts";
+import { createRequire } from "node:module";
 import { writeTransaction } from "../../integrations/postgres/working-session.mts";
 import type {
   CopyDatabase,
@@ -6,6 +7,9 @@ import type {
 } from "../../integrations/postgres/contracts.mts";
 import type { Client } from "./policy.ts";
 import type { Store } from "./worker.ts";
+const { selectTelegramGroupChatId } = createRequire(import.meta.url)("../../../shared/telegram-group-chat.ts") as {
+  selectTelegramGroupChatId(client: Record<string, unknown>): unknown;
+};
 const str = (value: unknown) => String(value ?? "").trim();
 // pg returns Date objects; String(Date) would discard their milliseconds.
 const date = (value: unknown) =>
@@ -33,10 +37,10 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
     async claim(key, clientId, kind, points, at, expectedStatus, expectedClient) {
       return write(async (session) => {
         const current = await session.query(
-          `SELECT id FROM noco.clients WHERE id=$1 AND client_status=$2
+          `SELECT id FROM noco.clients c WHERE id=$1 AND client_status=$2
           AND NOT COALESCE(__nc_deleted,false)
           AND ($3::jsonb IS NULL OR jsonb_build_array(
-            btrim(COALESCE(client_role,'')),btrim(COALESCE(telegram_general_chat_id::text,'')),
+            btrim(COALESCE(client_role,'')),btrim(COALESCE(NULLIF(btrim(to_jsonb(c)->>'secured_general_chat_id'),''),telegram_general_chat_id::text,'')),
             btrim(COALESCE(telegram_personal_chat_id,'')),btrim(COALESCE(google_folder,'')),
             btrim(COALESCE(tg_hard_mentor,'')),btrim(COALESCE(client_name,'')),
             CASE WHEN market_id IN (1,2,3) THEN market_id ELSE NULL END
@@ -129,6 +133,7 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
         (
           await s.query(`SELECT c.id,c.client_name,c.client_status,c.client_role,c.market_id,
         c.telegram_personal_chat_id,c.telegram_general_chat_id,c.google_folder,c.tg_hard_mentor,
+        to_jsonb(c)->>'secured_general_chat_id' AS secured_general_chat_id,
         c.first_name,c.last_name,c.fio,c.birth_date,c.english_levels_id,c.ready_for_interview_in_english_in_2_months,
         c.real_location,c.desired_location,c.calendar_email,c.education,c.education_entries,c.no_higher_education,c.stop_list_company,
         noco.client_account_indicators(c.id) indicators,
@@ -169,7 +174,7 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
                 Number(r.market_id) as 1 | 2 | 3
               ] ?? null,
             tag: str(r.telegram_personal_chat_id),
-            chatId: str(r.telegram_general_chat_id),
+            chatId: str(selectTelegramGroupChatId(r)),
             googleFolder: str(r.google_folder),
             hardMentor: str(r.tg_hard_mentor),
             indicators: r.indicators as Client["indicators"],

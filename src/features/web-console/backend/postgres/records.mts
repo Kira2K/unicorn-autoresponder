@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { PostgresReadError } from '../../../../integrations/postgres/contracts.mts';
 import type { CopyRecord } from '../../../../integrations/postgres/contracts.mts';
 import { readPages } from '../../../../platform/db/postgres/pages.mts';
@@ -5,6 +6,9 @@ import { nocoRecordOrder } from '../../../../platform/db/postgres/record-order.m
 import type { ConsoleRow, ConsoleSql } from './contracts.mts';
 import { readable, relations, tableIds } from './tables.mts';
 import { filterRows, consoleClauses } from './query.mts';
+const { selectTelegramGroupChatId } = createRequire(import.meta.url)('../../../../../shared/telegram-group-chat.ts') as {
+  selectTelegramGroupChatId(client: Record<string, unknown>): unknown;
+};
 export function consoleRow(record: CopyRecord): ConsoleRow {
   const id = Number(record.data.Id);
   if (!Number.isSafeInteger(id) || id <= 0 || record.key.length !== 1 || String(id) !== record.key[0])
@@ -25,7 +29,7 @@ export function consoleRecords(db: ConsoleSql) {
   return {
     async fetchClientReferences() {
       return nocoRecordOrder((await readAll(tableIds.clients)).map(consoleRow))
-        .map(row => ({ Id: row.Id, chat: row.telegram_general_chat_id }));
+        .map(row => ({ Id: row.Id, chat: selectTelegramGroupChatId(row) }));
     },
     async fetchTableMeta(id: string) { return structuredClone(table(id)); },
     async fetchRecords(id: string, _pageSize?: number, query?: { where?: string; fields?: string; sort?: string }): Promise<ConsoleRow[]> {

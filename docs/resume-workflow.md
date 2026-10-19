@@ -52,7 +52,10 @@ Commands:
 
 `clients` fields used by the workflow:
 
-- `telegram_general_chat_id`: linked Telegram common group.
+- `secured_general_chat_id`: preferred linked Telegram common group when nonblank.
+- `telegram_general_chat_id`: original linked group; used only if the secured ID
+  is absent or blank. Commands and CV notifications use the same effective ID.
+  A notification error never causes a fallback to the original group.
 - `telegram_personal_chat_id`: client Telegram username used to authorize the
   student actor inside the linked common group.
 - `education`: legacy education field. If `education_entries` is empty, code
@@ -561,8 +564,9 @@ unless the run is explicitly meant to exercise those accounts.
 
 ## Troubleshooting
 
-- `No student found`: set `clients.telegram_general_chat_id` to the exact group
-  chat ID.
+- `No student found`: check the effective group ID: nonblank
+  `clients.secured_general_chat_id`, otherwise `clients.telegram_general_chat_id`.
+  A migrated client's original group no longer resolves.
 - `resume_required_data_missing`: add the missing Console/profile data, then
   retry `/resume`.
 - `resume_reject_comment_too_short`: use
