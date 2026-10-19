@@ -1,5 +1,12 @@
 # TG Chat ID Checker
 
+> **Use carefully: legacy Sheets diagnostic.** `--belongings` reads
+> `ПЕРС ДАННЫЕ` even with `APP_DB=postgres`. Sheet group IDs may be stale, and
+> this report does not resolve `secured_general_chat_id`. Verify the student and
+> effective group in PostgreSQL and Telegram before changing any binding. The
+> tool prints a warning before reading the source. Default mode without
+> `--belongings` only lists Telegram dialogs and does not read Sheets.
+
 Service for finding fresh student Telegram mentor chats and producing the final chat-id report that we can use to fill `Id общего чата` in the personal data table.
 
 ## What This Service Answers

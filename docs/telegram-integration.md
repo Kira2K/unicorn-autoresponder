@@ -47,6 +47,7 @@ Historical imports and restoration tools retain the original group IDs.
 type SendOneInput = {
   chatId: string
   text: string
+  editMessageId?: number
   messageThreadId?: number
   parseMode?: ParseMode
   replyMarkup?: InlineKeyboardMarkup | ReplyKeyboardMarkup |
@@ -60,6 +61,14 @@ type SendManyInput = Record<string, Omit<SendOneInput, 'chatId'>>
 `chatId` is always a Telegram destination ID. It is never a student, client,
 user, mentor, workflow, or database record ID. Link previews are disabled by
 default; an explicit `linkPreviewOptions` object takes precedence.
+
+To edit a bot-owned text message, pass its positive `editMessageId` to `sendOne`
+with the existing `chatId` and replacement `text`. The same HTTP client calls
+`editMessageText`; it never creates a replacement post or retries an uncertain
+edit. Inline keyboards and rich text are supported; attachments, thread IDs and
+regular reply keyboards are rejected for edits. Custom legacy adapters without
+edit support fail closed. The four-operation facade and native result contract
+are unchanged.
 
 ## Result contract
 

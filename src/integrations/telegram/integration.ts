@@ -29,6 +29,7 @@ type TelegramLogger = (event: Readonly<Record<string, unknown>>) => void
 
 type RawBotApi = {
   sendMessageResponse(input: SendOneInput): Promise<unknown>
+  editMessageTextResponse?(input: SendOneInput): Promise<unknown>
 }
 
 type TelegramIntegrationOptions = {
@@ -112,6 +113,15 @@ function validateSendOneInput(input: unknown):
       )
     }
   }
+  if (input.editMessageId !== undefined && (
+    !Number.isSafeInteger(input.editMessageId) || Number(input.editMessageId) <= 0 ||
+    input.attachment !== undefined || input.messageThreadId !== undefined ||
+    (input.replyMarkup !== undefined && (!isObject(input.replyMarkup) || !Array.isArray(input.replyMarkup.inline_keyboard)))
+  )) {
+    return { ok: false, error: namedError('TelegramSendValidationError',
+      'Editing requires a positive message ID and supports only text and inline keyboards, without attachments or a thread ID.',
+      'telegram_edit_message_invalid') }
+  }
   if (
     input.messageThreadId !== undefined &&
     (!Number.isSafeInteger(input.messageThreadId) || Number(input.messageThreadId) <= 0)
@@ -176,6 +186,7 @@ function validateSendOneInput(input: unknown):
     input: {
       chatId: input.chatId.trim(),
       text: input.text,
+      ...(input.editMessageId !== undefined ? { editMessageId: Number(input.editMessageId) } : {}),
       ...(input.messageThreadId !== undefined
         ? { messageThreadId: Number(input.messageThreadId) }
         : {}),
@@ -405,7 +416,13 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
 
       let rawResponse: unknown
       try {
-        rawResponse = await rawBotApi.sendMessageResponse(validated.input)
+        if (validated.input.editMessageId !== undefined) {
+          if (!rawBotApi.editMessageTextResponse)
+            throw namedError('TelegramConfigurationError', 'The configured bot adapter does not support editing.', 'telegram_bot_runtime_unavailable')
+          rawResponse = await rawBotApi.editMessageTextResponse(validated.input)
+        } else {
+          rawResponse = await rawBotApi.sendMessageResponse(validated.input)
+        }
       } catch (error) {
         const result = clientFailureResult(classifyFailure(error), error)
         log({

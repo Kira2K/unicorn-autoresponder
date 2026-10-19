@@ -378,6 +378,7 @@ async function runRequiredProxyCheck(options: RunOptions = {}) {
   }
 
   await fs.mkdir(runDirectory, { recursive: true })
+  log('WARNING: Use this legacy Sheets diagnostic carefully. Client/profile expectations come from ПЕРС ДАННЫЕ even with APP_DB=postgres and may be stale. Verify results against PostgreSQL and Dolphin before acting. Historical proxy names may contain original chat IDs; a mismatch alone does not prove the proxy is wrong.')
   log(`Proxy required check started. market=${market}`)
   log(`Proxy connection value redaction: ${redactProxyConnectionValues ? 'on' : 'off'}`)
   log(`Reading source through app DB: ${SHEET_NAMES.personalData}`)

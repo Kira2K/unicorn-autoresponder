@@ -351,6 +351,9 @@ function getBelongingForChat(
 async function getFreshStudentChatBelongings(
   options: FreshStudentChatBelongingsOptions = {}
 ): Promise<FreshStudentChatBelongingsResult> {
+  console.warn(
+    'WARNING: Use this legacy Sheets diagnostic carefully. The belongings report reads ПЕРС ДАННЫЕ even with APP_DB=postgres; group IDs may be stale and secured_general_chat_id is not used. Verify results against PostgreSQL and current Telegram groups before updating bindings.'
+  )
   const studentRecords = await getStudentTelegramRecords()
   const client = await createTelegramClient({ saveSession: false })
 
