@@ -32,6 +32,17 @@ framework. Feature code must not add direct Bot API requests: use this facade.
 
 ## TypeScript inputs
 
+Student-group routing is resolved before calling this facade. Database-backed
+features use nonblank `clients.secured_general_chat_id`, falling back to
+`clients.telegram_general_chat_id` only when the secured field is empty or absent.
+The same effective ID is used for incoming command lookups; a migrated client's
+old group no longer resolves. Existing ID normalization is unchanged. Delivery
+errors never trigger a retry against the original group. Explicit destinations,
+private staff chats and fixed reporting channels keep their existing meaning.
+PostgreSQL projects only this optional secured key, even without catalog
+registration; reads require no migration and grant no additional write access.
+Historical imports and restoration tools retain the original group IDs.
+
 ```ts
 type SendOneInput = {
   chatId: string

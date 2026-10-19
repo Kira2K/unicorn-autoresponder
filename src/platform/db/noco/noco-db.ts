@@ -1,4 +1,5 @@
 const { hhLoginKind } = require('../../../../shared/hh-login.ts')
+const { selectTelegramGroupChatId } = require('../../../../shared/telegram-group-chat.ts')
 const { isDolphinProfile } = require('../../../integrations/noco/core/profile-browser.ts') as {
   isDolphinProfile(row: Record<string, unknown>): boolean
 }
@@ -322,7 +323,7 @@ function toHHAuthCredentials(
   const email = String(account.email ?? '').trim()
   const emailPassword = String(account.email_password ?? '').trim() || undefined
   const clientName = String(client.client_name ?? account.client_name ?? '').trim()
-  const commonChatId = normalizeId(client.telegram_general_chat_id)
+  const commonChatId = normalizeId(selectTelegramGroupChatId(client))
 
   if (!login) {
     throw new Error(`HH ${market} credentials for "${clientName}" are missing login`)
@@ -414,7 +415,7 @@ function buildAutomationTargetsFromNocoState(
     }
     const resolvedStack = resolveStack(row, client, clientName, state.stacks)
     const stack = resolvedStack.name
-    const commonChatId = normalizeId(client.telegram_general_chat_id)
+    const commonChatId = normalizeId(selectTelegramGroupChatId(client))
     if (!clientName || !stack || !commonChatId) continue
 
     for (const market of ['Ru', 'En'] as Market[]) {
@@ -567,7 +568,7 @@ function createNocoDb(options: { nocoClient?: any } = {}): AppDb {
       const normalizedChatId = normalizeId(commonChatId)
       const client = await findNocoClientForAuth(
         { fetchRecords: fetchClients },
-        candidate => normalizeId(candidate.telegram_general_chat_id) === normalizedChatId,
+        candidate => normalizeId(selectTelegramGroupChatId(candidate)) === normalizedChatId,
         `common chat id "${commonChatId}"`
       )
 

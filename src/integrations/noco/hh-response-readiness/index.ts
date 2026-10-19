@@ -1,3 +1,4 @@
+const { selectTelegramGroupChatId } = require('../../../../shared/telegram-group-chat.ts')
 const { createNocoDb } = require('../../../platform/db/noco/noco-db.ts') as {
   createNocoDb(): import('../../../platform/db/types.ts').AppDb
 }
@@ -175,7 +176,7 @@ function buildTargets(state: {
     const clientId = linkedId(row.rel_hhAutoresponses_client) ?? Number(row.clients_id)
     const client = clientsById.get(clientId)
     const clientName = String(client?.client_name ?? '').trim()
-    const commonChatId = normalizeId(client?.telegram_general_chat_id)
+    const commonChatId = normalizeId(selectTelegramGroupChatId(client))
     const selected = selectedClientNames.has(normalizeNameKey(clientName))
     if (hasSelectedClients && !selected) continue
 
@@ -277,7 +278,7 @@ function buildTargets(state: {
           stackId: 0,
           stackSource: '',
           dolphinProfileId: 0,
-          commonChatId: normalizeId(client?.telegram_general_chat_id),
+          commonChatId: normalizeId(selectTelegramGroupChatId(client)),
           hasCoverText: false,
           hasStackScenario: false,
           hasProfileRelation: false,

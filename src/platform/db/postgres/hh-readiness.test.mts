@@ -23,6 +23,7 @@ test('HH readiness keeps old defaults except explicit postgres; no hidden SQL fa
 });
 test('HH readiness matches Noco for Ru/En, disabled targets, selections and missing relations', async () => {
   for (const modify of [(_f: ReturnType<typeof makeFixture>) => {},
+    (f: ReturnType<typeof makeFixture>) => { f.data.clients[0].secured_general_chat_id = '-10034'; },
     (f: ReturnType<typeof makeFixture>) => { f.data.dolphinProfiles = []; },
     (f: ReturnType<typeof makeFixture>) => { f.data.platformAccounts = []; },
     (f: ReturnType<typeof makeFixture>) => { f.data.stacks[0].hh_scenario_url_en = ''; },
@@ -36,5 +37,17 @@ test('HH readiness matches Noco for Ru/En, disabled targets, selections and miss
       const old = await loadReadinessResults({ market, clientNames, db: createNocoDb({ nocoClient: f.records }), nocoClient: f.records });
       assert.deepEqual(sql, old);
     }
+  }
+});
+
+test('HH readiness reports secured destinations even for selected disabled/missing-profile targets', async () => {
+  for (const missingProfiles of [false, true]) {
+    const f = makeFixture(); f.data.clients[0].secured_general_chat_id = ' -10034 ';
+    if (missingProfiles) f.data.dolphinProfiles = [];
+    const db = createPostgresAppDb(async () => f.reader, unusedSheets);
+    const result = await loadReadinessResults({ market: 'En', clientNames: ['Fake'], db,
+      ...hhReadinessOptions('postgres', db, async () => f.reader) } as Parameters<typeof loadReadinessResults>[0]);
+    assert.equal(result.length, 1);
+    assert.equal((result[0] as { commonChatId: string }).commonChatId, '-10034');
   }
 });

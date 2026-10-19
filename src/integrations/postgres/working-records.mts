@@ -7,6 +7,11 @@ export const physicalColumns = (t: WorkingTable) => t.columns.filter(c => !virtu
 const literal = (text: string) => "'" + text.replaceAll("'", "''") + "'";
 export function projection(table: WorkingTable, alias = 't'): string {
   const pairs = physicalColumns(table).map(c => `${literal(c.dataKey)},${alias}.${quoted(c.sqlName)}`);
+  // This optional SQL-only client field predates catalog registration. Project
+  // only this key: missing physical columns yield JSON null without a migration.
+  // Keep it out of the writable catalog and the historical source projection.
+  if (table.id === 'mxza381054ldlza' && !physicalColumns(table).some(c => c.dataKey === 'secured_general_chat_id'))
+    pairs.push(`'secured_general_chat_id',to_jsonb(${alias})->'secured_general_chat_id'`);
   // Concatenate objects in small chunks: PostgreSQL limits arguments per function call.
   const chunks: string[] = [];
   for (let i = 0; i < pairs.length; i += 40) chunks.push(`jsonb_build_object(${pairs.slice(i, i + 40).join(',')})`);

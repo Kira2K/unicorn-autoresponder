@@ -39,7 +39,8 @@ For the current client audience, verify these canonical mappings against the
 live schema before every operation:
 
 - identity: `clients.client_name`;
-- destination: `clients.telegram_general_chat_id`, which is the linked common
+- destination: nonblank `clients.secured_general_chat_id`, otherwise
+  `clients.telegram_general_chat_id`, which is the linked common
   Telegram chat, not necessarily the student’s private chat;
 - primary stack: `clients.rel_clients_primary_stack` linked to `stacks`;
 - market: `clients.market`;
@@ -134,7 +135,8 @@ Unless the manager explicitly says otherwise:
 
 - `send`, `write`, `notify`, or `message` means Telegram delivery.
 - An unqualified audience such as `every Java EN` means linked common Telegram
-  chats from `clients.telegram_general_chat_id`.
+  chats from nonblank `clients.secured_general_chat_id`, otherwise
+  `clients.telegram_general_chat_id`.
 - `Java`, `Go`, `React`, and similar terms refer to
   `clients.rel_clients_primary_stack` linked to `stacks`; resolve the requested
   value against current stack records.
@@ -146,8 +148,8 @@ Unless the manager explicitly says otherwise:
 - `every`, `all`, or `everyone` means all records matching the resolved filters.
 - `their English level` means the linked `English level` value resolved through
   `english_levels_id` and the `english_levels` table.
-- `chat` or `Telegram chat` means the linked common chat stored in
-  `clients.telegram_general_chat_id`.
+- `chat` or `Telegram chat` means the linked common chat selected from nonblank
+  `clients.secured_general_chat_id`, otherwise `clients.telegram_general_chat_id`.
 
 These mappings must always be shown in the preview.
 
@@ -165,8 +167,8 @@ Interpret as:
 - entity: students;
 - audience filter: stack = Java;
 - audience filter: market = EN;
-- destination: linked common Telegram chat ID from
-  `clients.telegram_general_chat_id`;
+- destination: linked common Telegram chat ID from nonblank
+  `clients.secured_general_chat_id`, otherwise `clients.telegram_general_chat_id`;
 - message: convert the manager’s intent into a direct recipient-facing message, then show the exact wording in the preview.
 
 Do not send after interpretation. First display the preview and wait for approval.
@@ -232,7 +234,13 @@ For every potential recipient, resolve at least:
 ### Telegram chat rules
 
 - The delivery integration accepts Telegram `chatId`, not internal database IDs.
-- The current destination source is `clients.telegram_general_chat_id`. It is a
+- Select nonblank `clients.secured_general_chat_id`; only if absent, null or blank
+  use `clients.telegram_general_chat_id`. Use `shared/telegram-group-chat.ts` for
+  local selection, or the backend's already resolved `commonChatId` projection.
+  Read both fields when selecting from raw SQL. Record the selected source field
+  in the preview. Never retry the original group after a send error, and never
+  emit both destinations for one client. A nonblank invalid secured ID is an
+  exclusion, not permission to fall back. The selected destination is a
   linked common chat with the team and must not be described as a guaranteed
   private student chat.
 - Never pass student ID, client ID, platform-account ID, or another application ID as `chatId`.
@@ -243,8 +251,10 @@ For every potential recipient, resolve at least:
   group chat IDs are negative. Preserve an existing leading `-` unchanged.
 - Show both the stored value and the canonical destination in the preview
   whenever this sign normalization was applied.
-- This sign rule applies only to `clients.telegram_general_chat_id`; do not
-  invent, reconstruct, or normalize missing IDs or IDs from another field.
+- This sign rule applies only when the selected source is
+  `clients.telegram_general_chat_id`. Secured IDs must already be valid negative
+  Telegram group IDs; do not invent, reconstruct, or normalize missing IDs or
+  IDs from another field.
 - A missing or invalid chat ID must be shown as an exclusion.
 
 ### Deduplication
@@ -443,7 +453,7 @@ Data sources
 
 Resolved schema
 - Identity: clients.client_name
-- Destination: clients.telegram_general_chat_id (linked common chat)
+- Destination: nonblank clients.secured_general_chat_id, otherwise clients.telegram_general_chat_id (linked common chat)
 - Stack: clients.rel_clients_primary_stack -> stacks
 - Market: clients.market (EN includes en + both)
 

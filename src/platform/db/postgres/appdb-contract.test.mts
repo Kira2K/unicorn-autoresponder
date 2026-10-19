@@ -24,6 +24,22 @@ test('SQL source rejection is propagated, never interpreted as an empty table', 
   await assert.rejects(db.getHHAuthCredentialsByClientName('Fake'), error => error === failure);
 });
 
+test('SQL and Noco route targets and HH auth to the same effective group, retiring the old lookup', async () => {
+  for (const secured of [' -10034 ', '-1.0034e4', undefined, null, '', '  ']) {
+    const f = makeFixture(); f.data.clients[0].secured_general_chat_id = secured;
+    const expected = String(secured ?? '').trim() ? '-10034' : '-1';
+    for (const db of [createPostgresAppDb(async () => f.reader, unusedSheets), createNocoDb({ nocoClient: f.records })]) {
+      const targets = await db.getAutomationTargets({ workWithRuOnly: false, clientNames: ['Fake'] });
+      assert.equal(targets.length, 2, 'market selection is unchanged');
+      assert.ok(targets.every(t => t.commonChatId === expected));
+      assert.equal((await db.getAutomationTargetByName('Fake', 'Ru')).commonChatId, expected);
+      assert.equal((await db.getHHAuthCredentialsByClientName('Fake')).commonChatId, expected);
+      assert.equal((await db.getHHAuthCredentialsByCommonChatId(expected)).clientName, 'Fake');
+      if (expected !== '-1') await assert.rejects(db.getHHAuthCredentialsByCommonChatId('-1'), /not found/);
+    }
+  }
+});
+
 test('Noco and SQL automation ignore Octo and unknown profiles sharing a Dolphin market', async () => {
   const f = makeFixture();
   f.data.dolphinProfiles[0].browser = 'dolphin';
