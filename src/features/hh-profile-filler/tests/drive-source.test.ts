@@ -3,10 +3,12 @@ import { createDriveSourceLoader } from '../drive-source.ts'
 import { google } from 'googleapis'
 import { createProfileDriveClient } from '../drive-client.ts'
 import { ProfileFillerError } from '../errors.ts'
+import http from 'node:http'
 
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const PDF = 'application/pdf'
 const GOOGLE_DOC = 'application/vnd.google-apps.document'
+const GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
 const cvUrl = 'https://docs.google.com/document/d/final-cv/edit'
 
 function expectSafeError(code: string) {
@@ -91,6 +93,7 @@ async function runFailureTests() {
       const drive = { files: {
         get: async (input: any) => {
           if (step === 'metadata' || input.alt) return fail()
+          if (step === 'list') return { data: { mimeType: GOOGLE_FOLDER } }
           return { data: { mimeType: step === 'export' ? GOOGLE_DOC : PDF } }
         },
         export: async () => fail(), list: async () => fail()
@@ -114,6 +117,7 @@ async function runIncompleteListingTests() {
   for (const repeatToken of [false, true]) {
     let pages = 0
     const drive = { files: {
+      get: async () => ({ data: { mimeType: GOOGLE_FOLDER } }),
       list: async () => {
         pages++
         if (pages === 2 && !repeatToken) throw new Error('PRIVATE_CONTENT FAKE_SECRET')
@@ -132,6 +136,9 @@ export async function runDriveSourceTests() {
   await runDownloadTests()
   await runFailureTests()
   await runIncompleteListingTests()
+  await runFolderAccessTests()
+  await runResourceKeyTests()
+  await runResourceKeyTransportTest()
   const downloadedIds: string[] = []
   const listedParents: string[] = []
   const drive = {
@@ -161,6 +168,7 @@ export async function runDriveSourceTests() {
           downloadedIds.push(input.fileId)
           return { data: Buffer.from('document') }
         }
+        if (['student-folder', 'presentation-folder'].includes(input.fileId)) return { data: { mimeType: GOOGLE_FOLDER } }
         return { data: { id: input.fileId, name: `${input.fileId}.docx`, mimeType: DOCX,
           modifiedTime: '2026-09-08T00:00:00Z', version: '1', size: 8 } }
       }
@@ -177,4 +185,115 @@ export async function runDriveSourceTests() {
     'presentation-folder:first', 'presentation-folder:second'])
   assert.deepEqual(downloadedIds, ['experience-first', 'experience'])
   assert.deepEqual(await loader.loadExperienceDescriptions(), [])
+}
+
+async function runFolderAccessTests() {
+  for (const status of [401, 403, 404, 500]) {
+    let lists = 0
+    const drive = { files: {
+      get: async () => { throw Object.assign(new Error('FAKE_SECRET PRIVATE_CONTENT'), { response: { status } }) },
+      list: async () => { lists++; return { data: { files: [] } } }
+    } }
+    await assert.rejects(createDriveSourceLoader({ drive }).loadExperienceDescriptions(
+      'https://drive.google.com/drive/folders/student-folder'),
+    expectSafeError(status === 500 ? 'profile_drive_folder_unavailable' : 'profile_drive_access_denied'))
+    assert.equal(lists, 0, 'An inaccessible folder is not a successful empty search')
+  }
+  let lists = 0
+  const readable = { files: {
+    get: async () => ({ data: { mimeType: GOOGLE_FOLDER } }),
+    list: async () => { lists++; return { data: { files: [] } } }
+  } }
+  assert.deepEqual(await createDriveSourceLoader({ drive: readable }).loadExperienceDescriptions(
+    'https://drive.google.com/drive/folders/student-folder'), [])
+  assert.equal(lists, 1, 'A readable empty folder remains valid')
+  const notFolder = { files: { ...readable.files, get: async () => ({ data: { mimeType: PDF } }) } }
+  await assert.rejects(createDriveSourceLoader({ drive: notFolder }).loadExperienceDescriptions(
+    'https://drive.google.com/drive/folders/student-folder'), expectSafeError('profile_drive_format_unsupported'))
+  assert.equal(lists, 1)
+  const lostChild = { files: {
+    get: async ({ fileId }: any) => {
+      if (fileId !== 'student-folder') throw Object.assign(new Error('FAKE_SECRET'), { code: 404 })
+      return { data: { mimeType: GOOGLE_FOLDER } }
+    },
+    list: async () => ({ data: { files: [{ id: 'presentation', name: 'Самопрезентация', mimeType: GOOGLE_FOLDER }] } })
+  } }
+  await assert.rejects(createDriveSourceLoader({ drive: lostChild }).loadExperienceDescriptions(
+    'https://drive.google.com/drive/folders/student-folder'), expectSafeError('profile_drive_access_denied'))
+}
+
+async function runResourceKeyTests() {
+  const header = (options: any) => options?.headers?.['X-Goog-Drive-Resource-Keys']
+  for (const mimeType of [PDF, DOCX, GOOGLE_DOC]) {
+    let expected: string | undefined = 'final-cv/FAKE_SECRET'
+    const drive = { files: {
+      get: async (input: any, options: any) => {
+        assert.equal(header(options), expected)
+        return { data: input.alt ? Buffer.from('CV!') : { mimeType, size: 3 } }
+      },
+      export: async (_input: any, options: any) => { assert.equal(header(options), expected); return { data: Buffer.from('CV!') } }
+    } }
+    const loader = createDriveSourceLoader({ drive })
+    assert.equal((await loader.loadCv(cvUrl + '?resourcekey=FAKE_SECRET')).bytes.toString(), 'CV!')
+    expected = undefined
+    assert.equal((await loader.loadCv(cvUrl)).bytes.toString(), 'CV!', 'Keys must not leak between source reads')
+  }
+  let reads = 0
+  const discoverKey = { files: { get: async (input: any, options: any) => {
+    if (!input.alt) { assert.equal(header(options), undefined); return { data: { mimeType: PDF, resourceKey: 'FAKE_SECRET' } } }
+    reads++; assert.equal(header(options), 'final-cv/FAKE_SECRET'); return { data: Buffer.from('CV!') }
+  } } }
+  await createDriveSourceLoader({ drive: discoverKey }).loadCv(cvUrl)
+  assert.equal(reads, 1)
+  for (const value of ['FAKE_SECRET%0d%0aInjected:yes', 'FAKE_SECRET%2Fother', 'FAKE_SECRET%2Cother']) {
+    await assert.rejects(createDriveSourceLoader({ drive: { files: {} } }).loadCv(cvUrl + '?resourcekey=' + value),
+      expectSafeError('profile_drive_url_invalid'))
+  }
+  const rootHeader = 'student-folder/root-key'
+  const childHeader = rootHeader + ',presentation/child-key'
+  const drive = { files: {
+    get: async (input: any, options: any) => {
+      const expected = input.fileId === 'student-folder' ? rootHeader : input.fileId === 'presentation' ? childHeader : childHeader + ',experience/FAKE_SECRET'
+      assert.equal(header(options), expected)
+      return { data: input.alt ? Buffer.from('experience') : { mimeType: ['student-folder', 'presentation'].includes(input.fileId) ? GOOGLE_FOLDER : DOCX } }
+    },
+    list: async (input: any, options: any) => {
+      assert.ok(input.fields.includes('resourceKey'))
+      const root = input.q.includes("'student-folder'")
+      assert.equal(header(options), root ? rootHeader : childHeader)
+      if (!input.pageToken) return { data: { files: [], nextPageToken: 'page-2' } }
+      return { data: { files: root
+        ? [{ id: 'presentation', name: 'Самопрезентация', mimeType: GOOGLE_FOLDER, resourceKey: 'child-key' }]
+        : [{ id: 'experience', name: 'Описание опыта.docx', mimeType: DOCX, resourceKey: 'FAKE_SECRET' }] } }
+    }
+  } }
+  const documents = await createDriveSourceLoader({ drive }).loadExperienceDescriptions(
+    'https://drive.google.com/drive/folders/student-folder?resourcekey=root-key')
+  assert.equal(documents.length, 1)
+  assert.equal(documents[0].bytes.toString(), 'experience')
+}
+
+async function runResourceKeyTransportTest() {
+  let requests = 0
+  const server = http.createServer((request, response) => {
+    requests++
+    const url = new URL(request.url!, 'http://localhost')
+    response.setHeader('Content-Type', 'application/json')
+    if (request.headers['x-goog-drive-resource-keys'] !== 'final-cv/FAKE_SECRET') {
+      response.statusCode = 404; response.end(JSON.stringify({ error: { message: 'FAKE_SECRET PRIVATE_CONTENT' } })); return
+    }
+    if (url.searchParams.get('alt') === 'media') response.end('CV!')
+    else response.end(JSON.stringify({ id: 'final-cv', name: 'CV.pdf', mimeType: PDF, size: 3 }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const address = server.address() as { port: number }
+    const drive = createProfileDriveClient({ env: { GOOGLE_DRIVE_API_KEY: 'FAKE_SECRET' },
+      createClient: config => google.drive({ ...config, rootUrl: `http://127.0.0.1:${address.port}/` }) })
+    const loader = createDriveSourceLoader({ drive })
+    const document = await loader.loadCv(cvUrl + '?resourcekey=FAKE_SECRET')
+    assert.equal(document.bytes.toString(), 'CV!')
+    await assert.rejects(loader.loadCv(cvUrl), expectSafeError('profile_drive_access_denied'))
+    assert.equal(requests, 3)
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
 }
