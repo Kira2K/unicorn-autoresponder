@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { TestContext } from "node:test";
 import { createLifecycleRuntime } from "./runtime.mts";
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -111,4 +112,111 @@ test("throwing reporter cannot stop scheduling or leak a timer", async () => {
     pass:async()=>{calls++;return {counts:{errors:0}}}});
   await r.start();await delay(10);await r.stop();const stopped=calls;
   await delay(10);assert.equal(calls,stopped);assert(calls>1);
+});
+
+async function advance(t: TestContext, milliseconds: number) {
+  t.mock.timers.tick(milliseconds);
+  // Drain the async pass and its scheduling continuation, without real sleeping.
+  await new Promise<void>(resolve => setImmediate(resolve));
+}
+
+test("empty queue polls every five minutes, not every five seconds", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T15:00Z") });
+  let calls = 0;
+  const r = createLifecycleRuntime({ enabled: true, report: () => {},
+    pass: async () => { calls++; return { state: "idle", counts: { errors: 0 } }; } });
+  try {
+    await r.start();
+    assert.equal(calls, 1, "startup still reads persisted work immediately");
+    await advance(t, 299999); assert.equal(calls, 1);
+    await advance(t, 1); assert.equal(calls, 2);
+  } finally { await r.stop(); }
+});
+
+for (const activity of ["sent", "deferred", "failed", "stale", "errors"] as const) {
+  test(`${activity} work retries after five seconds, then returns to idle polling`, async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T15:00Z") });
+    let calls = 0;
+    const r = createLifecycleRuntime({ enabled: true, report: () => {},
+      pass: async () => ({ counts: { errors: 0, ...(calls++ === 0 ? { [activity]: 1 } : {}) } }) });
+    try {
+      await r.start();
+      await advance(t, 4999); assert.equal(calls, 1);
+      await advance(t, 1); assert.equal(calls, 2);
+      await advance(t, 299999); assert.equal(calls, 2);
+      await advance(t, 1); assert.equal(calls, 3);
+    } finally { await r.stop(); }
+  });
+}
+
+test("idle five-minute timer wakes exactly at 19 MSK and checks the day only once", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T15:58:13Z") });
+  const reminders: string[] = [];
+  let calls = 0;
+  const r = createLifecycleRuntime({ enabled: true, report: () => {},
+    pass: async options => {
+      calls++;
+      if (options.reminders) reminders.push(options.now.toISOString());
+      return { state: "send", counts: { errors: 0 } };
+    } });
+  try {
+    await r.start();
+    await advance(t, 106999); assert.equal(calls, 1);
+    await advance(t, 1);
+    assert.deepEqual(reminders, ["2026-10-21T16:00:00.000Z"]);
+    await advance(t, 300000); assert.equal(calls, 3); assert.equal(reminders.length, 1);
+  } finally { await r.stop(); }
+});
+
+test("pending daily batch drains every five seconds, without a five-minute pause", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T16:00Z") });
+  const checks: boolean[] = [];
+  const r = createLifecycleRuntime({ enabled: true, report: () => {},
+    pass: async options => {
+      checks.push(options.reminders);
+      return { state: "send", counts: { errors: 0, deferred: checks.length < 3 ? 1 : 0 } };
+    } });
+  try {
+    await r.start();
+    await advance(t, 5000); await advance(t, 5000);
+    assert.deepEqual(checks, [true, true, true]);
+    await advance(t, 299999); assert.equal(checks.length, 3);
+    await advance(t, 1); assert.deepEqual(checks, [true, true, true, false]);
+  } finally { await r.stop(); }
+});
+
+test("a slow in-flight pass crossing 19 MSK schedules the daily check immediately", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T15:59:59Z") });
+  let calls = 0, reminders = 0;
+  const r = createLifecycleRuntime({ enabled: true, report: () => {},
+    pass: async options => {
+      calls++; reminders += Number(options.reminders);
+      if (calls === 1) t.mock.timers.tick(2000);
+      return { counts: { errors: 0 } };
+    } });
+  try {
+    await r.start(); assert.equal(reminders, 0);
+    await advance(t, 1); assert.equal(calls, 2); assert.equal(reminders, 1);
+  } finally { await r.stop(); }
+});
+
+test("disabled daily reminders do not shorten the idle timer near 19 MSK", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T15:59Z") });
+  let calls = 0;
+  const r = createLifecycleRuntime({ enabled: true, remindersEnabled: false, report: () => {},
+    pass: async options => { calls++; assert.equal(options.reminders, false); return { counts: { errors: 0 } }; } });
+  try {
+    await r.start(); await advance(t, 60000); assert.equal(calls, 1);
+    await advance(t, 240000); assert.equal(calls, 2);
+  } finally { await r.stop(); }
+});
+
+test("unknown SQL outcome keeps the five-second retry rather than assuming an empty queue", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T15:00Z") });
+  let calls = 0;
+  const r = createLifecycleRuntime({ enabled: true, report: () => {},
+    pass: async () => { if (++calls === 1) throw Error("synthetic SQL outage"); return { counts: { errors: 0 } }; } });
+  try {
+    await r.start(); await advance(t, 5000); assert.equal(calls, 2);
+  } finally { await r.stop(); }
 });
