@@ -1312,7 +1312,7 @@ function linkedInReadyNotification(record: ResumeWorkflowRecord): ResumeWorkflow
   const messageThreadId = linkedinReadyNotifyThreadId()
   const cvUrl = record.enVersionUrl || record.ruVersionUrl || 'n/a'
   const text = [
-    `@CheMpoKaRokee, резюме ${clientLinkedInReadyLabel(record)}, готово к заполнению на LinkedIn.`,
+    `@juliafeels @polinats, резюме ${clientLinkedInReadyLabel(record)}, готово к заполнению на LinkedIn.`,
     `Ссылка на резюме: ${cvUrl}`
   ].join('\n')
   return { kind: 'linkedin_ready', chatId, messageThreadId, text }

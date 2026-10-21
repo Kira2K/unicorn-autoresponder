@@ -1489,8 +1489,8 @@ async function runTests(): Promise<void> {
     process.env.RESUME_WORKFLOW_RUS_TRANSLATOR_TELEGRAM_USER_IDS = '490903294'
     process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'
     process.env.RESUME_WORKFLOW_KIRA_NOTIFY_CHAT_ID = '343610488'
-    process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = '-1003187558078'
-    process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = '777'
+    process.env.RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID = '-1004404346934'
+    process.env.RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID = ''
     process.env.RESUME_WORKFLOW_FAKE_DATA_MODE = 'true'
     try {
       const botHeaders = { 'Content-Type': 'application/json', 'X-Bot-Api-Token': 'test-bot-token' }
@@ -1770,12 +1770,20 @@ async function runTests(): Promise<void> {
       assert.match(kiraFillingMessage.text, /• EN: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
       assert.match(kiraFillingMessage.text, /• RU: https:\/\/docs\.google\.com\/document\/d\/test-russian-version/)
       assert.match(kiraFillingMessage.text, /\nВсе задачи: \/open_my_tasks$/)
-      const linkedInReadyMessage = telegramBotMessages.find((message: any) => /@CheMpoKaRokee/.test(message.text))
+      const linkedInReadyMessages = telegramBotMessages.filter((message: any) => /готово к заполнению на LinkedIn\./.test(message.text))
+      assert.equal(linkedInReadyMessages.length, 1)
+      const linkedInReadyMessage = linkedInReadyMessages[0]
       assert(linkedInReadyMessage)
-      assert.equal(linkedInReadyMessage.chatId, '-1003187558078')
-      assert.equal(linkedInReadyMessage.messageThreadId, 777)
-      assert.match(linkedInReadyMessage.text, /^@CheMpoKaRokee, резюме Client One, FRONTEND, En, готово к заполнению на LinkedIn\./)
+      assert.equal(linkedInReadyMessage.chatId, '-1004404346934')
+      assert.equal(linkedInReadyMessage.messageThreadId, undefined)
+      assert.match(linkedInReadyMessage.text, /^@juliafeels @polinats, резюме Client One, FRONTEND, En, готово к заполнению на LinkedIn\./)
+      assert.doesNotMatch(linkedInReadyMessage.text, /@CheMpoKaRokee/)
       assert.match(linkedInReadyMessage.text, /Ссылка на резюме: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
+
+      const messagesAfterCompletion = telegramBotMessages.length
+      const completedRetry = await resumeByChat(studentHeaders)
+      assert.equal(completedRetry.body.error, 'resume_workflow_noop')
+      assert.equal(telegramBotMessages.length, messagesAfterCompletion, 'completed workflows must not resend notifications')
 
       await noco.patchRecord('mhiysd8l0f33bny', 98, {
         status: 'Draft in approve by student',

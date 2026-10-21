@@ -438,6 +438,14 @@ filling chat/thread. RU-market workflows still move to `moved to filling`, but
 do not emit the LinkedIn-ready notification because they are filled in a
 different async lane.
 
+The LinkedIn-ready message mentions `@juliafeels @polinats`, not Andrey. In
+production, route this existing notification to General in `ФЕРМА 2.0` with
+`RESUME_WORKFLOW_LINKEDIN_READY_CHAT_ID=-1004404346934` and an empty
+`RESUME_WORKFLOW_LINKEDIN_READY_THREAD_ID` (no topic ID). Keep the shared summary
+channel settings unchanged. This changes neither the completion transition
+(`CV done` in the current workflow, also supporting legacy `moved to filling`)
+nor any other recipient or notification; do not replay completed workflows.
+
 At `moved to filling` and `filled`, student-facing replies show only the RU link
 for RU-only clients, even if an older EN link remains stored. EN/both workflows
 show both available links. If the workflow is `stopped`, the bot replies with the last

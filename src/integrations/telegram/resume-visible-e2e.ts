@@ -1086,7 +1086,7 @@ async function runVisibleResumeE2e(options: VisibleResumeE2eOptions = {}) {
     if (!kiraFillingNotification) {
       throw new Error('Final Kira filling notification was not observed.')
     }
-    const linkedInReadyNotification = observed.sends.find(send => /@CheMpoKaRokee/.test(normalizeText(send?.text)))
+    const linkedInReadyNotification = observed.sends.find(send => /^@juliafeels @polinats, резюме .*готово к заполнению на LinkedIn\./.test(normalizeText(send?.text)))
     if (!linkedInReadyNotification) {
       throw new Error('Final LinkedIn-ready reporting notification was not observed.')
     }
