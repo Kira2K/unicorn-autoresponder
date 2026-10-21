@@ -175,7 +175,7 @@ test('actual PostgreSQL notification contract', {skip:!port},async t=>{
       // Shorten only the test lock timeout, never a production timeout or shared service.
       const boundedPool={connect:async()=>{
         const session=await pool.connect();return {query:async(sql:string,values?:unknown[])=>{
-          if(sql.includes('SELECT id FROM noco.clients WHERE'))await session.query("SET LOCAL lock_timeout='25ms'");
+          if(/SELECT id FROM noco\.clients(?: c)? WHERE/.test(sql))await session.query("SET LOCAL lock_timeout='25ms'");
           return session.query(sql,values);
         },release:(destroy=false)=>session.release(destroy)}
       },end:async()=>{}};

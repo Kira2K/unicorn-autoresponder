@@ -1,10 +1,10 @@
 import type { clientLifecycleStore } from "./postgres-store.mts";
 import { isReminderWindow, planReminder, planStatusMessage } from "./policy.ts";
-import { deliverPlan, type Delivery } from "./worker.ts";
+import { deliverPlan, type Delivery, type DeliveryContext } from "./worker.ts";
 import type { ClientMessageConfig } from "./message-config.mts";
 
 export type LifecycleStore = ReturnType<typeof clientLifecycleStore>;
-export type Sender = (chatId: string, text: string) => Promise<Delivery>;
+export type Sender = (chatId: string, text: string, context?: DeliveryContext) => Promise<Delivery>;
 
 /** Per-event receipts prevent loss and starvation; daily checks are durable. */
 export async function runLifecyclePass(input: {
@@ -20,7 +20,7 @@ export async function runLifecyclePass(input: {
 }) {
   const counts = {
     send: 0, error: 0, skip: 0, sent: 0, failed: 0, uncertain: 0,
-    already_claimed: 0, stale: 0, deferred: 0, errors: 0,
+    already_claimed: 0, stale: 0, deferred: 0, blocked: 0, errors: 0,
   };
   const activation = await input.store.activation();
   if (!activation) return { state: "not_activated", counts };
@@ -47,7 +47,7 @@ export async function runLifecyclePass(input: {
       messageConfig: input.messageConfig,
     });
     if (result.state !== "skipped")
-      counts[result.state as "sent" | "failed" | "uncertain" | "already_claimed" | "stale" | "deferred"]++;
+      counts[result.state as "sent" | "failed" | "uncertain" | "already_claimed" | "stale" | "deferred" | "blocked"]++;
     return result;
   };
   // A busy status queue cannot postpone the daily check past its scheduled time.
@@ -76,10 +76,10 @@ export async function runLifecyclePass(input: {
       const result = row ? await deliver(row, plan) : { state: "skipped" };
       if (!row) counts.skip++;
       if (input.apply) {
-        const done = plan.kind !== "error" && !["failed", "stale", "deferred"].includes(result.state);
+        const done = plan.kind !== "error" && !["failed", "stale", "deferred", "blocked"].includes(result.state);
         await input.store.recordChange(
           // Pacing is checked by SQL on the next pass, not the error backoff.
-          change.id, done, done || result.state === "deferred" ? null : new Date(input.now.getTime() + 60000),
+          change.id, done, done || result.state === "deferred" ? null : new Date(input.now.getTime() + (result.state==='blocked'?24*3600000:60000)),
         );
       }
       if (BigInt(change.id) > BigInt(cursor)) cursor = change.id;

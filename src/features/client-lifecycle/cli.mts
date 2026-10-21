@@ -42,7 +42,7 @@ if (process.env.CLIENT_LIFECYCLE_ENABLED !== "1") {
       store,
       messageConfig,
       supportChatId,
-      send: createClientSender(supportChatId),
+      send: createClientSender(supportChatId,process.env,store.delivery),
       now: new Date(),
       apply,
       statuses: !args.has("--reminders"),

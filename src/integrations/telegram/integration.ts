@@ -10,7 +10,8 @@ import type {
   TelegramCommandContext,
   TelegramCommandDispatchResult,
   TelegramCommandHandler,
-  TelegramCommandName
+  TelegramCommandName,
+  TelegramErrorReporter
 } from './types.ts'
 import {
   sanitizeTelegramValue,
@@ -45,6 +46,7 @@ type TelegramIntegrationOptions = {
   env?: Record<string, string | undefined>
   botApi?: RawBotApi
   batchSendOne?: (input: SendOneInput) => Promise<SendOneResult>
+  errorReporter?: TelegramErrorReporter
 }
 
 const COMMAND_NAME = /^\/[a-z0-9_]{1,32}$/i
@@ -330,7 +332,8 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
 
   async function reportResult(
     result: SendOneResult,
-    operation: string
+    operation: string,
+    input?: SendOneInput
   ): Promise<void> {
     let destination = ''
     let reportText = ''
@@ -339,22 +342,51 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
       const apiError: ApiError = result.response
       destination = apiError.error_code === 401 ? summaryLogsChatId : regularErrorChatId
       const safeDescription = sanitizeTelegramValue(apiError.description, { secrets })
-      reportText = [
-        'Telegram integration error',
-        `operation=${operation}`,
-        `telegram_error_code=${apiError.error_code}`,
-        `description=${typeof safeDescription === 'string' ? safeDescription.slice(0, 300) : 'Unavailable'}`
-      ].join('\n')
+      const description = typeof safeDescription === 'string' ? safeDescription.slice(0, 300) : 'Unavailable'
+      const action = apiError.error_code === 400 && /chat not found/i.test(apiError.description)
+        ? 'Бот не видит чат. Проверьте актуальный ID и добавьте @veu_support_bot в нужную группу.'
+        : apiError.error_code === 403 ? 'У бота нет доступа. Проверьте участие бота и разрешение отправлять сообщения.'
+        : apiError.error_code === 429 ? `Telegram ограничил частоту запросов. Повтор — не раньше чем через ${apiError.parameters?.retry_after ?? 60} сек.; вручную не дублируйте.`
+        : apiError.error_code === 401 ? 'Проверьте настройку токена бота; сам токен не публикуйте.'
+        : 'Проверьте причину отклонения запроса ниже.'
+      reportText = ['Не удалось отправить сообщение в Telegram.', action,
+        `Ошибка Telegram ${apiError.error_code}: ${description}`, `Операция: ${operation}`].join('\n')
     } else {
       destination = ['configuration', 'response', 'internal'].includes(result.failure.stage)
         ? summaryLogsChatId
         : regularErrorChatId
       reportText = [
-        'Telegram integration client failure',
-        `operation=${operation}`,
-        `stage=${result.failure.stage}`,
-        `error=${result.failure.error.name}: ${result.failure.error.message.slice(0, 300)}`
+        'Не удалось подтвердить отправку в Telegram.',
+        ['transport', 'response', 'internal'].includes(result.failure.stage)
+          ? 'Сообщение могло дойти. Перед повтором проверьте доставку; автоматически повторять его нельзя.'
+          : 'Проверьте данные отправки и настройки бота.',
+        `Операция: ${operation}; этап: ${result.failure.stage}`,
+        `Причина: ${result.failure.error.name}: ${result.failure.error.message.slice(0, 300)}`
       ].join('\n')
+    }
+
+    if (input) {
+      // Diagnostic fields must neither leak message text nor turn a rejected send
+      // into an internal failure (including malformed runtime-only callers).
+      try {
+        const field = (value: unknown) => {
+          const safe = sanitizeTelegramValue(value, { secrets })
+          return typeof safe === 'string' ? safe.replace(/[\r\n]+/g, ' ').slice(0, 160) : ''
+        }
+        const context = input.reportContext
+        const type = context?.chatType
+        const lines = [
+          `Чат (ID): ${field(input.chatId) || 'не указан'}`,
+          `Тип Telegram: ${['private', 'group', 'supergroup', 'channel'].includes(type ?? '') ? type : 'неизвестен — Telegram не сообщил'}`
+        ]
+        if (Number.isSafeInteger(context?.clientId) && Number(context?.clientId) > 0)
+          lines.push(`ID ученика в Clients: ${context!.clientId}`)
+        if (context?.clientName) lines.push(`Ученик: ${field(context.clientName)}`)
+        if (context?.chatPurpose) lines.push(`Назначение чата: ${field(context.chatPurpose)}`)
+        if (Number.isSafeInteger(input.messageThreadId) && Number(input.messageThreadId) > 0)
+          lines.push(`Тема чата (ID): ${input.messageThreadId}`)
+        reportText += '\n' + lines.join('\n')
+      } catch { /* Diagnostic metadata must not alter the original send result. */ }
     }
 
     if (!destination) {
@@ -368,16 +400,23 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
     }
 
     try {
-      const report = await sendOneCore({ chatId: destination, text: reportText }, false)
-      if (report.kind === 'client-failure' || !report.response.ok) {
-        log({
-          level: 'error',
-          event: 'telegram_remote_report_failed',
-          operation,
-          destination,
-          result: report
-        })
+      const send = async () => {
+        const report = await sendOneCore({ chatId: destination, text: reportText }, false)
+        if (report.kind === 'client-failure' || !report.response.ok) {
+          log({
+            level: 'error',
+            event: 'telegram_remote_report_failed',
+            operation,
+            destination,
+            result: report
+          })
+        }
+        return report
       }
+      if (options.errorReporter) await options.errorReporter({
+        sourceChatId: input?.chatId, context: input?.reportContext, result
+      }, send)
+      else await send()
     } catch (error) {
       log({
         level: 'error',
@@ -403,7 +442,7 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
           textLength: isObject(input) && typeof input.text === 'string' ? input.text.length : undefined,
           failure: result.failure
         })
-        if (reportFailures) await reportResult(result, 'sendOne')
+        if (reportFailures) await reportResult(result, 'sendOne', input)
         return result
       }
 
@@ -434,7 +473,7 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
           failure: result.failure,
           internalError: sanitizeTelegramValue(error, { secrets })
         })
-        if (reportFailures) await reportResult(result, 'sendOne')
+        if (reportFailures) await reportResult(result, 'sendOne', input)
         return result
       }
 
@@ -454,7 +493,7 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
           durationMs: Date.now() - startedAt,
           failure: result.failure
         })
-        if (reportFailures) await reportResult(result, 'sendOne')
+        if (reportFailures) await reportResult(result, 'sendOne', input)
         return result
       }
 
@@ -478,7 +517,7 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
           telegramErrorCode: rawResponse.error_code,
           durationMs: Date.now() - startedAt
         })
-        if (reportFailures) await reportResult(result, 'sendOne')
+        if (reportFailures) await reportResult(result, 'sendOne', input)
       }
       return result
     } catch (error) {
@@ -490,7 +529,7 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
         failure: result.failure,
         internalError: sanitizeTelegramValue(error, { secrets })
       })
-      if (reportFailures) await reportResult(result, 'sendOne')
+      if (reportFailures) await reportResult(result, 'sendOne', input)
       return result
     }
   }
@@ -523,7 +562,7 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
           failure: result.failure,
           internalError: sanitizeTelegramValue(error, { secrets })
         })
-        await reportResult(result, 'sendMany.item')
+        await reportResult(result, 'sendMany.item', { chatId, text: '' })
       }
 
       if (index < entries.length - 1) {

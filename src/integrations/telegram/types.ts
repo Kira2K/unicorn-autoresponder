@@ -25,6 +25,15 @@ export type SendOneInput = {
    */
   chatId: string
 
+  /** Optional diagnostic metadata, never included in the Telegram message payload. */
+  reportContext?: {
+    clientId?: number
+    clientName?: string
+    chatPurpose?: string
+    /** Only when known; a -100 prefix does not distinguish a supergroup from a channel. */
+    chatType?: TelegramSentMessage['chat']['type']
+  }
+
   text: string
   /** Edit this bot-owned message instead of creating a new message. */
   editMessageId?: number
@@ -76,6 +85,13 @@ export type SendOneResult =
 
 export type SendManyResult =
   Record<string, SendOneResult>
+
+/** Trusted composition hook; persistence can guard the existing no-recursion report send. */
+export type TelegramErrorReporter = (report: {
+  sourceChatId?: string
+  context?: SendOneInput['reportContext']
+  result: SendOneResult
+}, send: () => Promise<SendOneResult>) => Promise<void>
 
 export type TelegramCommandName = `/${string}`
 

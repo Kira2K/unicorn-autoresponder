@@ -12,7 +12,8 @@ export type {
   TelegramCommandHandler,
   TelegramCommandName,
   TelegramReplyMarkup,
-  TelegramSentMessage
+  TelegramSentMessage,
+  TelegramErrorReporter
 } from './types.ts'
 
 import { createTelegramIntegration } from './integration.ts'
@@ -20,7 +21,8 @@ import { createTelegramIntegration } from './integration.ts'
 export const telegram = createTelegramIntegration()
 
 /** Trusted server composition: same bot, a feature-specific error destination. */
-export function telegramForReports(chatId: string, env: NodeJS.ProcessEnv = process.env) {
+export function telegramForReports(chatId: string, env: NodeJS.ProcessEnv = process.env,
+  errorReporter?: import('./types.ts').TelegramErrorReporter) {
   if (!/^-?\d+$/.test(chatId)) throw new Error('telegram_report_chat_required')
-  return createTelegramIntegration({ env, regularErrorChatId: chatId, summaryLogsChatId: chatId })
+  return createTelegramIntegration({ env, regularErrorChatId: chatId, summaryLogsChatId: chatId, errorReporter })
 }
