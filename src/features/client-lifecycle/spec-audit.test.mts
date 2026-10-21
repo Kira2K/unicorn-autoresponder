@@ -130,20 +130,20 @@ test('delivery: an explicit rejection then restored access must not lose the tra
   assert.ok(f.deliveries.some(d=>d.outcome==='sent'),'Known non-delivery must be recoverable, unlike an unknown response');
 });
 
-async function wireCase(reply:unknown, failure=false,text='literal audit message'){
+async function wireCase(reply:unknown, failure=false,text='literal audit message',context?:import('./worker.ts').DeliveryContext,reportStore?:import('./worker.ts').Store){
   const require=createRequire(import.meta.url);
   const path=fileURLToPath(new URL('../../integrations/telegram/index.ts',import.meta.url));
   const previous=require.cache[path];const requests:Array<{chat_id:string,text?:string}>=[];
   const logs:unknown[]=[];
-  const telegram=createTelegramIntegration({env:{VEU_SUPPORT_BOT:'synthetic-test-token',summary_logs_channel_id:'-1009999999999'},regularErrorChatId:'-1009999999999',summaryLogsChatId:'-1009999999999',logger:e=>logs.push(e),
-    requester:async(_url,options)=>{
+  const options={env:{VEU_SUPPORT_BOT:'synthetic-test-token',summary_logs_channel_id:'-1009999999999'},regularErrorChatId:'-1009999999999',summaryLogsChatId:'-1009999999999',logger:(e:Readonly<Record<string,unknown>>)=>logs.push(e),
+    requester:async(_url:string,options:Record<string,unknown>)=>{
       coverage.wire_requests++;const body=JSON.parse(String(options.body));requests.push(body);
       if(requests.length===1&&failure)throw Error('synthetic socket reset');
       const result=requests.length===1?reply:{ok:true,result:{message_id:10,date:1,chat:{id:Number(body.chat_id),type:'supergroup'},text:body.text}};
       return {ok:true,status:200,json:async()=>result};
-    }});
-  const mock=new Module(path);mock.filename=path;mock.loaded=true;mock.exports={telegramForReports:(route:string)=>{assert.equal(route,'-1009999999999');return telegram}};require.cache[path]=mock;
-  try {return {delivery:await createClientSender('-1009999999999')('-1001111111111',text),requests,logs}}
+    }};
+  const mock=new Module(path);mock.filename=path;mock.loaded=true;mock.exports={telegramForReports:(route:string,_env:unknown,errorReporter?:import('../../integrations/telegram/types.ts').TelegramErrorReporter)=>{assert.equal(route,'-1009999999999');return createTelegramIntegration({...options,errorReporter})}};require.cache[path]=mock;
+  try {return {delivery:await createClientSender('-1009999999999',process.env,reportStore)('-1001111111111',text,context),requests,logs}}
   finally {if(previous)require.cache[path]=previous;else delete require.cache[path]}
 }
 test('actual sender + actual Telegram facade: success preserves target/body and does not issue a second send',async()=>{
@@ -174,4 +174,30 @@ test('actual sender: timeout/invalid response stays uncertain and is never resen
 test('actual sender: error reports use only the configured support route, never an unrelated hardcoded chat',async()=>{
   const f=await wireCase({ok:false,error_code:429,description:'synthetic rejection'});
   assert.deepEqual(f.requests.slice(1).map(r=>r.chat_id),['-1009999999999']);
+});
+
+test('actual sender passes student and chat purpose to the existing error report without repeating the send',async()=>{
+  const f=await wireCase({ok:false,error_code:400,description:'Bad Request: chat not found'},false,'private student message',
+    {clientId:3,clientName:'Вениамин Хлебников',chatPurpose:'Общий чат ученика'});
+  assert.equal(f.delivery.outcome,'failed');
+  assert.equal(f.requests.length,2);
+  const report=String(f.requests[1].text);
+  assert.ok(report.includes('Чат (ID): -1001111111111'));
+  assert.match(report,/ID ученика в Clients: 3/);
+  assert.match(report,/Ученик: Вениамин Хлебников/);
+  assert.match(report,/Назначение чата: Общий чат ученика/);
+  assert.doesNotMatch(report,/private student message/);
+});
+
+test('actual sender wires the persistent report guard: restart repeats neither the report nor the student send on its own',async()=>{
+  const keys=new Set<string>();let saved=0;
+  const store:import('./worker.ts').Store={claim:async()=>true,finish:async()=>{saved++},
+    claimReport:async key=>{if(keys.has(key))return false;keys.add(key);return true}};
+  const response={ok:false,error_code:400,description:'Bad Request: chat not found'};
+  const context={clientId:3,clientName:'Student',chatPurpose:'Общий чат ученика'};
+  const first=await wireCase(response,false,'private',context,store);
+  const restarted=await wireCase(response,false,'private',context,store);
+  assert.equal(first.requests.length,2);
+  assert.equal(restarted.requests.length,1,'Only the explicitly invoked original rejection; no diagnostic repeat');
+  assert.equal(saved,1);
 });

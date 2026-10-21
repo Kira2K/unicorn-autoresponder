@@ -209,6 +209,27 @@ Logs contain metadata such as text length, duration, chat/message ID, stage,
 and Telegram error code. They do not contain the outgoing text, bot-token URL,
 authorization/cookie/password/secret/credential fields, or credentials.
 
+Send failure reports identify the attempted `chat_id` and optional topic ID.
+Trusted feature callers may pass `reportContext` with a client ID/name, chat
+purpose, and a known Telegram chat type. Clients supplies the student and
+"Общий чат ученика" purpose (or "Ботоотчёты" for its data-error alerts).
+Unknown technical types remain `unknown`: a failed request and a `-100` ID
+cannot distinguish a supergroup from a channel. This bounded, sanitized metadata
+is never sent in the student's payload or logged as message content. It does
+not add Telegram lookups or change routing or the original send result.
+
+Clients additionally supplies a durable error reporter backed by its existing
+SQL notification journal. Reports for the same student, attempted destination
+and error category are limited to one per 24 hours, including restarts and
+uncertain report delivery. A known `chat not found`/403 report stops repeated
+attempts of the same failed message to the same chat for that period; it does
+not block a corrected destination or unrelated students. Unavailable status
+events remain pending, not falsely delivered. Daily checks may finish with
+these explicitly blocked recipients. Missing-data alerts share a separate
+per-student 24-hour limit across events and missing fields, measured from the
+previous successful report (or attempt when its result is unknown). They never
+consume the student's original status event. No tables or columns are added.
+
 Malformed values pass through a never-throw sanitizer: depth 5, strings 512
 characters, arrays 25 items, objects 50 keys, circular markers, and sensitive
 key/token redaction. Logger, sanitizer, and remote reporter failures never

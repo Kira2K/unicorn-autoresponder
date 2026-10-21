@@ -5,6 +5,11 @@ export type Delivery =
   | { outcome: "sent"; messageId: number }
   | { outcome: "failed"; code: string; retryAfterSeconds?: number }
   | { outcome: "uncertain"; code: string };
+export type DeliveryContext = {
+  clientId: number;
+  clientName: string;
+  chatPurpose: string;
+};
 export type Store = {
   /** Atomic claim; only an explicit failed delivery may retry when due. */
   claim(
@@ -15,7 +20,9 @@ export type Store = {
     at: Date,
     expectedStatus: string,
     expectedClient?: Client,
-  ): Promise<boolean | "stale" | "deferred">;
+  ): Promise<boolean | "stale" | "deferred" | "blocked">;
+  /** Durable 24h report guard, independent of retries of the original message. */
+  claimReport?(key: string, clientId: number, points: readonly string[], at: Date): Promise<boolean>;
   finish(key: string, delivery: Delivery): Promise<void>;
 };
 /** External sends occur only after a durable claim. A missing SQL response never sends. */
@@ -27,7 +34,7 @@ export async function deliverPlan(input: {
   store: Store;
   supportChatId: string;
   messageConfig: ClientMessageConfig;
-  send: (chatId: string, text: string) => Promise<Delivery>;
+  send: (chatId: string, text: string, context?: DeliveryContext) => Promise<Delivery>;
 }) {
   if (!input.enabled || input.plan.kind === "skip") return { state: "skipped" };
   const plan = input.plan;
@@ -39,7 +46,7 @@ export async function deliverPlan(input: {
   const key = isError ? `error:${plan.key}` : plan.key;
   // Format before claiming: a configuration/formatting failure must not consume a delivery.
   const text = isError
-    ? `Clients: не отправлено сообщение для ${input.client.name} (ID ${input.client.id}). Не заполнено: ${plan.fields.join(", ")}.`
+    ? `Clients: сообщение не отправлено — не хватает данных.\nУченик: ${input.client.name} (ID ${input.client.id}).\nЧат: ${input.client.chatId || "не указан"}. Тип: общий чат ученика.\nНе заполнено: ${plan.fields.join(", ")}.\nЗаполните эти поля в Clients. Повтор такого отчёта — не чаще одного раза за 24 часа.`
     : messageText(input.client, plan, input.messageConfig);
   const claim = await input.store.claim(
     key,
@@ -57,6 +64,8 @@ export async function deliverPlan(input: {
     delivery = await input.send(
       chatId,
       text,
+      { clientId: input.client.id, clientName: input.client.name,
+        chatPurpose: isError ? "Ботоотчёты" : "Общий чат ученика" },
     );
   } catch {
     // An injected sender may throw after delivery. Never blindly repeat.

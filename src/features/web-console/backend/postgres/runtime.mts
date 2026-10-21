@@ -49,7 +49,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     if (env.CLIENT_LIFECYCLE_ENABLED === '1') {
       const { messageConfig, supportChatId } = await loadClientNotificationSettings(pool, config.database);
       const lifecycleStore = clientLifecycleStore(pool, config.database);
-      const send = createClientSender(supportChatId, env);
+      const send = createClientSender(supportChatId, env, lifecycleStore.delivery);
       lifecycle = createLifecycleRuntime({ enabled: true,
         pass: ({ now, reminders, reminderAt }) => runLifecyclePass({ store: lifecycleStore, supportChatId, send,
           messageConfig, now, apply: true, statuses: true, reminders, reminderAt }),

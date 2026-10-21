@@ -52,6 +52,25 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
           ]) : null],
         );
         if (!current.rows.length) return "stale";
+        const previous = (await session.query(
+          `SELECT outcome,error_code,COALESCE(retry_at,'-infinity'::timestamptz)<=$2 AS retry_due,
+           COALESCE(sent_at,attempted_at)<=$2::timestamptz-interval '24 hours' AS report_due
+          FROM noco.client_notifications WHERE event_key=$1`, [key, at.toISOString()],
+        )).rows[0];
+        if (previous && previous.outcome !== "failed" && !(kind==='support_error' && previous.report_due===true)) return false;
+        if (kind === 'support_error') {
+          const recent = await session.query(`SELECT event_key FROM noco.client_notifications
+            WHERE client_id=$1 AND kind='support_error' AND outcome IN ('claimed','sent','uncertain')
+            AND COALESCE(sent_at,attempted_at)>$2::timestamptz-interval '24 hours' LIMIT 1`, [clientId,at.toISOString()]);
+          if (recent.rows.length) return false;
+        } else if (expectedClient && previous?.outcome==='failed' && ['telegram_400','telegram_403'].includes(String(previous.error_code))) {
+          const blocked = await session.query(`SELECT event_key FROM noco.client_notifications
+            WHERE client_id=$1 AND kind='support_delivery_error' AND points->>0=$2
+              AND points->>1 IN ('chat_not_found','forbidden')
+              AND COALESCE(sent_at,attempted_at)>$3::timestamptz-interval '24 hours' LIMIT 1`,
+            [clientId,expectedClient.chatId,at.toISOString()]);
+          if (blocked.rows.length) return 'blocked';
+        }
         if (kind === "reminder") {
           const recent = await session.query(
             `SELECT event_key FROM noco.client_notifications
@@ -68,11 +87,6 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
               AND changed_at>$2::timestamptz-interval '48 hours' LIMIT 1`,[clientId,at.toISOString()]);
           if (reset.rows.length) return "stale";
         }
-        const previous = (await session.query(
-          `SELECT outcome,COALESCE(retry_at,'-infinity'::timestamptz)<=$2 AS retry_due
-          FROM noco.client_notifications WHERE event_key=$1`, [key, at.toISOString()],
-        )).rows[0];
-        if (previous && previous.outcome !== "failed") return false;
         if (previous && previous.retry_due !== true) return "deferred";
         // One durable slot for this bot's automatic notifications in both runtimes.
         // No sleep or delivery claim while the slot is unavailable.
@@ -86,9 +100,10 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
               `INSERT INTO noco.client_notifications
         (event_key,client_id,kind,points,attempted_at) VALUES($1,$2,$3,$4::jsonb,$5)
         ON CONFLICT(event_key) DO UPDATE SET outcome='claimed',attempted_at=EXCLUDED.attempted_at,
-          points=EXCLUDED.points,message_id=NULL,error_code=NULL,retry_at=NULL
-        WHERE client_notifications.outcome='failed'
-          AND COALESCE(client_notifications.retry_at,'-infinity'::timestamptz)<=$5
+          points=EXCLUDED.points,message_id=NULL,error_code=NULL,retry_at=NULL,sent_at=NULL
+        WHERE (client_notifications.outcome='failed'
+          AND COALESCE(client_notifications.retry_at,'-infinity'::timestamptz)<=$5)
+          OR (EXCLUDED.kind='support_error' AND COALESCE(client_notifications.sent_at,client_notifications.attempted_at)<=$5::timestamptz-interval '24 hours')
         RETURNING event_key`,
               [key, clientId, kind, JSON.stringify(points), at.toISOString()],
             )
@@ -100,6 +115,14 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
         )).rows[0];
         return existing?.outcome === "failed" ? "deferred" : false;
       });
+    },
+    async claimReport(key,clientId,points,at) {
+      return write(async session => (await session.query(`INSERT INTO noco.client_notifications
+        (event_key,client_id,kind,points,attempted_at) VALUES($1,$2,'support_delivery_error',$3::jsonb,$4)
+        ON CONFLICT(event_key) DO UPDATE SET outcome='claimed',attempted_at=EXCLUDED.attempted_at,
+          points=EXCLUDED.points,message_id=NULL,error_code=NULL,sent_at=NULL,retry_at=NULL
+        WHERE COALESCE(client_notifications.sent_at,client_notifications.attempted_at)<=$4::timestamptz-interval '24 hours'
+        RETURNING event_key`, [key,clientId,JSON.stringify(points),at.toISOString()])).rows.length===1);
     },
     async finish(key, result) {
       await write(async (session) => {

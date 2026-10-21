@@ -62,6 +62,21 @@ test("disabled default does not read or write the store and does not send", asyn
   });
   assert.equal(f.count(), 0);
 });
+
+test('sender receives destination context separately from the unchanged message',async()=>{
+  const f=fixture();
+  assert.ok(plan.kind==='send');
+  const sendPlan=plan;
+  let context:unknown;
+  await deliverPlan({client,plan,now,enabled:true,store:f.store,messageConfig:testMessageConfig,supportChatId:'12345',
+    send:async(chat,text,metadata)=>{
+      assert.equal(chat,client.chatId);
+      assert.equal(text,messageText(client,sendPlan));
+      context=metadata;
+      return {outcome:'sent',messageId:1};
+    }});
+  assert.deepEqual(context,{clientId:client.id,clientName:client.name,chatPurpose:'Общий чат ученика'});
+});
 test("double click, duplicate worker and restart use one durable claim", async () => {
   const f = fixture();
   const input = {
