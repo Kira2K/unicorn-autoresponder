@@ -78,7 +78,8 @@ export async function runLifecyclePass(input: {
       if (input.apply) {
         const done = plan.kind !== "error" && !["failed", "stale", "deferred"].includes(result.state);
         await input.store.recordChange(
-          change.id, done, done ? null : new Date(input.now.getTime() + 60000),
+          // Pacing is checked by SQL on the next pass, not the error backoff.
+          change.id, done, done || result.state === "deferred" ? null : new Date(input.now.getTime() + 60000),
         );
       }
       if (BigInt(change.id) > BigInt(cursor)) cursor = change.id;
