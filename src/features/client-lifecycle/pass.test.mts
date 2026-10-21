@@ -144,3 +144,24 @@ test("idle polling outside reminder time does not scan all clients", async () =>
   assert.equal(f.reads(), 0);
   assert.equal(f.sends(), 0);
 });
+
+test("pacing leaves status events eligible next pass, not delayed by error backoff", async () => {
+  const f = fixture(), claim = f.store.delivery.claim;
+  let available = true;
+  f.store.delivery.claim = async (...args) => {
+    if (!available) return "deferred";
+    const result = await claim(...args);
+    if (result === true) available = false;
+    return result;
+  };
+  await runLifecyclePass({ ...options, ...f });
+  assert.equal(f.sends(), 1);
+  assert.equal((await f.store.changes("0", new Date(now.getTime() + 5000))).length, 2);
+  available = true;
+  await runLifecyclePass({ ...options, ...f, now: new Date(now.getTime() + 5000) });
+  assert.equal(f.sends(), 2);
+  available = true;
+  await runLifecyclePass({ ...options, ...f, now: new Date(now.getTime() + 10000) });
+  assert.equal(f.sends(), 3);
+  assert.equal((await f.store.changes("0", new Date(now.getTime() + 15000))).length, 0);
+});

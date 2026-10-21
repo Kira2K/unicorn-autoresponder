@@ -13,6 +13,7 @@ function fixture(secured: unknown) {
     if (sql.includes('current_database()')) return { rows: [{ database: 'unicorn_noco_copy_restore', marker: COPY_MARKER }] };
     if (sql.includes('SELECT c.id,c.client_name')) return { rows: [row] };
     if (sql.startsWith('SELECT id FROM noco.clients')) return { rows: [{ id: 1 }] };
+    if (sql.includes('telegram_notification_try_claim()')) return { rows: [{ claimed: true }] };
     if (sql.includes('INSERT INTO noco.client_notifications')) return { rows: [{ event_key: 'fixture' }] };
     return { rows: [] };
   } }; } };

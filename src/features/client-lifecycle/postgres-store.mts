@@ -68,6 +68,18 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
               AND changed_at>$2::timestamptz-interval '48 hours' LIMIT 1`,[clientId,at.toISOString()]);
           if (reset.rows.length) return "stale";
         }
+        const previous = (await session.query(
+          `SELECT outcome,COALESCE(retry_at,'-infinity'::timestamptz)<=$2 AS retry_due
+          FROM noco.client_notifications WHERE event_key=$1`, [key, at.toISOString()],
+        )).rows[0];
+        if (previous && previous.outcome !== "failed") return false;
+        if (previous && previous.retry_due !== true) return "deferred";
+        // One durable slot for this bot's automatic notifications in both runtimes.
+        // No sleep or delivery claim while the slot is unavailable.
+        const slot = (await session.query(
+          "SELECT noco.telegram_notification_try_claim() AS claimed",
+        )).rows[0];
+        if (slot?.claimed !== true) return "deferred";
         const claimed = (
           (
             await session.query(
