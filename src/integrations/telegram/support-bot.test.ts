@@ -2531,7 +2531,8 @@ async function runTests() {
     const bothMarketLinkedInNotification = bothMarketFillingResult.notifications.find((item: any) => item.kind === 'linkedin_ready')
     assert.equal(bothMarketLinkedInNotification.chatId, '-1003187558078')
     assert.equal(bothMarketLinkedInNotification.messageThreadId, 777)
-    assert.match(bothMarketLinkedInNotification.text, /^@CheMpoKaRokee, резюме Test, Python, both, готово к заполнению на LinkedIn\./)
+    assert.match(bothMarketLinkedInNotification.text, /^@juliafeels @polinats, резюме Test, Python, both, готово к заполнению на LinkedIn\./)
+    assert.doesNotMatch(bothMarketLinkedInNotification.text, /@CheMpoKaRokee/)
 
     const missingApprovalLinkRepository = makeWorkflowRepository(makeWorkflow({
       status: 'Russian version in approve by student',
@@ -2765,7 +2766,8 @@ async function runTests() {
           assert.equal(linkedInNotification.chatId, '-1003187558078')
           assert.equal(linkedInNotification.messageThreadId, 777)
           assert.equal(linkedInNotification.text.includes(PRIVATE_STAFF_TASKS_FOOTER), false)
-          assert.match(linkedInNotification.text, /^@CheMpoKaRokee, резюме Test, Python, EN, готово к заполнению на LinkedIn\./)
+          assert.match(linkedInNotification.text, /^@juliafeels @polinats, резюме Test, Python, EN, готово к заполнению на LinkedIn\./)
+          assert.doesNotMatch(linkedInNotification.text, /@CheMpoKaRokee/)
           assert.match(linkedInNotification.text, /Ссылка на резюме: https:\/\/docs\.google\.com\/document\/d\/test-english-version/)
 
           const summaryNotification = lastResult.notifications.find((item: any) => item.kind === 'hh_summary')
