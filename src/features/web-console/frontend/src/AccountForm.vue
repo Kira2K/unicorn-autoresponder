@@ -45,7 +45,6 @@ function capturePhone(event) {
         {{ platformDisplayLabel(platform.label) }}{{ preview && platform.label === 'phone_ru' && phoneRuExists ? ' (уже добавлен)' : '' }}
       </option>
     </select>
-    <small v-if="preview && phoneRuExists" class="phone-ru-hint">Телефон для ру рынка уже добавлен — отредактируйте существующий.</small>
   </label>
   <label v-else class="field">
     <span>{{ ui('Platform') }}</span>
@@ -65,7 +64,7 @@ function capturePhone(event) {
     <span>{{ ui('Phone') }}<span v-if="phoneRuSelected" class="required-star"> *</span></span>
     <InputText :model-value="accountFieldEnabled('phone') ? formatPhone(form.phone) : form.phone" inputmode="tel" :placeholder="accountFieldEnabled('phone') ? '+кодномер' : undefined" :disabled="!accountFieldEnabled('phone')" :required="accountFieldRequired('phone')" :class="{ 'phone-ru-invalid': phoneRuValidationMessage }" :aria-invalid="Boolean(phoneRuValidationMessage)" data-testid="account-phone" @input.capture="capturePhone" @update:model-value="emit('phone', $event)" />
     <small v-if="accountFieldEnabled('phone') && !phoneRuSelected">Формат: +кодномер, без пробелов и скобок.</small>
-    <small v-if="phoneRuSelected" class="phone-ru-hint">Российский номер в формате +7XXXXXXXXXX. Этот номер используется для HH на ру рынке (вход и подтверждение по SMS).</small>
+    <small v-if="phoneRuSelected" class="phone-ru-hint">Номер с любым кодом страны в формате +кодномер, от 6 до 15 цифр. Используется для HH на ру рынке (вход и подтверждение по SMS).</small>
     <small v-if="phoneRuValidationMessage" class="phone-ru-error" role="alert">{{ phoneRuValidationMessage }}</small>
   </label>
   <label class="field">

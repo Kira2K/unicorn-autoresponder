@@ -4,6 +4,21 @@ import { workflowFixture } from './workflow-fixture.mts';
 import { tableIds } from './tables.mts';
 
 for (const mode of ['legacy', 'sql'] as const) {
+  for (const [platformId, platform] of [[130, 'phone_ru'], [11, 'hh_ru'], [10, 'hh_en']] as const) {
+    test(`${mode}: ${platform} preserves international phone codes on create and update`, async () => {
+      const f = workflowFixture(), repo = f[mode];
+      f.set(tableIds.platforms, platformId, { name: platform });
+      const credentials = platform === 'phone_ru' ? {} : { login: 'test@example.invalid', password: 'test-password' };
+      await repo.createPlatformAccount(7, { platformId, platform, phone: '+85620123456', ...credentials });
+      const created = [...f.rows.get(tableIds.accounts)!.values()].find(a => a.account_label === platform)!;
+      assert.equal(created.phone, '+85620123456');
+      for (const phone of ['+15551234567', '+447700900123', '+375291234567', '+995555123456', '+79990000000']) {
+        await repo.updatePlatformAccount(7, Number(created.Id), { phone, ...credentials });
+        assert.equal(f.rows.get(tableIds.accounts)!.get(String(created.Id))!.phone, phone);
+      }
+    });
+  }
+
   test(`${mode}: phone_ru is selectable and stores its phone in the existing account field`, async () => {
     const f = workflowFixture(), repo = f[mode];
     f.set(tableIds.platforms, 130, { name: 'phone_ru' });

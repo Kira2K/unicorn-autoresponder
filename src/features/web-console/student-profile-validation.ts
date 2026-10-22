@@ -41,12 +41,11 @@ export function profileAge(value: unknown, today = profileToday()): number | nul
 }
 export const profileFullName = (value: { firstName?: unknown; lastName?: unknown; middleName?: unknown }) =>
   [value.lastName, value.firstName, value.middleName].map(cleanProfileText).filter(Boolean).join(' ');
-export function normalizeRussianPhone(value: unknown): string {
-  const phone = String(value ?? '').replace(/[\s()\-]/g, '');
-  return /^8\d{10}$/.test(phone) ? '+7' + phone.slice(1) : phone;
+export function normalizeInternationalPhone(value: unknown): string {
+  return String(value ?? '').replace(/[\s()\-]/g, '');
 }
-export const russianPhoneError = 'Номер в формате +7 и 10 цифр, например +79991234567';
-export const isRussianPhone = (value: unknown) => /^\+7\d{10}$/.test(normalizeRussianPhone(value));
+export const internationalPhoneError = 'Укажите +, код страны и номер: от 6 до 15 цифр, например +995555123456';
+export const isInternationalPhone = (value: unknown) => /^\+[1-9]\d{5,14}$/.test(normalizeInternationalPhone(value));
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const locationPattern = /^[A-Za-z][A-Za-z .'\-]*,\s*[A-Za-z][A-Za-z .'\-]*$/;
 const normalizeLocation = (value: unknown) => cleanProfileText(value).replace(/\s*,\s*/g, ', ');
