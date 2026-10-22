@@ -145,6 +145,25 @@ test("idle polling outside reminder time does not scan all clients", async () =>
   assert.equal(f.sends(), 0);
 });
 
+test("Thursday cannot create a reminder batch, even when requested explicitly", async () => {
+  const f = fixture();
+  let begins = 0;
+  f.store.beginDay = async () => { begins++; };
+  await runLifecyclePass({ ...options, ...f, statuses: false, reminders: true,
+    now: new Date("2026-10-22T16:00Z") });
+  assert.equal(begins, 0);
+  assert.equal(f.reads(), 0);
+  assert.equal(f.sends(), 0);
+});
+
+test("status events keep sending on Thursday outside the reminder schedule", async () => {
+  const f = fixture();
+  await runLifecyclePass({ ...options, ...f, reminders: true,
+    now: new Date("2026-10-22T16:00Z") });
+  assert.equal(f.sends(), 3);
+  assert.deepEqual([...f.claimed], ["status:1", "status:2", "status:3"]);
+});
+
 test("pacing leaves status events eligible next pass, not delayed by error backoff", async () => {
   const f = fixture(), claim = f.store.delivery.claim;
   let available = true;
