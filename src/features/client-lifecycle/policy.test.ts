@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   ACCOUNT_KINDS,
+  isReminderWindow,
   planReminder,
   planStatusMessage,
   type Client,
@@ -169,6 +170,23 @@ test("only the 19h Moscow window sends; midnight and other times skip", () => {
       }).kind,
       "skip",
     );
+});
+
+test("reminders are scheduled only on Monday and Wednesday, 19:00–19:59 Moscow", () => {
+  for (let day = 19; day <= 25; day++) {
+    const expected = day === 19 || day === 21;
+    for (const time of ["16:00:00.000", "16:59:59.999"]) {
+      const now = at(`2026-10-${day}T${time}Z`);
+      assert.equal(isReminderWindow(now), expected, now.toISOString());
+      assert.equal(planReminder(client({ missingStopList: true }), { ...state, now }).kind,
+        expected ? "send" : "skip", now.toISOString());
+    }
+    for (const time of ["15:59:59.999", "17:00:00.000"])
+      assert.equal(isReminderWindow(at(`2026-10-${day}T${time}Z`)), false);
+  }
+  assert.equal(isReminderWindow(at("2026-10-19T12:00:00-04:00")), true);
+  assert.equal(isReminderWindow(at("2026-10-18T21:00:00Z")), false);
+  assert.equal(isReminderWindow(at("invalid")), false);
 });
 test("matrix follows status and market; RU ignores foreign accounts and HH comes later", () => {
   const indicators = Object.fromEntries(

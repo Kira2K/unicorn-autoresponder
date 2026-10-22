@@ -5,7 +5,7 @@ import type {
   CopyDatabase,
   SqlPool,
 } from "../../integrations/postgres/contracts.mts";
-import type { Client } from "./policy.ts";
+import type { Client, LinkedInField } from "./policy.ts";
 import type { Store } from "./worker.ts";
 const { selectTelegramGroupChatId } = createRequire(import.meta.url)("../../../shared/telegram-group-chat.ts") as {
   selectTelegramGroupChatId(client: Record<string, unknown>): unknown;
@@ -172,6 +172,16 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
         c.first_name,c.last_name,c.fio,c.birth_date,c.english_levels_id,c.ready_for_interview_in_english_in_2_months,
         c.real_location,c.desired_location,c.calendar_email,c.education,c.education_entries,c.no_higher_education,c.stop_list_company,
         noco.client_account_indicators(c.id) indicators,
+        (SELECT jsonb_build_object(
+          'url',NULLIF(btrim(a.url),'') IS NOT NULL,
+          'login',NULLIF(btrim(a.login),'') IS NOT NULL,
+          'password',NULLIF(btrim(a.password),'') IS NOT NULL)
+          FROM noco.platform_accounts a JOIN noco.platforms p ON p.id=a.platforms_id
+          WHERE a.clients_id=c.id AND NOT COALESCE(a.__nc_deleted,false)
+            AND lower(btrim(p.label))='linkedin'
+          -- Use one most-complete account; never combine credentials from different rows.
+          ORDER BY num_nonnulls(NULLIF(btrim(a.url),''),NULLIF(btrim(a.login),''),NULLIF(btrim(a.password),'')) DESC,a.id
+          LIMIT 1) AS linkedin_fields,
         h.id AS change_id,h.changed_at AS status_changed_at,
         (SELECT max(n.sent_at) FROM noco.client_notifications n WHERE n.client_id=c.id AND n.kind='reminder' AND n.outcome='sent') AS last_sent_at,
         (SELECT max(hh.changed_at) FROM noco.client_status_history hh WHERE hh.client_id=c.id
@@ -218,6 +228,12 @@ export function clientLifecycleStore(pool: SqlPool, database: CopyDatabase) {
               .map(([, label]) => label),
             missingStopList: !str(r.stop_list_company),
           };
+          // SQL projects only booleans. NULL means no active LinkedIn account.
+          if (r.linkedin_fields !== undefined) {
+            const present = r.linkedin_fields as Record<string, unknown> | null;
+            client.linkedinMissing = (["url", "login", "password"] as LinkedInField[])
+              .filter(field => present?.[field] !== true);
+          }
           if (!hasEducation) client.missingPersonal.push("Образование");
           return {
             client,

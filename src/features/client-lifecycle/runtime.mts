@@ -3,7 +3,7 @@ import { isReminderWindow } from "./policy.ts";
 /** One owned loop; generations invalidate schedules left by overlapping lifecycle calls. */
 export function createLifecycleRuntime(input: {
   enabled: boolean;
-  /** The existing backend starts each Moscow day; SQL retains unfinished checks. */
+  /** The existing backend starts scheduled Moscow checks; SQL retains unfinished checks. */
   remindersEnabled?: boolean;
   pass: (options: { now: Date; reminders: boolean; reminderAt?: Date }) => Promise<{
     state?: string;
@@ -28,7 +28,7 @@ export function createLifecycleRuntime(input: {
     const due = new Date(now);
     due.setUTCHours(16, 0, 0, 0);
     // Complete an opportunity crossed by an in-flight pass, not a new unscheduled off-hour check.
-    const crossed = previous != null && previous < due && now >= due;
+    const crossed = previous != null && previous < due && now >= due && isReminderWindow(due);
     if (input.remindersEnabled !== false && !pendingReminder && day !== reminderDay && (isReminderWindow(now) || crossed))
       pendingReminder = due;
     const reminders = pendingReminder != null;
@@ -55,8 +55,8 @@ export function createLifecycleRuntime(input: {
     if (input.remindersEnabled !== false && !pendingReminder) {
       const now = input.now?.() ?? new Date(), due = new Date(now);
       due.setUTCHours(16, 0, 0, 0);
-      // One timer: shorten idle sleep at 19 MSK, including a pass crossing it.
-      const crossed = previous != null && previous < due && now >= due;
+      // One timer: shorten idle sleep for scheduled 19 MSK checks, including an in-flight pass.
+      const crossed = previous != null && previous < due && now >= due && isReminderWindow(due);
       if (reminderDay !== now.toISOString().slice(0, 10) && (isReminderWindow(now) || crossed))
         wait = 1;
       else {

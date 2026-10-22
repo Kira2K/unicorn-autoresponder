@@ -29,6 +29,7 @@ export type Indicator =
   | "не заполнен"
   | "не применимо"
   | "маркет не указан";
+export type LinkedInField = "url" | "login" | "password";
 export type Client = {
   id: number;
   name: string;
@@ -40,6 +41,8 @@ export type Client = {
   googleFolder: string;
   hardMentor: string;
   indicators: Record<AccountKind, Indicator>;
+  /** Presence only; never pass account credentials into message planning. */
+  linkedinMissing?: LinkedInField[];
   missingPersonal: string[];
   missingStopList: boolean;
 };
@@ -130,6 +133,9 @@ const labels: Record<AccountKind, string> = {
   hh_ru: "Профиль hh.ru (российский)",
   hh_en: "Профиль hh.ru (иностранный)",
 };
+const linkedinLabels: Record<LinkedInField, string> = {
+  url: "ссылка на профиль", login: "логин", password: "пароль",
+};
 const basicRu: AccountKind[] = ["phone_ru", "email_ru", "telegram_ru"];
 const basicEn: AccountKind[] = [
   "phone_en",
@@ -146,9 +152,11 @@ const hhStatuses = new Set([
   "hh_en process",
 ]);
 export function isReminderWindow(now: Date): boolean {
+  const moscow = new Date(now.getTime() + 3 * 3600000);
   return (
     Number.isFinite(now.getTime()) &&
-    new Date(now.getTime() + 3 * 3600000).getUTCHours() === 19
+    [1, 3].includes(moscow.getUTCDay()) &&
+    moscow.getUTCHours() === 19
   );
 }
 export function planReminder(
@@ -217,7 +225,7 @@ export function planReminder(
   )
     fields.push("индикаторы аккаунтов");
   if (fields.length) return { kind: "error", key, clientId: client.id, fields };
-  // Moscow is UTC+3 with no daylight saving time. The cron window is exactly 19:00–19:59.
+  // Moscow is UTC+3: Monday/Wednesday, exactly 19:00–19:59.
   if (!isReminderWindow(scheduledAt) || scheduledAt > state.now)
     return { kind: "skip", reason: "outside_moscow_window" };
   const floor = Math.max(
@@ -241,9 +249,16 @@ export function planReminder(
   const missing = [
     ...client.missingPersonal,
     ...(client.missingStopList ? ["Стоп-лист компаний"] : []),
-    ...kinds
-      .filter((kind) => client.indicators[kind] === "не заполнен")
-      .map((kind) => labels[kind]),
+    ...kinds.flatMap((kind) => {
+      if (kind === "linkedin" && client.linkedinMissing) {
+        const missingFields = client.linkedinMissing.map(field => linkedinLabels[field]);
+        if (!missingFields.length) return [];
+        const detail = missingFields.length === 1 ? missingFields[0]
+          : `${missingFields.slice(0, -1).join(", ")} и ${missingFields.at(-1)}`;
+        return [`${labels.linkedin}: ${detail}`];
+      }
+      return client.indicators[kind] === "не заполнен" ? [labels[kind]] : [];
+    }),
   ];
   return missing.length
     ? {

@@ -120,6 +120,44 @@ async function advance(t: TestContext, milliseconds: number) {
   await new Promise<void>(resolve => setImmediate(resolve));
 }
 
+for (let day = 19; day <= 25; day++) {
+  test(`week schedule on October ${day}: only Monday/Wednesday start reminders`, async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date(`2026-10-${day}T15:59:59Z`) });
+    let calls = 0, reminders = 0;
+    const r = createLifecycleRuntime({ enabled: true, report: () => {},
+      pass: async options => {
+        calls++; reminders += Number(options.reminders);
+        return { counts: { errors: 0 } };
+      } });
+    try {
+      await r.start();
+      await advance(t, 1000);
+      await advance(t, 1);
+      await advance(t, 5 * 60000);
+      assert.equal(reminders, day === 19 || day === 21 ? 1 : 0);
+      assert.ok(calls >= 2, "status polling continues on all days");
+      assert.ok(calls <= 3, "an off-day crossing must not create an immediate polling loop");
+    } finally { await r.stop(); }
+  });
+}
+
+test("a slow status pass crossing Thursday 19 MSK does not create a reminder", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-22T15:59:59Z") });
+  let calls = 0, reminders = 0;
+  const r = createLifecycleRuntime({ enabled: true, report: () => {},
+    pass: async options => {
+      calls++; reminders += Number(options.reminders);
+      if (calls === 1) t.mock.timers.tick(2000);
+      return { counts: { errors: 0 } };
+    } });
+  try {
+    await r.start();
+    await advance(t, 1); assert.equal(calls, 1);
+    await advance(t, 299999); assert.equal(calls, 2);
+    assert.equal(reminders, 0);
+  } finally { await r.stop(); }
+});
+
 test("empty queue polls every five minutes, not every five seconds", async t => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-21T15:00Z") });
   let calls = 0;
