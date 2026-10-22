@@ -11,6 +11,9 @@ import { inFolder } from '../../octo-access/provision.mts';
 import type { ManagedProfile } from '../../octo-access/contracts.mts';
 import { readPostgresAppDbConfig } from '../../../platform/db/postgres/config.mts';
 import { createPostgresPool } from '../../../integrations/postgres/pg-pool.mts';
+import { ownerVerifierFromEnv } from '../../octo-access/archive-acceptance/files.mts';
+import type { OwnerVerifier } from '../../octo-access/archive-acceptance/files.mts';
+import { ARCHIVE_ORIGIN, ArchiveFailure, archiveMarker, failureFields, profileIdentity, readFixtureEmails } from '../../octo-access/archive-acceptance/contract.mts';
 
 type Name = 'Alex' | 'Bob';
 type Fixture = { name: Name; email: string; clientId: number; profileId: number; page: Page; context: BrowserContext };
@@ -95,6 +98,7 @@ async function accessFor(fixture: Fixture, url: string): Promise<Access> {
 
 export async function runConsoleFlow(options: {
   url?: string; password?: string; driver?: ConsoleDriver; unauthorizedEmail?: string; outputDir?: string; headful?: boolean;
+  browserChannel?: 'chrome' | 'msedge';
 } = {}) {
   const url = (options.url ?? process.env.OCTO_E2E_CONSOLE_URL ?? 'http://127.0.0.1:4300').replace(/\/$/, '');
   const consoleUrl = new URL(url);
@@ -102,17 +106,21 @@ export async function runConsoleFlow(options: {
   const resumeIds = new Set(options.driver?.resumeProfileIds ?? readResumeProfileIds(process.env.OCTO_E2E_RESUME_PROFILE_IDS));
   check(resumeIds.size === 0 || options.driver?.kind === 'live', 'resume_requires_live_driver');
   const startedAt = Date.now(), output = options.outputDir ?? 'tmp/octo-console';
-  const browser = await chromium.launch({ headless: !options.headful });
+  const fixtureEmails = readFixtureEmails(process.env);
+  const channel = options.browserChannel ?? process.env.OCTO_E2E_BROWSER_CHANNEL;
+  check(channel === undefined || channel === 'chrome' || channel === 'msedge', 'invalid_acceptance_browser_channel');
+  const browser = await chromium.launch({ headless: !options.headful, channel });
   const fixtures: Fixture[] = [];
   const contexts: BrowserContext[] = [];
   const report = { passed: false, live: options.driver?.kind === 'live', users: ['Alex', 'Bob'], cycles: 0,
     unauthorizedHidden: false, passwordPersistent: false, aliasChanged: false, openAfterExpiry: false,
-    localStorageRestored: false, otherClientPasswordRejected: false, screenshots: [] as string[], error: undefined as string | undefined,
+    localStorageRestored: false, otherClientPasswordRejected: false, ownerPasswordFreeRestored: false,
+    freshOwnerRestore: false, screenshots: [] as string[], error: undefined as string | undefined,
     cleanup: 'not_needed', cleanupError: undefined as string | undefined, resumedProfileIds: [] as number[] };
   try {
     await mkdir(output, { recursive: true });
     for (const name of ['Alex', 'Bob'] as const) {
-      const email = `${name.toLowerCase()}.octo@example.com`;
+      const email = fixtureEmails[name];
       progress('login', name);
       const context = await browser.newContext({ viewport: { width: 1450, height: 1100 } });
       contexts.push(context);
@@ -162,7 +170,7 @@ export async function runConsoleFlow(options: {
     check(await card(unauthorized).count() === 0, 'unauthorized_card_visible');
     report.unauthorizedHidden = true;
     const first: Access[] = [];
-    for (let cycle = 0; cycle < 2; cycle++) {
+    for (let cycle = 0; cycle < 3; cycle++) {
       const accesses: Access[] = [];
       for (const fixture of fixtures) {
         progress('grant', fixture.name, cycle + 1);
@@ -183,10 +191,10 @@ export async function runConsoleFlow(options: {
         // Each UUID is separately guarded. Start in parallel within the same lease window.
         const opened = await Promise.allSettled(accesses.map((access, index) => {
           progress('open', access.fixture.name, cycle + 1);
-          return options.driver!.open(access, cycle === 1, accesses[1 - index].password);
+          return options.driver!.open(access, cycle > 0, accesses[1 - index].password);
         }));
         const failure = opened.find(result => result.status === 'rejected');
-        if (failure?.status === 'rejected' && failure.reason instanceof AcceptanceFailure) throw failure.reason;
+        if (failure?.status === 'rejected' && (failure.reason instanceof AcceptanceFailure || failure.reason instanceof ArchiveFailure)) throw failure.reason;
         check(!failure, 'scoped_profile_open_acceptance_failed');
         report.otherClientPasswordRejected = options.driver.kind === 'live';
       }
@@ -214,11 +222,14 @@ export async function runConsoleFlow(options: {
     }
     report.passwordPersistent = true; report.aliasChanged = true;
     report.openAfterExpiry = options.driver?.kind === 'live'; report.localStorageRestored = options.driver?.kind === 'live';
+    report.ownerPasswordFreeRestored = options.driver?.kind === 'live';
+    report.freshOwnerRestore = options.driver?.kind === 'live';
     report.passed = true;
   } catch (error) {
     // Playwright and upstream errors can include form values: never serialize them.
     // Only our explicit acceptance failures are safe to report.
-    report.error = error instanceof AcceptanceFailure ? error.message : 'octo_console_acceptance_failed';
+    report.error = error instanceof AcceptanceFailure ? error.message : error instanceof ArchiveFailure
+      ? failureFields(error).error : 'octo_console_acceptance_failed';
   } finally {
     try { await options.driver?.cleanup(); report.cleanup = options.driver ? 'ordinary_close_completed' : 'not_needed'; }
     catch (error) {
@@ -233,11 +244,17 @@ export async function runConsoleFlow(options: {
   return report;
 }
 
-export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): ConsoleDriver & { close(): Promise<void> } {
+export function createLiveConsoleDriver(env: NodeJS.ProcessEnv, owner: OwnerVerifier): ConsoleDriver & {
+  assertIsolated(): Promise<void>; close(): Promise<void>;
+} {
   const config = readOctoConfig(env);
-  check(config?.enabled && config.allowedClientIds.size === 2, 'exactly_two_allowed_clients_required');
+  check(config?.enabled && !config.allowAll && config.allowedClientIds.size === 2, 'exactly_two_allowed_clients_required');
   const resumeIds = new Set(readResumeProfileIds(env.OCTO_E2E_RESUME_PROFILE_IDS));
-  const dbConfig = readPostgresAppDbConfig(env), pool = createPostgresPool(dbConfig);
+  check(resumeIds.size === 0 && owner, 'archive_full_acceptance_requires_new_fixtures_and_owner');
+  const fixtureEmails = readFixtureEmails(env);
+  const dbConfig = readPostgresAppDbConfig(env);
+  check(dbConfig.database === 'unicorn_noco_copy_restore', 'isolated_restore_database_required');
+  const pool = createPostgresPool(dbConfig);
   const store = createOctoPostgresStore(pool, dbConfig.database);
   const cloud = createCloudApi(env.OCTO_API_TOKEN ?? '');
   const localApi = createOctoApi(env.OCTO_API_TOKEN ?? '', fetch, { debugPort: true });
@@ -247,8 +264,16 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
   const opened = new Set<string>();
   const windows = new Map<number, Page>();
   const expiries = new Map<string, number>();
-  const markerKey = 'unicorn-octo-console-e2e';
+  const markerKey = archiveMarker('').key;
   const markerValue = new Map<number, string>();
+  const profileIdentities = new Map<number, string>(), cycles = new Map<number, number>();
+  const rawCloud = createOctoApi(env.OCTO_API_TOKEN ?? '', fetch, { cloudOnly: true });
+  const marker = (id: number) => archiveMarker(markerValue.get(id)!);
+  async function cookieMarker(page: Page, value: string) {
+    const m = archiveMarker(value);
+    await page.context().addCookies([{ name: m.cookie, value, url: m.origin,
+      expires: Math.floor(Date.now() / 1000) + 86_400 }]);
+  }
   async function local(path: string, body?: object) {
     try {
       const response = await fetch(`http://127.0.0.1:58888${path}`, {
@@ -279,7 +304,18 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
   return {
     kind: 'live',
     resumeProfileIds: [...resumeIds],
+    async assertIsolated() {
+      // The runtime's expiry/deletion loops deliberately process all stored profiles.
+      // An allowlist alone cannot isolate a live acceptance run from existing grants.
+      check((await store.list()).length === 0 && !(await store.clientStates()).some(c => allowed.has(c.clientId)),
+        'empty_isolated_octo_fixture_database_required');
+    },
     async beforeEnsure(clientId) {
+      const sql = await pool.connect();
+      try {
+        const row = (await sql.query('SELECT calendar_email,client_status FROM noco.clients WHERE id=$1', [clientId])).rows[0];
+        check(row?.client_status === 'paused' && Object.values(fixtureEmails).includes(String(row.calendar_email)), 'paused_synthetic_fixture_required');
+      } finally { sql.release(); }
       const existing = await store.list(clientId);
       check(allowed.has(clientId) && (existing.length === 0 || existing.length === 1 && resumeIds.has(existing[0].id) &&
         existing[0].clientId === clientId && resumableProfile(existing[0]) &&
@@ -292,15 +328,15 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
         identity.result.username.toLowerCase() === config.guest.email.toLowerCase(), 'local_octo_guest_session_required');
       for (const fixture of fixtures) {
         const p = await store.get(fixture.profileId);
-        check(p && p.clientId === fixture.clientId && p.uuid && (p.createdAt >= startedAt || resumeIds.has(p.id)) &&
+        check(p && p.clientId === fixture.clientId && p.locale === 'ru' && p.uuid && (p.createdAt >= startedAt || resumeIds.has(p.id)) &&
           resumableProfile(p) && (!p.grant || resumeIds.has(p.id)) &&
-          p.original.description === `unicorn-octo:${p.operationId}` &&
-          p.original.start_pages.some(url => new URL(url).searchParams.get('search') === fixture.name.toLowerCase()), 'new_profile_binding_failed');
+          p.original.description === `unicorn-octo:${p.operationId}`, 'new_profile_binding_failed');
         const remote = await cloud.getProfile(p.uuid);
         check(remote.description === p.original.description && remote.title === p.original.title && inFolder(remote, homeFolder) &&
           remote.has_user_password === !p.grant && remote.status === 0 && !(await active()).has(normalizeUuid(p.uuid)),
           'new_profile_cloud_binding_failed');
         bound.set(p.id, p);
+        profileIdentities.set(p.id, profileIdentity(await rawCloud.cloudRequest(`/profiles/${p.uuid}`)));
       }
       check(new Set([...bound.values()].map(p => normalizeUuid(p.uuid!))).size === 2, 'two_unique_profile_uuids_required');
       check([...resumeIds].every(id => bound.has(id)), 'resume_profile_ids_unused_or_unknown');
@@ -331,6 +367,7 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
       const content = await page.locator('#mw-content-text').innerText();
       const identity = new RegExp(`\\b${access.fixture.name}\\b`, 'i');
       check(identity.test(heading) && identity.test(content), 'wikipedia_fixture_identity_mismatch');
+      await page.goto(ARCHIVE_ORIGIN, { waitUntil: 'domcontentloaded', timeout: 45_000 });
       windows.set(p.id, page);
       if (secondCycle) {
         const saved = await page.evaluate(key => localStorage.getItem(key), markerKey);
@@ -339,6 +376,7 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
         const value = `${access.fixture.name}:${Date.now()}`;
         markerValue.set(p.id, value);
         await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: markerKey, value });
+        await cookieMarker(page, value);
       }
     },
     async afterExpiry(access) {
@@ -354,9 +392,12 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
       check(!page.isClosed() && await page.evaluate(key => localStorage.getItem(key), markerKey) === markerValue.get(p.id), 'browser_not_usable_after_expiry');
       const afterHideValue = `${access.fixture.name}:after-hide:${Date.now()}`;
       await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: markerKey, value: afterHideValue });
+      await cookieMarker(page, afterHideValue);
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 45_000 });
       check(await page.evaluate(key => localStorage.getItem(key), markerKey) === afterHideValue, 'after_hide_marker_reload_failed');
       markerValue.set(p.id, afterHideValue);
+      check((await page.context().cookies(ARCHIVE_ORIGIN)).some(c => c.name === marker(p.id).cookie && c.value === afterHideValue),
+        'after_hide_cookie_missing');
     },
     async stop(access) { await closeUuid(guard(access.fixture.profileId).uuid!); },
     async afterComplete(access) {
@@ -365,6 +406,10 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
       const saved = await store.get(p.id), remote = await cloud.getProfile(p.uuid!);
       check(saved?.password === p.password && remote.has_user_password === false && remote.status === 0 && inFolder(remote, homeFolder) &&
         remote.title === p.original.title && remote.description === p.original.description, 'cleanup_readback_failed');
+      const cycle = (cycles.get(p.id) ?? 0) + 1;
+      await owner.verify({ uuid: p.uuid!, title: p.original.title, description: p.original.description,
+        folder: homeFolder, createdAt: p.createdAt, identity: profileIdentities.get(p.id)! }, marker(p.id), cycle);
+      cycles.set(p.id, cycle);
       expiries.delete(p.uuid!);
     },
     async cleanup() {
@@ -405,7 +450,9 @@ export function createLiveConsoleDriver(env: NodeJS.ProcessEnv = process.env): C
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   let driver: ReturnType<typeof createLiveConsoleDriver> | undefined;
   try {
-    if (process.env.OCTO_E2E_LIVE === '1') driver = createLiveConsoleDriver();
+    if (process.env.OCTO_E2E_LIVE === '1') {
+      driver = createLiveConsoleDriver(process.env, await ownerVerifierFromEnv()); await driver.assertIsolated();
+    }
     const report = await runConsoleFlow({ driver });
     console.log(JSON.stringify(report));
     if (!report.passed) process.exitCode = 1;

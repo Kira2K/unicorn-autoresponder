@@ -66,7 +66,7 @@ async function startBackend() {
 void startBackend().catch((error: unknown) => {
   // SQL/provider errors may contain credentials. Expose only our known startup code.
   const code = (error as { code?: unknown })?.code
-  console.error(typeof code === 'string' && /^(invalid_appdb_|tls_or_|postgres_id_|sql_|database_not_allowed|postgres_read_)/.test(code)
+  console.error(typeof code === 'string' && /^(invalid_appdb_|tls_or_|postgres_id_|sql_|database_not_allowed|postgres_read_|octo_bridge_configuration_required$|octo_local_console_removed$)/.test(code)
     ? `Web console startup blocked: ${code}` : 'Web console startup blocked; inspect configuration.')
   process.exitCode = 1
 })

@@ -1,0 +1,7 @@
+{
+  "name": "unicorn-octo-bridge",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "node cli.mjs", "check": "node cli.mjs --check", "test": "node --test *.test.mjs" }
+}

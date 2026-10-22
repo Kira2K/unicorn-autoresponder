@@ -48,8 +48,8 @@ The running API matched the contract. The live request for
 `Donostia / San Sebastian`, matching location, score 78. No substitute city was used.
 Safe report: `tmp/octo-deletion-live/geography-report.json`.
 
-Unavailable local checker/configuration now shows an installation link to
-`https://github.com/Kira2K/unicorn-proxy-checker` and blocks new proxy setup.
+Unavailable local checker/configuration shows an error directing the user to support
+and blocks new proxy setup. No checker download or installation link is offered.
 Recovery and production/Render suppression are tested. The health probe runs from
 existing status/start requests, is cached, and has a two-second timeout.
 

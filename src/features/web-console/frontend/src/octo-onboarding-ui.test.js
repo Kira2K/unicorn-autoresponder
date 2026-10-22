@@ -32,7 +32,7 @@ test('Octo setup UI: welcome dismissal, Dolphin warning, key clearing, hierarchy
   try {
     await server.listen()
     const address = server.httpServer.address()
-    browser = await chromium.launch()
+    browser = await chromium.launch({ channel: process.env.OCTO_E2E_BROWSER_CHANNEL || undefined })
     const page = await browser.newPage()
     page.setDefaultTimeout(8000)
     const calls = []
@@ -124,13 +124,15 @@ test('Octo setup UI: welcome dismissal, Dolphin warning, key clearing, hierarchy
     assert.equal(await page.getByRole('button', { name: 'Продолжить в любом случае' }).count(), 0, 'unreachable proxy cannot be continued')
     await page.evaluate(() => { window.fixtureState.status = { profiles: [], requiredLocales: ['En'], onboarding: {
       phase: 'idle', dolphinProfiles: [], developmentHelp: {
-        message: 'Для локальной разработки установите и запустите proxy-checker.',
+        message: 'Сервис проверки прокси недоступен. Обратитесь в поддержку.',
         repositoryUrl: 'https://github.com/Kira2K/unicorn-proxy-checker'
       }
     } } })
     const help = page.getByTestId('octo-checker-local-help')
     await help.waitFor()
-    assert.equal(await help.getByRole('link').getAttribute('href'), 'https://github.com/Kira2K/unicorn-proxy-checker')
+    assert.match(await help.textContent(), /Сервис проверки прокси недоступен\. Обратитесь в поддержку\./)
+    assert.equal(await help.getByRole('link', { name: 'Поддержка', exact: true }).getAttribute('href'), 'https://t.me/veu_support_bot')
+    assert.equal(await help.locator('a[href*="github.com"], a[download]').count(), 0)
     assert.equal(await page.getByRole('button', { name: 'Сгенерировать NodeMaven прокси или протестировать свой' }).isDisabled(), true)
     await page.evaluate(() => { delete window.fixtureState.status.onboarding.developmentHelp })
     await help.waitFor({ state: 'detached' })

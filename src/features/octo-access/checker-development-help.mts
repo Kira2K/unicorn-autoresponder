@@ -1,10 +1,9 @@
-export interface CheckerDevelopmentHelp { message: string; repositoryUrl: string }
+export interface CheckerDevelopmentHelp { message: string }
 const help: CheckerDevelopmentHelp = {
-  message: 'Сервис проверки прокси недоступен. Для локальной разработки установите и запустите proxy-checker из репозитория. Настройте PROXY_CHECKER_BASE_URL и UNICORN_PROXY_CHECKER_SECRET_KEY в .env.',
-  repositoryUrl: 'https://github.com/Kira2K/unicorn-proxy-checker'
+  message: 'Сервис проверки прокси недоступен. Обратитесь в поддержку.'
 };
 
-/** Opt-in by local environment/loopback URL; no development instructions on Render. */
+/** Local availability check; customers are directed to support, never installation. */
 export function createCheckerDevelopmentHelp(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch = fetch, now = Date.now) {
   if (env.NODE_ENV === 'production' || env.RENDER) return undefined;
   const baseUrl = env.PROXY_CHECKER_BASE_URL;

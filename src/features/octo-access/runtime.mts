@@ -11,10 +11,11 @@ import { advanceOnboarding } from './onboarding-workflow.mts';
 import { octoClientAllowed } from './access-policy.mts';
 import { advanceDeletion } from './deletion-workflow.mts';
 export function createOctoRuntime({ store, api, config, token, getClient, now = Date.now,
-  listen = createActionLogListener, report = () => {}, onboarding }: {
+  listen = createActionLogListener, report = () => {}, onboarding, passwordBridge }: {
   store: OctoStore; api: CloudApi; config: OctoConfig; token: string; getClient(id: number): Promise<WebClient>;
   now?: () => number; listen?: typeof createActionLogListener; report?: (event: { code: string; profileId?: number }) => void;
   onboarding?: OnboardingDependencies;
+  passwordBridge?: { id: string; ownerEmail: string };
 }) {
   let lease: Awaited<ReturnType<OctoStore['leader']>>, listener: ReturnType<typeof listen> | undefined;
   let signature = '', stopped = true, timer: ReturnType<typeof setTimeout> | undefined, work: Promise<void> | undefined;
@@ -80,7 +81,7 @@ export function createOctoRuntime({ store, api, config, token, getClient, now = 
       for (const p of profiles.filter(p => !p.deletion && p.grant && p.grant.phase !== 'complete')) {
         if (jobs.has(p.id) || (p.grant!.phase !== 'preparing' && (nextCheck.get(p.id) ?? 0) > now())) continue;
         launch(p.id, async check => {
-          await advanceGrant(p, { store, api, config, now, check, historyCheckpoint: () => {
+          await advanceGrant(p, { store, api, config, now, check, passwordBridge, historyCheckpoint: () => {
             const checkpoint = listener?.status().checkpoint;
             return checkpoint === undefined ? undefined : `${listenerGeneration}:${checkpoint}`;
           } });
@@ -140,6 +141,10 @@ export function createOctoRuntime({ store, api, config, token, getClient, now = 
   }
   return {
     service,
+    async bridgeCheckpoint() {
+      await checked(); const c = listener?.status().checkpoint;
+      return c === undefined ? undefined : `${listenerGeneration}:${c}`;
+    },
     status: () => ({ running: !stopped, leader: !!lease, connected: listener?.status().connected ?? false, error: lastError }),
     async start() {
       if (!stopped) return; await store.checkSchema(); stopped = false;
