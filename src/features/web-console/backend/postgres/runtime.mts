@@ -19,6 +19,9 @@ import { createCheckerDevelopmentHelp } from '../../../octo-access/checker-devel
 import { createNodeMavenCatalogue } from '../../../octo-access/nodemaven-locations.mts';
 import { createDolphinProxySource } from '../../../octo-access/dolphin-proxy-source.mts';
 import { OctoError } from '../../../octo-access/contracts.mts';
+import { readBridgeConfig } from '../../../octo-access/bridge/config.mts';
+import { createBridgeBroker } from '../../../octo-access/bridge/broker.mts';
+import { bridgeRoutes } from '../../../octo-access/bridge/routes.mts';
 import { clientLifecycleStore } from '../../../client-lifecycle/postgres-store.mts';
 import { runLifecyclePass } from '../../../client-lifecycle/pass.mts';
 import { createLifecycleRuntime } from '../../../client-lifecycle/runtime.mts';
@@ -26,9 +29,11 @@ import { createClientSender } from '../../../client-lifecycle/sender.mts';
 import { loadClientNotificationSettings } from '../../../client-lifecycle/postgres-settings.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
+  const bridgeConfig = readBridgeConfig(env);
   const config = readPostgresAppDbConfig(env), pool = open(config);
   let closing: Promise<void> | undefined;
   let octo: ReturnType<typeof createOctoRuntime> | undefined, octoLockPool: ReturnType<typeof createPostgresPool> | undefined;
+  let octoBridge: ReturnType<typeof bridgeRoutes> | undefined;
   let lifecycle: ReturnType<typeof createLifecycleRuntime> | undefined;
   const close = () => closing ??= (async () => {
     try { await lifecycle?.stop(); } finally {
@@ -56,6 +61,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         report: event => console.error(JSON.stringify(event)) });
     }
     const octoConfig = readOctoConfig(env);
+    if (bridgeConfig && !octoConfig) throw new OctoError('octo_bridge_configuration_required', 503);
     if (octoConfig) {
       // The advisory-lock connection must not occupy the two application pool slots.
       octoLockPool = open(config);
@@ -64,7 +70,8 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       const clients = await Promise.all((octoConfig.allowAll ? [] : [...octoConfig.allowedClientIds]).map(id => options.repository.getClientById(id)));
       if (clients.some(c => !c.id || !c.calendarEmail))
         throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
-      octo = createOctoRuntime({ store: octoStore, api: createCloudApi(env.OCTO_API_TOKEN!), config: octoConfig,
+      const api = createCloudApi(env.OCTO_API_TOKEN!);
+      octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig,
         token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
         onboarding: {
           developmentHelp: createCheckerDevelopmentHelp(env),
@@ -76,8 +83,10 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           dolphin: createDolphinProxySource({ profiles: id => options.repository.getDolphinProfilesForClient(id) })
         },
         report: event => console.error(JSON.stringify({ feature: 'octo', ...event })) });
+      if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
+        bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }
-    return { options: { ...options, ...(octo ? { octoService: octo.service } : {}) }, close,
+    return { options: { ...options, ...(octo ? { octoService: octo.service } : {}) }, close, octoBridge,
       startBackground: async () => { await octo?.start(); await lifecycle?.start(); } };
   } catch (error) { await close(); throw error; }
 }

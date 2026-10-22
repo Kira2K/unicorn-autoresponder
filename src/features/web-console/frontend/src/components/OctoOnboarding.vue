@@ -134,7 +134,7 @@ onUnmounted(() => { mounted = false; picker.cancel(); controller.abort(); nodeKe
     <p v-if="missingLocales.length" class="octo-warning" role="note">{{ windowsRequirement }}</p>
     <div v-if="onboarding.developmentHelp" class="octo-warning" role="alert" data-testid="octo-checker-local-help">
       <p>{{ onboarding.developmentHelp.message }}</p>
-      <a :href="onboarding.developmentHelp.repositoryUrl" target="_blank" rel="noopener noreferrer">Установить proxy-checker — репозиторий и инструкции</a>
+      <a href="https://t.me/veu_support_bot" target="_blank" rel="noopener noreferrer">Поддержка</a>
     </div>
     <div v-if="busy" class="octo-progress" role="status" aria-live="polite">
       <i class="pi pi-spin pi-spinner" aria-hidden="true" />

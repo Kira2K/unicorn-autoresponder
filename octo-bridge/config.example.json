@@ -1,0 +1,9 @@
+{
+  "backendUrl": "https://very-evil-unicorn.onrender.com",
+  "bridgeId": "render-owner-pc",
+  "secret": "REPLACE_WITH_43_CHARACTER_OR_LONGER_RANDOM_SECRET",
+  "ownerEmail": "owner@example.com",
+  "allowAllManagedProfiles": false,
+  "allowedProfileUuids": ["REPLACE_WITH_DISPOSABLE_PROFILE_UUID"],
+  "pollMilliseconds": 2000
+}

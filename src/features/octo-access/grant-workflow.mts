@@ -4,11 +4,11 @@ import { OctoError } from './contracts.mts';
 import type { CloudApi, Grant, ManagedProfile, Metadata, OctoConfig, OctoStore } from './contracts.mts';
 import { inFolder, safeCode } from './provision.mts';
 import { normalizeUuid } from './cloud-api.mts';
-const sameMetadata = (p: Metadata, m: Metadata) => p.title === m.title && p.description === m.description
-  && JSON.stringify(p.tags ?? []) === JSON.stringify(m.tags) && JSON.stringify(p.start_pages) === JSON.stringify(m.start_pages);
+import { cleanupHistoryReady, sameMetadata } from './cleanup-readiness.mts';
 export async function advanceGrant(initial: ManagedProfile, deps: {
   store: OctoStore; api: CloudApi; config: OctoConfig; check(): Promise<void>; now?: () => number;
   historyCheckpoint?: () => string | number | undefined;
+  passwordBridge?: { id: string; ownerEmail: string };
 }) {
   const { store, api, config, check, now = Date.now, historyCheckpoint = () => 0 } = deps;
   let p = initial;
@@ -42,6 +42,21 @@ export async function advanceGrant(initial: ManagedProfile, deps: {
       // First reconcile interrupted writes. Retrying the same restrictive hide is
       // safe only while this grant's protected anonymous profile is still shared.
       const step = g.pending, at = g.attemptedAt!;
+      if (step === 'clear' && g.clearMethod === 'bridge') {
+        const receipt = g.bridgeClear?.result;
+        if (!receipt) {
+          if (g.phase === 'blocked') return;
+          if (g.error !== 'octo_bridge_waiting' || g.phase !== 'awaiting_close') {
+            g.phase = 'awaiting_close'; g.error = 'octo_bridge_waiting'; await save();
+          }
+          return;
+        }
+        if (receipt.state !== 'succeeded') throw new OctoError(receipt.state === 'uncertain'
+          ? 'octo_bridge_outcome_unknown' : 'octo_bridge_clear_rejected');
+        if (live.has_user_password || live.status !== 0 || !inFolder(live, config.homeFolder) || !sameMetadata(live as Metadata, g.original))
+          throw new OctoError('octo_clear_unverified');
+        await complete(); return;
+      }
       if (step === 'protect' && inFolder(live, config.homeFolder) && sameMetadata(live as Metadata, g.original) && live.has_user_password) {
         g.phase = 'preparing'; await resolved();
       } else if (step === 'mask_proxy' && await proxyTitle() === g.alias) { g.phase = 'preparing'; await resolved(); }
@@ -94,30 +109,24 @@ export async function advanceGrant(initial: ManagedProfile, deps: {
     live = await read();
     if (!inFolder(live, config.homeFolder) || !sameMetadata(live as Metadata, g.original)) throw new OctoError('octo_private_profile_changed');
     if (!live.has_user_password) throw new OctoError('octo_password_changed_externally');
-    const stream = await store.stream();
-    if (stream.coverageSince > g.createdAt) throw new OctoError('octo_event_history_gap');
-    const events = (await store.events(p.uuid!, g.eventsAfter)).filter(e => e.time * 1000 >= Math.floor(g.createdAt / 1000) * 1000);
-    if (events.some(e => e.action === 'profiles.force_stopped')) throw new OctoError('octo_force_stop_observed');
-    const lifecycle = events.filter(e => ['profiles.started', 'profiles.stopped'].includes(e.action));
-    const started = lifecycle.some(e => e.action === 'profiles.started');
-    const normallyClosed = started && lifecycle.at(-1)?.action === 'profiles.stopped';
-    // A matching update after hide is a positive ordering barrier: the stream has
-    // replayed the complete exposure interval. Absence of start alone is not proof.
-    const hideBarrier = events.some(e => e.action === 'profiles.updated'
-      && e.title === g.original.title && e.time >= Math.floor(g.hiddenAt! / 1000));
-    const neverOpened = !lifecycle.length && hideBarrier;
-    if (live.status !== 0 || !hideBarrier || (!normallyClosed && !neverOpened)) return;
+    if (live.status !== 0 || !await cleanupHistoryReady(p, store)) return;
     if (p.proxy && await proxyTitle() !== g.originalProxyTitle) {
       await write('restore_proxy', () => api.updateProxy(p.proxy!.uuid, g.originalProxyTitle!));
       if (await proxyTitle() !== g.originalProxyTitle) throw new OctoError('octo_proxy_write_unknown');
       await resolved();
     }
+    if (deps.passwordBridge) {
+      g.clearMethod = 'bridge'; g.bridgeClear = { bridgeId: deps.passwordBridge.id, ownerEmail: deps.passwordBridge.ownerEmail };
+    }
     await write('clear', async () => {
       // The inbox was read across SQL/network awaits. A new page or disconnect
       // invalidates that decision, even if the new page has already drained.
       if (historyCheckpoint() !== checkpoint) throw new OctoError('octo_event_history_pending');
-      await api.clearPassword(p.uuid!, p.password);
+      if (g.clearMethod !== 'bridge') await api.clearPassword(p.uuid!, p.password);
     });
+    if (g.clearMethod === 'bridge') {
+      g.error = 'octo_bridge_waiting'; await save(); return;
+    }
     live = await read();
     if (live.has_user_password || !inFolder(live, config.homeFolder) || !sameMetadata(live as Metadata, g.original))
       throw new OctoError('octo_clear_unverified');
@@ -127,6 +136,7 @@ export async function advanceGrant(initial: ManagedProfile, deps: {
     if (g.pending === 'clear' && (error as any)?.code === 'octo_event_history_pending') {
       // The request was never sent; do not leave an uncertain-write journal.
       g.phase = 'awaiting_close'; delete g.pending; delete g.attemptedAt; g.error = 'octo_event_history_pending';
+      delete g.clearMethod; delete g.bridgeClear;
     } else if (g.pending === 'clear' && error instanceof OctoError && error.details?.upstreamCode === 'profiles.password_error') {
       // Explicit refusal can be retried: cloud synchronization can lag normal stop.
       g.phase = 'awaiting_close'; delete g.pending; delete g.attemptedAt; g.error = 'octo_waiting_for_sync';

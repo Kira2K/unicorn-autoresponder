@@ -6,6 +6,25 @@ is required. Production access lasts 120 seconds from verified publication.
 
 ## Runtime and storage
 
+Password-free owner reopening is a separate acceptance requirement. The cloud
+password flag does not prove saved archive readability. See
+[`archive-acceptance/README.md`](archive-acceptance/README.md) for the independent
+owner-PC check and three-cycle Console release gate. The old cloud comparison and
+local fixture-console runtimes have been removed; existing private reports remain.
+
+An opt-in local Octo bridge is available in [`../../../octo-bridge`](../../../octo-bridge/README.md).
+Set `OCTO_PASSWORD_CLEANUP=bridge` plus its private identity/secret configuration
+to queue local password removal in the same backend process. The bridge makes
+outbound requests and calls only the local Octo password API. Existing 120-second
+publication/hiding and event-history checks remain; no password is changed on
+profile launch. There is no cloud-clear fallback in bridge mode. Its durable
+one-shot authorization and local acknowledgement are stored in the existing
+private grant JSON, without a database migration. Pending bridge operations also
+remain bridge operations after a restart/configuration change. The default cloud
+adapter is unchanged; enabling bridge mode and deployment require a separate
+rollout after fresh second-PC archive acceptance.
+The bridge README describes the Render/PC setup. The PC needs no local backend.
+
 - `service.mts`: authenticated client ownership, locale rules, idempotent provisioning
   and grants. `OCTO_ACCESS_SCOPE=all` enables all authenticated client accounts;
   `allowlist` keeps the initial scoped pilot. Every profile and operation remains owner-bound.
@@ -47,6 +66,19 @@ operations; restart retains original deadlines. Keep the Render backend awake. D
 existing cleanup to finish. Do not remove configuration before grants have drained.
 
 ## Explicit setup
+
+For the existing local Octo Console configuration, run `npm run web:dev`, or
+`npm run web:backend` and `npm run web:frontend` in separate terminals.
+Both backend commands (`web:backend` and the watched `web:backend:dev`) load
+`.env`, `.env.octo-pilot` (enablement and folders), then `.env.octo-onboarding`
+(all-client scope and checker URL), using native Node. Missing files are optional;
+explicit process environment values take precedence. Without Octo configuration,
+the Octo status endpoint returns 403 and the frontend hides its card. Pilot-only
+scope excludes OctoGuide (client 261).
+Stop the previous backend before replacing it with this command; keep the existing
+frontend running. This is the normal backend against the configured database,
+including its normal workers, not the disposable archive acceptance test. It does
+not repair encrypted archives. Production `web:start` and Dolphin logic are unchanged.
 
 No startup migration or seeding runs automatically. Remote writes require explicit
 operator authorization under repository `AGENTS.md`.
@@ -90,10 +122,11 @@ membership validation. The checker service must also support them; see
 `docs/proxy-checker-geography-request.md`. Do not normalize the city into a different target.
 
 Local development with a loopback checker URL (or missing checker configuration) shows
-installation instructions linking to `https://github.com/Kira2K/unicorn-proxy-checker`
-when `/health` is unavailable. The two-second probe is shared/cached across status requests;
-no new proxy setup is queued while unavailable. Production/Render and remote checker URLs
-never expose these development instructions. Ru-only creation does not need the checker.
+an unavailable-service error and a support link when `/health` is unavailable. The UI
+does not offer checker downloads or installation instructions. The two-second probe is
+shared/cached across status requests; no new proxy setup is queued while unavailable.
+Production/Render and remote checker URLs do not use this local health probe.
+Ru-only creation does not need the checker.
 
 When refreshing the supplied checker client, preserve these Console compatibility edits:
 explicit class fields instead of TypeScript parameter properties (Node strip-only mode),
@@ -250,21 +283,25 @@ Existing experiments are neither adopted nor modified.
   migration twice, rollback, concurrent reservations, CAS and loss of leader connection.
   It never reads application DB environment; unavailable Docker is reported as skipped.
 - `npm run octo:console:e2e:mock`: real Console form and UI, separate Alex/Bob sessions,
-  mocked Octo/DB, two cycles with 45-second leases. This does not prove desktop behavior.
+  real HTTP bridge gateway/agent, mocked Octo/DB, three cycles with 45-second leases.
+  It verifies six mocked native removals and no cloud clear. The browser is headless;
+  this does not prove desktop/archive behavior.
 - `npm run octo:console:e2e:live`: existing Console auth and real SQL/cloud Octo modules,
   with unrelated automation mocked. Requires an authenticated local Guest desktop.
-  Only this test driver uses `localhost:58888`, for two newly created, verified fixture
+  It now requires an empty Octo fixture scope in the isolated `unicorn_noco_copy_restore`
+  database and a second VEULink PC; the application database is refused before startup.
+  The client test driver uses `localhost:58888` for two newly created, verified fixture
   UUIDs. It checks the other client's actual password is rejected, opens both windows,
-  checks Wikipedia identity and a storage marker, waits 120 seconds, checks hidden but
-  running/protected profiles, closes normally and repeats with unchanged passwords.
+  checks Wikipedia identity and saved markers, waits 120 seconds, checks hidden but
+  running/protected profiles, closes normally and repeats three cycles with unchanged
+  passwords. Every cleanup also requires password-free owner reopening on a different
+  PC through the archive-acceptance handoff.
 
-The live runner refuses existing fixture bindings by default. To resume an interrupted test,
-inspect the exact new bindings and cloud metadata, then explicitly allow their internal IDs
-via `OCTO_E2E_RESUME_PROFILE_IDS`. Resume requires the same pilot owners, operation markers,
-canonical private metadata and closed profiles. Each profile must either have no previous
-grant and remain protected, or have a fully completed, expired grant and cleared protection.
-Unfinished grants and old experimental profiles are rejected. No grant history is reset.
-Do not create additional profiles to bypass a failed run.
+Full live acceptance now refuses `OCTO_E2E_RESUME_PROFILE_IDS`: an interrupted or older
+run cannot establish its first fresh owner restore. Retain its exact bindings, journal
+and data for inspection. Use separately prepared, paused, unused synthetic fixture
+clients for a separately identified acceptance run, never replacements for client
+profiles. See the archive-acceptance procedure for fixture email overrides and preflight.
 Artifacts go to ignored `tmp/octo-console*`; screenshots mask credentials, reports never
 contain passwords or provider errors. A mock pass is marked `live: false`.
 

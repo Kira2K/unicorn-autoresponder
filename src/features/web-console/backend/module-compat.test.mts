@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -12,7 +12,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const guard = fileURLToPath(new URL('./tests/no-outbound.cjs', import.meta.url));
-const tsx = require.resolve('tsx/cli');
 const tsxLoader = pathToFileURL(require.resolve('tsx')).href;
 const backend = fileURLToPath(new URL('./index.ts', import.meta.url));
 const source = (path: string) => join(root, path);
@@ -87,8 +86,9 @@ for (const loader of ['node', 'tsx'] as const) {
   });
 }
 
-for (const mode of ['node', 'tsx-watch'] as const) {
-  test(`${mode}: normal backend entrypoint serves HTTP with isolated mock data`, async () => {
+const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts;
+for (const command of ['web:backend', 'web:backend:dev'] as const) {
+  test(`${command}: normal backend entrypoint serves HTTP with isolated mock data`, async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'unicorn-startup-'));
     const reservation = createServer();
     await new Promise<void>((resolve, reject) => {
@@ -96,8 +96,8 @@ for (const mode of ['node', 'tsx-watch'] as const) {
     });
     const port = (reservation.address() as { port: number }).port;
     await new Promise<void>(resolve => reservation.close(() => resolve()));
-    const child = spawn(process.execPath, ['--require', guard,
-      ...(mode === 'tsx-watch' ? [tsx, 'watch', '--clear-screen=false'] : []), backend], {
+    const flags = scripts[command].split(' ').slice(1, -1);
+    const child = spawn(process.execPath, ['--require', guard, ...flags, backend], {
       cwd, env: { ...environment(), WEB_CONSOLE_HOST: '127.0.0.1', PORT: String(port) },
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     });

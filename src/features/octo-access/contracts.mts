@@ -20,6 +20,12 @@ export interface Grant {
   hiddenAt?: number; completedAt?: number; error?: string;
   pending?: 'protect' | 'mask_proxy' | 'publish' | 'hide' | 'restore_proxy' | 'clear';
   attemptedAt?: number; original: Metadata; originalProxyTitle?: string;
+  clearMethod?: 'bridge';
+  bridgeClear?: {
+    bridgeId: string; ownerEmail: string;
+    claim?: { deviceId: string; authorizedAt?: number };
+    result?: { state: 'succeeded' | 'uncertain' | 'rejected'; code?: string; at: number };
+  };
 }
 export interface ProfileDeletion {
   eventId: string;

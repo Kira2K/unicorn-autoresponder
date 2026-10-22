@@ -9,6 +9,7 @@ const visible = ref(false)
 const status = ref({ profiles: [], requiredLocales: [] })
 const grants = ref({})
 const requesting = ref({})
+const requestErrors = ref({})
 const proxyDrafts = ref({})
 const proxySaving = ref({})
 const proxyMessages = ref({})
@@ -19,6 +20,12 @@ const phaseLabels = {
   preparing: 'Подготавливаем доступ…', granted: 'Доступ выдан',
   awaiting_close: 'Ожидаем закрытия браузера', complete: 'Доступ завершён', blocked: 'Доступ заблокирован',
   deleting: 'Профиль удалён в Octo. Очищаем связанные данные…', deletion_blocked: 'Не удалось завершить очистку удалённого профиля'
+}
+function phaseLabel(profile) {
+  const grant = grants.value[profile.id]
+  if ((grant?.phase || profile.phase) === 'awaiting_close' && (grant?.error || profile.error) === 'octo_bridge_waiting')
+    return 'Браузер закрыт. Завершаем доступ…'
+  return phaseLabels[grant?.phase || profile.phase] || (profile.phase === 'ready' ? 'Профиль готов' : 'Профиль подготавливается…')
 }
 const proxyPhaseLabels = { queued: 'Прокси ожидает сохранения…', creating: 'Создаём прокси…',
   attaching: 'Подключаем прокси к профилю…', complete: 'Прокси сохранён', blocked: 'Не удалось сохранить прокси. Обратитесь к команде поддержки.' }
@@ -70,6 +77,7 @@ function denied(error) {
   visible.value = false
   status.value = { profiles: [], requiredLocales: [] }
   grants.value = {}
+  requestErrors.value = {}
   message.value = ''
   return true
 }
@@ -93,9 +101,11 @@ async function refresh(version) {
       [profile.id, proxyDrafts.value[profile.id] || octoProxyDraft(profile.proxy)]))
     proxyMessages.value = Object.fromEntries(Object.entries(proxyMessages.value).filter(([id]) => profileIds.has(id)))
     grants.value = Object.fromEntries(Object.entries(grants.value).filter(([id]) => profileIds.has(id)))
+    requestErrors.value = Object.fromEntries(Object.entries(requestErrors.value).filter(([id]) => profileIds.has(id)))
     await Promise.all(nextStatus.profiles.map(async profile => {
       if (['deleting', 'deletion_blocked'].includes(profile.phase)) {
         delete grants.value[profile.id]
+        delete requestErrors.value[profile.id]
         delete proxyDrafts.value[profile.id]
         return
       }
@@ -106,6 +116,7 @@ async function refresh(version) {
         const grant = await octoApi.grant(grantId, { signal: controller.signal })
         if (active(version) && grants.value[profile.id]?.id === current?.id) {
           grants.value = { ...grants.value, [profile.id]: octoGrantForDisplay(grant) }
+          if (['preparing', 'granted'].includes(grant.phase)) delete requestErrors.value[profile.id]
         }
       } catch (error) {
         if (!active(version) || error.name === 'AbortError') return
@@ -177,12 +188,14 @@ async function requestAccess(profile) {
   if (!canRequest(profile) || !visible.value || document.hidden) return
   const version = generation
   requesting.value[profile.id] = true
+  delete requestErrors.value[profile.id]
   message.value = ''
   try {
     const grant = await octoApi.requestGrant(profile.id, { signal: controller.signal })
     if (active(version)) grants.value = { ...grants.value, [profile.id]: octoGrantForDisplay(grant) }
   } catch (error) {
-    if (active(version) && error.name !== 'AbortError' && !denied(error)) message.value = 'Не удалось запросить доступ. Попробуйте ещё раз.'
+    if (active(version) && error.name !== 'AbortError' && !denied(error))
+      requestErrors.value[profile.id] = 'Не удалось запросить доступ. Обратитесь в поддержку.'
   } finally {
     if (active(version)) requesting.value[profile.id] = false
   }
@@ -218,6 +231,7 @@ watch(() => props.clientId, () => {
   visible.value = false
   status.value = { profiles: [], requiredLocales: [] }
   grants.value = {}
+  requestErrors.value = {}
   message.value = ''
   start()
 })
@@ -245,10 +259,14 @@ onUnmounted(() => {
     <p v-if="message" role="status">{{ message }}</p>
     <article v-for="profile in status.profiles" :key="profile.id" class="octo-profile" :data-testid="`octo-profile-${profile.id}`">
       <h3>{{ profile.title }} · {{ profile.locale.toUpperCase() }}</h3>
-      <p>{{ phaseLabels[grants[profile.id]?.phase || profile.phase] || (profile.phase === 'ready' ? 'Профиль готов' : 'Профиль подготавливается…') }}</p>
+      <p>{{ phaseLabel(profile) }}</p>
       <button type="button" :disabled="!canRequest(profile)" @click="requestAccess(profile)">
         {{ requesting[profile.id] ? 'Запрашиваем доступ…' : 'Получить доступ' }}
       </button>
+      <div v-if="requestErrors[profile.id]" role="alert">
+        <p>{{ requestErrors[profile.id] }}</p>
+        <a href="https://t.me/veu_support_bot" target="_blank" rel="noopener noreferrer">Поддержка</a>
+      </div>
       <div v-if="grants[profile.id]?.password" class="octo-credentials">
         <p v-if="grants[profile.id].alias">Профиль в браузере: <strong>{{ grants[profile.id].alias }}</strong></p>
         <p role="timer">Доступ действует ещё {{ countdown(grants[profile.id]) }}</p>

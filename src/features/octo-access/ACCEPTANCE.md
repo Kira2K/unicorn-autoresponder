@@ -1,5 +1,11 @@
 # Octo pilot acceptance — 2026-10-13
 
+Historical result: the checks below did not verify a password-free owner restore
+from another PC. They must not be used as that acceptance evidence. The current
+live runner requires three cycles plus independent VEULink owner reopening after
+each cleanup; see [archive acceptance](archive-acceptance/README.md). No new live
+result is claimed by adding that gate.
+
 The full live Console flow passed on the Windows Guest desktop with the real
 PostgreSQL repository and Octo cloud API. Production backend logic used only the
 cloud; the test driver alone used the desktop API to open and normally close windows.
