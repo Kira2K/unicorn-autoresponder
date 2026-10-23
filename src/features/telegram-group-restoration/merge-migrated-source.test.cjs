@@ -1,0 +1,2 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),{mergeMigratedSource}=require('./merge-migrated-source.cjs');
+test('both sides of migration survive equal message IDs without changing originals',()=>{const a=[{id:'1',date:3}],b=[{id:'1',date:1}];const out=mergeMigratedSource(a,b,'-50');assert.equal(out.length,2);assert.notEqual(out[0].id,out[1].id);assert.equal(out[1].source_original_message_id,'1');assert.equal(b[0].id,'1');assert.equal(out[1].date,1);});

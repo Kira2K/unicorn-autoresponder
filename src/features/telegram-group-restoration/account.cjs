@@ -1,0 +1,4 @@
+const ACCOUNTS={unicorn:{id:'8805256389',username:'unicorn_service'},kira:{id:'7586552066',username:'very_evil_unicorn'}};
+function account(key='unicorn',local){if(key==='local'){if(!local||!/^\d+$/.test(local.id)||!/^\w{5,32}$/.test(local.username)||Object.values(ACCOUNTS).some(a=>a.id===local.id))throw Error('invalid_local_restoration_account');return{id:local.id,username:local.username};}if(!Object.hasOwn(ACCOUNTS,key))throw Error('unknown_restoration_account');return ACCOUNTS[key];}
+function bindOwner(state,id){if(state.ownerId&&state.ownerId!==id&&(state.channel||state.steps?.create?.intentAt||!state.creationReconciledAt))throw Error('group_owner_account_mismatch');if(state.channel&&!state.ownerId&&id!==ACCOUNTS.unicorn.id)throw Error('existing_group_owner_mismatch');state.ownerId=id;}
+module.exports={account,bindOwner};

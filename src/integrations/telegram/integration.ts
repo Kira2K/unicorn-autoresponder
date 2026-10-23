@@ -115,6 +115,16 @@ function validateSendOneInput(input: unknown):
       )
     }
   }
+  if (input.attachment !== undefined && (
+    !isObject(input.attachment) || !(input.attachment.file instanceof Blob) ||
+    input.attachment.file.size <= 0 || input.attachment.file.size > 50_000_000 ||
+    typeof input.attachment.filename !== 'string' || !input.attachment.filename.trim() ||
+    /[\r\n/\\]/.test(input.attachment.filename) || input.text.length > 1024
+  )) {
+    return { ok: false, error: namedError('TelegramSendValidationError',
+      'Telegram document requires a nonempty Blob up to 50 MB, a filename and a caption up to 1024 characters.',
+      'telegram_document_invalid') }
+  }
   if (input.editMessageId !== undefined && (
     !Number.isSafeInteger(input.editMessageId) || Number(input.editMessageId) <= 0 ||
     input.attachment !== undefined || input.messageThreadId !== undefined ||
@@ -189,6 +199,7 @@ function validateSendOneInput(input: unknown):
       chatId: input.chatId.trim(),
       text: input.text,
       ...(input.editMessageId !== undefined ? { editMessageId: Number(input.editMessageId) } : {}),
+      ...(input.attachment !== undefined ? { attachment: input.attachment as SendOneInput['attachment'] } : {}),
       ...(input.messageThreadId !== undefined
         ? { messageThreadId: Number(input.messageThreadId) }
         : {}),
@@ -218,7 +229,7 @@ function validTelegramResponse(
     isObject(result.chat) &&
     typeof result.chat.id === 'number' &&
     typeof result.chat.type === 'string' &&
-    (typeof result.text === 'string' || (
+    (typeof result.text === 'string' || isObject(result.document) && typeof result.document.file_id === 'string' || (
       isObject(result.rich_message) &&
       Array.isArray(result.rich_message.blocks) &&
       result.rich_message.blocks.length > 0 &&

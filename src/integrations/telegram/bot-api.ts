@@ -15,6 +15,7 @@ type SendMessageInput = {
   chatId: string
   text: string
   editMessageId?: number
+  attachment?: { file: Blob; filename: string }
   messageThreadId?: number
   replyMarkup?: unknown
   parseMode?: import('./types.ts').SendOneInput['parseMode']
@@ -49,7 +50,7 @@ export function createTelegramBotApi(options: {
 } = {}) {
   const baseUrl = String(options.baseUrl ?? 'https://api.telegram.org').replace(/\/+$/, '')
 
-  async function requestResponse(method: string, body: Record<string, unknown> = {}): Promise<unknown> {
+  async function requestResponse(method: string, body: Record<string, unknown> = {}, multipart?: FormData): Promise<unknown> {
     const token = resolveBotToken(options.token)
     const requester = options.requester ?? globalThis.fetch
     if (typeof requester !== 'function' || typeof AbortController !== 'function') {
@@ -75,8 +76,8 @@ export function createTelegramBotApi(options: {
     try {
       const requestOptions = {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        ...(multipart ? {} : { headers: { 'Content-Type': 'application/json' } }),
+        body: multipart ?? JSON.stringify(body),
         signal: controller.signal
       }
       let response: BotApiHttpResponse
@@ -133,6 +134,17 @@ export function createTelegramBotApi(options: {
   }
 
   async function sendResponse(input: SendMessageInput): Promise<unknown> {
+    if (input.attachment) {
+      const form = new FormData()
+      form.set('chat_id', input.chatId)
+      form.set('caption', input.text)
+      form.set('document', input.attachment.file, input.attachment.filename)
+      form.set('disable_content_type_detection', 'true')
+      if (input.parseMode) form.set('parse_mode', input.parseMode)
+      if (input.messageThreadId !== undefined) form.set('message_thread_id', String(input.messageThreadId))
+      if (input.replyMarkup) form.set('reply_markup', JSON.stringify(input.replyMarkup))
+      return await requestResponse('sendDocument', {}, form)
+    }
     const richMessage = prepareTelegramRichMessage(input)
     if (!richMessage) return await requestResponse('sendMessage', sendMessageBody(input))
     return await requestResponse('sendRichMessage', {

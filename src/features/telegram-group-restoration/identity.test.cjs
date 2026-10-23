@@ -1,0 +1,2 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),{normalizeChatId}=require('./identity.cjs');
+test('existing whitespace and positive or scientific IDs normalize without changing source data',()=>{assert.equal(normalizeChatId(' -1004426099792'),'-1004426099792');assert.equal(normalizeChatId('5216637594'),'-5216637594');assert.equal(normalizeChatId('-1.004e12'),'-1004000000000');assert.throws(()=>normalizeChatId('not an id'));assert.throws(()=>normalizeChatId('1.2'));});

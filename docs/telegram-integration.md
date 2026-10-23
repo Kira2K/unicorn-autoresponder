@@ -48,6 +48,7 @@ type SendOneInput = {
   chatId: string
   text: string
   editMessageId?: number
+  attachment?: { file: Blob; filename: string }
   messageThreadId?: number
   parseMode?: ParseMode
   replyMarkup?: InlineKeyboardMarkup | ReplyKeyboardMarkup |
@@ -61,6 +62,15 @@ type SendManyInput = Record<string, Omit<SendOneInput, 'chatId'>>
 `chatId` is always a Telegram destination ID. It is never a student, client,
 user, mentor, workflow, or database record ID. Link previews are disabled by
 default; an explicit `linkPreviewOptions` object takes precedence.
+
+Trusted local callers may provide `attachment` to send one document through the
+same `sendOne` facade. Supply a nonempty `Blob` up to 50,000,000 bytes and a
+filename without path separators or newlines. `text` becomes the caption and
+must fit 1024 UTF-16 code units. The sole HTTP client builds multipart FormData;
+it never reads caller-supplied paths. JSON backend endpoints cannot upload a
+Blob. Text-only calls retain their existing behavior. Document uploads return
+the complete native `Message.DocumentMessage` response and never retry an
+uncertain upload. Larger files require a separate upload solution before use.
 
 To edit a bot-owned text message, pass its positive `editMessageId` to `sendOne`
 with the existing `chatId` and replacement `text`. The same HTTP client calls
@@ -76,7 +86,7 @@ are unchanged.
 rejects its promise.
 
 - `kind: 'telegram-response'` contains the complete, unchanged Telegram
-  `ApiResponse<Message.TextMessage | Message.RichMessageMessage>`. This includes both `ok: true` and every
+  `ApiResponse<Message.TextMessage | Message.RichMessageMessage | Message.DocumentMessage>`. This includes both `ok: true` and every
   valid `ok: false` Bot API response, including `parameters` and unknown future
   fields.
 - `kind: 'client-failure'` means that no valid Telegram response was available.
@@ -85,7 +95,7 @@ rejects its promise.
 
 The minimum accepted success body has `ok: true`, an object `result`, numeric
 `message_id` and `date`, an object `chat` with numeric `id` and string `type`,
-and either string `text` or `rich_message.blocks` containing typed blocks.
+and either string `text`, a document with `file_id`, or `rich_message.blocks` containing typed blocks.
 Native Rich Message responses are retained unchanged, without fabricating a
 `text` field. The minimum accepted API error has `ok: false`, numeric
 `error_code`, and string `description`. Extra fields are retained without
@@ -126,7 +136,7 @@ if (result.kind === 'client-failure') {
       break
   }
 } else if (result.response.ok) {
-  const sentMessage: Message.TextMessage | Message.RichMessageMessage = result.response.result
+  const sentMessage: Message.TextMessage | Message.RichMessageMessage | Message.DocumentMessage = result.response.result
   recordTelegramMessageId(sentMessage.message_id)
 } else {
   const apiError: ApiError = result.response

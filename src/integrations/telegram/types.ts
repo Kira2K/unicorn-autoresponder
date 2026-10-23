@@ -37,6 +37,8 @@ export type SendOneInput = {
   text: string
   /** Edit this bot-owned message instead of creating a new message. */
   editMessageId?: number
+  /** Local uploads are provided by trusted callers as a Blob, never a file path. */
+  attachment?: { file: Blob; filename: string }
   messageThreadId?: number
   parseMode?: ParseMode
   replyMarkup?: TelegramReplyMarkup
@@ -78,7 +80,7 @@ export type TelegramCallResult<T> =
       failure: ClientFailure
     }
 
-export type TelegramSentMessage = Message.TextMessage | Message.RichMessageMessage
+export type TelegramSentMessage = Message.TextMessage | Message.RichMessageMessage | Message.DocumentMessage
 
 export type SendOneResult =
   TelegramCallResult<TelegramSentMessage>
