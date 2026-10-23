@@ -14,7 +14,7 @@ import AccountForm from './AccountForm.vue'
 import StudentDashboardLayout from './StudentDashboardLayout.vue'
 import { studentPreviewLabel } from './student-preview-labels.js'
 import './student-preview.css'
-import { isRussianPhone, normalizeRussianPhone, russianPhoneError } from '../../student-profile-validation.ts'
+import { isInternationalPhone, normalizeInternationalPhone, internationalPhoneError } from '../../student-profile-validation.ts'
 import {
   normalizePhoneEn,
   normalizePlatformAccountLabel,
@@ -210,7 +210,7 @@ const accountDisplayLabel = computed(() => selectedAccountPlatform.value || acco
 const phoneRuAttempted = ref(false)
 const phoneRuSelected = computed(() => validatedProfileEnabled.value && selectedAccountPlatform.value === 'phone_ru')
 const phoneRuExists = computed(() => accountRows.value.some(account => platformKey(account) === 'phone_ru'))
-const phoneRuValidationMessage = computed(() => phoneRuSelected.value && phoneRuAttempted.value && !isRussianPhone(accountForm.value.phone) ? russianPhoneError : '')
+const phoneRuValidationMessage = computed(() => phoneRuSelected.value && phoneRuAttempted.value && !isInternationalPhone(accountForm.value.phone) ? internationalPhoneError : '')
 
 
 function updateAccountPhone(value) {
@@ -1838,12 +1838,12 @@ async function saveAccount() {
     }
     if (phoneRuSelected.value) {
       phoneRuAttempted.value = true
-      if (!isRussianPhone(payload.phone)) return
+      if (!isInternationalPhone(payload.phone)) return
       if (!editingAccount.value && phoneRuExists.value) {
         accountError.value = 'Уже добавлен — отредактируйте существующий'
         return
       }
-      payload.phone = normalizeRussianPhone(payload.phone)
+      payload.phone = normalizeInternationalPhone(payload.phone)
     }
     const missingFields = selectedAccountPolicy.value.requiredFields
       .filter(field => !String(payload[field] || '').trim())

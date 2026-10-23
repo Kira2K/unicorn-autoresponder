@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { validateStudentProfile, profileAge, profileFullName, isRussianPhone, normalizeRussianPhone } from './student-profile-validation.ts';
+import { validateStudentProfile, profileAge, profileFullName, isInternationalPhone, normalizeInternationalPhone } from './student-profile-validation.ts';
 const options = { today: '2026-10-05', englishLevelIds: [1] };
 const complete = () => ({ firstName: 'Кира', lastName: 'Самсонова', middleName: '', birthDate: '20.04.2000', englishLevelId: '1',
   readyForInterviewInEnglishIn2Months: 'No', educationEntries: [{ uni: 'Университет', faculty: 'Факультет', grade: 'Бакалавр', yearOfEnd: '2022' }],
@@ -42,8 +42,13 @@ test('workplaces preserve current flags and reject duplicates or separator ambig
   for (const rows of [[{ companyName: 'Ozon, Avito' }], [{ companyName: 'Yandex' }, { companyName: 'yandex ' }], [{ companyName: 'a'.repeat(101) }]])
     assert.ok(validateStudentProfile({ ...complete(), workPlaces: rows }, options).errors.workPlaces);
 });
-test('Russian phone accepts only +7 and ten digits after permitted normalization', () => {
-  assert.equal(normalizeRussianPhone('8 (977) 544-21-05'), '+79775442105');
-  for (const value of ['8 (977) 544-21-05', '+7 999 123-45-67']) assert.equal(isRussianPhone(value), true);
-  for (const value of ['+15551234567', '+7999', 'call +79991234567', '79991234567']) assert.equal(isRussianPhone(value), false);
+test('HH contact phone accepts international codes without substituting country code digits', () => {
+  assert.equal(normalizeInternationalPhone('8 (977) 544-21-05'), '89775442105');
+  assert.equal(normalizeInternationalPhone('+8 (977) 544-21-05'), '+89775442105');
+  assert.equal(normalizeInternationalPhone('+856 20 123 456'), '+85620123456');
+  for (const value of ['+8 (977) 544-21-05', '+7 999 123-45-67', '+15551234567', '+44 7700 900123',
+    '+375291234567', '+380501234567', '+995555123456', '+998901234567', '+85620123456', '+123456', '+123456789012345'])
+    assert.equal(isInternationalPhone(value), true, value);
+  for (const value of ['', '+', '+7999', '+0123456789', '+1234567890123456', 'call +79991234567', '79991234567', '8 (977) 544-21-05', '++995555123456'])
+    assert.equal(isInternationalPhone(value), false, value);
 });
