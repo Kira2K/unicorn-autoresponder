@@ -362,34 +362,36 @@ async function sendClientAutoResponderReports(
   runStartedAt: number,
   data: AutoResponderCollectedData
 ): Promise<OrchestratorStatus> {
-  status = addLifecycleEvent(
-    status,
-    runStartedAt,
-    'sending client Telegram report'
-  )
-  await withTimeout(
-    sendManualVacanciesToTelegram(
-      clientData.commonChatId,
-      `${clientData.clientName} / ${clientData.market}`,
-      data.manualVacancies,
-      data.responseCount,
-      data.vacancyTransitionCount,
-      isClientReportSuccessful(status),
-      status.manualVacanciesCleanup
-    ),
-    ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
-    `Client Telegram report timed out after ${ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS}ms`
-  )
+  if (data.manualVacancies.length > 0) {
+    status = addLifecycleEvent(
+      status,
+      runStartedAt,
+      'sending client Telegram report'
+    )
+    await withTimeout(
+      sendManualVacanciesToTelegram(
+        clientData.commonChatId,
+        `${clientData.clientName} / ${clientData.market}`,
+        data.manualVacancies,
+        data.responseCount,
+        data.vacancyTransitionCount,
+        isClientReportSuccessful(status),
+        status.manualVacanciesCleanup
+      ),
+      ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS,
+      `Client Telegram report timed out after ${ORCHESTRATOR_CLIENT_REPORT_TIMEOUT_MS}ms`
+    )
 
-  status = {
-    ...status,
-    manualVacanciesSent: true
+    status = {
+      ...status,
+      manualVacanciesSent: true
+    }
+    status = addLifecycleEvent(
+      status,
+      runStartedAt,
+      'client Telegram report sent'
+    )
   }
-  status = addLifecycleEvent(
-    status,
-    runStartedAt,
-    'client Telegram report sent'
-  )
 
   try {
     if (shouldSendParserLogsToTelegram(status, data.parserLogs)) {
