@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { CLIENT_TRAINING_STATUSES, isClientTrainingStatus } from "../../../shared/client-training-status.ts";
 import {
   ACCOUNT_KINDS,
   isReminderWindow,
@@ -33,6 +34,13 @@ const state = {
   lastSentAt: null,
   statusChangeId: "2",
 };
+
+test("training classification accepts only the three exact persisted values", () => {
+  assert.deepEqual(CLIENT_TRAINING_STATUSES, ["studying", "studying hard", "studying soft"]);
+  for (const value of CLIENT_TRAINING_STATUSES) assert.equal(isClientTrainingStatus(value), true);
+  for (const value of [null, undefined, "studying hard ", "Studying soft", "studying_hard", "studying other", 7, {}])
+    assert.equal(isClientTrainingStatus(value), false);
+});
 test("same status and events before activation never send", () => {
   const c = client({ status: "onboarding" });
   for (const change of [
@@ -195,6 +203,10 @@ test("matrix follows status and market; RU ignores foreign accounts and HH comes
   const expect = [
     ["studying", "ru", 3],
     ["studying", "en", 7],
+    ["studying hard", "ru", 3],
+    ["studying hard", "en", 7],
+    ["studying soft", "ru", 3],
+    ["studying soft", "both", 7],
     ["hh_ru process", "ru", 4],
     ["hh_both process", "both", 8],
     ["hh_en process", "en", 9],
@@ -204,6 +216,37 @@ test("matrix follows status and market; RU ignores foreign accounts and HH comes
     const result = planReminder(client({ status, market, indicators }), state);
     assert.equal(result.kind, "send");
     if (result.kind === "send") assert.equal(result.missing!.length, count);
+  }
+});
+
+test("both training stages preserve studying reminder rules for every account combination", () => {
+  for (const status of ["studying hard", "studying soft"])
+    for (const market of ["ru", "en", "both"] as const)
+      for (let mask = 0; mask < 512; mask++) {
+        const indicators = Object.fromEntries(ACCOUNT_KINDS.map((kind, index) =>
+          [kind, mask & (1 << index) ? "не заполнен" : "заполнен"])) as Client["indicators"];
+        const patch = { market, indicators };
+        assert.deepEqual(planReminder(client({ ...patch, status }), state),
+          planReminder(client({ ...patch, status: "studying" }), state), `${status}/${market}/${mask}`);
+      }
+});
+
+test("training-stage changes do not greet, reset cooldown, or enable other roles", () => {
+  for (const status of ["studying hard", "studying soft"]) {
+    const c = client({ status, missingStopList: true });
+    assert.deepEqual(planStatusMessage(c, {
+      id: "99", oldStatus: "studying hard", newStatus: status, at: state.now,
+    }, enabled), { kind: "skip", reason: status === "studying hard"
+      ? "not_a_current_new_transition" : "no_status_template" });
+    assert.equal(planReminder(c, { ...state, statusChangedAt: state.now }).kind, "send");
+    assert.deepEqual(planReminder(c, { ...state, statusChangedAt: state.now,
+      lastSentAt: new Date(state.now.getTime() - 47 * 3600000) }), { kind: "skip", reason: "cooldown" });
+    assert.deepEqual(planReminder(c, { ...state, lastHHTransitionAt: state.now }),
+      { kind: "skip", reason: "cooldown" });
+    for (const role of ["клиент", "реферал", "фейк", ""])
+      assert.equal(planReminder({ ...c, role }, state).kind, "skip");
+    assert.equal(planReminder({ ...c, market: null }, state).kind, "error");
+    assert.equal(planReminder(c, { ...state, now: at("2026-10-15T16:00:00Z") }).kind, "skip");
   }
 });
 test("missing market or impossible RU state goes to support, never to the student", () => {

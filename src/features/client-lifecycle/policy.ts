@@ -1,7 +1,9 @@
 /** TAS-143: scheduling/recipient policy. No DB, ENV, HTTP, or writes here. */
+import { CLIENT_TRAINING_STATUSES, isClientTrainingStatus } from "../../../shared/client-training-status.ts";
+
 export const CLIENT_STATUSES = [
   "onboarding",
-  "studying",
+  ...CLIENT_TRAINING_STATUSES,
   "hh_ru process",
   "hh_both process",
   "on ru market",
@@ -177,7 +179,7 @@ export function planReminder(
   if (
     ![
       "onboarding",
-      "studying",
+      ...CLIENT_TRAINING_STATUSES,
       "hh_ru process",
       "hh_both process",
       "on ru market",
@@ -243,7 +245,7 @@ export function planReminder(
   const kinds: AccountKind[] = [
     ...(client.market === "ru" ? basicRu : basicEn),
   ];
-  if (!["onboarding", "studying"].includes(client.status)) kinds.push("hh_ru");
+  if (client.status !== "onboarding" && !isClientTrainingStatus(client.status)) kinds.push("hh_ru");
   if (["hh_en process", "on en market"].includes(client.status))
     kinds.push("hh_en");
   const missing = [
