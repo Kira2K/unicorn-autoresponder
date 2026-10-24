@@ -10,6 +10,17 @@ export interface LinkLabIntake {
 }
 export type IntakeTransaction = <T>(run: (session: SqlSession, tx: PostgresTransaction) => Promise<T>) => Promise<T>;
 
+/** Called inside the caller's client-locked transaction after saving LinkedIn credentials. */
+export async function syncLinkLabAccount(sql: SqlSession, clientId: number) {
+  const existing = await sql.query('SELECT client_id FROM noco.linklab WHERE client_id=$1', [clientId]);
+  if (existing.rows.length) return;
+  await sql.query('SELECT id FROM noco.platform_accounts WHERE clients_id=$1 FOR UPDATE', [clientId]);
+  const selected = (await sql.query(`SELECT * FROM (${linkLabBaseQuery}) chosen WHERE client_id=$1`, [clientId])).rows[0];
+  if (!selected?.platform_account_id || selected.data_issue) return;
+  await sql.query('INSERT INTO noco.linklab(client_id,platform_account_id) VALUES($1,$2)', [clientId, selected.platform_account_id]);
+  await sql.query("UPDATE noco.linklab_changes SET handoff=true,source='cabinet' WHERE client_id=$1 AND version=1", [clientId]);
+}
+
 /** SQL only. The caller owns transactions and permissions; no ENV or external sends. */
 export function createLinkLabIntake(transaction: IntakeTransaction, cvTableId: string,
   lockCv: (sql: SqlSession, id: number) => Promise<unknown>): LinkLabIntake {
@@ -20,15 +31,7 @@ export function createLinkLabIntake(transaction: IntakeTransaction, cvTableId: s
         const saved = await save(tx);
         if (Number(saved.data.clients_id) !== clientId) throw Error('linklab_owner_mismatch');
         if (Number(saved.data.platforms_id) !== 16) return saved;
-        const existing = await sql.query('SELECT client_id FROM noco.linklab WHERE client_id=$1', [clientId]);
-        if (existing.rows.length) return saved; // Never reset a working account or re-send its handoff.
-        await sql.query('SELECT id FROM noco.platform_accounts WHERE clients_id=$1 FOR UPDATE', [clientId]);
-        const selected = (await sql.query(`SELECT * FROM (${linkLabBaseQuery}) chosen WHERE client_id=$1`, [clientId])).rows[0];
-        if (!selected?.platform_account_id || selected.data_issue) return saved;
-        await sql.query('INSERT INTO noco.linklab(client_id,platform_account_id) VALUES($1,$2)',
-          [clientId, selected.platform_account_id]);
-        await sql.query("UPDATE noco.linklab_changes SET handoff=true,source='cabinet' WHERE client_id=$1 AND version=1",
-          [clientId]);
+        await syncLinkLabAccount(sql, clientId);
         return saved;
       });
     },

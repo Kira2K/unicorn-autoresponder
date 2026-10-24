@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "linkedin:intake:test": "node --test src/features/linkedin-automation/console-intake/*.test.mts src/features/web-console/backend/linkedin-intake-routes.test.mts src/features/web-console/frontend/src/linkedin-intake.test.js",
+    "linkedin:intake:e2e": "node src/features/web-console/e2e/linkedin-octo.e2e.mts",
     "clients:check": "node src/features/client-lifecycle/cli.mts",
     "clients:test": "node --test src/features/client-lifecycle/*.test.ts src/features/client-lifecycle/*.test.mts",
     "octo:test:serve": "node --env-file=.env src/features/octo-access-test/index.mts",

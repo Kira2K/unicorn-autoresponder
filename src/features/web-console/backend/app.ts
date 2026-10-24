@@ -455,6 +455,7 @@ function createMockCvTailoringService(): CvTailoringService {
 
 function createWebConsoleApp(options: {
   octoService?: import('../../octo-access/service.mts').OctoService
+  linkedinIntake?: import('../../linkedin-automation/console-intake/service.mts').LinkedInIntakeService
   repository?: WebConsoleRepository
   linkedinStorage?: import('./storage-options.ts').LinkedInStorageOptions
   dolphinLeaseService?: DolphinLeaseService
@@ -1350,6 +1351,8 @@ function createWebConsoleApp(options: {
 
   const { registerOctoRoutes } = require('./octo-routes.ts') as typeof import('./octo-routes.ts')
   registerOctoRoutes(app, requireAuth, options.octoService)
+  const { registerLinkedInIntakeRoutes } = require('./linkedin-intake-routes.ts') as typeof import('./linkedin-intake-routes.ts')
+  registerLinkedInIntakeRoutes(app, requireAuth, options.linkedinIntake)
 
   app.get('/api/dolphin/profiles/status', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {

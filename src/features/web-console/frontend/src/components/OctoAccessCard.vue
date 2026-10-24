@@ -1,10 +1,12 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { octoApi, octoGrantForDisplay, octoProxyDraft } from '../octo-api.js'
-import OctoOnboarding from './OctoOnboarding.vue'
+import OctoManualSetup from './OctoManualSetup.vue'
+import OctoProxyFields from './OctoProxyFields.vue'
 import { octoOnboardingBusy } from '../octo-onboarding.js'
 
-const props = defineProps({ clientId: { type: [Number, String], required: true } })
+const props = defineProps({ clientId: { type: [Number, String], required: true }, setupEnabled: { type: Boolean, default: true } })
+const emit = defineEmits(['status', 'access-issued', 'proxy-changed'])
 const visible = ref(false)
 const status = ref({ profiles: [], requiredLocales: [] })
 const grants = ref({})
@@ -94,6 +96,7 @@ async function refresh(version) {
     const nextStatus = await octoApi.profileStatus({ signal: controller.signal })
     if (!active(version)) return
     status.value = nextStatus
+    emit('status', nextStatus)
     visible.value = true
     message.value = ''
     const profileIds = new Set(nextStatus.profiles.map(profile => String(profile.id)))
@@ -116,6 +119,7 @@ async function refresh(version) {
         const grant = await octoApi.grant(grantId, { signal: controller.signal })
         if (active(version) && grants.value[profile.id]?.id === current?.id) {
           grants.value = { ...grants.value, [profile.id]: octoGrantForDisplay(grant) }
+          if (profile.locale === 'en' && grant.phase === 'granted' && grant.expiresAt > Date.now()) emit('access-issued', profile.id)
           if (['preparing', 'granted'].includes(grant.phase)) delete requestErrors.value[profile.id]
         }
       } catch (error) {
@@ -167,6 +171,7 @@ async function saveProxy(profile) {
   proxyMessages.value[profile.id] = ''
   try {
     await octoApi.saveProxy(profile.id, proxyDrafts.value[profile.id], { signal: controller.signal })
+    emit('proxy-changed')
     if (active(version)) {
       const draft = proxyDrafts.value[profile.id]
       proxyDrafts.value[profile.id] = octoProxyDraft({ type: draft.type, host: draft.host, port: draft.port })
@@ -252,7 +257,7 @@ onUnmounted(() => {
   <section v-if="visible" class="octo-card" aria-labelledby="octo-title">
     <h2 id="octo-title">Профиль Octo — бета</h2>
     <p>Создай профили Octo Browser и получи временный доступ отдельно для каждого рынка.</p>
-    <OctoOnboarding :status="status" @queued="onboardingQueued" @denied="denied" />
+    <OctoManualSetup v-if="setupEnabled" :status="status" @queued="onboardingQueued" @denied="denied" />
     <p v-if="status.provisioning?.phase === 'blocked' || status.provisioning?.error" role="alert">
       {{ status.provisioning.error || 'Создание профилей заблокировано.' }}
     </p>
@@ -295,32 +300,17 @@ onUnmounted(() => {
         <p v-else-if="profile.proxy?.error" role="alert">Не удалось обновить прокси. Обратитесь к команде поддержки.</p>
         <p v-if="proxyMessages[profile.id]" role="status">{{ proxyMessages[profile.id] }}</p>
       </div>
-      <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :data-testid="`octo-proxy-form-${profile.id}`" @submit.prevent="saveProxy(profile)">
-        <fieldset :disabled="!canEditProxy(profile)">
-          <legend>Настроить прокси</legend>
-          <label class="octo-field">Тип прокси
-            <select v-model="proxyDrafts[profile.id].type" :data-testid="`octo-proxy-type-${profile.id}`" aria-label="Тип прокси">
-              <option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks4">SOCKS4</option><option value="socks5">SOCKS5</option>
-            </select>
-          </label>
-          <label class="octo-field">Адрес прокси
-            <input v-model="proxyDrafts[profile.id].host" type="text" required autocomplete="off" spellcheck="false" :data-testid="`octo-proxy-host-${profile.id}`" aria-label="Адрес прокси">
-          </label>
-          <label class="octo-field">Порт прокси
-            <input v-model="proxyDrafts[profile.id].port" type="number" min="1" max="65535" step="1" required :data-testid="`octo-proxy-port-${profile.id}`" aria-label="Порт прокси">
-          </label>
-          <label class="octo-field">Логин прокси
-            <input v-model="proxyDrafts[profile.id].login" type="text" autocomplete="off" spellcheck="false" :data-testid="`octo-proxy-login-${profile.id}`" aria-label="Логин прокси">
-          </label>
-          <label class="octo-field">Пароль прокси
-            <input v-model="proxyDrafts[profile.id].password" type="password" autocomplete="new-password" :data-testid="`octo-proxy-password-${profile.id}`" aria-label="Пароль прокси">
-          </label>
-          <label class="octo-field">URL смены IP (необязательно)
-            <input v-model="proxyDrafts[profile.id].changeIpUrl" type="url" autocomplete="off" spellcheck="false" :data-testid="`octo-proxy-change-ip-url-${profile.id}`" aria-label="URL смены IP">
-          </label>
-          <button type="submit" :data-testid="`octo-proxy-save-${profile.id}`">{{ proxySaving[profile.id] ? 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
-        </fieldset>
-      </form>
+      <details class="octo-proxy-settings">
+        <summary>Свой прокси — дополнительные настройки</summary>
+        <p>Этот раздел нужен только для пользователей со своей настройкой прокси.</p>
+        <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :data-testid="`octo-proxy-form-${profile.id}`" @submit.prevent="saveProxy(profile)">
+          <fieldset :disabled="!canEditProxy(profile)">
+            <legend>Настроить прокси</legend>
+            <OctoProxyFields v-model="proxyDrafts[profile.id]" :prefix="`octo-proxy-${profile.id}`" />
+            <button type="submit" :data-testid="`octo-proxy-save-${profile.id}`">{{ proxySaving[profile.id] ? 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
+          </fieldset>
+        </form>
+      </details>
     </article>
     <p class="octo-note">После окончания срока доступа уже открытый браузер можно продолжать использовать. Для завершения работы закройте его.</p>
   </section>

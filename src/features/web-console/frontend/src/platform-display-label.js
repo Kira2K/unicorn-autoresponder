@@ -1,4 +1,5 @@
 const labels = {
+  email_outlook: 'Почта Outlook',
   email_ru: 'Email для ру рынка',
   email_en: 'Email для зарубежного рынка',
   phone_ru: 'Телефон для ру рынка',

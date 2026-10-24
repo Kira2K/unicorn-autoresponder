@@ -11,10 +11,11 @@ import { advanceOnboarding } from './onboarding-workflow.mts';
 import { octoClientAllowed } from './access-policy.mts';
 import { advanceDeletion } from './deletion-workflow.mts';
 export function createOctoRuntime({ store, api, config, token, getClient, now = Date.now,
-  listen = createActionLogListener, report = () => {}, onboarding, passwordBridge }: {
+  listen = createActionLogListener, report = () => {}, onboarding, passwordBridge, allowLegacyChecks = true }: {
   store: OctoStore; api: CloudApi; config: OctoConfig; token: string; getClient(id: number): Promise<WebClient>;
   now?: () => number; listen?: typeof createActionLogListener; report?: (event: { code: string; profileId?: number }) => void;
   onboarding?: OnboardingDependencies;
+  allowLegacyChecks?: boolean;
   passwordBridge?: { id: string; ownerEmail: string };
 }) {
   let lease: Awaited<ReturnType<OctoStore['leader']>>, listener: ReturnType<typeof listen> | undefined;
@@ -124,6 +125,7 @@ export function createOctoRuntime({ store, api, config, token, getClient, now = 
         const dependencies = onboarding ?? { checker: { check: unavailable, best: unavailable },
           catalogue: { list: unavailable, validate: unavailable }, dolphin: { list: async () => [], proxy: unavailable } };
         const job = advanceOnboarding(state, { ...dependencies, store, check, now,
+          allowLegacyChecks,
           reserve: id => service.reserve(id, true),
           saveProxy: (clientId, id, input, operationId) => service.queueProxy(clientId, id, input, operationId)
         }).catch(error => report({ code: safeCode(error) })).finally(() => { setupJobs.delete(state.clientId); });

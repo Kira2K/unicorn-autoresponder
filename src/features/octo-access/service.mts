@@ -45,13 +45,15 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
       const existing = await store.list(clientId), operation = (await store.clientState(clientId))?.setup;
       if (existing.some(p => p.deletion)) throw new OctoError('octo_profile_deleting', 409);
       const missing = requiredLocalesForMarket(c.market).filter(locale => !existing.some(p => p.locale === locale));
-      if (missing.includes('en') && (!operation || operation.phase !== 'provisioning' || operation.source === 'none' ||
+      const explicitSetup = operation?.phase === 'provisioning' &&
+        (operation.source === 'direct' || (operation.source === 'manual' && !!operation.input));
+      if (missing.includes('en') && !explicitSetup && (!operation || operation.phase !== 'provisioning' || operation.source === 'none' ||
         !operation.input || typeof operation.score !== 'number' ||
         (operation.source !== 'nodemaven' && operation.score < 70 && !operation.acceptLowScore)))
         throw new OctoError('octo_proxy_setup_required', 409);
       if (missing.length && onboarding && (await onboarding.dolphin.list(clientId)).length && !operation?.confirmDolphin)
         throw new OctoError('octo_dolphin_confirmation_required', 409);
-      return reserveClientProfiles(store, c, ownProxy, now, password);
+      return reserveClientProfiles(store, c, ownProxy || !!explicitSetup, now, password);
     },
     async ensure(clientId: number, ownProxy = false) {
       await this.reserve(clientId, ownProxy);

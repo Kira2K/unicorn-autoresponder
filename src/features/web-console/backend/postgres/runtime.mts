@@ -27,6 +27,8 @@ import { runLifecyclePass } from '../../../client-lifecycle/pass.mts';
 import { createLifecycleRuntime } from '../../../client-lifecycle/runtime.mts';
 import { createClientSender } from '../../../client-lifecycle/sender.mts';
 import { loadClientNotificationSettings } from '../../../client-lifecycle/postgres-settings.mts';
+import { createLinkedInIntakeStore } from '../../../linkedin-automation/console-intake/postgres-store.mts';
+import { createLinkedInIntakeService } from '../../../linkedin-automation/console-intake/service.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const bridgeConfig = readBridgeConfig(env);
@@ -35,6 +37,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
   let octo: ReturnType<typeof createOctoRuntime> | undefined, octoLockPool: ReturnType<typeof createPostgresPool> | undefined;
   let octoBridge: ReturnType<typeof bridgeRoutes> | undefined;
   let lifecycle: ReturnType<typeof createLifecycleRuntime> | undefined;
+  let linkedinIntake: ReturnType<typeof createLinkedInIntakeService> | undefined;
   const close = () => closing ??= (async () => {
     try { await lifecycle?.stop(); } finally {
       try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
@@ -71,7 +74,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       if (clients.some(c => !c.id || !c.calendarEmail))
         throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
       const api = createCloudApi(env.OCTO_API_TOKEN!);
-      octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig,
+      octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig, allowLegacyChecks: false,
         token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
         onboarding: {
           developmentHelp: createCheckerDevelopmentHelp(env),
@@ -83,10 +86,15 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           dolphin: createDolphinProxySource({ profiles: id => options.repository.getDolphinProfilesForClient(id) })
         },
         report: event => console.error(JSON.stringify({ feature: 'octo', ...event })) });
+      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab);
+      await intakeStore.checkSchema();
+      linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
+        getClient: id => options.repository.getClientById(id),
+        hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }
-    return { options: { ...options, ...(octo ? { octoService: octo.service } : {}) }, close, octoBridge,
+    return { options: { ...options, ...(octo ? { octoService: octo.service } : {}), ...(linkedinIntake ? { linkedinIntake } : {}) }, close, octoBridge,
       startBackground: async () => { await octo?.start(); await lifecycle?.start(); } };
   } catch (error) { await close(); throw error; }
 }

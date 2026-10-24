@@ -6,6 +6,7 @@ import LinkedInAuthTab from './LinkedInAuthTab.vue'
 import StudentProfile from './StudentProfile.vue'
 import StudentWorkPlaces from './StudentWorkPlaces.vue'
 import OctoAccessCard from './components/OctoAccessCard.vue'
+import LinkedInOctoWorkflow from './components/LinkedInOctoWorkflow.vue'
 import BrowserWelcomeDialog from './components/BrowserWelcomeDialog.vue'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 import { usernamePayload } from './username-input.js'
@@ -1296,6 +1297,11 @@ async function loadClientOptions() {
   platforms.value = result.platforms || []
 }
 
+async function refreshLinkedInAccounts() {
+  try { dashboard.value = await api.clientDashboard() }
+  catch { /* The intake has its own saved receipt; a dashboard refresh must not resubmit it. */ }
+}
+
 async function loadDolphinStatus(targetClientId = null) {
   const status = await api.dolphinProfileStatus(targetClientId)
   if (isProvider.value && targetClientId) {
@@ -2510,7 +2516,8 @@ onUnmounted(() => {
         </Card>
       </div>
 
-      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled">
+      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled"
+        :class="{ 'linkedin-intake-layout': isClient && dolphinProfileStatus && ['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase()) }">
         <template #profile>
         <Card class="profile-card">
           <template #title>
@@ -2985,7 +2992,11 @@ onUnmounted(() => {
           </template>
         </Card>
 
-        <OctoAccessCard v-if="isClient && dashboard?.client?.id" :key="dashboard.client.id" :client-id="dashboard.client.id" />
+        <template v-if="isClient && !pageLoading && dashboard?.client?.id && dolphinProfileStatus">
+          <OctoAccessCard v-if="String(dashboard.client.market || '').trim().toLowerCase() === 'ru' && !dolphinProfileStatus.existingProfiles?.length" :key="dashboard.client.id" :client-id="dashboard.client.id" />
+          <LinkedInOctoWorkflow v-else-if="['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase())"
+            :key="`linkedin-${dashboard.client.id}`" :client="dashboard.client" :has-dolphin="!!dolphinProfileStatus.existingProfiles?.length" @saved="refreshLinkedInAccounts" />
+        </template>
         <Card v-if="adminCanOpenDolphinProfiles" class="action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>
           <template #subtitle>Open profiles for the latest client</template>

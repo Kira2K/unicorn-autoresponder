@@ -6,6 +6,14 @@ is required. Production access lasts 120 seconds from verified publication.
 
 ## Runtime and storage
 
+The student entry flow is documented in
+[`../linkedin-automation/console-intake/README.md`](../linkedin-automation/console-intake/README.md).
+New Console setup uses structured manual proxy fields for an existing LinkedIn
+account, or a durable direct/no-proxy setup when preparing a new account. These
+explicit sources skip NodeMaven and proxy scoring. Legacy setup records remain
+readable; the SQL Console stops undispatched retired checker jobs rather than
+restarting them. Existing in-flight provisioning/grant cleanup is preserved.
+
 Password-free owner reopening is a separate acceptance requirement. The cloud
 password flag does not prove saved archive readability. See
 [`archive-acceptance/README.md`](archive-acceptance/README.md) for the independent
