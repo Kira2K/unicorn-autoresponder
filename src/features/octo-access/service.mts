@@ -8,6 +8,7 @@ import { canEditProxy, proxyBusy } from './proxy-workflow.mts';
 import { octoClientAllowed } from './access-policy.mts';
 import { profileRules, reserveClientProfiles } from './profile-reservation.mts';
 import { createOnboardingService } from './onboarding-service.mts';
+import { readGrantCandidate } from './acquire-profile.mts';
 import type { OnboardingDependencies } from './onboarding-service.mts';
 const { requiredLocalesForMarket } = profileRules;
 export function createOctoService({ store, config, getClient, now = Date.now, password = generateProfilePassword,
@@ -65,23 +66,11 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
     async locations(clientId: number, level: unknown, country?: unknown, region?: unknown) { await client(clientId); return setup.locations(clientId, level, country, region); },
     async acquire(clientId: number, profileId: number) {
       allow(clientId);
-      if (!Number.isSafeInteger(profileId) || profileId < 1) throw new OctoError('invalid_profile_id', 400);
       for (let attempt = 0; attempt < 4; attempt++) {
-        const p = await store.get(profileId);
-        if (!p || p.clientId !== clientId) throw new OctoError('not_found', 404);
-        if (p.deletion) throw new OctoError('octo_profile_deleting', 409);
-        const operation = (await store.clientState(clientId))?.setup;
-        if (operation && operation.phase !== 'complete' && p.createdAt >= operation.createdAt)
-          throw new OctoError('octo_profile_not_ready', 409);
-        if (proxyBusy(p)) throw new OctoError('octo_proxy_pending', 409);
-        if (p.grant && ['preparing', 'granted'].includes(p.grant.phase)) {
-          if (p.grant.expiresAt && p.grant.expiresAt <= now()) throw new OctoError('octo_cleanup_pending', 409);
-          return { id: p.grant.id, phase: p.grant.phase };
-        }
-        if (p.grant && p.grant.phase !== 'complete') throw new OctoError('octo_cleanup_pending', 409);
-        if (p.phase !== 'ready' || !p.uuid) throw new OctoError('octo_profile_not_ready', 409);
-        if (!canGrant(p.uuid)) throw new OctoError('octo_listener_unavailable', 503);
-        const events = await store.events(p.uuid);
+        const { profile: p, existing } = await readGrantCandidate(store, clientId, profileId, now);
+        if (existing) return existing;
+        if (!canGrant(p.uuid!)) throw new OctoError('octo_listener_unavailable', 503);
+        const events = await store.events(p.uuid!);
         p.grant = { id: randomUUID(), phase: 'preparing', alias: `John Doe ${randomUUID().slice(0, 8)}`,
           createdAt: now(), eventsAfter: events.at(-1)?.seq ?? 0, original: structuredClone(p.original),
           originalProxyTitle: p.proxy?.title };

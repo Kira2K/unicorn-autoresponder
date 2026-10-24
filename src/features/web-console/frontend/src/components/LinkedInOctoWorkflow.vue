@@ -9,19 +9,21 @@ const loaded = ref(false), loading = ref(false), loadError = ref(''), message = 
 const scenario = ref(''), existing = ref(false), newSaved = ref(false), opened = ref(false), status = ref(null)
 const form = ref({ url: '', login: '', password: '', outlookLogin: '', outlookPassword: '', firstName: '', lastName: '', realLocation: '', blockedAccounts: [], loggedIn: false })
 const secrets = ref({ hasPassword: false, hasOutlookPassword: false })
+const editLocked = ref(false)
 const controller = new AbortController()
 const outlookError = ref('')
 const ready = computed(() => infrastructureReady(status.value))
 const historyFields = { fullName: 'Какие имя и фамилия стояли?', country: 'Какая страна была указана?', company: 'Какая компания была указана?', position: 'Какая должность была указана?', blockedAt: 'Когда заблокировали аккаунт?', newFullName: 'Имя и фамилия латиницей для нового аккаунта' }
-const canSave = computed(() => loaded.value && !saving.value && (scenario.value === 'new' || (!props.hasDolphin && ready.value && opened.value && form.value.loggedIn)))
+const canSave = computed(() => loaded.value && !props.hasDolphin && !editLocked.value && !saving.value && (scenario.value === 'new' || (ready.value && opened.value && form.value.loggedIn)))
 async function load() {
-  if (loading.value) return
+  if (loading.value || props.hasDolphin) return
   loading.value = true; loadError.value = ''
   try {
     const data = await intakeRequest('GET', undefined, controller.signal)
     if (controller.signal.aborted) return
     form.value = { ...form.value, ...data, realLocation: data.realLocation || props.client.realLocation || '', password: '', outlookPassword: '', loggedIn: false }
     secrets.value = data; scenario.value = intakeScenario(data); existing.value = !!scenario.value
+    editLocked.value = data.editLocked === true
     newSaved.value = !!data.hasOutlookPassword && !!data.firstName; loaded.value = true
   } catch (error) { if (error.name !== 'AbortError') loadError.value = 'Не удалось загрузить данные LinkedIn. Попробуйте ещё раз.' }
   finally { loading.value = false }
@@ -40,12 +42,11 @@ async function save() {
   }
   saving.value = true; message.value = ''
   try {
-    await intakeRequest('PUT', { ...form.value, scenario: scenario.value }, controller.signal)
+    const result = await intakeRequest('PUT', { ...form.value, scenario: scenario.value }, controller.signal)
     if (controller.signal.aborted) return
     if (scenario.value === 'new') {
       newSaved.value = true; secrets.value.hasOutlookPassword = true
-      message.value = props.hasDolphin ? 'Данные сохранены. Продолжайте использовать существующие профили Dolphin. Сам аккаунт LinkedIn пока не создаётся.' :
-        'Данные сохранены. Создаём профили Octo — это произойдёт в фоновом режиме. Сам аккаунт LinkedIn пока не создаётся.'
+      message.value = result.task ? (result.task.created ? 'Заявка успешно создана' : 'Заявка обновлена') : 'Данные сохранены. Подготавливаем профили Octo.'
     } else { existing.value = true; secrets.value.hasPassword = true; message.value = 'Данные LinkedIn сохранены.' }
     form.value.password = ''; form.value.outlookPassword = ''; form.value.loggedIn = false; emit('saved')
   } catch (error) {
@@ -56,6 +57,7 @@ async function save() {
       loadError.value = 'Результат сохранения неизвестен. Нажмите «Повторить», чтобы перечитать сохранённые данные. Повторная отправка не запускается автоматически.'
       return
     }
+    if (error.message === 'linkedin_task_student_edit_locked') editLocked.value = true
     message.value = error.message.includes('ambiguous') ? 'Найдено несколько аккаунтов. Обратитесь в поддержку: данные не перезаписаны.' :
       'Не удалось сохранить. Проверьте поля и состояние Octo; при повторной ошибке обратитесь в поддержку.'
   } finally { saving.value = false }
@@ -64,11 +66,12 @@ onMounted(load)
 onUnmounted(() => { controller.abort(); form.value.password = ''; form.value.outlookPassword = '' })
 </script>
 <template>
-  <section v-if="!hasDolphin || (loaded && !existing) || loadError" class="linkedin-card" aria-labelledby="linkedin-intake-title" data-testid="linkedin-octo-workflow">
+  <section v-if="!hasDolphin" class="linkedin-card" aria-labelledby="linkedin-intake-title" data-testid="linkedin-octo-workflow">
     <h2 id="linkedin-intake-title">LinkedIn</h2>
     <p v-if="loading" role="status">Загружаем данные…</p>
     <div v-if="loadError" role="alert">{{ loadError }} <button type="button" @click="load">Повторить</button></div>
-    <template v-if="loaded">
+    <p v-if="editLocked" role="status">Заявка обработана экспертом. Для изменения данных обратитесь в поддержку.</p>
+    <template v-if="loaded && !editLocked">
       <div v-if="!existing" class="scenario-buttons" aria-label="Выберите сценарий LinkedIn">
         <button type="button" :aria-pressed="scenario === 'existing'" @click="selectScenario('existing')">У меня есть LinkedIn</button>
         <button type="button" :aria-pressed="scenario === 'new'" @click="selectScenario('new')">Нет LinkedIn / аккаунт заблокирован</button>
@@ -113,7 +116,7 @@ onUnmounted(() => { controller.abort(); form.value.password = ''; form.value.out
           </article>
           <button type="button" @click="form.blockedAccounts.push({})">＋ Добавить заблокированный аккаунт</button>
         </section>
-        <p>{{ hasDolphin ? 'Существующие профили Dolphin сохраняются. Новые профили Octo не создаются.' : 'После сохранения недостающие профили Octo будут созданы без прокси; готовые профили и их прокси сохраняются.' }} Сам аккаунт LinkedIn сейчас не создаётся.</p>
+        <p>После сохранения создадим заявку эксперту на подготовку LinkedIn. Недостающие профили Octo подготовятся автоматически; готовые профили и их прокси сохраняются.</p>
         <button type="submit" :disabled="!canSave">{{ saving ? 'Сохраняем…' : hasDolphin ? 'Сохранить данные' : 'Сохранить и подготовить Octo' }}</button>
       </form>
       <p v-if="message" role="status">{{ message }}</p>

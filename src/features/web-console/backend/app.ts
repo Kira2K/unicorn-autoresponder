@@ -456,6 +456,8 @@ function createMockCvTailoringService(): CvTailoringService {
 function createWebConsoleApp(options: {
   octoService?: import('../../octo-access/service.mts').OctoService
   linkedinIntake?: import('../../linkedin-automation/console-intake/service.mts').LinkedInIntakeService
+  linkedinCreator?: import('../../linkedin-automation/creation-tasks/service.mts').CreationTaskService
+  linkedinCreatorAuth?: { login: string; password: string }
   repository?: WebConsoleRepository
   linkedinStorage?: import('./storage-options.ts').LinkedInStorageOptions
   dolphinLeaseService?: DolphinLeaseService
@@ -905,6 +907,14 @@ function createWebConsoleApp(options: {
   }
 
   app.use(attachSession)
+  // This contractor receives only task-scoped APIs; legacy non-client fallbacks stay unreachable.
+  app.use((req: AuthedRequest, res: Response, next: NextFunction) => {
+    if (req.webSession?.role === 'linkedin_creator' && req.path.startsWith('/api/') &&
+      !req.path.startsWith('/api/linkedin-creator/') && !['/api/auth/me','/api/auth/logout'].includes(req.path)) {
+      res.status(403).json({ error: 'forbidden' }); return
+    }
+    next()
+  })
   registerLinkedInAuthRoutes({
     app,
     requireAdmin: requireRole('admin'),
@@ -985,6 +995,14 @@ function createWebConsoleApp(options: {
       const email = String(req.body?.email ?? '').trim().toLowerCase()
       const login = String(req.body?.email ?? '').trim()
       const password = String(req.body?.password ?? '')
+
+      const creator = options.linkedinCreatorAuth
+      if (creator?.login && creator.password && options.linkedinCreator &&
+        login.toLowerCase() === creator.login.toLowerCase() && password === creator.password) {
+        const session = sessions.create({ role: 'linkedin_creator', email: creator.login })
+        setSessionCookie(res, session)
+        res.json(publicSession(session)); return
+      }
 
       if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
         const session = sessions.create({ role: 'admin', email })
@@ -1353,6 +1371,8 @@ function createWebConsoleApp(options: {
   registerOctoRoutes(app, requireAuth, options.octoService)
   const { registerLinkedInIntakeRoutes } = require('./linkedin-intake-routes.ts') as typeof import('./linkedin-intake-routes.ts')
   registerLinkedInIntakeRoutes(app, requireAuth, options.linkedinIntake)
+  const { registerCreationTaskRoutes } = require('./linkedin-creation-routes.ts') as typeof import('./linkedin-creation-routes.ts')
+  registerCreationTaskRoutes(app, requireAuth, options.linkedinCreator)
 
   app.get('/api/dolphin/profiles/status', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
@@ -1907,6 +1927,9 @@ function createWebConsoleApp(options: {
   })
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (String((error as any)?.code || '').startsWith('linkedin_task_')) {
+      res.status(409).json({ error: (error as any).code }); return
+    }
     const upstreamStatus = Number((error as any)?.response?.status)
     const upstreamCode = String((error as any)?.code ?? '')
     if (upstreamStatus === 429 || upstreamCode === 'noco_rate_limited') {

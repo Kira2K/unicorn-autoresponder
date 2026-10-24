@@ -1,0 +1,80 @@
+// Explicitly authorized live write for the existing OctoGuide fixture only; never starts workers.
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { chromium } from 'playwright';
+import { openSqlConsole } from '../backend/postgres/runtime.mts';
+import { createPostgresPool } from '../../../integrations/postgres/pg-pool.mts';
+import { readPostgresAppDbConfig } from '../../../platform/db/postgres/config.mts';
+import { createReadSession } from '../../../integrations/postgres/read-session.mts';
+const require=createRequire(import.meta.url);
+const {createWebConsoleApp,CLIENT_PASSWORD}=require('../backend/app.ts');
+const express=require('express');
+if(!process.argv.includes('--apply-octoguide'))throw Error('Explicit --apply-octoguide required');
+const config=readPostgresAppDbConfig(process.env),pool=createPostgresPool(config),read=createReadSession(pool,config.database);
+const runtime=await openSqlConsole(process.env);
+const app=createWebConsoleApp(runtime.options);
+app.use(express.static(resolve('dist/web-console')));
+app.use((_r:unknown,s:import('express').Response)=>s.sendFile(resolve('dist/web-console/index.html')));
+const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
+const url=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+const browser=await chromium.launch({headless:true});
+try {
+  const client=await runtime.options.repository.findClientByCalendarEmail('octoguide@julian.com');
+  assert.equal(client?.id,261);
+  const before=await read(async s=>(await s.query('SELECT profile_id,revision,state FROM noco.octo_profiles WHERE client_id=261 ORDER BY profile_id')).rows);
+  assert.equal(before.length,2);
+  const intake=await runtime.options.linkedinIntake!.load(261);
+  assert.equal(intake.url,'');assert.equal(intake.hasOutlookPassword,true);
+  const student=await browser.newContext();
+  await student.addInitScript(()=>localStorage.setItem('webConsole.octoWelcome.v1.261','closed'));
+  const page=await student.newPage();page.setDefaultTimeout(30000);await page.goto(url);
+  await page.getByTestId('email-input').fill('octoguide@julian.com');await page.locator('#password').fill(CLIENT_PASSWORD);
+  await page.getByTestId('login-button').click();
+  const card=page.getByTestId('linkedin-octo-workflow');
+  await card.getByRole('button',{name:'Нет LinkedIn / аккаунт заблокирован',exact:true}).click();
+  const form=card.getByTestId('linkedin-new-form');
+  assert.equal(await form.getByLabel('Логин от новой почты Outlook',{exact:true}).inputValue(),intake.outlookLogin);
+  assert.equal(await form.getByLabel('Пароль от новой почты Outlook',{exact:true}).inputValue(),'');
+  const firstResponse=page.waitForResponse(r=>r.url().endsWith('/api/client/linkedin-intake')&&r.request().method()==='PUT');
+  await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click();
+  const first=await firstResponse;assert.equal(first.status(),200);const firstData=await first.json();
+  assert.ok(firstData.task?.id);await card.getByText(firstData.task.created?'Заявка успешно создана':'Заявка обновлена',{exact:true}).waitFor();
+  const secondResponse=page.waitForResponse(r=>r.url().endsWith('/api/client/linkedin-intake')&&r.request().method()==='PUT');
+  await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click();
+  const second=await secondResponse;assert.equal(second.status(),200);
+  assert.equal((await second.json()).task.id,firstData.task.id);await card.getByText('Заявка обновлена',{exact:true}).waitFor();
+  const concurrent=await Promise.all([1,2].map(()=>student.request.put(url+'/api/client/linkedin-intake',{
+    data:{...intake,scenario:'new',outlookPassword:'',password:'',loggedIn:false}
+  })));
+  for(const response of concurrent){assert.equal(response.status(),200);assert.equal((await response.json()).task.id,firstData.task.id);}
+  const after=await read(async s=>(await s.query('SELECT profile_id,revision,state FROM noco.octo_profiles WHERE client_id=261 ORDER BY profile_id')).rows);
+  assert.deepEqual(after,before,'student task save must not recreate or mutate ready profiles/proxies');
+  const tasks=await read(async s=>(await s.query("SELECT * FROM noco.linkedin_creation_task WHERE client_id=261 AND source='student_intake'")).rows);
+  assert.equal(tasks.length,1);assert.equal(tasks[0].status,'не начата');
+  await mkdir('tmp/linkedin-creation',{recursive:true});
+  await page.screenshot({path:'tmp/linkedin-creation/student-live.png',fullPage:true});
+  const provider=await browser.newContext({permissions:['clipboard-read','clipboard-write']});
+  const p=await provider.newPage();p.setDefaultTimeout(30000);await p.goto(url);
+  await p.getByTestId('email-input').fill(process.env.LINKEDIN_CREATOR_LOGIN!);await p.locator('#password').fill(process.env.LINKEDIN_CREATOR_PASSWORD!);
+  await p.getByTestId('login-button').click();await p.getByTestId('linkedin-creator-console').waitFor();
+  await p.getByTestId(`creation-task-${firstData.task.id}`).click();await p.getByTestId('creation-task-detail').waitFor();
+  assert.equal(await p.getByLabel('Статус заявки').locator('option').allTextContents().then(v=>v.includes('выполнение подтверждено')),false);
+  const doneOption=p.getByLabel('Статус заявки').locator('option').filter({hasText:'сделана экспертом'});
+  assert.equal(await doneOption.evaluate((el:HTMLOptionElement)=>el.disabled),true);
+  await p.locator('.octo-profile').waitFor();assert.equal(await p.locator('.octo-profile').count(),1);
+  assert.ok((await p.locator('.octo-profile h3').innerText()).endsWith('EN'));
+  for(const path of ['/api/provider/clients','/api/client/me','/api/admin/latest-client','/api/octo/profiles/status','/api/linkedin/auth/status?targetClientId=261'])
+    assert.equal((await provider.request.get(url+path)).status(),403);
+  const keyResponse=await provider.request.post(url+'/api/linkedin-creator/nodemaven-key');assert.equal(keyResponse.status(),200);
+  assert.equal(keyResponse.headers()['cache-control'],'no-store');
+  const key=(await keyResponse.json()).key;assert.ok(key);
+  assert.ok(!(await p.locator('body').innerText()).includes(key));
+  assert.ok(!(await p.evaluate(()=>JSON.stringify(localStorage))).includes(key));
+  await p.screenshot({path:'tmp/linkedin-creation/provider-live.png',fullPage:true});
+  await p.setViewportSize({width:390,height:844});await p.screenshot({path:'tmp/linkedin-creation/provider-live-mobile.png',fullPage:true});
+  assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+  console.log(JSON.stringify({clientId:261,taskId:firstData.task.id,status:tasks[0].status,duplicateSaveVerified:true,concurrentSaveVerified:true,profilesPreserved:true,providerLoginVerified:true,enOnly:true,workersStarted:false}));
+  await student.close();await provider.close();
+} finally {await browser.close();await new Promise<void>(r=>server.close(()=>r()));await runtime.close();await pool.end();}

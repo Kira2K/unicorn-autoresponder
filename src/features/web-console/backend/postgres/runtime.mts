@@ -13,6 +13,10 @@ import { createSecuredGroupReader } from './secured-group.mts';
 import { readOctoConfig } from '../../../octo-access/config.mts';
 import { createOctoPostgresStore } from '../../../octo-access/postgres-store.mts';
 import { createOctoRuntime } from '../../../octo-access/runtime.mts';
+import type { OctoService } from '../../../octo-access/service.mts';
+import { readControlConfig } from '../../../octo-access/control-config.mts';
+import { createControlAcquire } from '../../../octo-access/control-client.mts';
+import { controlRoutes } from '../../../octo-access/control-routes.mts';
 import { createCloudApi } from '../../../octo-access/cloud-api.mts';
 import { createProxyChecker } from '../../../octo-access/proxy-checker.mts';
 import { createCheckerDevelopmentHelp } from '../../../octo-access/checker-development-help.mts';
@@ -29,22 +33,31 @@ import { createClientSender } from '../../../client-lifecycle/sender.mts';
 import { loadClientNotificationSettings } from '../../../client-lifecycle/postgres-settings.mts';
 import { createLinkedInIntakeStore } from '../../../linkedin-automation/console-intake/postgres-store.mts';
 import { createLinkedInIntakeService } from '../../../linkedin-automation/console-intake/service.mts';
+import { createCreationTaskStore } from '../../../linkedin-automation/creation-tasks/postgres-store.mts';
+import { createCreationTaskService } from '../../../linkedin-automation/creation-tasks/service.mts';
+import { createTaskProxyCapture } from '../../../linkedin-automation/creation-tasks/proxy-capture.mts';
+import { guardAccount } from '../../../linkedin-automation/creation-tasks/account-guard.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const bridgeConfig = readBridgeConfig(env);
+  const control = readControlConfig(env);
   const config = readPostgresAppDbConfig(env), pool = open(config);
   let closing: Promise<void> | undefined;
   let octo: ReturnType<typeof createOctoRuntime> | undefined, octoLockPool: ReturnType<typeof createPostgresPool> | undefined;
   let octoBridge: ReturnType<typeof bridgeRoutes> | undefined;
+  let octoControl: ReturnType<typeof controlRoutes> | undefined, octoService: OctoService | undefined;
   let lifecycle: ReturnType<typeof createLifecycleRuntime> | undefined;
   let linkedinIntake: ReturnType<typeof createLinkedInIntakeService> | undefined;
+  let linkedinCreator: ReturnType<typeof createCreationTaskService> | undefined;
   const close = () => closing ??= (async () => {
     try { await lifecycle?.stop(); } finally {
       try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
     }
   })();
   try {
-    const db = await createPostgresClient(pool, config.database, { writable: true });
+    const tasksEnabled = env.LINKEDIN_CREATION_TASKS_ENABLED === '1';
+    const db = await createPostgresClient(pool, config.database, { writable: true,
+      ...(tasksEnabled ? { beforeWrite: async (s,table,key,data) => { if(table===tableIds.accounts) await guardAccount(s,key,data); } } : {}) });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
     const create = (tx: PostgresTransaction, table: string, data: Readonly<Record<string, unknown>>) => tx.createRecord(table, data);
     const linklab = env.LINKLAB_ENABLED === '1' ? await openLinkLabIntake(pool, config.database, tableIds.cv) : undefined;
@@ -65,6 +78,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     }
     const octoConfig = readOctoConfig(env);
     if (bridgeConfig && !octoConfig) throw new OctoError('octo_bridge_configuration_required', 503);
+    if (control && !octoConfig) throw new OctoError('octo_control_configuration_required', 503);
     if (octoConfig) {
       // The advisory-lock connection must not occupy the two application pool slots.
       octoLockPool = open(config);
@@ -86,15 +100,29 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           dolphin: createDolphinProxySource({ profiles: id => options.repository.getDolphinProfilesForClient(id) })
         },
         report: event => console.error(JSON.stringify({ feature: 'octo', ...event })) });
-      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab);
+      octoService = control?.url ? { ...octo.service, acquire: createControlAcquire({ ...control, url: control.url,
+        store: octoStore, config: octoConfig, allowed: octo.service.allowed }) } : octo.service;
+      if (control && !control.url) octoControl = controlRoutes({ secret: control.secret, store: octoStore,
+        config: octoConfig, service: octo.service, ready: uuid => octo!.grantReady(uuid) });
+      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, tasksEnabled);
       await intakeStore.checkSchema();
       linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
         getClient: id => options.repository.getClientById(id),
         hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
+      if (tasksEnabled) {
+        const tasks = createCreationTaskStore(pool,config.database,!!linklab);
+        await tasks.checkSchema();
+        linkedinCreator = createCreationTaskService({ store: tasks, profiles: octoStore, octo: octoService,
+          client: id => options.repository.getClientById(id),
+          secrets: (id,account) => options.repository.getPlatformAccountSecrets(id,account),
+          capture: createTaskProxyCapture({store:octoStore,api,config:octoConfig,octo:octo.service}),
+          nodeMavenKey: () => env.NODEMAVEN_API_KEY || '' });
+      }
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }
-    return { options: { ...options, ...(octo ? { octoService: octo.service } : {}), ...(linkedinIntake ? { linkedinIntake } : {}) }, close, octoBridge,
-      startBackground: async () => { await octo?.start(); await lifecycle?.start(); } };
+    return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),
+      ...(linkedinCreator ? { linkedinCreator, linkedinCreatorAuth: { login: env.LINKEDIN_CREATOR_LOGIN || '', password: env.LINKEDIN_CREATOR_PASSWORD || '' } } : {}) }, close, octoBridge, octoControl,
+      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start(); } };
   } catch (error) { await close(); throw error; }
 }

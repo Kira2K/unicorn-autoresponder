@@ -7,9 +7,9 @@ import { parseIntake } from './contracts.mts';
 import { tableIds } from '../../web-console/backend/postgres/tables.mts';
 const input = () => parseIntake({ scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'mail-secret',
   firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', blockedAccounts: [{ fullName: 'Old Alex' }, { country: 'UK' }] });
-function fixture() {
-  const state: { accounts: Record<string, unknown>[]; client?: Record<string, unknown>; profiles: Record<string, unknown>[] } = { accounts: [], profiles: [], client: undefined };
-  const control = { failQueue: false, uncertain: false }, calls: string[] = [];
+function fixture(creationTasks = false) {
+  const state: { accounts: Record<string, unknown>[]; client?: Record<string, unknown>; profiles: Record<string, unknown>[]; tasks: Record<string,unknown>[] } = { accounts: [], profiles: [], tasks: [], client: undefined };
+  const control = { failQueue: false, failTask: false, uncertain: false }, calls: string[] = [];
   let backup = structuredClone(state);
   let nextId = 1;
   const pool: SqlPool = { async end() {}, async connect() { return { release() {}, async query(sql, values = []) {
@@ -26,6 +26,16 @@ function fixture() {
       backup = structuredClone(state);
       if (control.uncertain) { control.uncertain = false; throw Error('ack lost'); }
       return { rows: [] };
+    }
+    if (sql.includes('FROM noco.linkedin_creation_task')) return { rows: state.tasks.filter(t=>Number(t.client_id)===Number(values[0])) };
+    if (sql.startsWith('INSERT INTO noco.linkedin_creation_task')) {
+      if(control.failTask) throw Error('task failed');
+      let row=state.tasks.find(t=>t.client_id===values[0]&&t.source==='student_intake');
+      const created=!row;
+      if(!row) { row={id:state.tasks.length+1,client_id:values[0],linkedin_account_id:values[1],outlook_account_id:values[2],source:'student_intake',status:'не начата',version:1,created_at:new Date(),updated_at:new Date()}; state.tasks.push(row); }
+      else row.version=Number(row.version)+1;
+      if(values[3]) {delete row.proxy_uuid;delete row.proxy_saved_at;delete row.proxy_profile_id;}
+      return {rows:[{...row,created}]};
     }
     if (sql.includes('FROM noco.clients')) return { rows: [{ id: values[0] }] };
     if (sql.includes('FROM noco.platform_accounts a JOIN')) return { rows: structuredClone(state.accounts) };
@@ -58,8 +68,32 @@ function fixture() {
     }
     return { rows: [] };
   } }; } };
-  return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore') };
+  return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore', false, creationTasks) };
 }
+
+test('student save creates one referenced task, repeated saves update it and preserve other manual tasks',async()=>{
+  const f=fixture(true);
+  const first=await f.store.save(7,input(),['ru','en']);
+  assert.equal(first.task?.created,true);
+  f.state.tasks.push({...f.state.tasks[0],id:99,source:'manual'});
+  const next=await f.store.save(7,{...input(),outlookPassword:''},['ru','en']);
+  assert.equal(next.task?.created,false);assert.equal(next.task?.id,first.task?.id);assert.equal(f.state.tasks.length,2);
+  assert.equal(f.state.tasks[0].linkedin_account_id,f.state.accounts[0].id);
+  assert.equal(f.state.tasks[0].outlook_account_id,f.state.accounts[1].id);
+  assert.ok(!JSON.stringify(f.state.tasks).includes('mail-secret'));
+});
+test('task failure rolls back both accounts and Octo intent; locked task rejects stale student save',async()=>{
+  const f=fixture(true);f.control.failTask=true;
+  await assert.rejects(f.store.save(7,input(),['ru','en']),{code:'postgres_write_failed'});
+  assert.equal(f.state.accounts.length,0);assert.equal(f.state.client,undefined);
+  f.control.failTask=false;await f.store.save(7,input(),['ru','en']);
+  for(const status of ['сделана экспертом','выполнение подтверждено']) {
+    f.state.tasks[0].status=status;
+    const original=structuredClone(f.state.accounts);
+    await assert.rejects(f.store.save(7,{...input(),firstName:'Changed'},['ru','en']),{code:'linkedin_task_student_edit_locked'});
+    assert.deepEqual(f.state.accounts,original);
+  }
+});
 test('intake and direct Octo intent commit together; repeated save preserves intent and existing secrets', async () => {
   const f = fixture(); await f.store.save(7, input(), ['ru','en']);
   const original = structuredClone(f.state.client);

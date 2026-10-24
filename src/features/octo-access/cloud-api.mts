@@ -21,6 +21,17 @@ export function createCloudApi(token: string, fetchImpl: typeof fetch = fetch): 
       ...(typeof row.external_id === 'string' ? { externalId: row.external_id } : {}) };
   };
   return {
+    async readProfileProxy(uuid) {
+      const row = await base.cloudRequest(`/profiles/${encodeURIComponent(uuid)}`);
+      if (!row?.proxy) throw new OctoError('octo_proxy_required', 409);
+      const value = row.proxy;
+      if (typeof value.uuid === 'string' && value.uuid) {
+        const found = (await list('/proxies')).filter(p => normalizeUuid(p.uuid) === normalizeUuid(value.uuid));
+        if (found.length !== 1) throw new OctoError('octo_proxy_unavailable', 409);
+        return { saved: proxy(found[0]) };
+      }
+      return { inline: parseProxyInput({ ...value, type: value.type === 'socks' ? 'socks4' : value.type, changeIpUrl: value.change_ip_url }) };
+    },
     listFolders: base.listFolders, createProfile: base.createProfile,
     async profileExists(uuid) {
       try { await base.getProfile(uuid); return true; }

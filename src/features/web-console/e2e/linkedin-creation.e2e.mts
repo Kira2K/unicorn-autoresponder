@@ -1,0 +1,105 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { chromium } from 'playwright';
+import type { CreationTaskService } from '../../linkedin-automation/creation-tasks/service.mts';
+const require=createRequire(import.meta.url),express=require('express');
+const {createWebConsoleApp}=require('../backend/app.ts');
+const task={id:1,clientId:901,status:'не начата',version:1,proxySavedAt:undefined as string|undefined,fio:'Test Student',stack:'Java'};
+const secondTask={...task,id:2,clientId:902,fio:'Second Student'};
+const intake={firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookLogin:'mail@outlook.com',hasOutlookPassword:true,
+  blockedAccounts:[{fullName:'Blocked Test',country:'France'},{company:'Old Company'}],url:'',login:'',hasPassword:false};
+let acquired=0,grants=0,proxySaved=0;
+let missingSecondProfile=true;
+const service={
+  async list(){return task.status==='выполнение подтверждено'?[]:[{...task},{...secondTask}];},
+  async detail(id:unknown){if(task.status==='выполнение подтверждено')throw Object.assign(Error(),{code:'linkedin_task_not_found'});
+    const selected=Number(id)===2?secondTask:task;
+    return {task:{...selected},intake:{...intake},client:{id:selected.clientId,fio:selected.fio,stack:selected.stack}};},
+  key(){return{key:'mock-key-copy-only'};},async secrets(){return{password:'mock-mail-secret'};},
+  async profileStatus(id:unknown){return{profiles:Number(id)===2&&missingSecondProfile?[]:[{id:2,locale:'en',title:'EN Test',phase:'ready',canEditProxy:true,proxy:{configured:true,phase:proxySaved?'complete':undefined}}],requiredLocales:['en'],onboarding:{phase:'idle'}};},
+  async saveProxy(id:unknown,profileId:unknown,input:any){assert.equal(Number(id),1);assert.equal(Number(profileId),2);assert.equal(input.host,'demo-proxy.example.test');assert.equal(input.type,'socks5');proxySaved++;return{queued:true};},
+  async acquire(_id:unknown,profileId:unknown){assert.equal(profileId,2);acquired++;return{id:'grant-1',phase:'preparing'};},
+  async grant(){grants++;return{id:'grant-1',phase:'complete'};},
+  async capture(){task.version++;task.proxySavedAt=new Date().toISOString();return{...task};},
+  async result(_id:unknown,body:any){intake.url=body.url;intake.login=body.login;intake.hasPassword=!!body.password;task.version++;return{...task};},
+  async status(_id:unknown,body:any){assert.ok(task.proxySavedAt&&intake.url&&intake.hasPassword);task.status=body.status;task.version++;return{...task};}
+} as unknown as CreationTaskService;
+const app=createWebConsoleApp({useMockData:true,linkedinCreator:service,linkedinCreatorAuth:{login:'test-creator',password:'test-password'}});
+app.use(express.static(resolve('dist/web-console')));app.use((_r:unknown,s:import('express').Response)=>s.sendFile(resolve('dist/web-console/index.html')));
+const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
+const url=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+const browser=await chromium.launch({headless:true});
+try{
+  const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']}),page=await context.newPage();page.setDefaultTimeout(10000);
+  await page.goto(url);await page.getByTestId('email-input').fill('test-creator');await page.locator('#password').fill('test-password');await page.getByTestId('login-button').click();
+  const console=page.getByTestId('linkedin-creator-console');await console.waitFor();
+  await console.getByRole('button',{name:'Копировать ключ',exact:true}).click();await console.getByRole('button',{name:'Скопировано',exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),'mock-key-copy-only');
+  assert.ok(!(await console.innerText()).includes('mock-key-copy-only'));
+  let releaseDetail!:()=>void;
+  const heldDetail=new Promise<void>(resolve=>{releaseDetail=resolve;});
+  await page.route('**/api/linkedin-creator/tasks/1',async route=>{await heldDetail;await route.continue().catch(()=>{});},{times:1});
+  await page.getByTestId('creation-task-1').click();await page.getByTestId('creation-task-loader').waitFor();
+  assert.equal(await page.getByTestId('creation-task-1').getAttribute('aria-pressed'),'true');
+  assert.ok((await page.getByTestId('creation-task-1').getAttribute('class'))?.includes('task-button--selected'));
+  assert.equal(await page.getByTestId('creation-task-2').getAttribute('aria-pressed'),'false');
+  const copyWidth=await page.locator('.key-copy-button').evaluate(el=>el.getBoundingClientRect().width);
+  const rowWidth=await page.locator('.key-row').evaluate(el=>el.getBoundingClientRect().width);
+  assert.ok(Math.abs(copyWidth-rowWidth)<1,'NodeMaven copy spans the console width');
+  await mkdir('tmp/linkedin-creation',{recursive:true});await page.screenshot({path:'tmp/linkedin-creation/card-loader-mock.png',fullPage:true});
+  await page.getByTestId('creation-task-2').click();await page.getByRole('heading',{name:'Second Student',exact:true}).waitFor();
+  await page.getByText('Профиль Octo пока не создан. После подготовки он появится здесь.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).isDisabled(),true);
+  releaseDetail();
+  assert.equal(await page.getByTestId('creation-task-2').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.getByTestId('creation-task-1').getAttribute('aria-pressed'),'false');
+  await page.getByTestId('creation-task-1').click();await page.getByRole('heading',{name:'Test Student',exact:true}).waitFor();
+  const done=page.getByLabel('Статус заявки').locator('option').filter({hasText:'сделана экспертом'});
+  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),true);
+  await page.getByText('Blocked Test',{exact:true}).waitFor();await page.getByText('Old Company',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Копировать пароль Outlook',exact:true}).click();
+  await page.waitForFunction(async()=>await navigator.clipboard.readText()==='mock-mail-secret');
+  assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),'mock-mail-secret');
+  await page.getByRole('button',{name:'Получить доступ',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.octo-profile p')?.textContent?.includes('Доступ завершён'));
+  assert.equal(acquired,1);assert.ok(grants>0);
+  const proxyForm=page.getByTestId('octo-proxy-form-2');
+  assert.equal(await proxyForm.isVisible(),true,'expert proxy form is expanded without entering student account');
+  await proxyForm.getByTestId('octo-proxy-2-type').selectOption('socks5');
+  await proxyForm.getByLabel('Адрес прокси',{exact:true}).fill('demo-proxy.example.test');
+  await proxyForm.getByLabel('Порт прокси',{exact:true}).fill('1080');
+  await proxyForm.getByLabel('Логин прокси',{exact:true}).fill('fixture');
+  await proxyForm.getByLabel('Пароль прокси',{exact:true}).fill('mock-proxy-secret');
+  await proxyForm.getByRole('button',{name:'Сохранить прокси',exact:true}).click();
+  await page.getByText('Прокси отправлен на сохранение.',{exact:true}).waitFor();
+  assert.equal(proxySaved,1);
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Сохранить настройки прокси'&&!b.disabled));
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'');
+  await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor();
+  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),true,'proxy alone cannot complete missing result');
+  await page.getByLabel('Ссылка LinkedIn',{exact:true}).fill('https://linkedin.com/in/test-created');
+  await page.getByLabel('Логин LinkedIn',{exact:true}).fill('created@outlook.com');
+  await page.getByLabel('Пароль LinkedIn',{exact:true}).fill('mock-created-password');
+  await page.getByRole('button',{name:'Сохранить данные LinkedIn',exact:true}).click();await page.getByText('Данные LinkedIn сохранены.',{exact:true}).waitFor();
+  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false);
+  await page.reload();await page.getByTestId('creation-task-1').click();await page.getByTestId('creation-task-detail').waitFor();
+  assert.equal(await page.getByLabel('Ссылка LinkedIn',{exact:true}).inputValue(),'https://linkedin.com/in/test-created');
+  assert.equal(await page.getByLabel('Логин LinkedIn',{exact:true}).inputValue(),'created@outlook.com');
+  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),true,'completion requires a fresh successful proxy button after reopening');
+  await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor();
+  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false);
+  await page.getByLabel('Статус заявки').selectOption('сделана экспертом');await page.getByRole('button',{name:'Сохранить статус',exact:true}).click();
+  await page.getByText('Статус сохранён.',{exact:true}).waitFor();assert.equal(task.status,'сделана экспертом');
+  assert.equal(await page.getByTestId('creation-task-1').count(),1);
+  assert.equal(await page.getByLabel('Пароль LinkedIn',{exact:true}).inputValue(),'');
+  assert.ok(!(await page.evaluate(()=>JSON.stringify(localStorage))).includes('mock-'));
+  await mkdir('tmp/linkedin-creation',{recursive:true});await page.screenshot({path:'tmp/linkedin-creation/provider-completion-mock.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+  task.status='выполнение подтверждено';await page.getByRole('button',{name:'Обновить список',exact:true}).click();await page.getByText('Нет открытых заявок.',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('creation-task-1').count(),0);
+  await page.evaluate(()=>navigator.clipboard.writeText(''));
+  process.stdout.write('Contractor mock browser flow passed: loader, selected task, rapid switching, full-width copy, EN grant, masked copy, proxy/result completion gate, expert status, confirmation exclusion, mobile.\n');
+  await context.close();
+}finally{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}

@@ -10,7 +10,7 @@ test('intake rejects RU/outside-scope clients and ignores payload client identit
   const service = createLinkedInIntakeService({ store, allowed: id => id === 7, hasDolphin: async () => dolphin,
     getClient: async id => ({ ...mockClient(id), market }) });
   await assert.rejects(service.load(8), { code: 'forbidden' });
-  dolphin = true; await service.load(7);
+  dolphin = true; await assert.rejects(service.load(7), {code:'linkedin_intake_use_dolphin'});
   dolphin = false; market = 'Ru'; await assert.rejects(service.load(7), { code: 'forbidden' });
   market = 'En';
   await service.save(7, { clientId: 8, scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'secret',
@@ -18,7 +18,7 @@ test('intake rejects RU/outside-scope clients and ignores payload client identit
   assert.equal(savedId, 7);
 });
 
-test('Dolphin users can save Outlook preparation without queueing Octo or changing existing-account workflow', async () => {
+test('Dolphin users cannot enter either Octo intake scenario or create tasks', async () => {
   let creation: boolean | undefined;
   const store = { load: async () => ({ url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
     firstName: '', lastName: '', realLocation: '', blockedAccounts: [] }),
@@ -27,9 +27,9 @@ test('Dolphin users can save Outlook preparation without queueing Octo or changi
     } };
   const service = createLinkedInIntakeService({ store, allowed: () => true, hasDolphin: async () => true,
     getClient: async id => ({ ...mockClient(id), market: 'En', commonChatId: '' }) });
-  await service.save(7, { scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'secret',
-    firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' });
-  assert.equal(creation, false);
+  await assert.rejects(service.save(7, { scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'secret',
+    firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' }), {code:'linkedin_intake_use_dolphin'});
+  assert.equal(creation, undefined);
   await assert.rejects(service.save(7, { scenario: 'existing', url: 'https://linkedin.com/in/alex', login: 'alex', loggedIn: true }),
     { code: 'linkedin_intake_use_dolphin' });
 });

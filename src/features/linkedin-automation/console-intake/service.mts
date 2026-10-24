@@ -11,6 +11,7 @@ export function createLinkedInIntakeService(deps: {
 }) {
   async function client(id: number) {
     if (!deps.allowed(id)) throw new IntakeError('forbidden', 403);
+    if (await deps.hasDolphin(id)) throw new IntakeError('linkedin_intake_use_dolphin', 409);
     const value = await deps.getClient(id);
     if (!profileRules.requiredLocalesForMarket(value.market).includes('en')) throw new IntakeError('forbidden', 403);
     return value;
@@ -19,11 +20,9 @@ export function createLinkedInIntakeService(deps: {
     async load(id: number) { await client(id); return deps.store.load(id); },
     async save(id: number, raw: unknown) {
       const c = await client(id), data = parseIntake(raw);
-      const hasDolphin = await deps.hasDolphin(id);
-      if (hasDolphin && data.scenario === 'existing') throw new IntakeError('linkedin_intake_use_dolphin', 409);
-      if (data.scenario === 'new' && !hasDolphin && profileRules.getRequiredClientDataIssues(c, { requireCalendarEmail: true }).length)
+      if (data.scenario === 'new' && profileRules.getRequiredClientDataIssues(c, { requireCalendarEmail: true }).length)
         throw new IntakeError('octo_client_data_required', 409);
-      return deps.store.save(id, data, profileRules.requiredLocalesForMarket(c.market), { createOctoProfiles: !hasDolphin });
+      return deps.store.save(id, data, profileRules.requiredLocalesForMarket(c.market), { createOctoProfiles: true });
     }
   };
 }

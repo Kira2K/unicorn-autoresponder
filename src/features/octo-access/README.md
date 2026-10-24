@@ -75,6 +75,40 @@ existing cleanup to finish. Do not remove configuration before grants have drain
 
 ## Explicit setup
 
+### Two Consoles with one Octo worker
+
+Use the existing active backend as the only Octo worker. On that backend set
+`OCTO_CONTROL_SECRET` to a new, separate random server secret (at least 32 non-whitespace
+characters); leave `OCTO_CONTROL_URL` empty. The configured Console entrypoint mounts
+`POST /internal/octo-control/v1/ready` and `/grants` before its static fallback.
+
+On the secondary/local Console set the same secret and `OCTO_CONTROL_URL` to the worker's
+HTTPS **origin** (no path, credentials, query or fragment). Both use the same SQL database
+and Octo folder configuration. This mode does not start a second Octo worker or listener;
+other configured feature workers retain their own existing enablement. The local desktop
+bridge keeps its current backend configuration and does not move to the secondary Console.
+No migration is needed for the control transport. Without these new variables the old
+single-backend behavior is unchanged.
+
+Only acquire is delegated. Both student and task-scoped contractor routes receive the
+same injected service; the active backend calls the existing acquire implementation.
+Status, grant polling, provisioning/proxy intents and task capture retain shared SQL
+storage. Readiness checks compare the client/profile/UUID/operation and folder identity,
+then require current worker leadership and an event-history checkpoint. Authentication
+uses a dedicated bearer secret, never session cookies or browser-provided client IDs.
+Neither endpoint returns guest/profile passwords. Existing authenticated grant polling
+is still the only credential delivery path.
+
+Each acquire issues at most one mutation request. A lost response is reconciled against
+the same SQL binding/grant; unresolved results return `octo_control_uncertain` with no
+automatic resend or local-write fallback. Redirects are rejected. Keep the worker awake.
+An already issued, unexpired access can still be reused from SQL while the worker is
+unavailable; the shared acquisition checks preserve its original deadline and ownership.
+To roll out: deploy these routes disabled, configure the worker secret, verify readiness,
+then enable the local URL/secret and restart only the local Console. A 200 HTML page from
+the worker is not readiness: it means the route was not deployed. Never remove listener
+checks to work around an unavailable worker. Deployment remains an explicit operator action.
+
 For the existing local Octo Console configuration, run `npm run web:dev`, or
 `npm run web:backend` and `npm run web:frontend` in separate terminals.
 Both backend commands (`web:backend` and the watched `web:backend:dev`) load

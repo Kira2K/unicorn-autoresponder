@@ -13,6 +13,12 @@ export class IntakeError extends Error {
 }
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 export const isOutlookLogin = (value: unknown) => /^[^@\s]+@outlook\.com$/i.test(text(value));
+export function parseLinkedInResult(raw: Record<string, unknown>) {
+  const url = text(raw.url), login = text(raw.login), password = typeof raw.password === 'string' ? raw.password : '';
+  if (!/^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[^/?#\s]+([/?#][^\s]*)?$/i.test(url) || !login ||
+      [url, login, password].some(v => v.length > 4096)) throw new IntakeError('linkedin_intake_account_required');
+  return { url, login, password };
+}
 export function normalizeBlockedAccounts(value: unknown): BlockedAccount[] {
   if (!Array.isArray(value) || value.length > 100) throw new IntakeError('linkedin_intake_blocked_invalid');
   return value.map(item => {
@@ -54,8 +60,7 @@ export function parseIntake(value: unknown): LinkedInIntake {
   const outlookPassword = typeof raw.outlookPassword === 'string' ? raw.outlookPassword : '';
   if (password.length > 4096 || outlookPassword.length > 4096) throw new IntakeError('linkedin_intake_invalid');
   if (raw.scenario === 'existing') {
-    if (!/^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[^/?#\s]+([/?#][^\s]*)?$/i.test(data.url) || !data.login)
-      throw new IntakeError('linkedin_intake_account_required');
+    parseLinkedInResult(raw);
     if (raw.loggedIn !== true) throw new IntakeError('linkedin_intake_login_confirmation_required');
   } else {
     if (!isOutlookLogin(data.outlookLogin)) throw new IntakeError('linkedin_intake_outlook_required');

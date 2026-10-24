@@ -9,7 +9,8 @@ import { workingLocks } from './working-locks.mts';
 import { writeTransaction } from './working-session.mts';
 export type PostgresTransaction = ReturnType<typeof workingReads> & ReturnType<typeof workingCrud> &
   ReturnType<typeof workingLinks> & ReturnType<typeof workingLocks>;
-export async function createPostgresClient(pool: SqlPool, database: CopyDatabase, options: { writable?: boolean } = {}) {
+export async function createPostgresClient(pool: SqlPool, database: CopyDatabase, options: { writable?: boolean;
+  beforeWrite?(session: SqlSession, table: string, key?: readonly string[], data?: Readonly<Record<string, unknown>>): Promise<void> } = {}) {
   const read = createReadSession(pool, database), writable = options.writable === true;
   const catalog = await read(async s => createWorkingCatalog((await s.query(
     "SELECT definition FROM copy_meta.inventory WHERE definition ? 'sqlTable' OR definition ? 'sqlOnlyFor' ORDER BY id")).rows));
@@ -25,7 +26,12 @@ export async function createPostgresClient(pool: SqlPool, database: CopyDatabase
           failure ??= new PostgresReadError('parallel_transaction_operation');
           return Promise.reject(failure);
         }
-        const promise = (fn as (...values: unknown[]) => Promise<unknown>)(...args);
+        const promise = (async () => {
+          if (options.beforeWrite && ['createRecord','patchRecord','deleteRecord'].includes(name))
+            await options.beforeWrite(session, String(args[0]), name === 'createRecord' ? undefined : args[1] as string[],
+              name === 'createRecord' ? args[1] as Record<string, unknown> : args[2] as Record<string, unknown>);
+          return (fn as (...values: unknown[]) => Promise<unknown>)(...args);
+        })();
         pending = promise;
         void promise.then(() => { pending = undefined; }, e => { pending = undefined; failure = e; });
         return promise;

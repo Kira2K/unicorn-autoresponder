@@ -9,7 +9,7 @@ export function registerLinkedInIntakeRoutes(app: Express, requireAuth: RequestH
     try { res.json(await (save ? service.save(Number(id), req.body) : service.load(Number(id)))); }
     catch (error) {
       const e = error as { code?: string; status?: number };
-      const code = /^(linkedin_intake_|octo_|forbidden$|commit_uncertain$)/.test(e.code || '') ? e.code! : 'linkedin_intake_unavailable';
+      const code = /^(linkedin_intake_|linkedin_task_|octo_|forbidden$|commit_uncertain$)/.test(e.code || '') ? e.code! : 'linkedin_intake_unavailable';
       res.status(e.status || (code === 'forbidden' ? 403 : ['linkedin_intake_unavailable','commit_uncertain'].includes(code) ? 503 : 409)).json({ error: code });
     }
   };

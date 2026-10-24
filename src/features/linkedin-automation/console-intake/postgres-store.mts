@@ -12,6 +12,7 @@ import { syncLinkLabAccount } from '../linklab/intake.mts';
 import { readBlockedAccounts } from './contracts.mts';
 import type { LinkedInIntake } from './contracts.mts';
 import { tableIds } from '../../web-console/backend/postgres/tables.mts';
+import { assertStudentEditable, readStudentTask, saveStudentTask, studentEditLocked } from '../creation-tasks/student-task.mts';
 
 const accountQuery = `SELECT a.id,a.platforms_id,a.url,a.login,a.password,a.linkedin_first_name,
   a.linkedin_last_name,a.real_location,a.old_link_blocked,lower(p.name) AS platform
@@ -23,7 +24,7 @@ function select(rows: Record<string, unknown>[], platform: string) {
   if (candidates.length > 1) throw new PostgresReadError('linkedin_intake_account_ambiguous');
   return candidates[0];
 }
-export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false) {
+export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false, creationTasks = false) {
   const read = createReadSession(pool, database);
   return {
     async checkSchema() { await read(async s => { await s.query(accountQuery + ' LIMIT 0', [0]); }); },
@@ -32,7 +33,8 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         const rows = (await s.query(accountQuery, [clientId])).rows;
         const li = select(rows, 'linkedin'), email = select(rows, 'email_outlook');
         // No secret is returned; leaving a password blank preserves its current value.
-        return { url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
+        const task = creationTasks ? await readStudentTask(s, clientId) : undefined;
+        return { ...(creationTasks ? { task, editLocked: await studentEditLocked(s,clientId) } : {}), url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
           outlookLogin: String(email?.login ?? ''), hasOutlookPassword: !!email?.password,
           firstName: String(li?.linkedin_first_name ?? ''), lastName: String(li?.linkedin_last_name ?? ''),
           realLocation: String(li?.real_location ?? ''), blockedAccounts: readBlockedAccounts(li?.old_link_blocked) };
@@ -44,6 +46,9 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         await s.query('SELECT pg_advisory_xact_lock(730644, $1::integer)', [clientId]);
         const client = (await s.query('SELECT id FROM noco.clients WHERE id=$1 AND NOT COALESCE(__nc_deleted,false) FOR UPDATE', [clientId])).rows[0];
         if (!client) throw new PostgresReadError('record_not_found');
+        if (creationTasks && (await s.query('SELECT id FROM noco.dolphin_profiles WHERE "02_clients_id"=$1 AND browser=\'dolphin\' AND NOT coalesce(__nc_deleted,false) LIMIT 1', [clientId])).rows.length)
+          throw new PostgresReadError('linkedin_intake_use_dolphin');
+        if (creationTasks) await assertStudentEditable(s, clientId);
         const rows = (await s.query(accountQuery + ' FOR UPDATE OF a', [clientId])).rows;
         const li = select(rows, 'linkedin'), email = select(rows, 'email_outlook');
         if (data.scenario === 'new' && String(li?.url ?? '').trim()) throw new PostgresReadError('linkedin_intake_existing_account');
@@ -90,7 +95,12 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
             ...(data.outlookPassword ? { password: data.outlookPassword } : {}) });
           if (options.createOctoProfiles) await queueDirectProfiles(s, clientId, locales);
         }
-        return { saved: true, linkedinAccountId, ...(outlookAccountId ? { outlookAccountId } : {}) };
+        const task = creationTasks && outlookAccountId ? await saveStudentTask(s, clientId, linkedinAccountId, outlookAccountId,
+          !li || !email || String(li.linkedin_first_name ?? '') !== data.firstName ||
+          String(li.linkedin_last_name ?? '') !== data.lastName || String(li.real_location ?? '') !== data.realLocation ||
+          String(li.old_link_blocked ?? '') !== JSON.stringify(data.blockedAccounts) || String(email.login ?? '') !== data.outlookLogin ||
+          !!data.outlookPassword && data.outlookPassword !== email.password) : undefined;
+        return { saved: true, ...(task ? { task } : {}), linkedinAccountId, ...(outlookAccountId ? { outlookAccountId } : {}) };
       });
     }
   };

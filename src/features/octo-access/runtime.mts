@@ -29,8 +29,8 @@ export function createOctoRuntime({ store, api, config, token, getClient, now = 
     if (stopped || !lease) throw new OctoError('octo_leadership_lost');
     try { await lease.check(); } catch { throw new OctoError('octo_leadership_lost'); }
   };
-  const service = createOctoService({ store, config, getClient, now, onboarding,
-    canGrant: uuid => !!lease && listener?.status().checkpoint !== undefined && signature.split(',').includes(uuid) && !lastError });
+  const canGrant = (uuid: string) => !!lease && listener?.status().checkpoint !== undefined && signature.split(',').includes(uuid) && !lastError;
+  const service = createOctoService({ store, config, getClient, now, onboarding, canGrant });
   async function disconnect() {
     await listener?.stop(); listener = undefined; signature = '';
     const previous = lease; lease = undefined; await previous?.release();
@@ -143,6 +143,9 @@ export function createOctoRuntime({ store, api, config, token, getClient, now = 
   }
   return {
     service,
+    async grantReady(uuid: string) {
+      try { await checked(); return canGrant(uuid); } catch { return false; }
+    },
     async bridgeCheckpoint() {
       await checked(); const c = listener?.status().checkpoint;
       return c === undefined ? undefined : `${listenerGeneration}:${c}`;
