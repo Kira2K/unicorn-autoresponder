@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCreatorDesktopSession, assertCreatorGuestProof } from './linkedin-creator-session.mts';
+import { createCreatorDesktopSession, createManualCreatorSession, assertCreatorGuestProof } from './linkedin-creator-session.mts';
 const guest = { email: 'guest@example.test', password: 'private-guest' };
 const owner = { email: 'owner@example.test', password: 'private-owner-password' };
 test('desktop switching checks closed profiles and reads back the actual identity', async () => {
@@ -42,4 +42,15 @@ test('both tasks require guest proof, owner launches cannot pass the full E2E', 
   for (const results of [[], [{ taskId: 1, guestVerified: true }], [{ taskId: 1 }, { taskId: 9 }]])
     assert.throws(() => assertCreatorGuestProof(results), { code: 'denis_e2e_guest_proof_missing' });
   assertCreatorGuestProof([{ taskId: 1, guestVerified: true }, { taskId: 9, guestVerified: true }]);
+});
+test('manual mode observes account switching without reading passwords or sending auth mutations', async () => {
+  let name = owner.email, clock = 0;
+  const paths: string[] = [], notices: string[] = [];
+  const session = createManualCreatorSession({ guestEmail: guest.email, ownerEmail: owner.email,
+    now: () => clock, wait: async () => { clock += 1000; name = guest.email; },
+    notify: async role => { notices.push(role); }, local: async path => {
+      paths.push(path); return path.endsWith('/active') ? [] : { username: name };
+    } });
+  await session.verifyOwner(); await session.guest();
+  assert.deepEqual(notices, ['owner','guest']); assert.ok(paths.every(p => !p.includes('/auth/')));
 });

@@ -135,3 +135,10 @@ before each grant/open, then back to the owner for journalled cleanup. It never 
 Both task 1 (client 261) and task 9 (client 266) require verified guest opening to pass.
 Artyom's mandatory proxy form source is **Октон Октонович, client 257**, not OctoGuide.
 Existing EN/RU profiles are reused; no real LinkedIn registration is performed.
+
+Alternatively use `--manual-desktop` instead of `--switch-desktop`. No owner password is
+required or read in that mode. After grant publication the visible Console shows the guest
+credentials; the operator uses Octo's Add/Switch account menu within 90 seconds. After normal
+profile closure the runner waits for the owner account before processing bridge cleanup.
+`operator-step.json` contains only the stage/required role/time; no credentials. An expired
+grant or missing guest identity fails the run rather than counting an owner launch as success.

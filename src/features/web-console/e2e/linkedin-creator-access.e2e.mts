@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import type { ManagedProfile, ProxyInput } from '../../octo-access/contracts.mts';
-import { createCreatorDesktopSession, assertCreatorGuestProof } from './linkedin-creator-session.mts';
+import { createCreatorDesktopSession, createManualCreatorSession, assertCreatorGuestProof } from './linkedin-creator-session.mts';
 const require = createRequire(import.meta.url), express = require('express');
 const { createWebConsoleApp } = require('../backend/app.ts');
 const { openSqlConsole } = await import('../backend/postgres/runtime.mts');
@@ -23,8 +23,9 @@ const { readPostgresAppDbConfig } = await import('../../../platform/db/postgres/
 const { createPostgresPool } = await import('../../../integrations/postgres/pg-pool.mts');
 const { createReadSession } = await import('../../../integrations/postgres/read-session.mts');
 const apply = process.argv.includes('--apply-denis');
-const switching = process.argv.includes('--switch-desktop');
-if (process.argv.slice(2).some(v => !['--apply-denis', '--preflight', '--proxy-from-octon', '--switch-desktop'].includes(v))) throw Error('invalid_e2e_argument');
+const manual = process.argv.includes('--manual-desktop');
+const switching = process.argv.includes('--switch-desktop') || manual;
+if (process.argv.slice(2).some(v => !['--apply-denis', '--preflight', '--proxy-from-octon', '--switch-desktop', '--manual-desktop'].includes(v))) throw Error('invalid_e2e_argument');
 const config = readOctoConfig(process.env), control = readControlConfig(process.env);
 if (!config) throw Error('octo_configuration_required');
 const db = readPostgresAppDbConfig(process.env), pool = createPostgresPool(db), read = createReadSession(pool, db.database);
@@ -36,7 +37,7 @@ const output = 'tmp/linkedin-creation/denis-access';
 let runtime: Awaited<ReturnType<typeof openSqlConsole>> | undefined;
 let server: import('node:http').Server | undefined, browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 let stage = 'preflight';
-let session: ReturnType<typeof createCreatorDesktopSession> | undefined;
+let session: Pick<ReturnType<typeof createCreatorDesktopSession>, 'guest' | 'owner' | 'verifyOwner'> | undefined;
 let journal: any, bridgeAgent: any;
 const attempted = new Set<string>(), stopSent = new Set<string>();
 function check(value: unknown, code: string): asserts value { if (!value) throw Object.assign(Error(code), { code }); }
@@ -112,7 +113,7 @@ try {
   }
   if ((await desktop.activeProfiles()).length) report.blockers.push('desktop_has_active_profiles');
   if (switching && !process.env.LINKEDIN_CREATOR_E2E_BRIDGE_CONFIG) report.blockers.push('desktop_bridge_configuration_required');
-  if (switching && !process.env.OCTO_E2E_OWNER_PASSWORD) report.blockers.push('owner_desktop_credentials_required');
+  if (switching && !manual && !process.env.OCTO_E2E_OWNER_PASSWORD) report.blockers.push('owner_desktop_credentials_required');
   if (!switching && report.desktopRole !== 'guest') report.blockers.push('guest_desktop_required');
   if (!apply) { report.passed = report.blockers.length === 0; }
   else {
@@ -128,7 +129,10 @@ try {
       const { openJournal } = require(resolve('octo-bridge/journal.mjs'));
       journal = await openJournal(resolve(path, '../.state/journal.json'), bridge);
       bridgeAgent = createAgent({ config: bridge, journal });
-      session = createCreatorDesktopSession({ local, guest: config.guest,
+      session = manual ? createManualCreatorSession({ local, guestEmail: config.guest.email, ownerEmail: bridge.ownerEmail,
+        notify: async role => { console.log(JSON.stringify({ stage, operatorSwitchRequired: role }));
+          await mkdir(output,{recursive:true}); await writeFile(resolve(output,'operator-step.json'),JSON.stringify({ stage, role, at: new Date().toISOString() })); }
+      }) : createCreatorDesktopSession({ local, guest: config.guest,
         owner: { email: bridge.ownerEmail, token: process.env.OCTO_API_TOKEN!, password: process.env.OCTO_E2E_OWNER_PASSWORD } });
       await session.verifyOwner(); // Verify restoration credentials before any guest grant exists.
       await bridgeAgent.check();
@@ -185,8 +189,7 @@ try {
           ['type','host','port','login','password','changeIpUrl'].every(k =>
             ((saved as any)[k] ?? '') === ((proxy as any)[k] ?? '')), 'denis_e2e_proxy_not_persisted');
       }
-      if (session) await session.guest();
-      check(String((await local('/api/username')).username || '').toLowerCase() === config.guest.email.toLowerCase(), 'denis_e2e_guest_identity_required');
+      if (session && !manual) await session.guest();
       const grantResponse = page.waitForResponse(r => r.url().endsWith(`/tasks/${taskId}/octo/grants`) && r.request().method() === 'POST');
       await page.getByRole('button', { name: 'Получить доступ', exact: true }).click();
       const issued = await grantResponse; check(issued.ok(), 'denis_e2e_grant_failed'); const grantId = (await issued.json()).id;
@@ -197,6 +200,8 @@ try {
       const published = await cloud.getProfile(bound.uuid!);
       check(inFolder(published, config.guestFolder) && published.title === grant.alias && grant.password === bound.password,
         'denis_e2e_publication_mismatch');
+      if (session && manual) { await page.bringToFront(); await session.guest(); }
+      check(String((await local('/api/username')).username || '').toLowerCase() === config.guest.email.toLowerCase(), 'denis_e2e_guest_identity_required');
       stage = `task-${taskId}-open`; console.log(JSON.stringify({ stage })); attempted.add(bound.uuid!);
       const opened = await desktop.startProfile(bound.uuid!, grant.password);
       check(opened.state === 'STARTED' && (await desktop.activeProfiles()).includes(bound.uuid!), 'denis_e2e_open_failed');

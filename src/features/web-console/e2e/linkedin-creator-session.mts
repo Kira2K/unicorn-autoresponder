@@ -31,3 +31,28 @@ export function assertCreatorGuestProof(results: Array<{ taskId: number; guestVe
   if (![1, 9].every(id => results.some(r => r.taskId === id && r.guestVerified === true)))
     throw Object.assign(Error('denis_e2e_guest_proof_missing'), { code: 'denis_e2e_guest_proof_missing' });
 }
+
+// Operator switches using Octo's saved-account menu; the runner only observes identity.
+export function createManualCreatorSession({ local, guestEmail, ownerEmail, notify,
+  wait = () => new Promise<void>(r => setTimeout(r, 1000)), now = Date.now }: {
+  local(path: string): Promise<any>; guestEmail: string; ownerEmail: string;
+  notify(role: 'guest' | 'owner'): Promise<void>;
+  wait?(): Promise<void>; now?(): number;
+}) {
+  async function switchTo(role: 'guest' | 'owner') {
+    const email = (role === 'guest' ? guestEmail : ownerEmail).toLowerCase();
+    const deadline = now() + (role === 'guest' ? 90_000 : 20 * 60_000);
+    await notify(role);
+    do {
+      const username = String((await local('/api/username').catch(() => ({}))).username || '').toLowerCase();
+      if (username === email) {
+        const active = await local('/api/profiles/active');
+        if (!Array.isArray(active) || active.length) throw Object.assign(Error(), { code: 'denis_e2e_switch_has_active_profiles' });
+        return role;
+      }
+      await wait();
+    } while (now() < deadline);
+    throw Object.assign(Error(), { code: 'denis_e2e_manual_switch_timeout' });
+  }
+  return { guest: () => switchTo('guest'), owner: () => switchTo('owner'), verifyOwner: () => switchTo('owner') };
+}
