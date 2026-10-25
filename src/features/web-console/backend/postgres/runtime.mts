@@ -55,9 +55,8 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     }
   })();
   try {
-    const tasksEnabled = env.LINKEDIN_CREATION_TASKS_ENABLED === '1';
     const db = await createPostgresClient(pool, config.database, { writable: true,
-      ...(tasksEnabled ? { beforeWrite: async (s,table,key,data) => { if(table===tableIds.accounts) await guardAccount(s,key,data); } } : {}) });
+      beforeWrite: async (s,table,key,data) => { if(table===tableIds.accounts) await guardAccount(s,key,data); } });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
     const create = (tx: PostgresTransaction, table: string, data: Readonly<Record<string, unknown>>) => tx.createRecord(table, data);
     const linklab = env.LINKLAB_ENABLED === '1' ? await openLinkLabIntake(pool, config.database, tableIds.cv) : undefined;
@@ -104,20 +103,18 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         store: octoStore, config: octoConfig, allowed: octo.service.allowed }) } : octo.service;
       if (control && !control.url) octoControl = controlRoutes({ secret: control.secret, store: octoStore,
         config: octoConfig, service: octo.service, ready: uuid => octo!.grantReady(uuid) });
-      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, tasksEnabled);
+      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true);
       await intakeStore.checkSchema();
       linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
         getClient: id => options.repository.getClientById(id),
         hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
-      if (tasksEnabled) {
-        const tasks = createCreationTaskStore(pool,config.database,!!linklab);
-        await tasks.checkSchema();
-        linkedinCreator = createCreationTaskService({ store: tasks, profiles: octoStore, octo: octoService,
-          client: id => options.repository.getClientById(id),
-          secrets: (id,account) => options.repository.getPlatformAccountSecrets(id,account),
-          capture: createTaskProxyCapture({store:octoStore,api,config:octoConfig,octo:octo.service}),
-          nodeMavenKey: () => env.NODEMAVEN_API_KEY || '' });
-      }
+      const tasks = createCreationTaskStore(pool,config.database,!!linklab);
+      await tasks.checkSchema();
+      linkedinCreator = createCreationTaskService({ store: tasks, profiles: octoStore, octo: octoService,
+        client: id => options.repository.getClientById(id),
+        secrets: (id,account) => options.repository.getPlatformAccountSecrets(id,account),
+        capture: createTaskProxyCapture({store:octoStore,api,config:octoConfig,octo:octo.service}),
+        nodeMavenKey: () => env.NODEMAVEN_API_KEY || '' });
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }

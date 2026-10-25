@@ -11,16 +11,26 @@ repeated/concurrent saves update that row. Existing-account saves never create a
 
 ## Composition and authorization
 
-Apply the explicit migration before enabling the feature; startup never performs DDL:
+Tasks and the expert Console are always composed in the PostgreSQL + Octo Console; there is no separate
+expert feature flag. Existing Octo configuration and access policy still apply. Apply the explicit migration
+before deploying this version; startup checks the existing schema and never performs DDL:
 
 ```powershell
 node --env-file-if-exists=.env --env-file-if-exists=.env.octo-pilot --env-file-if-exists=.env.octo-onboarding src/features/linkedin-automation/creation-tasks/migrate.mts
 node --env-file-if-exists=.env --env-file-if-exists=.env.octo-pilot --env-file-if-exists=.env.octo-onboarding src/features/linkedin-automation/creation-tasks/migrate.mts --apply
 ```
 
-Configure `LINKEDIN_CREATION_TASKS_ENABLED=1`, `LINKEDIN_CREATOR_LOGIN`, `LINKEDIN_CREATOR_PASSWORD` in server secrets
-or ignored local ENV. The existing `NODEMAVEN_API_KEY` is read on demand by the authenticated copy endpoint.
+Configure `LINKEDIN_CREATOR_LOGIN`, `LINKEDIN_CREATOR_PASSWORD` and `NODEMAVEN_API_KEY` in server secrets
+or ignored local ENV. Missing credentials do not grant expert access. The NodeMaven key is read on demand
+by the authenticated copy endpoint.
 Credentials and the key must never enter Git, task rows, localStorage or logs. This does not configure Render.
+
+For the current Render deployment these three keys belong only to the **Very Evil Unicorn** Web Console backend.
+They are not needed by `unicorn-bot`, `unicorn-proxy-checker`, the local bridge or Octo Desktop.
+The separate E2E stand needs its own values only when explicitly running that stand.
+Keep the existing student Octo/bridge settings. On a single backend the expert uses the same worker as students;
+no new Docker container, `OCTO_CONTROL_URL` or `OCTO_CONTROL_SECRET` is required for this feature.
+The removed `LINKEDIN_CREATION_TASKS_ENABLED` ENV is ignored, including an old value of `0`; it can be deleted.
 
 The new `linkedin_creator` session role is restricted to `/api/linkedin-creator/*`, auth/me and logout.
 Nariman's existing `provider` role and endpoints stay unchanged. Task routes resolve student/account/profile IDs
