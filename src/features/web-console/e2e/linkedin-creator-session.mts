@@ -9,11 +9,11 @@ export function createCreatorDesktopSession({ local, guest, owner }: {
   async function username() {
     return String((await local('/api/username')).username || '').trim().toLowerCase();
   }
-  async function login(role: 'guest' | 'owner') {
+  async function login(role: 'guest' | 'owner', reauthenticate = false) {
     const active = await local('/api/profiles/active');
     if (!Array.isArray(active) || active.length) fail('denis_e2e_switch_has_active_profiles');
     const email = (role === 'guest' ? guest.email : owner.email).toLowerCase();
-    if (await username().catch(() => '') === email) return role;
+    if (!reauthenticate && await username().catch(() => '') === email) return role;
     if (refused.has(role)) fail('denis_e2e_desktop_login_requires_review');
     if (role === 'owner' && !owner.password) fail('denis_e2e_owner_password_required');
     const body = role === 'guest' ? { email, password: guest.password }
@@ -24,7 +24,7 @@ export function createCreatorDesktopSession({ local, guest, owner }: {
     if (actual !== email) { refused.add(role); fail('denis_e2e_desktop_login_unverified'); }
     return role;
   }
-  return { username, guest: () => login('guest'), owner: () => login('owner') };
+  return { username, guest: () => login('guest'), owner: () => login('owner'), verifyOwner: () => login('owner', true) };
 }
 
 export function assertCreatorGuestProof(results: Array<{ taskId: number; guestVerified?: boolean }>) {

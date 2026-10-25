@@ -14,9 +14,9 @@ test('desktop switching checks closed profiles and reads back the actual identit
     else assert.equal(body.password, guest.password);
     return { msg: 'Logged in successfully' };
   } });
-  await session.owner(); await session.guest(); assert.equal(await session.username(), guest.email);
+  await session.verifyOwner(); await session.guest(); assert.equal(await session.username(), guest.email);
   active = [{}]; await assert.rejects(session.owner(), { code: 'denis_e2e_switch_has_active_profiles' });
-  assert.equal(calls, 1); active = []; await session.owner(); assert.equal(calls, 2);
+  assert.equal(calls, 2); active = []; await session.owner(); assert.equal(calls, 3);
 });
 test('refused or lost login is not retried or mistaken for a verified switch', async () => {
   let calls = 0;

@@ -130,7 +130,7 @@ try {
       bridgeAgent = createAgent({ config: bridge, journal });
       session = createCreatorDesktopSession({ local, guest: config.guest,
         owner: { email: bridge.ownerEmail, token: process.env.OCTO_API_TOKEN!, password: process.env.OCTO_E2E_OWNER_PASSWORD } });
-      await session.owner();
+      await session.verifyOwner(); // Verify restoration credentials before any guest grant exists.
       await bridgeAgent.check();
     }
     runtime = await openSqlConsole(process.env); // No startBackground(): the published worker performs all work.
