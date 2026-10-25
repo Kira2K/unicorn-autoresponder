@@ -8,14 +8,15 @@ const require=createRequire(import.meta.url),express=require('express');
 const {createWebConsoleApp}=require('../backend/app.ts');
 const task={id:1,clientId:901,status:'не начата',version:1,proxySavedAt:undefined as string|undefined,fio:'Test Student',stack:'Java'};
 const secondTask={...task,id:2,clientId:902,fio:'Second Student'};
+const completedTask={...task,id:3,clientId:903,fio:'Completed Student',status:'сделана экспертом'};
 const intake={firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookLogin:'mail@outlook.com',hasOutlookPassword:true,
   blockedAccounts:[{fullName:'Blocked Test',country:'France'},{company:'Old Company'}],url:'',login:'',hasPassword:false};
 let acquired=0,grants=0,proxySaved=0;
 let missingSecondProfile=true;
 const service={
-  async list(){return task.status==='выполнение подтверждено'?[]:[{...task},{...secondTask}];},
+  async list(){return task.status==='выполнение подтверждено'?[]:[{...completedTask},{...task},{...secondTask}];},
   async detail(id:unknown){if(task.status==='выполнение подтверждено')throw Object.assign(Error(),{code:'linkedin_task_not_found'});
-    const selected=Number(id)===2?secondTask:task;
+    const selected=Number(id)===3?completedTask:Number(id)===2?secondTask:task;
     return {task:{...selected},intake:{...intake},client:{id:selected.clientId,fio:selected.fio,stack:selected.stack}};},
   key(){return{key:'mock-key-copy-only'};},async secrets(){return{password:'mock-mail-secret'};},
   async profileStatus(id:unknown){return{profiles:Number(id)===2&&missingSecondProfile?[]:[{id:2,locale:'en',title:'EN Test',phase:'ready',canEditProxy:true,proxy:{configured:true,phase:proxySaved?'complete':undefined}}],requiredLocales:['en'],onboarding:{phase:'idle'}};},
@@ -33,8 +34,39 @@ const url=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
 const browser=await chromium.launch({headless:true});
 try{
   const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']}),page=await context.newPage();page.setDefaultTimeout(10000);
+  let releaseTasks!:()=>void;
+  const heldTasks=new Promise<void>(resolve=>{releaseTasks=resolve;});
+  await page.route('**/api/linkedin-creator/tasks',async route=>{await heldTasks;await route.continue();},{times:1});
   await page.goto(url);await page.getByTestId('email-input').fill('test-creator');await page.locator('#password').fill('test-password');await page.getByTestId('login-button').click();
   const console=page.getByTestId('linkedin-creator-console');await console.waitFor();
+  const listLoader=page.getByTestId('creation-task-list-loader');
+  await listLoader.waitFor();
+  assert.equal(await page.getByText('Нет открытых заявок.',{exact:true}).count(),0,'initial request must not flash an empty-state message');
+  assert.equal(await page.getByRole('button',{name:'Обновляем…',exact:true}).isDisabled(),true);
+  await mkdir('tmp/linkedin-creation',{recursive:true});await page.screenshot({path:'tmp/linkedin-creation/task-list-loader-mock.png',fullPage:true});
+  releaseTasks();await listLoader.waitFor({state:'hidden'});
+  const taskButtons=page.getByRole('navigation',{name:'Заявки'}).locator('button[data-testid^="creation-task-"]');
+  await page.getByTestId('creation-task-3').waitFor();
+  assert.deepEqual(await taskButtons.evaluateAll(els=>els.map(el=>el.getAttribute('data-testid'))),['creation-task-1','creation-task-2','creation-task-3']);
+  const activeHeight=await page.getByTestId('creation-task-1').evaluate(el=>el.getBoundingClientRect().height);
+  const completedHeight=await page.getByTestId('creation-task-3').evaluate(el=>el.getBoundingClientRect().height);
+  assert.ok(completedHeight<activeHeight,'expert-completed tasks are visibly more compact');
+  assert.ok(completedHeight>=44,'compact tasks remain accessible click targets');
+  await page.getByTestId('creation-task-3').click();await page.getByRole('heading',{name:'Completed Student',exact:true}).waitFor();
+  await page.getByText('Заявка сделана экспертом и ожидает подтверждения.',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Для завершения сохраните данные LinkedIn и настройки прокси.',{exact:true}).count(),0);
+  let releaseRefresh!:()=>void;
+  const heldRefresh=new Promise<void>(resolve=>{releaseRefresh=resolve;});
+  await page.route('**/api/linkedin-creator/tasks',async route=>{await heldRefresh;await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'linkedin_task_unavailable'})});},{times:1});
+  await page.getByRole('button',{name:'Обновить список',exact:true}).click();await listLoader.waitFor();
+  assert.equal(await taskButtons.count(),3,'refresh keeps the previous task list visible');
+  assert.equal(await page.getByTestId('creation-task-3').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.getByRole('heading',{name:'Completed Student',exact:true}).isVisible(),true,'refresh preserves the current card');
+  releaseRefresh();await page.getByTestId('creation-task-list-error').waitFor();
+  assert.equal(await listLoader.count(),0);assert.equal(await taskButtons.count(),3);
+  assert.equal(await page.getByRole('button',{name:'Обновить список',exact:true}).isEnabled(),true);
+  await page.getByRole('button',{name:'Обновить список',exact:true}).click();
+  await page.getByTestId('creation-task-list-error').waitFor({state:'hidden'});await listLoader.waitFor({state:'hidden'});
   await console.getByRole('button',{name:'Копировать ключ',exact:true}).click();await console.getByRole('button',{name:'Скопировано',exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),'mock-key-copy-only');
   assert.ok(!(await console.innerText()).includes('mock-key-copy-only'));
@@ -90,8 +122,23 @@ try{
   assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),true,'completion requires a fresh successful proxy button after reopening');
   await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor();
   assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false);
+  let releaseOlderList!:()=>void;
+  const heldOlderList=new Promise<void>(resolve=>{releaseOlderList=resolve;});
+  const oldList=JSON.stringify([{...completedTask},{...task},{...secondTask}]);
+  await page.route('**/api/linkedin-creator/tasks',async route=>{await heldOlderList;await route.fulfill({status:200,contentType:'application/json',body:oldList});},{times:1});
+  await page.getByRole('button',{name:'Обновить список',exact:true}).click();await listLoader.waitFor();
   await page.getByLabel('Статус заявки').selectOption('сделана экспертом');await page.getByRole('button',{name:'Сохранить статус',exact:true}).click();
   await page.getByText('Статус сохранён.',{exact:true}).waitFor();assert.equal(task.status,'сделана экспертом');
+  await listLoader.waitFor({state:'hidden'});
+  const olderResponse=page.waitForResponse(r=>r.url().endsWith('/api/linkedin-creator/tasks')&&r.request().method()==='GET');
+  releaseOlderList();await olderResponse;
+  assert.equal(await taskButtons.first().getAttribute('data-testid'),'creation-task-2','completed task moves below unfinished tasks immediately');
+  assert.ok((await page.getByTestId('creation-task-1').getAttribute('class'))?.includes('task-button--completed'),'late older list cannot overwrite the newer post-save list');
+  assert.equal(await page.getByTestId('creation-task-1').getAttribute('aria-pressed'),'true','sorting preserves selection');
+  await page.reload();await page.getByTestId('creation-task-1').click();await page.getByTestId('creation-task-detail').waitFor();
+  assert.equal(await page.getByLabel('Статус заявки').inputValue(),'сделана экспертом');
+  await page.getByText('Заявка сделана экспертом и ожидает подтверждения.',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Для завершения сохраните данные LinkedIn и настройки прокси.',{exact:true}).count(),0,'completed task never shows an unfinished-work reminder after reload');
   assert.equal(await page.getByTestId('creation-task-1').count(),1);
   assert.equal(await page.getByLabel('Пароль LinkedIn',{exact:true}).inputValue(),'');
   assert.ok(!(await page.evaluate(()=>JSON.stringify(localStorage))).includes('mock-'));
@@ -99,7 +146,11 @@ try{
   await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
   task.status='выполнение подтверждено';await page.getByRole('button',{name:'Обновить список',exact:true}).click();await page.getByText('Нет открытых заявок.',{exact:true}).waitFor();
   assert.equal(await page.getByTestId('creation-task-1').count(),0);
+  await page.route('**/api/linkedin-creator/tasks',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'linkedin_task_unavailable'})}),{times:1});
+  await page.reload();await page.getByTestId('creation-task-list-error').waitFor();
+  assert.equal(await page.getByText('Нет открытых заявок.',{exact:true}).count(),0,'initial failure is not an empty task list');
+  await page.getByRole('button',{name:'Обновить список',exact:true}).click();await page.getByText('Нет открытых заявок.',{exact:true}).waitFor();
   await page.evaluate(()=>navigator.clipboard.writeText(''));
-  process.stdout.write('Contractor mock browser flow passed: loader, selected task, rapid switching, full-width copy, EN grant, masked copy, proxy/result completion gate, expert status, confirmation exclusion, mobile.\n');
+  process.stdout.write('Contractor mock browser flow passed: task-list loading/refresh/error/retry states, compact completed tasks sorted last, completion notice after reload, card loader, selected task, rapid switching, full-width copy, EN grant, masked copy, proxy/result completion gate, expert status, confirmation exclusion, mobile.\n');
   await context.close();
 }finally{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}
