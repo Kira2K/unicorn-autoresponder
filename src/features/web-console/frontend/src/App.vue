@@ -6,6 +6,8 @@ import LinkedInAuthTab from './LinkedInAuthTab.vue'
 import StudentProfile from './StudentProfile.vue'
 import StudentWorkPlaces from './StudentWorkPlaces.vue'
 import OctoAccessCard from './components/OctoAccessCard.vue'
+import LinkedInOctoWorkflow from './components/LinkedInOctoWorkflow.vue'
+import LinkedInCreatorConsole from './components/LinkedInCreatorConsole.vue'
 import BrowserWelcomeDialog from './components/BrowserWelcomeDialog.vue'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 import { usernamePayload } from './username-input.js'
@@ -176,6 +178,7 @@ const REQUIRED_DATA_WARNING_PREFIX = 'webConsole.requiredDolphinDataWarning'
 
 const isAdmin = computed(() => session.value?.role === 'admin')
 const isProvider = computed(() => session.value?.role === 'provider')
+const isLinkedInCreator = computed(() => session.value?.role === 'linkedin_creator')
 const isClient = computed(() => session.value?.role === 'client')
 const validatedProfileEnabled = computed(() => isClient.value && dashboard.value?.client?.studentProfileEnabled === true)
 const ui = text => studentPreviewLabel(text, validatedProfileEnabled.value)
@@ -1296,6 +1299,11 @@ async function loadClientOptions() {
   platforms.value = result.platforms || []
 }
 
+async function refreshLinkedInAccounts() {
+  try { dashboard.value = await api.clientDashboard() }
+  catch { /* The intake has its own saved receipt; a dashboard refresh must not resubmit it. */ }
+}
+
 async function loadDolphinStatus(targetClientId = null) {
   const status = await api.dolphinProfileStatus(targetClientId)
   if (isProvider.value && targetClientId) {
@@ -1327,6 +1335,9 @@ async function loadDashboard() {
       await loadDolphinStatus(dashboard.value?.client?.id)
       providerClients.value = []
       providerDolphinEmail.value = ''
+    } else if (isLinkedInCreator.value) {
+      dashboard.value = null
+      providerClients.value = []
     } else if (isProvider.value) {
       const result = await api.providerClients()
       dashboard.value = null
@@ -2037,12 +2048,12 @@ onUnmounted(() => {
     <section
       v-else
       class="dashboard"
-      :data-testid="isAdmin ? 'admin-dashboard' : isProvider ? 'provider-dashboard' : 'client-dashboard'"
+      :data-testid="isAdmin ? 'admin-dashboard' : isLinkedInCreator ? 'linkedin-creator-dashboard' : isProvider ? 'provider-dashboard' : 'client-dashboard'"
     >
       <Toolbar class="topbar">
         <template #start>
           <div>
-            <h1>{{ isAdmin ? 'Admin console' : isProvider ? 'Provider console' : 'Личный кабинет ученика' }}</h1>
+            <h1>{{ isAdmin ? 'Admin console' : isLinkedInCreator ? 'Создание LinkedIn' : isProvider ? 'Provider console' : 'Личный кабинет ученика' }}</h1>
             <p>{{ session.email }}</p>
           </div>
         </template>
@@ -2444,6 +2455,7 @@ onUnmounted(() => {
         <ProgressSpinner aria-label="Loading" />
       </div>
 
+      <LinkedInCreatorConsole v-else-if="isLinkedInCreator" />
       <div v-else-if="isProvider" class="dashboard-grid provider-grid">
         <Card class="provider-card">
           <template #title>Clients on English market</template>
@@ -2510,7 +2522,8 @@ onUnmounted(() => {
         </Card>
       </div>
 
-      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled">
+      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled"
+        :class="{ 'linkedin-intake-layout': isClient && dolphinProfileStatus && ['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase()) }">
         <template #profile>
         <Card class="profile-card">
           <template #title>
@@ -2985,7 +2998,11 @@ onUnmounted(() => {
           </template>
         </Card>
 
-        <OctoAccessCard v-if="isClient && dashboard?.client?.id" :key="dashboard.client.id" :client-id="dashboard.client.id" />
+        <template v-if="isClient && !pageLoading && dashboard?.client?.id && dolphinProfileStatus">
+          <OctoAccessCard v-if="String(dashboard.client.market || '').trim().toLowerCase() === 'ru' && !dolphinProfileStatus.existingProfiles?.length" :key="dashboard.client.id" :client-id="dashboard.client.id" />
+          <LinkedInOctoWorkflow v-else-if="!dolphinProfileStatus.existingProfiles?.length && ['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase())"
+            :key="`linkedin-${dashboard.client.id}`" :client="dashboard.client" :has-dolphin="!!dolphinProfileStatus.existingProfiles?.length" @saved="refreshLinkedInAccounts" />
+        </template>
         <Card v-if="adminCanOpenDolphinProfiles" class="action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>
           <template #subtitle>Open profiles for the latest client</template>

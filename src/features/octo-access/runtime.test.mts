@@ -73,6 +73,9 @@ test('two schedulers sharing a store have one leader and perform each expiry wri
   try {
     await first.start(); await second.start();
     assert.equal(first.status().leader,true); assert.equal(second.status().leader,false);
+    assert.equal(await first.grantReady(f.profile.uuid!), true);
+    assert.equal(await second.grantReady(f.profile.uuid!), false);
+    assert.equal(await first.grantReady('foreign-uuid'), false);
     assert.equal(second.status().connected,false); assert.equal(f.listenerCount(),1);
     f.advance(testConfig.leaseMs); t.mock.timers.tick(testConfig.leaseMs);
     await settled(async () => (await f.store.get(f.profile.id))?.grant?.phase==='complete');
@@ -84,6 +87,17 @@ test('two schedulers sharing a store have one leader and perform each expiry wri
     assert.equal(f.writes.filter(p => p.id===f.profile.id).length,4);
     assert.equal(f.listenerCount(),1); assert.deepEqual(f.reports,[]);
   } finally { await first.stop(); await second.stop(); }
+});
+
+test('control readiness requires a running leader and a usable history checkpoint', async () => {
+  const f = await fixture(), runtime = f.runtime();
+  try {
+    assert.equal(await runtime.grantReady(f.profile.uuid!), false);
+    await runtime.start(); assert.equal(await runtime.grantReady(f.profile.uuid!), true);
+    f.disconnect(); assert.equal(await runtime.grantReady(f.profile.uuid!), false);
+    f.reconnect(); assert.equal(await runtime.grantReady(f.profile.uuid!), true);
+    await runtime.stop(); assert.equal(await runtime.grantReady(f.profile.uuid!), false);
+  } finally { await runtime.stop(); }
 });
 
 test('slow provisioning does not block expiry of an existing grant even while the action stream is disconnected', async t => {

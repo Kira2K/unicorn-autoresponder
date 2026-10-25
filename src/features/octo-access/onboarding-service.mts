@@ -5,6 +5,7 @@ import type { WebClient } from '../web-console/backend/types.ts';
 import type { ProxyResult, ProxyLocation } from './proxy-checker.mts';
 import type { LocationOption } from './nodemaven-locations.mts';
 import { parseOwnSocksProxy } from './own-proxy-string.mts';
+import { parseProxyInput } from './proxy-input.mts';
 import { ensureClientPassword } from './client-password.mts';
 import { assertClientReady, profileRules } from './profile-reservation.mts';
 import type { ProxySetup } from './onboarding-contracts.mts';
@@ -50,8 +51,8 @@ export function createOnboardingService({ store, getClient, now = Date.now, ...d
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new OctoError('octo_setup_input_invalid', 400);
       const value = raw as Record<string, unknown>;
       const source = value.source as ProxySetup['source'];
-      if (!['none','own','nodemaven','dolphin'].includes(source)) throw new OctoError('octo_setup_input_invalid', 400);
-      if (source !== 'none' && await deps.developmentHelp?.()) throw new OctoError('octo_checker_local_unavailable', 503);
+      if (!['none','own','nodemaven','dolphin','manual'].includes(source)) throw new OctoError('octo_setup_input_invalid', 400);
+      if (!['none','manual'].includes(source) && await deps.developmentHelp?.()) throw new OctoError('octo_checker_local_unavailable', 503);
       let state = await ensureClientPassword(store, clientId);
       if (setupBusy(state.setup)) return this.status(clientId);
       if (state.setup?.phase === 'unknown') throw new OctoError('octo_setup_outcome_unknown', 409);
@@ -62,9 +63,10 @@ export function createOnboardingService({ store, getClient, now = Date.now, ...d
       if (missing.includes('en') === (source === 'none')) throw new OctoError('octo_proxy_setup_required', 409);
       const dolphinProfiles = await deps.dolphin.list(clientId);
       if (dolphinProfiles.length && value.confirmDolphin !== true) throw new OctoError('octo_dolphin_confirmation_required', 409);
-      const setup: ProxySetup = { id: randomUUID(), source, phase: source === 'none' ? 'provisioning' : 'queued',
+      const setup: ProxySetup = { id: randomUUID(), source, phase: ['none','manual'].includes(source) ? 'provisioning' : 'queued',
         createdAt: now(), confirmDolphin: value.confirmDolphin === true };
       if (source === 'own') setup.input = parseOwnSocksProxy(value.proxy as string);
+      if (source === 'manual') setup.input = parseProxyInput(value.proxy);
       if (source === 'dolphin') {
         const id = Number(value.profileId);
         if (!Number.isSafeInteger(id) || !dolphinProfiles.some(p => p.id === id && p.hasProxy)) throw new OctoError('not_found', 404);

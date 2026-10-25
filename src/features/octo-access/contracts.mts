@@ -67,6 +67,7 @@ export interface OctoStore {
   leader(): Promise<{ check(): Promise<void>; release(): Promise<void> } | undefined>;
 }
 export interface CloudApi {
+  readProfileProxy?(uuid: string): Promise<{ saved?: SavedProxy; inline?: ProxyInput }>;
   listFolders(): Promise<Folder[]>;
   getProfile(uuid: string): Promise<Profile>;
   profileExists(uuid: string): Promise<boolean>;

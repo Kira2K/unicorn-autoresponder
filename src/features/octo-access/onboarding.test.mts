@@ -67,3 +67,37 @@ test('Ru setup skips checker and retains an existing client password when adding
   await f.service.start(901, { source: 'none' }); await f.advance();
   assert.equal(f.checks(), 0); assert.equal((await f.store.list(901))[0].password, '03742');
 });
+
+test('manual structured proxy skips retired checker and direct setup reserves EN without pool proxy', async () => {
+  const f = fixture();
+  const service = createOctoService({ store: f.store, config: testConfig, getClient: f.getClient, onboarding: f.deps });
+  await service.startOnboarding(901, { source: 'manual', proxy: { ...input, type: 'http' } });
+  await service.reserve(901);
+  assert.equal(f.checks(), 0);
+  assert.equal((await f.store.clientState(901))!.setup!.input!.type, 'http');
+  assert.ok((await f.store.list(901)).every(p => p.ownProxy));
+  const direct = fixture();
+  const state = await direct.store.claimClientPassword(901, '00321');
+  state.setup = { id: 'new-intake', source: 'direct', phase: 'provisioning', createdAt: 1, confirmDolphin: false };
+  await direct.store.saveClientState(state);
+  const s = createOctoService({ store: direct.store, config: testConfig, getClient: direct.getClient, onboarding: direct.deps });
+  await s.reserve(901); await s.reserve(901);
+  assert.equal((await direct.store.list()).length, 2);
+  assert.ok((await direct.store.list()).every(p => p.ownProxy && p.password === '00321'));
+});
+
+test('direct workflow completes without attaching a proxy; retired queued checks never restart', async () => {
+  const f = fixture(); const state = await f.store.claimClientPassword(901, '00321');
+  state.setup = { id: 'new-intake', source: 'direct', phase: 'provisioning', createdAt: 1, confirmDolphin: false };
+  await f.store.saveClientState(state);
+  const profiles = await reserveClientProfiles(f.store, await f.getClient(901), true);
+  for (const p of profiles) { p.phase = 'ready'; await f.store.save(p); }
+  await f.advance();
+  assert.equal((await f.store.clientState(901))!.setup!.phase, 'complete');
+  assert.equal(f.checks(), 0);
+  const legacy = fixture(); await legacy.service.start(901, { source: 'own', proxy: 'proxy.example.com:1080:user:secret' });
+  await advanceOnboarding((await legacy.store.clientState(901))!, { store: legacy.store, ...legacy.deps, allowLegacyChecks: false,
+    check: async () => {}, reserve: async () => { throw Error('must not reserve'); }, saveProxy: async () => { throw Error('must not attach'); } });
+  assert.equal(legacy.checks(), 0);
+  assert.equal((await legacy.store.clientState(901))!.setup!.error, 'octo_legacy_proxy_setup_retired');
+});

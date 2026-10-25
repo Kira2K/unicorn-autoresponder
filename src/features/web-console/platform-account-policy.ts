@@ -18,6 +18,10 @@ export type PlatformAccountPolicy = {
 }
 
 export const PLATFORM_ACCOUNT_POLICIES: Readonly<Record<string, PlatformAccountPolicy>> = {
+  email_outlook: {
+    fields: ['login', 'password'],
+    requiredFields: ['login', 'password']
+  },
   email_en: {
     fields: ['login', 'password'],
     requiredFields: ['login', 'password']

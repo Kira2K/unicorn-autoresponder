@@ -10,6 +10,7 @@ const proxyUrl = (p: ProxyInput) => 'socks5h://' +
 
 export async function advanceOnboarding(initial: ClientState, deps: OnboardingDependencies & {
   store: OctoStore; check(): Promise<void>; now?: () => number;
+  allowLegacyChecks?: boolean;
   reserve(clientId: number): Promise<ManagedProfile[]>;
   saveProxy(clientId: number, profileId: number, input: ProxyInput, operationId: string): Promise<unknown>;
 }) {
@@ -22,6 +23,9 @@ export async function advanceOnboarding(initial: ClientState, deps: OnboardingDe
       setup.phase = 'unknown'; setup.error = 'octo_proxy_check_unknown'; await save(); return;
     }
     if (setup.phase === 'queued') {
+      if (deps.allowLegacyChecks === false && !['manual','direct','none'].includes(setup.source)) {
+        setup.phase = 'blocked'; setup.error = 'octo_legacy_proxy_setup_retired'; await save(); return;
+      }
       setup.phase = 'checking'; setup.startedAt = now(); await save(); await deps.check();
       const result = setup.source === 'nodemaven'
         ? await deps.checker.best(state.nodeMavenKey!, setup.location!)
@@ -39,7 +43,7 @@ export async function advanceOnboarding(initial: ClientState, deps: OnboardingDe
       if (!setup.profileIds) { setup.profileIds = profiles.map(p => p.id); await save(); }
       if (profiles.some(p => p.phase === 'blocked')) throw new OctoError('octo_profile_creation_failed', 502);
       if (profiles.some(p => p.phase !== 'ready')) return;
-      if (setup.source !== 'none') {
+      if (!['none','direct'].includes(setup.source)) {
         const en = profiles.find(p => p.locale === 'en');
         if (!en) throw new OctoError('octo_en_profile_missing', 409);
         if (!en.proxyChange) {

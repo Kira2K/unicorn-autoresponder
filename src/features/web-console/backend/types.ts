@@ -1,4 +1,4 @@
-export type UserRole = 'client' | 'provider' | 'admin'
+export type UserRole = 'client' | 'provider' | 'admin' | 'linkedin_creator'
 
 export type WebSession = {
   id: string
