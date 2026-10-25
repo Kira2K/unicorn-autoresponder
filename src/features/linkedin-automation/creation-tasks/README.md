@@ -12,6 +12,8 @@ repeated/concurrent saves update that row. Existing-account saves never create a
 The expert task picker shows unfinished tasks first; tasks already done by the expert remain available below
 them as compact, muted buttons. A completed task shows that it awaits confirmation, including after reloading.
 This display does not bypass the fresh proxy-capture requirement for completing an unfinished task.
+Initial list loading shows a spinner and skeletons; refresh keeps the current list and selected card visible.
+Failed requests show a retry hint instead of an empty-list message. Only the newest list response is applied.
 
 ## Composition and authorization
 

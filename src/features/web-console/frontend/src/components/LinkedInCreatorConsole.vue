@@ -4,6 +4,7 @@ import { request, octoProxyPayload } from '../octo-api.js'
 import OctoAccessCard from './OctoAccessCard.vue'
 const base = '/api/linkedin-creator'
 const tasks = ref([]), selected = ref(null), result = ref({ url: '', login: '', password: '' })
+const tasksLoading = ref(false), tasksLoaded = ref(false), tasksLoadError = ref('')
 const expertDoneStatus = 'сделана экспертом'
 const orderedTasks = computed(() => [...tasks.value].sort((a, b) =>
   Number(a.status === expertDoneStatus) - Number(b.status === expertDoneStatus)))
@@ -21,6 +22,7 @@ const requestedTaskId = ref(null), taskLoading = ref(false), taskLoadError = ref
 const controller = new AbortController()
 let taskController
 let selection = 0
+let listGeneration = 0
 const labels = { fullName: 'Имя и фамилия', country: 'Страна', company: 'Компания', position: 'Должность', blockedAt: 'Дата блока', newFullName: 'Новое имя', legacyText: 'Примечание' }
 const transport = computed(() => {
   const path = `${base}/tasks/${selected.value?.task.id}/octo`
@@ -41,16 +43,21 @@ function errorText(error) {
   return 'Не удалось выполнить действие. Проверьте поля и состояние профиля; при повторной ошибке обратитесь в поддержку.'
 }
 async function loadTasks() {
+  const current = ++listGeneration
+  tasksLoading.value = true; tasksLoadError.value = ''
   try {
     const list = await request(base + '/tasks', { signal: controller.signal })
-    if (controller.signal.aborted) return
-    tasks.value = list
+    if (controller.signal.aborted || current !== listGeneration) return
+    tasks.value = list; tasksLoaded.value = true
     if (requestedTaskId.value && !list.some(t => t.id === requestedTaskId.value)) {
       selection++; taskController?.abort(); requestedTaskId.value = null; taskLoading.value = false; taskLoadError.value = ''
       selected.value = null; captureConfirmed.value = false; profileState.value = null; result.value = { url: '', login: '', password: '' }
     }
   }
-  catch (e) { if (!controller.signal.aborted) message.value = errorText(e) }
+  catch (e) {
+    if (!controller.signal.aborted && current === listGeneration)
+      tasksLoadError.value = 'Не удалось загрузить список заявок. Нажмите «Обновить список», чтобы повторить.'
+  } finally { if (current === listGeneration) tasksLoading.value = false }
 }
 async function open(id) {
   const current = ++selection
@@ -109,8 +116,13 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
       <button type="button" class="key-copy-button" @click="copy('nodemaven')">{{ copied === 'nodemaven' ? 'Скопировано' : 'Копировать ключ' }}</button></div>
     <p v-if="message" role="status">{{ message }}</p>
     <div class="creator-layout">
-      <nav aria-label="Заявки"><h2>Заявки на создание LinkedIn</h2><button type="button" @click="loadTasks">Обновить список</button>
-        <p v-if="!tasks.length">Нет открытых заявок.</p>
+      <nav aria-label="Заявки" :aria-busy="tasksLoading"><h2>Заявки на создание LinkedIn</h2><button type="button" :disabled="tasksLoading" @click="loadTasks">{{ tasksLoading ? 'Обновляем…' : 'Обновить список' }}</button>
+        <div v-if="tasksLoading" class="task-list-loader" role="status" aria-live="polite" data-testid="creation-task-list-loader">
+          <div class="loader-heading"><span class="loader-ring" aria-hidden="true"></span><strong>{{ tasksLoaded ? 'Обновляем заявки…' : 'Загружаем заявки…' }}</strong></div>
+          <div v-if="!tasksLoaded" class="task-list-skeleton" aria-hidden="true"><span v-for="i in 3" :key="i" class="skeleton-box"></span></div>
+        </div>
+        <p v-if="tasksLoadError" role="alert" data-testid="creation-task-list-error">{{ tasksLoadError }}</p>
+        <p v-if="tasksLoaded && !tasksLoading && !tasksLoadError && !tasks.length">Нет открытых заявок.</p>
         <button v-for="task in orderedTasks" :key="task.id" type="button" class="task-button" :class="{ 'task-button--selected': requestedTaskId === task.id, 'task-button--completed': task.status === expertDoneStatus }" :aria-pressed="requestedTaskId === task.id" aria-controls="creation-task-panel" :data-testid="`creation-task-${task.id}`" :disabled="busy" @click="open(task.id)">
           <span class="task-button__title">#{{ task.id }} · {{ task.fio }}</span>
           <span class="task-button__meta">{{ task.stack }} · {{ task.status }}</span>
@@ -164,4 +176,9 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
 .task-button--completed:not(.task-button--selected){background:#f1f5f9;border-color:#e2e8f0;color:#526176}
 .task-button--completed:not(.task-button--selected):hover{background:#e2e8f0}
 .task-completion-note{margin:0;padding:12px 14px;border-radius:8px;background:#f1f5f9;color:#475569}
+.task-list-loader{padding:14px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fbff}
+.task-list-loader .loader-heading{gap:10px;font-size:14px}
+.task-list-loader .loader-ring{width:20px;height:20px;flex-basis:20px}
+.task-list-skeleton{display:grid;gap:10px;margin-top:16px}
+.task-list-skeleton .skeleton-box{height:64px}
 </style>
