@@ -142,3 +142,15 @@ credentials; the operator uses Octo's Add/Switch account menu within 90 seconds.
 profile closure the runner waits for the owner account before processing bridge cleanup.
 `operator-step.json` contains only the stage/required role/time; no credentials. An expired
 grant or missing guest identity fails the run rather than counting an owner launch as success.
+
+For unattended local acceptance use `--isolated-owner`: keep the Windows Desktop signed
+into the configured guest, and run a separate owner Desktop locally. The reference
+[Dockerfile](../../web-console/e2e/octo-owner/Dockerfile) follows Octo's official container recipe.
+Bind only `127.0.0.1:58889:58889`, provide `OCTO_API_TOKEN` at runtime rather than in image
+layers/arguments, and retain the stopped container's local cache outside Render and Git.
+Set private `LINKEDIN_CREATOR_E2E_OWNER_PORT=58889` and use a separate bridge configuration
+directory/journal. The injected fetch rewrites only the three existing localhost bridge
+endpoints; protected backend requests and the user's guest API keep their original targets.
+The runner checks both identities, opens/closes only in the guest Desktop, and runs the
+unchanged one-shot bridge protocol through the owner Desktop. No account switching or owner
+password is needed. This is not the independent fresh-owner archive acceptance test.

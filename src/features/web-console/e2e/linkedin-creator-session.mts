@@ -1,3 +1,6 @@
+import { createRequire } from 'node:module';
+const { createBridgeLocalFetch } = createRequire(import.meta.url)('../../../../octo-bridge/local-api.mjs') as {
+  createBridgeLocalFetch(port: number, fetchImpl: typeof fetch): typeof fetch };
 // One desktop session at a time. Dependencies keep credentials out of errors/reports.
 export function createCreatorDesktopSession({ local, guest, owner }: {
   local(path: string, body?: unknown): Promise<any>;
@@ -55,4 +58,28 @@ export function createManualCreatorSession({ local, guestEmail, ownerEmail, noti
     throw Object.assign(Error(), { code: 'denis_e2e_manual_switch_timeout' });
   }
   return { guest: () => switchTo('guest'), owner: () => switchTo('owner'), verifyOwner: () => switchTo('owner') };
+}
+
+export function creatorOwnerFetch(port: number, fetchImpl: typeof fetch = fetch): typeof fetch {
+  if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === 58888)
+    throw Object.assign(Error(), { code: 'denis_e2e_owner_port_invalid' });
+  return createBridgeLocalFetch(port, fetchImpl);
+}
+
+export function createIsolatedCreatorSession({ local, ownerFetch, ownerEmail, guestEmail }: {
+  local(path: string): Promise<any>; ownerFetch: typeof fetch; ownerEmail: string; guestEmail: string;
+}) {
+  async function owner() {
+    const r = await ownerFetch('http://127.0.0.1:58888/api/username', { signal: AbortSignal.timeout(5000) });
+    const j = await r.json();
+    if (!r.ok || String(j.username || '').toLowerCase() !== ownerEmail.toLowerCase())
+      throw Object.assign(Error(), { code: 'denis_e2e_isolated_owner_unverified' });
+    return 'owner' as const;
+  }
+  async function guest() {
+    if (String((await local('/api/username')).username || '').toLowerCase() !== guestEmail.toLowerCase())
+      throw Object.assign(Error(), { code: 'denis_e2e_guest_identity_required' });
+    return 'guest' as const;
+  }
+  return { owner, verifyOwner: owner, guest };
 }

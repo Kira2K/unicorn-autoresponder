@@ -1,11 +1,11 @@
 // Explicit operator E2E for the two approved fixtures. Default: read-only preflight.
-// Uses the published worker; desktop switching requires --switch-desktop and an isolated bridge journal.
+// Uses the published worker; desktop coordination requires an explicit mode and an isolated bridge journal.
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import type { ManagedProfile, ProxyInput } from '../../octo-access/contracts.mts';
-import { createCreatorDesktopSession, createManualCreatorSession, assertCreatorGuestProof } from './linkedin-creator-session.mts';
+import { createCreatorDesktopSession, createManualCreatorSession, createIsolatedCreatorSession, creatorOwnerFetch, assertCreatorGuestProof } from './linkedin-creator-session.mts';
 const require = createRequire(import.meta.url), express = require('express');
 const { createWebConsoleApp } = require('../backend/app.ts');
 const { openSqlConsole } = await import('../backend/postgres/runtime.mts');
@@ -24,8 +24,9 @@ const { createPostgresPool } = await import('../../../integrations/postgres/pg-p
 const { createReadSession } = await import('../../../integrations/postgres/read-session.mts');
 const apply = process.argv.includes('--apply-denis');
 const manual = process.argv.includes('--manual-desktop');
-const switching = process.argv.includes('--switch-desktop') || manual;
-if (process.argv.slice(2).some(v => !['--apply-denis', '--preflight', '--proxy-from-octon', '--switch-desktop', '--manual-desktop'].includes(v))) throw Error('invalid_e2e_argument');
+const isolatedOwner = process.argv.includes('--isolated-owner');
+const switching = process.argv.includes('--switch-desktop') || manual || isolatedOwner;
+if (process.argv.slice(2).some(v => !['--apply-denis', '--preflight', '--proxy-from-octon', '--switch-desktop', '--manual-desktop', '--isolated-owner'].includes(v))) throw Error('invalid_e2e_argument');
 const config = readOctoConfig(process.env), control = readControlConfig(process.env);
 if (!config) throw Error('octo_configuration_required');
 const db = readPostgresAppDbConfig(process.env), pool = createPostgresPool(db), read = createReadSession(pool, db.database);
@@ -113,7 +114,7 @@ try {
   }
   if ((await desktop.activeProfiles()).length) report.blockers.push('desktop_has_active_profiles');
   if (switching && !process.env.LINKEDIN_CREATOR_E2E_BRIDGE_CONFIG) report.blockers.push('desktop_bridge_configuration_required');
-  if (switching && !manual && !process.env.OCTO_E2E_OWNER_PASSWORD) report.blockers.push('owner_desktop_credentials_required');
+  if (switching && !manual && !isolatedOwner && !process.env.OCTO_E2E_OWNER_PASSWORD) report.blockers.push('owner_desktop_credentials_required');
   if (!switching && report.desktopRole !== 'guest') report.blockers.push('guest_desktop_required');
   if (!apply) { report.passed = report.blockers.length === 0; }
   else {
@@ -128,14 +129,18 @@ try {
       const { createAgent } = require(resolve('octo-bridge/agent.mjs'));
       const { openJournal } = require(resolve('octo-bridge/journal.mjs'));
       journal = await openJournal(resolve(path, '../.state/journal.json'), bridge);
-      bridgeAgent = createAgent({ config: bridge, journal });
-      session = manual ? createManualCreatorSession({ local, guestEmail: config.guest.email, ownerEmail: bridge.ownerEmail,
+      const ownerFetch = isolatedOwner ? creatorOwnerFetch(Number(process.env.LINKEDIN_CREATOR_E2E_OWNER_PORT)) : fetch;
+      bridgeAgent = createAgent({ config: bridge, journal, fetchImpl: ownerFetch });
+      session = isolatedOwner ? createIsolatedCreatorSession({ local, ownerFetch, guestEmail: config.guest.email, ownerEmail: bridge.ownerEmail })
+      : manual ? createManualCreatorSession({ local, guestEmail: config.guest.email, ownerEmail: bridge.ownerEmail,
         notify: async role => { console.log(JSON.stringify({ stage, operatorSwitchRequired: role }));
           await mkdir(output,{recursive:true}); await writeFile(resolve(output,'operator-step.json'),JSON.stringify({ stage, role, at: new Date().toISOString() })); }
       }) : createCreatorDesktopSession({ local, guest: config.guest,
         owner: { email: bridge.ownerEmail, token: process.env.OCTO_API_TOKEN!, password: process.env.OCTO_E2E_OWNER_PASSWORD } });
-      await session.verifyOwner(); // Verify restoration credentials before any guest grant exists.
-      await bridgeAgent.check();
+      if (!manual || report.desktopRole === 'owner') {
+        await session.verifyOwner(); // Verify restoration credentials before any guest grant exists.
+        await bridgeAgent.check();
+      }
     }
     runtime = await openSqlConsole(process.env); // No startBackground(): the published worker performs all work.
     const app = createWebConsoleApp({ ...runtime.options, useMockData: true, initializeConnectionInviter: false });
@@ -164,6 +169,7 @@ try {
       await until(() => workerReady(bound), 'denis_e2e_listener_timeout', 60_000);
       await page.getByRole('button', { name: 'Обновить список', exact: true }).click();
       await page.getByTestId(`creation-task-${taskId}`).click(); await page.getByTestId('creation-task-detail').waitFor();
+      await page.locator('.octo-profile').first().waitFor();
       check(await page.locator('.octo-profile').count() === 1, 'denis_e2e_en_scope_failed');
       if (taskId === 9) {
         // Mandatory on every apply run, even when this fixture already has a proxy.
@@ -248,7 +254,8 @@ try {
   }
 } catch (e) {
   const code = (e as { code?: string }).code ?? '';
-  report.error = /^(denis_e2e_|octo_|linkedin_task_|postgres_|commit_)[a-z0-9_]+$/.test(code) ? code : 'denis_e2e_failed';
+  report.error = /^(denis_e2e_|octo_|bridge_|linkedin_task_|postgres_|commit_)[a-z0-9_]+$/.test(code) ? code : 'denis_e2e_failed';
+  console.log(JSON.stringify({ stage, error: report.error }));
 } finally {
   for (const uuid of attempted) await closeAttempt(uuid).catch(() => { report.passed = false; report.error = 'denis_e2e_close_requires_review'; });
   if (session) await session.owner().catch(() => { report.passed = false; report.error = 'denis_e2e_owner_restore_requires_review'; });

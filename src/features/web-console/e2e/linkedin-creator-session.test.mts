@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCreatorDesktopSession, createManualCreatorSession, assertCreatorGuestProof } from './linkedin-creator-session.mts';
+import { createCreatorDesktopSession, createManualCreatorSession, createIsolatedCreatorSession, creatorOwnerFetch, assertCreatorGuestProof } from './linkedin-creator-session.mts';
 const guest = { email: 'guest@example.test', password: 'private-guest' };
 const owner = { email: 'owner@example.test', password: 'private-owner-password' };
 test('desktop switching checks closed profiles and reads back the actual identity', async () => {
@@ -53,4 +53,17 @@ test('manual mode observes account switching without reading passwords or sendin
     } });
   await session.verifyOwner(); await session.guest();
   assert.deepEqual(notices, ['owner','guest']); assert.ok(paths.every(p => !p.includes('/auth/')));
+});
+test('isolated owner rewrites only bridge localhost endpoints; guest stays on its own Desktop', async () => {
+  const paths: string[] = [];
+  const fetchOwner = creatorOwnerFetch(58889, (async (input: any) => {
+    paths.push(String(input)); return Response.json({ username: owner.email });
+  }) as typeof fetch);
+  const session = createIsolatedCreatorSession({ ownerFetch: fetchOwner, ownerEmail: owner.email, guestEmail: guest.email,
+    local: async () => ({ username: guest.email }) });
+  await session.verifyOwner(); await session.guest();
+  await fetchOwner('https://stand.example.test/internal/octo-bridge/v1/health');
+  assert.deepEqual(paths, ['http://127.0.0.1:58889/api/username','https://stand.example.test/internal/octo-bridge/v1/health']);
+  await assert.rejects(fetchOwner('http://127.0.0.1:58888/api/auth/logout'), { code: 'bridge_invalid_local_endpoint' });
+  assert.throws(() => creatorOwnerFetch(58888), { code: 'denis_e2e_owner_port_invalid' });
 });
