@@ -74,7 +74,8 @@ authorization. Reports/screenshots belong in ignored `tmp/linkedin-creation`.
 It validates the existing OctoGuide client 261/task 1 and the explicitly marked paused
 demo client 266/task 9, the original EN proxy, idle operations, guest rights, the local
 Desktop identity and the deployed control endpoint. It never starts a worker or changes
-Desktop login. `--apply-denis` requires all preflight checks to pass before any write.
+Desktop login. `--apply-denis` requires all preflight checks to pass before any write;
+the explicitly selected `--switch-desktop` mode switches sessions as described below.
 
 After the control endpoint is deployed/configured, provide a dedicated usable test
 proxy in **private process ENV** `LINKEDIN_CREATOR_E2E_PROXY_JSON`, with the same structured
@@ -101,19 +102,19 @@ the form button; no target proxy is assigned through an operator API call. The t
 all actual cloud connection fields in memory, the SQL proxy reference, and the task receipt.
 OctoGuide's RU profile and original EN proxy are compared afterwards. It never creates
 another student/task, directly sends a message, registers an actual LinkedIn account,
-force-stops a profile or alters existing Desktop/bridge configuration.
+force-stops a profile or overwrites the existing bridge configuration.
 
 The safe report is `tmp/linkedin-creation/denis-access/report.json`. It records the
-Desktop role: an owner-side Desktop launch proves local opening/closing but **does not
-prove independent guest Desktop visibility**. That claim is true only for a run already
-logged into the configured guest. Existing fresh-owner archive acceptance is separate.
+initial Desktop role and a separate verified guest-open result for each task. Owner-side
+opening cannot pass the full run. Existing fresh-owner archive acceptance is separate.
 An uncertain start/stop is inspected for the exact attempted UUID, never blindly resent.
 
 The existing shared guest has `profiles.edit=false` and `proxies.edit=false`, as required
 by the current guest validator. Proxy entry is performed in the contractor's Console
 form and verified in the cloud, not by editing inside Octo. Do not broaden this shared
 guest's rights or relax the validator as an incidental E2E setup operation.
-# Full contractor acceptance on an isolated stand
+
+### Full contractor acceptance on an isolated stand
 
 `src/features/web-console/e2e/linkedin-creator-staging.mts` is an explicit E2E entry point,
 not the production entry point. It exposes only auth, contractor, protected Octo control/bridge

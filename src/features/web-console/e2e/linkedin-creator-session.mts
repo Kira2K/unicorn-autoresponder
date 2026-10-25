@@ -5,6 +5,7 @@ export function createCreatorDesktopSession({ local, guest, owner }: {
   owner: { email: string; token?: string; password?: string };
 }) {
   const fail = (code: string) => { throw Object.assign(Error(code), { code }); };
+  const refused = new Set<string>();
   async function username() {
     return String((await local('/api/username')).username || '').trim().toLowerCase();
   }
@@ -13,13 +14,14 @@ export function createCreatorDesktopSession({ local, guest, owner }: {
     if (!Array.isArray(active) || active.length) fail('denis_e2e_switch_has_active_profiles');
     const email = (role === 'guest' ? guest.email : owner.email).toLowerCase();
     if (await username().catch(() => '') === email) return role;
+    if (refused.has(role)) fail('denis_e2e_desktop_login_requires_review');
     if (role === 'owner' && !owner.password) fail('denis_e2e_owner_password_required');
     const body = role === 'guest' ? { email, password: guest.password }
       : { email, password: owner.password };
     await local('/api/auth/logout', {});
     try { await local('/api/auth/login', body); } catch { /* reconcile, never retry login blindly */ }
     const actual = await username().catch(() => '');
-    if (actual !== email) fail('denis_e2e_desktop_login_unverified');
+    if (actual !== email) { refused.add(role); fail('denis_e2e_desktop_login_unverified'); }
     return role;
   }
   return { username, guest: () => login('guest'), owner: () => login('owner') };

@@ -27,6 +27,7 @@ test('refused or lost login is not retried or mistaken for a verified switch', a
     calls++; throw Error('upstream includes credentials');
   } });
   await assert.rejects(session.guest(), { code: 'denis_e2e_desktop_login_unverified' });
+  await assert.rejects(session.guest(), { code: 'denis_e2e_desktop_login_requires_review' });
   assert.equal(calls, 1);
 });
 test('missing owner credentials cannot log out a guest', async () => {
