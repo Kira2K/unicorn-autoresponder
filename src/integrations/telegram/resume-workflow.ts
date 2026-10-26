@@ -1305,6 +1305,7 @@ function movedToFillingSummary(record: ResumeWorkflowRecord, testMode: boolean):
 }
 
 function linkedInReadyNotification(record: ResumeWorkflowRecord): ResumeWorkflowNotification | null {
+  if (normalizeText(process.env.RESUME_WORKFLOW_LINKEDIN_READY_ENABLED).toLowerCase() === 'false') return null
   if (!['moved to filling', CV_DONE_STATUS].includes(statusText(record))) return null
   if (!isEnMarketWorkflow(record)) return null
   const chatId = linkedinReadyNotifyChatId()

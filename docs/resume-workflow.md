@@ -446,6 +446,11 @@ channel settings unchanged. This changes neither the completion transition
 (`CV done` in the current workflow, also supporting legacy `moved to filling`)
 nor any other recipient or notification; do not replay completed workflows.
 
+Set `RESUME_WORKFLOW_LINKEDIN_READY_ENABLED=false` to pause only this notification.
+Unset it or set it to `true` to enable future notifications again; completed
+workflows are not replayed. Keep the chat/thread settings when pausing: clearing
+the chat setting would otherwise fall back to the shared summary channel.
+
 At `moved to filling` and `filled`, student-facing replies show only the RU link
 for RU-only clients, even if an older EN link remains stored. EN/both workflows
 show both available links. If the workflow is `stopped`, the bot replies with the last
