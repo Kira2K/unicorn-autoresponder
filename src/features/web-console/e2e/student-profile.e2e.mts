@@ -25,7 +25,8 @@ const client = () => ({ id: clientId, studentProfileEnabled: enabled, clientName
   calendarEmail: `student${clientId}@gmail.com`, telegramPersonalChatId: '@kira_test', noHigherEducation: true,
   educationEntries: [{ uni: 'School', faculty: '', grade: '', yearOfEnd: '2020', city: 'Moscow' }], currentCompany: 'Alpha,Beta', previousCompanies: 'Gamma,Delta', stopListCompany: 'Alpha,Beta,Gamma,Delta' });
 let dashboard: any = { client: client(), platformAccounts: [], linkedInEmail: '' };
-const platforms = [{ id: 30, label: 'phone_ru' }, { id: 28, label: 'phone_en' }, { id: 24, label: 'telegram_ru' }, { id: 23, label: 'telegram_en' },
+const platforms = [{ id: 27, label: 'email_ru' }, { id: 25, label: 'email_en' },
+  { id: 30, label: 'phone_ru' }, { id: 28, label: 'phone_en' }, { id: 24, label: 'telegram_ru' }, { id: 23, label: 'telegram_en' },
   { id: 10, label: 'hh_en' }, { id: 11, label: 'hh_ru' }, { id: 16, label: 'linkedin' }, { id: 29, label: 'github' }];
 try {
   browser = await chromium.launch({ headless: true });
@@ -168,23 +169,30 @@ try {
   await byId('account-platform').selectOption('28');
   await byId('account-phone').fill('+44 (123) abc 45'); assert.equal(await byId('account-phone').inputValue(), '+4412345');
   await byId('account-platform').selectOption('30');
-  await submitAccount(); assert.equal(accountWrites.length, 0);
-  await byId('account-phone').fill('8 (999) 123-45-67'); assert.equal(await byId('account-phone').inputValue(), '+79991234567');
+  assert.match(await page.getByRole('dialog').innerText(), /любым кодом страны/);
+  for (const invalid of ['', '+7999', '+0123456789', '+1234567890123456']) {
+    await byId('account-phone').fill(invalid);
+    await submitAccount(); assert.equal(accountWrites.length, 0);
+    await page.getByRole('alert').filter({ hasText: 'код страны' }).waitFor();
+  }
+  await byId('account-phone').fill('8 (999) 123-45-67'); assert.equal(await byId('account-phone').inputValue(), '+89991234567');
+  await byId('account-phone').fill('+995 (555) 123-456'); assert.equal(await byId('account-phone').inputValue(), '+995555123456');
   failAccount = true; await submitAccount(); await byId('account-form-error').waitFor();
-  assert.equal(await byId('account-phone').inputValue(), '+79991234567');
+  assert.equal(await byId('account-phone').inputValue(), '+995555123456');
   failAccount = false; pendingAccount = true; await submitAccount();
   await page.waitForFunction(() => document.querySelector<HTMLFieldSetElement>('.account-form-fields')?.disabled);
   await page.keyboard.press('Escape'); assert.equal(await page.getByRole('dialog').count(), 1);
   await submitAccount(); assert.equal(accountWrites.length, 2);
   assert.ok(releaseAccount); releaseAccount(); pendingAccount = false;
   await page.getByRole('dialog').waitFor({ state: 'detached' });
+  assert.equal(accountWrites.at(-1).phone, '+995555123456');
   assert.equal(await byId('edit-account-button').count(), 0);
   await byId('edit-platform-accounts-button').click();
   await byId('edit-account-button').first().click();
   assert.equal(await byId('account-platform-locked').isDisabled(), true);
   await byId('account-phone').fill('+71111111111'); await page.keyboard.press('Escape');
   await page.getByRole('dialog').waitFor({ state: 'detached' }); assert.equal(accountWrites.length, 2);
-  await byId('edit-account-button').first().click(); assert.equal(await byId('account-phone').inputValue(), '+79991234567');
+  await byId('edit-account-button').first().click(); assert.equal(await byId('account-phone').inputValue(), '+995555123456');
   await byId('close-account-editor-button').click();
 
   // Preserve master password-loading behavior after extracting the form.
@@ -207,6 +215,35 @@ try {
   await page.getByRole('dialog').waitFor({ state: 'detached' });
   await page.screenshot({ path: path.join(artifacts, 'mobile-profile.png'), fullPage: true });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+
+  // International codes survive create, reload and update for the HH contact and both HH accounts.
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  for (const platform of ['30', '11', '10']) {
+    dashboard.platformAccounts = [];
+    await page.reload(); await byId('open-account-editor-button').click();
+    await byId('account-platform').selectOption(platform);
+    if (platform !== '30') {
+      await byId('account-login').fill('test@example.invalid');
+      await byId('account-password-widget').locator('input').fill('test-password');
+    }
+    await byId('account-phone').fill('+856 20 123 456');
+    assert.equal(await byId('account-phone').inputValue(), '+85620123456');
+    await byId('save-account-button').click(); await page.getByRole('dialog').waitFor({ state: 'detached' });
+    assert.equal(accountWrites.at(-1).phone, '+85620123456');
+    await page.reload(); await byId('edit-platform-accounts-button').click();
+    await byId('edit-account-button').first().click();
+    assert.equal(await byId('account-phone').inputValue(), '+85620123456');
+    for (const phone of ['+15551234567', '+447700900123', '+375291234567', '+995555123456']) {
+      await byId('account-phone').fill(phone);
+      await byId('save-account-button').click(); await page.getByRole('dialog').waitFor({ state: 'detached' });
+      assert.equal(accountWrites.at(-1).phone, phone);
+      await page.reload(); await byId('edit-platform-accounts-button').click();
+      await byId('edit-account-button').first().click();
+      assert.equal(await byId('account-phone').inputValue(), phone);
+    }
+    if (platform === '30') await page.screenshot({ path: path.join(artifacts, 'international-phone.png'), fullPage: true });
+    await byId('close-account-editor-button').click();
+  }
 
   clientId = 2; dashboard = { client: client(), platformAccounts: [{ id: 2010, platformId: 24, platform: 'telegram_ru', isTelegramAccount: true }], linkedInEmail: '' };
   const priorDolphinReads = dolphinReads;

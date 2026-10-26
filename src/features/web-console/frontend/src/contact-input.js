@@ -2,10 +2,8 @@ export function telegramInputValue(value) {
   return '@' + String(value ?? '').trim().replace(/@/g, '')
 }
 
-export function phoneInputValue(value, platform) {
-  let digits = String(value ?? '').replace(/[^0-9]/g, '')
-  if (platform === 'phone_ru' && /^8[0-9]{10}$/.test(digits)) digits = '7' + digits.slice(1)
-  return '+' + digits
+export function phoneInputValue(value, _platform) {
+  return '+' + String(value ?? '').replace(/[^0-9]/g, '')
 }
 
 export function phonePayload(value, platform) {
