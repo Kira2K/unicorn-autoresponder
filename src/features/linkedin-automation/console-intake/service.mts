@@ -1,6 +1,6 @@
 import type { WebClient } from '../../web-console/backend/types.ts';
 import { profileRules } from '../../octo-access/profile-reservation.mts';
-import { IntakeError, parseIntake } from './contracts.mts';
+import { IntakeError, parseIntake, isManualTestIntakeUser } from './contracts.mts';
 import type { createLinkedInIntakeStore } from './postgres-store.mts';
 
 export function createLinkedInIntakeService(deps: {
@@ -17,9 +17,22 @@ export function createLinkedInIntakeService(deps: {
     return value;
   }
   return {
-    async load(id: number) { await client(id); return deps.store.load(id); },
+    async load(id: number): ReturnType<typeof deps.store.load> {
+      const c = await client(id), data = await deps.store.load(id);
+      if (isManualTestIntakeUser(c.calendarEmail)) return data;
+      const { outlookRegisteredAt: _pilotTimestamp, ...legacy } = data;
+      return legacy;
+    },
     async save(id: number, raw: unknown) {
-      const c = await client(id), data = parseIntake(raw);
+      const c = await client(id);
+      let payload = raw;
+      if (!isManualTestIntakeUser(c.calendarEmail) && raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const { outlookRegisteredAt: _pilotTimestamp, ...legacy } = raw as Record<string, unknown>;
+        payload = legacy;
+      }
+      const data = parseIntake(payload);
+      if (data.scenario === 'new' && isManualTestIntakeUser(c.calendarEmail) && !data.outlookRegisteredAt)
+        throw new IntakeError('linkedin_intake_outlook_registration_required');
       if (data.scenario === 'new' && profileRules.getRequiredClientDataIssues(c, { requireCalendarEmail: true }).length)
         throw new IntakeError('octo_client_data_required', 409);
       return deps.store.save(id, data, profileRules.requiredLocalesForMarket(c.market), { createOctoProfiles: true });

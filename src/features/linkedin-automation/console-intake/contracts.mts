@@ -4,6 +4,7 @@ export interface LinkedInIntake {
   scenario: 'existing' | 'new';
   url: string; login: string; password: string;
   outlookLogin: string; outlookPassword: string;
+  outlookRegisteredAt?: string;
   firstName: string; lastName: string; realLocation: string;
   blockedAccounts: BlockedAccount[]; loggedIn: boolean;
 }
@@ -12,7 +13,15 @@ export class IntakeError extends Error {
   constructor(code: string, status = 400) { super(code); this.code = code; this.status = status; }
 }
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+export const isManualTestIntakeUser = (email: unknown) => text(email).toLowerCase() === 'linkedin-manual-test-20261026@example.invalid';
 export const isOutlookLogin = (value: unknown) => /^[^@\s]+@outlook\.com$/i.test(text(value));
+function registrationTime(value: unknown): string | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ||
+      !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value)
+    throw new IntakeError('linkedin_intake_outlook_registration_invalid');
+  return value;
+}
 export function parseLinkedInResult(raw: Record<string, unknown>) {
   const url = text(raw.url), login = text(raw.login), password = typeof raw.password === 'string' ? raw.password : '';
   if (!/^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[^/?#\s]+([/?#][^\s]*)?$/i.test(url) || !login ||
@@ -67,7 +76,9 @@ export function parseIntake(value: unknown): LinkedInIntake {
     if (![data.firstName, data.lastName].every(v => /^[A-Za-z][A-Za-z '\-]*$/.test(v)) || !data.realLocation)
       throw new IntakeError('linkedin_intake_identity_required');
   }
+  const outlookRegisteredAt = raw.scenario === 'new' ? registrationTime(raw.outlookRegisteredAt) : undefined;
   return { ...data, scenario: raw.scenario as LinkedInIntake['scenario'], password, outlookPassword,
+    ...(outlookRegisteredAt ? { outlookRegisteredAt } : {}),
     loggedIn: raw.loggedIn === true, blockedAccounts: normalizeBlockedAccounts(raw.blockedAccounts ?? []) };
 }
 /** Future staff-task boundary: preparation data only, never an automated signup. */

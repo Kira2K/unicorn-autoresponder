@@ -7,6 +7,7 @@ import StudentProfile from './StudentProfile.vue'
 import StudentWorkPlaces from './StudentWorkPlaces.vue'
 import OctoAccessCard from './components/OctoAccessCard.vue'
 import LinkedInOctoWorkflow from './components/LinkedInOctoWorkflow.vue'
+import { isManualTestIntakeUser } from '../../../linkedin-automation/console-intake/contracts.mts'
 import LinkedInCreatorConsole from './components/LinkedInCreatorConsole.vue'
 import BrowserWelcomeDialog from './components/BrowserWelcomeDialog.vue'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
@@ -2522,7 +2523,7 @@ onUnmounted(() => {
         </Card>
       </div>
 
-      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled"
+      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled || (isClient && isManualTestIntakeUser(session?.email))"
         :class="{ 'linkedin-intake-layout': isClient && dolphinProfileStatus && ['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase()) }">
         <template #profile>
         <Card class="profile-card">
@@ -3001,7 +3002,7 @@ onUnmounted(() => {
         <template v-if="isClient && !pageLoading && dashboard?.client?.id && dolphinProfileStatus">
           <OctoAccessCard v-if="String(dashboard.client.market || '').trim().toLowerCase() === 'ru' && !dolphinProfileStatus.existingProfiles?.length" :key="dashboard.client.id" :client-id="dashboard.client.id" />
           <LinkedInOctoWorkflow v-else-if="!dolphinProfileStatus.existingProfiles?.length && ['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase())"
-            :key="`linkedin-${dashboard.client.id}`" :client="dashboard.client" :has-dolphin="!!dolphinProfileStatus.existingProfiles?.length" @saved="refreshLinkedInAccounts" />
+            :key="`linkedin-${dashboard.client.id}`" :client="dashboard.client" :user-email="session?.email || ''" :has-dolphin="!!dolphinProfileStatus.existingProfiles?.length" @saved="refreshLinkedInAccounts" />
         </template>
         <Card v-if="adminCanOpenDolphinProfiles" class="action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>

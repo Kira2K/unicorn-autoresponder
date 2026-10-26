@@ -1,9 +1,13 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import OctoAccessCard from './OctoAccessCard.vue'
-import { intakeRequest, intakeScenario, infrastructureReady, infrastructureSignature } from '../linkedin-intake.js'
-import { isOutlookLogin } from '../../../../linkedin-automation/console-intake/contracts.mts'
-const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false } })
+import Dialog from 'primevue/dialog'
+import { intakeRequest, intakeScenario, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
+import { isOutlookLogin, isManualTestIntakeUser } from '../../../../linkedin-automation/console-intake/contracts.mts'
+const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false }, userEmail: { type: String, default: '' } })
+const isManualTestUser = computed(() => isManualTestIntakeUser(props.userEmail))
+const registrationDate = ref(''), showSavedDialog = ref(false)
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const emit = defineEmits(['saved'])
 const loaded = ref(false), loading = ref(false), loadError = ref(''), message = ref(''), saving = ref(false)
 const scenario = ref(''), existing = ref(false), newSaved = ref(false), opened = ref(false), status = ref(null)
@@ -14,6 +18,8 @@ const controller = new AbortController()
 const outlookError = ref('')
 const ready = computed(() => infrastructureReady(status.value))
 const historyFields = { fullName: 'Какие имя и фамилия стояли?', country: 'Какая страна была указана?', company: 'Какая компания была указана?', position: 'Какая должность была указана?', blockedAt: 'Когда заблокировали аккаунт?', newFullName: 'Имя и фамилия латиницей для нового аккаунта' }
+const visibleHistoryFields = computed(() => Object.fromEntries(Object.entries(historyFields)
+  .filter(([field]) => !isManualTestUser.value || field !== 'newFullName')))
 const canSave = computed(() => loaded.value && !props.hasDolphin && !editLocked.value && !saving.value && (scenario.value === 'new' || (ready.value && opened.value && form.value.loggedIn)))
 async function load() {
   if (loading.value || props.hasDolphin) return
@@ -22,6 +28,7 @@ async function load() {
     const data = await intakeRequest('GET', undefined, controller.signal)
     if (controller.signal.aborted) return
     form.value = { ...form.value, ...data, realLocation: data.realLocation || props.client.realLocation || '', password: '', outlookPassword: '', loggedIn: false }
+    registrationDate.value = registrationTimeInput(data.outlookRegisteredAt)
     secrets.value = data; scenario.value = intakeScenario(data); existing.value = !!scenario.value
     editLocked.value = data.editLocked === true
     newSaved.value = !!data.hasOutlookPassword && !!data.firstName; loaded.value = true
@@ -33,6 +40,9 @@ watch(() => [form.value.url, form.value.login, form.value.password], () => { for
 watch(() => infrastructureSignature(status.value), resetConfirmation)
 watch(scenario, () => { resetConfirmation(); form.value.password = ''; form.value.outlookPassword = ''; message.value = '' })
 function selectScenario(value) { scenario.value = value }
+function validateOutlook() {
+  outlookError.value = isOutlookLogin(form.value.outlookLogin) ? '' : 'Укажите полный адрес почты Outlook, например name@outlook.com.'
+}
 async function save() {
   if (!canSave.value) return
   outlookError.value = ''
@@ -42,15 +52,24 @@ async function save() {
   }
   saving.value = true; message.value = ''
   try {
-    const result = await intakeRequest('PUT', { ...form.value, scenario: scenario.value }, controller.signal)
+    const registration = scenario.value === 'new' && isManualTestUser.value
+      ? { outlookRegisteredAt: registrationTimeUtc(registrationDate.value) } : {}
+    if (scenario.value === 'new' && isManualTestUser.value && !registration.outlookRegisteredAt)
+      throw new Error('linkedin_intake_outlook_registration_required')
+    const result = await intakeRequest('PUT', { ...form.value, ...registration, scenario: scenario.value }, controller.signal)
     if (controller.signal.aborted) return
     if (scenario.value === 'new') {
       newSaved.value = true; secrets.value.hasOutlookPassword = true
       message.value = result.task ? (result.task.created ? 'Заявка успешно создана' : 'Заявка обновлена') : 'Данные сохранены. Подготавливаем профили Octo.'
+      if (isManualTestUser.value && result.saved === true) showSavedDialog.value = true
     } else { existing.value = true; secrets.value.hasPassword = true; message.value = 'Данные LinkedIn сохранены.' }
     form.value.password = ''; form.value.outlookPassword = ''; form.value.loggedIn = false; emit('saved')
   } catch (error) {
     if (error.name === 'AbortError') return
+    if (['linkedin_intake_outlook_registration_required', 'linkedin_intake_outlook_registration_invalid'].includes(error.message)) {
+      message.value = 'Укажите корректные дату и время регистрации Outlook-почты.'
+      return
+    }
     if (error.message === 'commit_uncertain') {
       loaded.value = false
       form.value.password = ''; form.value.outlookPassword = ''
@@ -92,25 +111,29 @@ onUnmounted(() => { controller.abort(); form.value.password = ''; form.value.out
       </template>
       <form v-if="scenario === 'new'" @submit.prevent="save" class="intake-form" data-testid="linkedin-new-form">
         <details><summary>Инструкция по созданию почты Outlook</summary><ol>
-          <li>Создай новую почту на outlook.com с телефона через мобильный интернет. VPN выключи, твоя локация не имеет значения.</li>
+          <li>Создай новую почту на outlook.com с телефона через мобильный интернет. VPN выключи, твоя локация не имеет значения.<template v-if="isManualTestUser"> Если ты в РФ, оставь VPN включенным.</template></li>
           <li>Адрес — имя.фамилия латиницей. Если занят — добавь цифры.</li>
           <li>Номер телефона к почте привязывать не нужно.</li>
           <li>Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.</li>
           <li>Двухфакторку не ставь.</li>
         </ol></details>
-        <label>Логин от новой почты Outlook<input v-model="form.outlookLogin" type="email" required autocomplete="off" aria-label="Логин от новой почты Outlook" :aria-invalid="!!outlookError" :aria-describedby="outlookError ? 'outlook-error' : undefined" @input="outlookError = ''">
+        <label>Логин от новой почты Outlook<input v-model="form.outlookLogin" type="email" required autocomplete="off" aria-label="Логин от новой почты Outlook" :placeholder="isManualTestUser ? 'name@outlook.com' : undefined" :aria-invalid="!!outlookError" :aria-describedby="outlookError ? 'outlook-error' : undefined" @input="outlookError = ''" @blur="isManualTestUser && validateOutlook()">
           <span v-if="outlookError" id="outlook-error" role="alert">{{ outlookError }}</span>
         </label>
         <label>Пароль от новой почты Outlook<input v-model="form.outlookPassword" type="password" :required="!secrets.hasOutlookPassword" :placeholder="secrets.hasOutlookPassword ? 'Сохранён. Оставьте пустым, чтобы не менять' : ''" autocomplete="new-password"></label>
+        <label v-if="isManualTestUser">Дата и время регистрации Outlook-почты
+          <input v-model="registrationDate" type="datetime-local" required aria-label="Дата и время регистрации Outlook-почты" aria-describedby="outlook-registration-timezone">
+          <small id="outlook-registration-timezone">Часовой пояс устройства: {{ timeZone }}</small>
+        </label>
         <label>Имя латиницей (как в иностранных документах)<input v-model="form.firstName" required></label>
         <label>Фамилия латиницей (как в иностранных документах)<input v-model="form.lastName" required></label>
-        <label>Реальная локация<input v-model="form.realLocation" required></label>
+        <label>{{ isManualTestUser ? 'Город и страна проживания' : 'Реальная локация' }}<input v-model="form.realLocation" required></label>
         <section class="blocked-history" aria-labelledby="blocked-title">
           <h3 id="blocked-title">Старые заблокированные аккаунты</h3>
           <p>Если аккаунты LinkedIn были заблокированы, добавь их ниже. Можно ничего не добавлять; все поля необязательные.</p>
           <article v-for="(account, index) in form.blockedAccounts" :key="index" class="blocked-account">
             <h4>Аккаунт {{ index + 1 }}</h4>
-            <label v-for="(label, field) in historyFields" :key="field">{{ label }}<input v-model="account[field]"></label>
+            <label v-for="(label, field) in visibleHistoryFields" :key="field">{{ label }}<input v-model="account[field]"></label>
             <label v-if="account.legacyText !== undefined">Ранее сохранённый текст<textarea v-model="account.legacyText" rows="4" /></label>
             <button type="button" @click="form.blockedAccounts.splice(index, 1)">Удалить аккаунт {{ index + 1 }}</button>
           </article>
@@ -122,6 +145,11 @@ onUnmounted(() => { controller.abort(); form.value.password = ''; form.value.out
       <p v-if="message" role="status">{{ message }}</p>
       <OctoAccessCard v-if="scenario === 'new' && newSaved && !hasDolphin" :client-id="client.id" :setup-enabled="false" />
     </template>
+    <Dialog v-model:visible="showSavedDialog" modal header="Спасибо, данные сохранены ✅" :closable="false" :draggable="false" :style="{ width: '32rem', maxWidth: 'calc(100vw - 2rem)' }">
+      <p>Мы начали создавать твой аккаунт LinkedIn. Обычно это занимает до 3 суток. Когда всё будет готово, мы тебе напишем.</p>
+      <p>Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.</p>
+      <template #footer><button type="button" autofocus @click="showSavedDialog = false">Понятно</button></template>
+    </Dialog>
   </section>
 </template>
 <style scoped>

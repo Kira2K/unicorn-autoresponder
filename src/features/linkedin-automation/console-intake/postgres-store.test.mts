@@ -71,6 +71,23 @@ function fixture(creationTasks = false) {
   return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore', false, creationTasks) };
 }
 
+test('Outlook registration time round-trips on the email account and survives legacy updates and rollback', async () => {
+  const f = fixture();
+  const outlookRegisteredAt = '2026-10-25T10:30:00.123Z';
+  await f.store.save(7, { ...input(), outlookRegisteredAt }, ['ru','en']);
+  assert.equal(f.state.accounts[0].outlook_registered_at, undefined);
+  assert.equal(f.state.accounts[1].outlook_registered_at, outlookRegisteredAt);
+  assert.equal((await f.store.load(7)).outlookRegisteredAt, outlookRegisteredAt);
+  await f.store.save(7, { ...input(), outlookPassword: '' }, ['ru','en']);
+  assert.equal((await f.store.load(7)).outlookRegisteredAt, outlookRegisteredAt);
+  f.control.failQueue = true;
+  f.state.client = undefined;
+  await assert.rejects(f.store.save(7, { ...input(), outlookRegisteredAt: '2026-10-24T10:30:00.000Z' }, ['ru','en']));
+  assert.equal((await f.store.load(7)).outlookRegisteredAt, outlookRegisteredAt);
+  f.state.accounts[1].outlook_registered_at = new Date(outlookRegisteredAt);
+  assert.equal((await f.store.load(7)).outlookRegisteredAt, outlookRegisteredAt);
+});
+
 test('student save creates one referenced task, repeated saves update it and preserve other manual tasks',async()=>{
   const f=fixture(true);
   const first=await f.store.save(7,input(),['ru','en']);

@@ -13,8 +13,10 @@ const { createWebConsoleRepository } = require('../backend/repository.ts');
 const { createWebConsoleApp } = require('../backend/app.ts');
 const express = require('express') as typeof import('express');
 const noco = createMockNocoClient(), rows = await noco.fetchRecords('mxza381054ldlza');
-for (const [id, market] of [[903,'En'],[904,'Both'],[905,'Ru'],[906,'En']] as const) rows.push({ Id: id, first_name: 'Alex', last_name: 'Test',
-  client_name: `Intake ${id}`, calendar_email: `intake-${id}@example.com`, market,
+const manualTestEmail = 'linkedin-manual-test-20261026@example.invalid';
+const loginEmail = (id: number) => id === 907 ? manualTestEmail : `intake-${id}@example.com`;
+for (const [id, market] of [[903,'En'],[904,'Both'],[905,'Ru'],[906,'En'],[907,'En']] as const) rows.push({ Id: id, first_name: 'Alex', last_name: 'Test',
+  client_name: `Intake ${id}`, calendar_email: loginEmail(id), market,
   real_location: 'Tbilisi', telegram_general_chat_id: `intake-test-${id}`, rel_clients_primary_stack: { Id: 14, name: 'REACT' } });
 const { TABLES } = require('../../../integrations/noco/core/schema.ts');
 (await noco.fetchRecords(TABLES.dolphinProfiles.id)).push({ Id: 999, clients_id: 906, locale: 'En', browser: 'dolphin', dolphin_profile_id: '999' });
@@ -42,18 +44,96 @@ const octo = {
 const app = createWebConsoleApp({ useMockData: true, repository, octoService: octo, linkedinIntake: intake });
 app.use(express.static(resolve('dist/web-console')));
 app.use((_req: unknown, res: import('express').Response) => res.sendFile(resolve('dist/web-console/index.html')));
-const server = app.listen(0, '127.0.0.1');
+const preview = process.argv.includes('--preview');
+const server = app.listen(preview ? 4317 : 0, '127.0.0.1');
 await new Promise<void>(done => server.once('listening', done));
 const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+if (preview) {
+  console.log(`LinkedIn intake MOCK preview: ${url}`);
+  console.log(`Login: ${manualTestEmail}; password: 1234. Changes are stored in memory only.`);
+  await new Promise<void>(() => {});
+}
 const browser = await chromium.launch({ headless: true });
 async function login(id: number, context: BrowserContext) {
   await context.addInitScript(id => localStorage.setItem(`webConsole.octoWelcome.v1.${id}`, 'closed'), id);
   const page = await context.newPage(); page.setDefaultTimeout(15000);
-  await page.goto(url); await page.getByTestId('email-input').fill(`intake-${id}@example.com`);
+  await page.goto(url); await page.getByTestId('email-input').fill(loginEmail(id));
   await page.locator('#password').fill('1234'); await page.getByTestId('login-button').click();
   return page;
 }
 try {
+  for (const id of [907, 904]) {
+    const instructionContext = await browser.newContext({ timezoneId: 'Europe/Warsaw' }), instructionPage = await login(id, instructionContext);
+    const instructionCard = instructionPage.getByTestId('linkedin-octo-workflow');
+    await instructionPage.getByTestId('telegram-card').waitFor();
+    assert.equal(await instructionPage.locator('.accounts-card').evaluate(element =>
+      !!(element.compareDocumentPosition(document.querySelector('[data-testid="telegram-card"]')!) & Node.DOCUMENT_POSITION_FOLLOWING)), id === 907,
+      'pilot accounts appear before Telegram while other users retain their layout');
+    await instructionCard.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).click();
+    await instructionCard.getByText('Инструкция по созданию почты Outlook', { exact: true }).click();
+    const instruction = instructionCard.locator('details ol');
+    assert.equal(await instruction.isVisible(), true);
+    assert.deepEqual(await instruction.locator('li').allTextContents(), [
+      'Создай новую почту на outlook.com с телефона через мобильный интернет. VPN выключи, твоя локация не имеет значения.' + (id === 907 ? ' Если ты в РФ, оставь VPN включенным.' : ''),
+      'Адрес — имя.фамилия латиницей. Если занят — добавь цифры.',
+      'Номер телефона к почте привязывать не нужно.',
+      'Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.',
+      'Двухфакторку не ставь.'
+    ]);
+    const registration = instructionCard.getByLabel('Дата и время регистрации Outlook-почты', { exact: true });
+    await instructionCard.getByRole('button', { name: '＋ Добавить заблокированный аккаунт', exact: true }).click();
+    assert.equal(await instructionCard.getByLabel('Имя и фамилия латиницей для нового аккаунта', { exact: true }).count(), id === 907 ? 0 : 1);
+    assert.equal(await instructionCard.getByLabel('Какие имя и фамилия стояли?', { exact: true }).count(), 1);
+    await instructionCard.getByRole('button', { name: 'Удалить аккаунт 1', exact: true }).click();
+    if (id === 907) {
+      await registration.waitFor();
+      assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi');
+      const form = instructionCard.getByTestId('linkedin-new-form');
+      const submit = form.getByRole('button', { name: 'Сохранить и подготовить Octo', exact: true });
+      await form.getByLabel('Пароль от новой почты Outlook', { exact: true }).fill('outlook-secret');
+      await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
+      await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
+      const outlook = form.getByLabel('Логин от новой почты Outlook', { exact: true });
+      await outlook.fill('test@outlook.com');
+      await submit.click();
+      assert.equal(saved.has(id), false, 'missing registration time prevents submission');
+      await registration.fill('2026-10-25T10:30');
+      await outlook.fill('test@gmail.com');
+      await registration.focus();
+      await form.getByRole('alert').waitFor();
+      await submit.click();
+      assert.equal(saved.has(id), false, 'non-Outlook address cannot be saved');
+      await outlook.fill('test@outlook.com');
+      await instructionPage.route('**/api/client/linkedin-intake', async route => {
+        if (route.request().method() === 'PUT') await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"linkedin_intake_unavailable"}' });
+        else await route.continue();
+      });
+      await submit.click();
+      await instructionCard.getByText('Не удалось сохранить.', { exact: false }).waitFor();
+      assert.equal(await instructionPage.getByRole('dialog').count(), 0, 'failure must not show success');
+      await instructionPage.unroute('**/api/client/linkedin-intake');
+      await submit.click();
+      const dialog = instructionPage.getByRole('dialog', { name: 'Спасибо, данные сохранены ✅' });
+      await dialog.waitFor();
+      assert.equal(saved.get(id)?.outlookRegisteredAt, '2026-10-25T09:30:00.000Z');
+      assert.ok((await dialog.textContent())?.includes('Мы начали создавать твой аккаунт LinkedIn. Обычно это занимает до 3 суток. Когда всё будет готово, мы тебе напишем.'));
+      assert.ok((await dialog.textContent())?.includes('Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.'));
+      await instructionPage.setViewportSize({ width: 390, height: 844 });
+      assert.ok(await dialog.evaluate(element => element.getBoundingClientRect().width <= 390));
+      await mkdir('tmp/linkedin-octo', { recursive: true });
+      await instructionPage.screenshot({ path: 'tmp/linkedin-octo/outlook-saved-mobile.png', fullPage: true, animations: 'disabled' });
+      await dialog.getByRole('button', { name: 'Понятно', exact: true }).click();
+      await dialog.waitFor({ state: 'hidden' });
+      await instructionPage.reload();
+      await instructionCard.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).click();
+      assert.equal(await registration.inputValue(), '2026-10-25T10:30');
+      assert.equal(await instructionPage.getByRole('dialog').count(), 0, 'reload does not reopen confirmation');
+    } else {
+      assert.equal(await registration.count(), 0);
+      assert.equal(await instructionCard.getByLabel('Реальная локация', { exact: true }).inputValue(), 'Tbilisi');
+    }
+    await instructionContext.close();
+  }
   const context = await browser.newContext(), page = await login(903, context);
   const card = page.getByTestId('linkedin-octo-workflow');
   await card.getByRole('button', { name: 'У меня есть LinkedIn', exact: true }).click();
