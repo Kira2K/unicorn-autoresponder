@@ -1,0 +1,41 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {harness} from './test-harness.mts';
+import {deliver} from './delivery.mts';
+import {enqueue} from './messages.mts';
+import type {Sender} from './types.mts';
+test('unknown outcomes retry only delivery, preserve business state and acknowledge one eventual send',async()=>{
+  const h=harness();await h.command('/hard_done','mentor');await h.click('confirm','mentor');
+  await h.store.transaction(s=>enqueue(s,{id:'isolated',clientId:'1',kind:'notice',input:{chatId:'-100',text:'test'}},h.now()));
+  let calls=0;
+  const send:Sender=async input=>{calls++;if(calls===1)throw Error('lost response with secret');return h.sender(input);};
+  const before=h.store.snapshot().history;
+  await deliver({store:h.store,send,now:h.now,log(){throw Error('log');}});
+  assert.equal(h.store.snapshot().deliveries.isolated.state,'pending');
+  await deliver({store:h.store,send,now:h.now});assert.equal(calls,1);
+  h.setNow(h.now()+2000);await deliver({store:h.store,send,now:h.now});
+  assert.equal(calls,2);assert.equal(h.store.snapshot().deliveries.isolated.state,'sent');
+  assert.deepEqual(h.store.snapshot().history,before);
+  assert.equal(JSON.stringify(h.store.snapshot()).includes('lost response with secret'),false);
+});
+test('rate limits respect retry_after, permanent errors block, expired claims recover and concurrent drain claims once',async()=>{
+  const h=harness();
+  await h.store.transaction(s=>enqueue(s,{id:'job',clientId:'1',kind:'notice',input:{chatId:'-100',text:'test'}},h.now()));
+  await deliver({store:h.store,now:h.now,send:async()=>({kind:'telegram-response',response:{ok:false,error_code:429,description:'slow',parameters:{retry_after:60}}})});
+  assert.equal(h.store.snapshot().deliveries.job.retryAt,h.now()+60_000);
+  h.setNow(h.now()+60_000);
+  await deliver({store:h.store,now:h.now,send:async()=>({kind:'telegram-response',response:{ok:false,error_code:403,description:'forbidden'}})});
+  assert.equal(h.store.snapshot().deliveries.job.state,'blocked');
+  await h.store.transaction(s=>{s.deliveries.job.state='sending';s.deliveries.job.claimedAt=h.now()-120_001;});
+  await Promise.all([deliver({store:h.store,now:h.now,send:h.sender}),deliver({store:h.store,now:h.now,send:h.sender})]);
+  assert.equal(h.sent.length,1);assert.equal(h.store.snapshot().deliveries.job.state,'sent');
+});
+test('stale screens and removed group destinations are not delivered',async()=>{
+  const h=harness();
+  await h.service.handle({username:'alice',userId:1,chatId:'-100',updateId:1,text:'/menu'});
+  await h.service.handle({username:'alice',userId:1,chatId:'-100',updateId:2,text:'/menu'});
+  await h.flush();assert.equal(h.sent.length,1);
+  await h.service.handle({username:'alice',userId:1,chatId:'-100',updateId:3,text:'/menu'});
+  await h.store.transaction(s=>{s.clients['1'].chatId='-101';});
+  await h.flush();assert.equal(h.sent.length,1);
+});

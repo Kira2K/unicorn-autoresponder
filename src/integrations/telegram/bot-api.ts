@@ -1,4 +1,14 @@
 import { prepareTelegramRichMessage } from './prepare-message.ts'
+import type { BotCommand, BotCommandScope } from '@grammyjs/types'
+
+type CommandScopeInput = { scope: BotCommandScope; languageCode?: string }
+
+function isBotCommands(value: unknown): value is BotCommand[] {
+  return Array.isArray(value) && value.length <= 100 && value.every(command =>
+    command && typeof command === 'object' && typeof command.command === 'string' &&
+    /^[a-z0-9_]{1,32}$/.test(command.command) && typeof command.description === 'string' &&
+    command.description.length >= 1 && [...command.description].length <= 256)
+}
 
 type BotApiHttpResponse = {
   ok: boolean
@@ -168,6 +178,34 @@ export function createTelegramBotApi(options: {
   }
 
   return {
+    async setMyCommands(input: CommandScopeInput & { commands: readonly BotCommand[] }): Promise<boolean> {
+      if (!isBotCommands(input.commands))
+        throw botError('telegram_commands_invalid', 'Telegram command definitions are invalid.')
+      const result = await unwrapLegacyResponse(await requestResponse('setMyCommands', {
+        commands: input.commands, scope: input.scope,
+        ...(input.languageCode !== undefined ? { language_code: input.languageCode } : {})
+      }))
+      if (result !== true)
+        throw botError('telegram_bot_response_invalid', 'Telegram command registration response must be true.')
+      return result
+    },
+    async getMyCommands(input: CommandScopeInput): Promise<BotCommand[]> {
+      const result = await unwrapLegacyResponse(await requestResponse('getMyCommands', {
+        scope: input.scope,
+        ...(input.languageCode !== undefined ? { language_code: input.languageCode } : {})
+      }))
+      if (!isBotCommands(result))
+        throw botError('telegram_bot_response_invalid', 'Telegram command list response is invalid.')
+      return result
+    },
+    async getMe(): Promise<unknown> {
+      return await unwrapLegacyResponse(await requestResponse('getMe'))
+    },
+    async getChat(chatId: string): Promise<unknown> {
+      const chat = String(chatId ?? '').trim()
+      if (!chat) throw botError('telegram_bot_chat_id_missing', 'Telegram chat ID is required.')
+      return await unwrapLegacyResponse(await requestResponse('getChat', { chat_id: chat }))
+    },
     async editMessageTextResponse(input: SendMessageInput): Promise<unknown> {
       if (!Number.isSafeInteger(input.editMessageId) || Number(input.editMessageId) <= 0 ||
         !input.chatId?.trim() || !input.text?.trim() || ('attachment' in input && input.attachment !== undefined) || input.messageThreadId !== undefined)
@@ -209,6 +247,18 @@ export function createTelegramBotApi(options: {
       return await unwrapLegacyResponse(await requestResponse('answerCallbackQuery', {
         callback_query_id: callbackQueryId,
         ...(input.text ? { text: input.text } : {})
+      }))
+    },
+    async getChatMember(chatId: string, userId: number): Promise<unknown> {
+      if (!chatId.trim() || !Number.isSafeInteger(userId) || userId <= 0)
+        throw botError('telegram_member_input_invalid', 'Chat and positive user ID required.')
+      return await unwrapLegacyResponse(await requestResponse('getChatMember', { chat_id: chatId, user_id: userId }))
+    },
+    async pinChatMessage(chatId: string, messageId: number): Promise<unknown> {
+      if (!chatId.trim() || !Number.isSafeInteger(messageId) || messageId <= 0)
+        throw botError('telegram_pin_input_invalid', 'Chat and positive message ID required.')
+      return await unwrapLegacyResponse(await requestResponse('pinChatMessage', {
+        chat_id: chatId, message_id: messageId, disable_notification: true
       }))
     },
     async getUpdates(

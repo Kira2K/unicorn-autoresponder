@@ -23,8 +23,8 @@ The selection is implemented in `prepare-message.ts`; HTTP remains in
 `bot-api.ts`. Explicit link-preview options apply only to ordinary messages,
 because `sendRichMessage` has no equivalent parameter.
 
-The integration assumes exactly one bot. It reads `VEU_SUPPORT_BOT` from server
-configuration; callers cannot choose a bot or provide a token. It owns Bot API
+The default singleton serves the support bot. It reads `VEU_SUPPORT_BOT` from server
+configuration; business callers cannot choose a bot or provide a token. The isolated Mentor Bot uses an explicitly assembled instance (see below). It owns Bot API
 HTTP, send validation, result classification, batching, the small command
 registry, safe logging, and error reporting. It does not own CV states, roles,
 chat-ID discovery, scheduling, TDLib user accounts, or a generic workflow/session
@@ -259,3 +259,100 @@ npm run tg:resume:e2e:test
 node src/features/web-console/backend/telegram-integration-routes.test.ts
 npm run typecheck
 ```
+
+## Mentor Bot (offline development)
+
+The mentor workflow is isolated in src/integrations/telegram/mentor-bot/.
+The `✅ Завершить онбординг` menu button is available only to staff while the student is at `onboarding`.
+An owner-only confirmation changes `clients.client_status` to `studying` and atomically records audit
+and a student notice. Student callbacks, stale stages and repeated updates cannot repeat the transition.
+Completion starts hard skills with status `studying`, clearing an earlier hard-completion marker while
+retaining audit history. The confirmation screen and student notice show the hard-skills stage.
+Selecting RU+EN sets `hh_both process`; the existing response-start confirmation then sets `on en market`
+while preserving market `both`. Button labels and confirmation steps remain unchanged.
+The original CLI entrypoints are offline; they never load .env or poll Telegram.
+The explicit `tg:mentor-bot:pilot` entrypoint reads only its `--env-file`, checks the bot/group
+identity, reads one SQL client through a read-only connection and persists test state locally.
+It limits updates to the configured group and listed usernames, and sends only to that group
+and the explicit report destination. `--check` neither polls nor sends; `--start` activates the
+local pilot. See the mentor-bot README for commands and persistence limitations.
+The separate `tg:mentor-bot:sql-pilot -- --env-file .env --client-id 204` entrypoint supports explicit
+`--status`, `--prepare`, `--check` and `--start` actions. It reads/writes only that selected client's
+real status/market/mentor fields and keeps pilot state/history in `mentor_bot_pilot_<id>`. Test roles/chat remain
+overlays; confirmed mentor edits write `noco.clients.tg_hard_mentor` or `tg_soft_mentor` for that client only.
+The SQL adapter reads canonical mentor usernames, ignoring old pilot runtime overrides; preflight checks
+UPDATE access to status, market and both mentor columns. Preparation explicitly creates the
+pilot schema and a history trigger bound only to the selected client's status changes; it does not
+update client rows, apply shared release migrations or activate a worker. Status changes without their
+matching transactional history record roll back. `--client-id` must match the explicit ENV setting.
+The mentor-bot README documents permissions, startup, manual status checks and persistence boundaries.
+An explicit `--db-env-file` can select separate existing SQL credentials while keeping the bot token
+and test roles from `--env-file`; neither ENV file is modified. SQL pilot access also includes current
+hard/soft mentors assigned to the selected client. Assignments refresh without a worker restart and are
+rechecked inside every business transaction. Unrelated users and other groups remain filtered. A removed
+mentor retains access only if separately configured as test staff. Staff can launch an action from another
+participant's main menu into their own draft; confirmations remain owner-only.
+An explicit `--use-test-chat` overlays
+the agreed test group on a canonical client with another chat, without changing that card's chat or
+changing the actor/destination/client scope. Both the physical database and SQL file are printed
+in pilot diagnostics. The current Mathesar test uses `unicorn_noco_copy`, not `unicorn_noco_copy_restore`.
+The default support singleton and protected send endpoints still use VEU_SUPPORT_BOT.
+The explicitly assembled mentor worker uses a separate instance with MENTOR_BOT_API_KEY;
+the token and requester must both be supplied at assembly time, never by business actions.
+The four public facade operations and send result types remain unchanged.
+
+The shared low-level adapter additionally supports getMe, getChat, getChatMember and pinChatMessage.
+It also supports native setMyCommands/getMyCommands metadata through the same HTTP client.
+Mentor live startup configures `/menu`, `/what_my_stage` and `/ready_pitch` with Russian descriptions
+only for its verified group, in the default and Russian language scopes. This does not extend the
+four-operation facade, change authorization, send messages, or alter other bots/chats. Read-only
+preflight modes do not register commands; hint-registration failure cannot stop the mentor worker.
+Mentor dialogue navigation edits the same actor-owned message through choices, confirmations, results
+and Home, retaining the message ID and the existing buttons. Interaction notices and instructions
+are included in that screen edit; reports and scheduled reminders keep their separate routes.
+Explicit slash commands create a fresh visible screen at the bottom of the chat; its subsequent
+button presses edit that screen. Commands addressed to another bot remain ignored.
+Shared launches preserve another actor's screen and reuse the clicker's own screen when present.
+There are no message deletions or timers. An edit failure never sends a replacement message or
+repeats business changes. The four-operation facade and support bot behavior remain unchanged.
+The mentor poller also subscribes to `my_chat_member`. Adding or re-adding its own bot to a linked,
+enrolled group queues the exact approved greeting and a main-menu button. Promotion alone does not
+queue another greeting. A durable receipt per addition prevents duplicate queues across restarts;
+client progress and chat permissions are unchanged. The pilot keeps this event only for its configured
+bot/group, including when the adding administrator is outside the test action allowlist.
+Mentor ownership/roles are username-based; numeric user IDs are used only for the technical
+membership query. Reliable checks of other users require the bot to be a group administrator:
+https://core.telegram.org/bots/api#getchatmember
+
+Mentor delivery retries live in its own durable queue, not in the shared sender.
+Dynamic mentor messages render current card names and mentions at each delivery attempt while
+preserving the original event facts. Approved error copy lives in mentor-bot/error-texts.mts;
+the invalid student username warning goes only to the injected «Ботоотчеты» destination.
+The mentor runtime acknowledges callback receipt before processing and uses the shared sender
+for error feedback that cannot be queued because the client binding or storage is unavailable.
+Failed updates are explained and skipped so the following chat can proceed; background failures
+also do not stop polling. Retryable error feedback can be queued without a student binding.
+The injected mentor throttle covers sends/edits, membership, callbacks and polling, respects native
+retry_after, and checkpoints server cooldown deadlines for restart recovery. This does not change
+the shared facade or automatically repeat business actions. Excluded student statuses, including
+the explicitly approved unknown, cancel pending checkins, reminders and student reports.
+Checkins require hh_ru process / hh_en process / hh_both process / on ru market / on en market
+throughout the cycle; studying and all other statuses stop checkin collection and delivery.
+Preparation-to-market transitions preserve the current cycle. Both roles can change a saved pitch
+readiness result through Edit answer, followed by explicit confirmation of the new answer.
+Student-facing mentor messages place the current student @username immediately after the student's
+name on the same line. Immediate error feedback retains username-only addressing when the card
+name is unavailable. Market stages display the current task and mentor contacts, with an EN transition
+only for RU students whose market also includes EN. Student reports put the current normalized
+@username directly after the student's name, including scheduled reports, checkin corrections
+and retry attempts. The preparation-stage screen places the
+linked hh creation instruction and plain-text Notion reassurance immediately after the current
+profile-creation task, before the next-stage description. Stage, readiness
+and checkin launch buttons work for the clicker from another participant's menu or staff screen;
+answers and confirmations still require the clicker's own session and current authorization.
+Unlike the support workflow, mentor unknown delivery outcomes retry by explicit product decision
+and may duplicate messages. Business mutations are still protected by operation IDs and transactions.
+The mentor workflow has no offer-acceptance action or graduation transition. Old callbacks cannot
+change status; pending removed-action screens and congratulations are cancelled. Existing source
+status values and historical audit are preserved, including the exclusion of external `graduated` statuses.
+See the mentor-bot README for contracts, isolated checks and the unapplied migration artifact.
