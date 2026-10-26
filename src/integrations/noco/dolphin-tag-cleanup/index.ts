@@ -1,3 +1,5 @@
+const { listAllDolphinProfiles } = require('../../dolphin/profile-list.mts') as
+  typeof import('../../dolphin/profile-list.mts')
 const { requestDolphinCloudApi } = require('../../dolphin/cloud-api.ts') as {
   requestDolphinCloudApi<T>(
     endpointPath: string,
@@ -39,13 +41,6 @@ const {
     checkedAt?: string
   }): TagCleanupReport
   runTests(): void
-}
-
-type DolphinPaginatedResponse<T> = {
-  current_page?: number
-  last_page?: number
-  total?: number
-  data?: T[]
 }
 
 type DolphinBrowserProfile = {
@@ -90,31 +85,9 @@ function toTagSnapshot(profile: DolphinBrowserProfile): DolphinProfileTagSnapsho
 }
 
 async function fetchAllDolphinProfiles(): Promise<DolphinProfileTagSnapshot[]> {
-  const limit = 100
-  const profiles: DolphinProfileTagSnapshot[] = []
-  let page = 1
-  let total = Number.POSITIVE_INFINITY
-
-  while (profiles.length < total) {
-    const response = await requestDolphinCloudApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
-      '/browser_profiles',
-      {
-        query: { limit, page }
-      }
-    )
-    const data = response.data ?? []
-
-    profiles.push(...data.map(toTagSnapshot).filter((profile): profile is DolphinProfileTagSnapshot => Boolean(profile)))
-    total = response.total ?? profiles.length
-
-    if (!data.length || page >= (response.last_page ?? page)) {
-      break
-    }
-
-    page += 1
-  }
-
-  return await Promise.all(profiles.map(fetchDolphinProfileDetails))
+  const profiles = await listAllDolphinProfiles<DolphinBrowserProfile>()
+  const snapshots = profiles.map(toTagSnapshot).filter((profile): profile is DolphinProfileTagSnapshot => Boolean(profile))
+  return await Promise.all(snapshots.map(fetchDolphinProfileDetails))
 }
 
 async function fetchDolphinProfileDetails(
