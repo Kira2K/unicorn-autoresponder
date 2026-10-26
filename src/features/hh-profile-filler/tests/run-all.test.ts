@@ -12,6 +12,7 @@ import { runContractDomTests } from './hh-contract-dom.test.ts'
 import { runStateStoreTests } from './state-store.test.ts'
 import { runStackTitleTests } from './stack-titles.test.ts'
 import { runProfileBuilderTests } from './profile-builder.test.ts'
+import { runLegendBirthDateTests } from './legend-birth-date.test.ts'
 import { runNocoRepositoryTests } from './noco-repository.test.ts'
 import { runServiceTests } from './service.test.ts'
 import { runProcessIsolationTests } from './process-isolation.test.ts'
@@ -46,6 +47,7 @@ async function main() {
   runStackTitleTests()
   runSkillSelectionTests()
   runProfileBuilderTests()
+  runLegendBirthDateTests()
   await runNocoRepositoryTests()
   await runPostgresRepositoryTests()
   await runPostgresWorkflowTests()

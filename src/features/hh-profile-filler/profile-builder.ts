@@ -5,6 +5,7 @@ import { profileFillerError } from './errors.ts'
 import { resolveProfileLanguages } from './language-policy.ts'
 import { mergeEmployerCandidates } from './employer-stop-list.ts'
 import { educationLevel } from './education-policy.ts'
+import { calculateLegendBirthDate } from './legend-birth-date.ts'
 
 function first<T>(...values: Array<T | undefined | null>): T | undefined {
   return values.find(value => value !== undefined && value !== null && String(value).trim() !== '') ?? undefined
@@ -59,16 +60,25 @@ function assertSourceIdentity(client: ResolvedClient, extracted: CvProfile): voi
   }
 }
 
-function usableBirthDate(value?: string, now = new Date()): string | undefined {
-  if (!value) return undefined
-  const parsed = Date.parse(value)
-  if (!Number.isFinite(parsed)) return value
-  const date = new Date(parsed)
-  let age = now.getUTCFullYear() - date.getUTCFullYear()
-  const birthdayPending = now.getUTCMonth() < date.getUTCMonth() ||
-    (now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() < date.getUTCDate())
-  if (birthdayPending) age -= 1
-  return age >= 14 && age <= 100 ? value : undefined
+function cvBirthDate(value: string | undefined, now: Date): string | undefined {
+  const text = String(value ?? '').trim()
+  if (!text) return undefined
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  const local = text.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/)
+  const year = Number(iso?.[1] ?? local?.[3])
+  const month = Number(iso?.[2] ?? local?.[2])
+  const day = Number(iso?.[3] ?? local?.[1])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  let age = now.getUTCFullYear() - year
+  if (now.getUTCMonth() + 1 < month || (now.getUTCMonth() + 1 === month && now.getUTCDate() < day)) age--
+  if (!Number.isFinite(now.getTime()) || !Number.isFinite(date.getTime()) ||
+      date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day ||
+      age < 14 || age > 100) {
+    throw profileFillerError('profile_cv_birth_date_invalid',
+      'The final CV birth date must be a valid full date with an age between 14 and 100 years.',
+      'prepare_profile')
+  }
+  return date.toISOString().slice(0, 10)
 }
 
 function nocoEducation(value?: string): CvEducation[] {
@@ -170,8 +180,8 @@ export function buildPreparedProfile(client: ResolvedClient, extracted: CvProfil
     firstName: useNocoIdentity ? nocoFirstName : first(extracted.firstName, client.fallbacks.firstName),
     lastName: useNocoIdentity ? nocoLastName : first(extracted.lastName, client.fallbacks.lastName),
     middleName: useNocoIdentity ? undefined : extracted.middleName,
-    birthDate: first(usableBirthDate(extracted.birthDate, new Date(now)),
-      usableBirthDate(client.fallbacks.birthDate, new Date(now))),
+    birthDate: cvBirthDate(extracted.birthDate, new Date(now)) ??
+      calculateLegendBirthDate(extracted.experience, new Date(now)),
     location: client.market === 'En' ? 'Tbilisi, Georgia' :
       first(extracted.location, client.fallbacks.location),
     contacts: {

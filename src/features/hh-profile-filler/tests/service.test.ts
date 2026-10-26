@@ -133,7 +133,21 @@ export async function runServiceTests() {
   const changed = fixture('status'); changed.controls.statusChanged = true
   await assert.rejects(() => changed.service.execute(changed.profile), /Status changed/)
   assert.ok(!changed.calls.includes('browser'))
-  const dry = fixture('dry'); const checked = await dry.service.run(7, 'En', true)
+  const noDates = fixture('missing-job-dates')
+  noDates.profile.client.fallbacks.birthDate = '1990-04-20'
+  const unavailableBirth = await noDates.service.run(7, 'En', true)
+  assert.equal(unavailableBirth.code, 'profile_legend_birth_date_unavailable')
+  assert.ok(!noDates.calls.includes('browser'), 'Reject an unknown legend date before opening HH')
+  const cvDate = fixture('cv-birth-date-without-job-dates')
+  cvDate.profile.cv.birthDate = '1995-04-20'
+  cvDate.profile.client.fallbacks.birthDate = '1990-04-20'
+  assert.equal((await cvDate.service.prepare(7, 'En')).cv.birthDate, '1995-04-20')
+  assert.ok(!cvDate.calls.includes('browser'), 'Resolve the CV birth date during preparation')
+  const dry = fixture('dry')
+  dry.profile.cv.experience[0].startDate = '06/2018'
+  const prepared = await dry.service.prepare(7, 'En')
+  assert.equal(prepared.cv.birthDate, '2000-06-01')
+  const checked = await dry.service.run(7, 'En', true)
   assert.equal(checked.ok, true); assert.equal(checked.operationComplete, false)
   assert.ok(!dry.calls.some(call => /^(create|duplicate|delete|privacy):/.test(call)))
   const override = fixture('override')

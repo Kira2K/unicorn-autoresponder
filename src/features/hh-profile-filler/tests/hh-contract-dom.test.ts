@@ -9,6 +9,7 @@ import { ensureResumeEnglish, inspectResumeLanguage } from '../hh-resume-languag
 import { readPersistedSkills } from '../hh-resume-ui.ts'
 import { verifiedContract } from './contract.test.ts'
 import { preserveFirstObservation } from '../preservation-state.ts'
+import { calculateLegendBirthDate } from '../legend-birth-date.ts'
 
 // Synthetic contract fixtures, not a claim of live HH DOM compatibility. All requests are intercepted.
 export async function runContractDomTests() {
@@ -17,11 +18,13 @@ export async function runContractDomTests() {
   try {
     const profile = makeServiceFixture(directory).profile
     profile.cv.contacts.phone = '+12025550100'
+    profile.cv.birthDate = calculateLegendBirthDate([{ startDate: '06/2018' }], new Date('2026-10-23T12:00:00Z'))
     const context = await browser.newContext()
     await context.route('**/*', route => route.abort())
     const page = await context.newPage()
     const resume = { id: 'r1', title: profile.titles[0], isDraft: true, href: 'https://hh.ru/resume/r1' }
     let wrongAbout = false, advancedCount = 30
+    let wrongBirthDate = false
     let contactMode: 'normal' | 'mismatch' | 'unreadable' = 'normal'
     await page.route('https://hh.ru/**', async route => {
       const url = new URL(route.request().url())
@@ -35,7 +38,8 @@ export async function runContractDomTests() {
         '/resume/edit/r1/contacts': '<input type="email" value="test@example.invalid"><input name="phone.formatted"><input type="checkbox" checked data-qa="resume-editor-preferred-contact-email-checked">' +
           '<script>setTimeout(()=>document.querySelector("input[name=\\\"phone.formatted\\\"]").value="+1 202 555 0100",350)</script>',
         '/resume/edit/r1/about': `<textarea name="about">${wrongAbout ? 'Wrong' : profile.about}</textarea>`,
-        '/profile/edit/common': '<input name="firstName"><input name="lastName"><input name="middleName"><input name="area" value="Тбилиси">',
+        '/profile/edit/common': '<input name="firstName"><input name="lastName"><input name="middleName"><input name="area" value="Тбилиси">' +
+          `<input name="birthday" value="${wrongBirthDate ? '20.04.1990' : '01.06.2000'}">`,
         '/profile/resume/common': '<form action="/search/vacancy"><input type="hidden" name="area" value="2758"></form><input data-qa="profile-common-edit-area" value="Тбилиси">',
         '/profile/block/languages': '<div data-qa="languages-card">English B2</div>',
         '/resume/r1/experience': '<div data-qa="resume-block-experience-item">Company Engineer Description Currently</div>',
@@ -53,6 +57,12 @@ export async function runContractDomTests() {
     }
     const good = await readResumeContract(page, profile, resume, resume.title, readers)
     assert.equal(good.complete, true, JSON.stringify(good.issues))
+    wrongBirthDate = true
+    const wrongBirth = await readResumeContract(page, profile, resume, resume.title, readers)
+    assert.equal(wrongBirth.complete, false)
+    assert.equal(wrongBirth.checks?.identity.status, 'failed',
+      'A persisted real birth date must not pass verification of the calculated legend date')
+    wrongBirthDate = false
     for (const mode of ['mismatch', 'unreadable'] as const) {
       contactMode = mode
       const advisory = await readResumeContract(page, profile, resume, resume.title, readers)
