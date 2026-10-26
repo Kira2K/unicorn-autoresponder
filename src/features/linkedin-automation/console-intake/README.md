@@ -28,7 +28,7 @@ Preparation saves LinkedIn metadata in existing `platform_accounts` text columns
 `linkedin_first_name`, `linkedin_last_name`, `real_location`, `old_link_blocked`.
 Outlook credentials use a separate account with platform name `email_outlook`.
 Platforms are resolved by name; missing/ambiguous platforms or account rows reject
-the write. No catalog/schema mutation or migration is performed.
+the write. Normal intake requests never mutate the schema.
 New rows use the shared SQL ID allocator and encoded `_copy_id`, with source
 metadata/timestamps. They never rely on the nonunique default `[]` for identity.
 
@@ -57,13 +57,42 @@ when LinkLab is enabled. Preparation-only LinkedIn rows do not trigger it.
 
 ## Local verification and release
 
+The updated intake is available to all eligible EN/Both clients without Dolphin;
+there is no email or client-ID rollout allowlist. The residence label is
+“Город и страна проживания”, the Outlook registration date/time is required for
+every new-account save, and a confirmed successful save opens the three-day
+registration notice with a “Понятно” button. Failures and uncertain commits do not
+open the success dialog. Existing LinkedIn saves do not require Outlook dates.
+The exact `@outlook.com` domain is validated on the client and server. The Outlook
+instructions include the VPN exception for users in Russia.
+
+The redundant new-account name field is hidden in blocked-account history;
+previously stored `newFullName` values remain in the data and survive subsequent
+saves. Platform accounts appear before Telegram for all clients. Administrator
+and provider layouts and the existing RU/Dolphin routing remain unchanged.
+
+`outlookRegisteredAt` is a canonical UTC ISO timestamp. The browser converts the
+device's local date/time to UTC and back and displays the device time zone.
+The nullable `noco.platform_accounts.outlook_registered_at` (`timestamptz`) column
+belongs to the `email_outlook` row. It is saved in the same transaction as the
+credentials and creation intent. The storage adapter preserves an existing
+timestamp if a caller omits it; the student API requires it on new-account saves.
+Existing rows without dates can still be loaded; no dates are fabricated for them.
+
+Before deploying the backend, run
+`node --env-file=.env src/features/linkedin-automation/console-intake/migrate.mts` against the intended
+configured database for a transaction-rolled-back migration check. Add `--apply`
+to commit the column. The migration checks database identity, uses the existing
+owner role, validates the column type and performs the DDL twice to check reruns.
+It does not alter existing account values or publish changes to NocoDB metadata.
+
 - `npm run linkedin:intake:test`: pure contracts, owner-scoped routes, SQL adapter
   mocks, blocked-history compatibility and frontend selection/checkpoint rules.
 - `npm run octo:console:test`, `npm run web:sql:test`, `npm run typecheck`,
   `npm run web:build`: affected regressions and compilation.
 - `npm run linkedin:intake:e2e`: mock-only browser flow; requires built frontend.
 
-Deploy backend before frontend. Startup validates the existing intake columns when
+Apply the column migration, then deploy backend before frontend. Startup validates the intake columns when
 Octo is configured. Runtime profile creation still needs the existing Octo worker,
 cloud configuration and owner bridge; this code change alone does not create live
 accounts or prove live login. No Octo-to-Unipile automation is introduced.
