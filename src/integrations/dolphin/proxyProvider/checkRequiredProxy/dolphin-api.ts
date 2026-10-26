@@ -1,3 +1,4 @@
+const { listAllDolphinProfiles } = require('../../profile-list.mts') as typeof import('../../profile-list.mts')
 const { requestDolphinCloudApi } = require('../../cloud-api.ts') as {
   requestDolphinCloudApi<T>(
     endpointPath: string,
@@ -86,33 +87,8 @@ function toSafeProfile(profile: DolphinProfile) {
 }
 
 async function getAllDolphinProfileSnapshots() {
-  const limit = 100
-  const profiles = []
-  let page = 1
-  let total = Number.POSITIVE_INFINITY
-
-  while (profiles.length < total) {
-    const response = await requestDolphinCloudApi<
-      DolphinPaginatedResponse<DolphinProfile>
-    >('/browser_profiles', {
-      query: {
-        limit,
-        page
-      }
-    })
-    const data = response.data ?? []
-
-    profiles.push(...data.map(toSafeProfile).filter(profile => profile.id))
-    total = response.total ?? profiles.length
-
-    if (!data.length || page >= (response.last_page ?? page)) {
-      break
-    }
-
-    page += 1
-  }
-
-  return profiles
+  const profiles = await listAllDolphinProfiles<DolphinProfile>()
+  return profiles.map(toSafeProfile).filter(profile => profile.id)
 }
 
 async function getAllDolphinProxySnapshots() {

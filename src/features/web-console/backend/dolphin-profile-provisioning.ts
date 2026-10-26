@@ -1,3 +1,5 @@
+const { listAllDolphinProfiles } = require('../../../integrations/dolphin/profile-list.mts') as
+  typeof import('../../../integrations/dolphin/profile-list.mts')
 const { requestDolphinCloudApi } = require('../../../integrations/dolphin/cloud-api.ts') as {
   requestDolphinCloudApi<T>(
     endpointPath: string,
@@ -406,7 +408,7 @@ function createDefaultDolphinProvisioningApi(): DolphinProvisioningApi {
       return await requestDolphinCloudApi('/browser_profiles', { method: 'POST', body: payload })
     },
     async listProfiles(): Promise<Record<string, any>[]> {
-      return await listPaginated<Record<string, any>>('/browser_profiles')
+      return await listAllDolphinProfiles<Record<string, any>>()
     },
     async listProxies(): Promise<DolphinProxySnapshot[]> {
       return await listPaginated<DolphinProxySnapshot>('/proxy')

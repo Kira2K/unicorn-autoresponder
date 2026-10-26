@@ -4,6 +4,8 @@ const path = require('node:path')
 require('dotenv').config({ quiet: true })
 
 const PROFILES_EXPORT_FILE = path.resolve(__dirname, 'dolphin-profiles.json')
+const { getDolphinProfilesPage, listAllDolphinProfiles } =
+  require('../../integrations/dolphin/profile-list.mts') as typeof import('../../integrations/dolphin/profile-list.mts')
 const {
   requestDolphinCloudApi
 } = require('../../integrations/dolphin/cloud-api.ts') as {
@@ -71,52 +73,11 @@ async function loginWithToken(): Promise<DolphinLoginResponse> {
 async function getBrowserProfiles(
   limit = 10
 ): Promise<DolphinPaginatedResponse<DolphinBrowserProfile>> {
-  return requestDolphinCloudApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
-    '/browser_profiles',
-    {
-      query: {
-        limit
-      }
-    }
-  )
+  return getDolphinProfilesPage<DolphinBrowserProfile>({ limit })
 }
 
 async function getAllBrowserProfiles(): Promise<DolphinBrowserProfile[]> {
-  const limit = 100
-  const firstPage = await requestDolphinCloudApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
-    '/browser_profiles',
-    {
-      query: {
-        limit
-      }
-    }
-  )
-
-  const profiles = [...firstPage.data]
-  const total = firstPage.total ?? profiles.length
-  let currentPage = firstPage.current_page ?? 1
-
-  while (profiles.length < total) {
-    currentPage += 1
-
-    const nextPage = await requestDolphinCloudApi<DolphinPaginatedResponse<DolphinBrowserProfile>>(
-      '/browser_profiles',
-      {
-        query: {
-          limit,
-          page: currentPage
-        }
-      }
-    )
-
-    if (!nextPage.data.length) {
-      break
-    }
-
-    profiles.push(...nextPage.data)
-  }
-
-  return profiles
+  return listAllDolphinProfiles<DolphinBrowserProfile>()
 }
 
 async function getProxies(limit = 10): Promise<DolphinPaginatedResponse<DolphinProxy>> {
