@@ -11,23 +11,46 @@ export function runProfileBuilderTests() {
     contacts: { email: 'noco@example.com', phone: '+222',
       telegram: '@noco', other: [] }, fallbacks: { fullName: 'Noco Name', location: 'Belgrade',
         education: '[{"uni":"Noco University","faculty":"CS","yearOfEnd":"2016"}]',
-        englishLevel: 'B2' },
+        englishLevel: 'B2', birthDate: '1990-04-20' },
     credentials: {}
   }
   const cv: CvProfile = {
-    language: 'en', fullName: 'CV Name', location: 'London', position: 'Engineer',
+    language: 'en', fullName: 'CV Name', location: 'London', position: 'Engineer', birthDate: '1995-04-20',
     contacts: { email: 'cv@example.com', phone: '+111', telegram: '@cv', other: [] },
     summary: 'Summary text.',
     skillGroups: [{ category: 'Backend', items: ['Java', 'Spring'],
       sourceText: 'Backend: Java, Spring' }],
     skills: ['Java', 'Spring'],
-    experience: [{ company: 'Employer', title: 'Engineer', current: true,
+    experience: [{ company: 'Employer', title: 'Engineer', current: true, startDate: '06/2018',
       description: 'Built systems.', technologies: ['Java', 'PostgreSQL'],
       namedOrganizations: ['Vendor', 'Product Brand'] }],
     education: [], languages: [{ name: 'English', level: 'B2' }],
     namedOrganizations: ['Partner']
   }
+  const originalClient = structuredClone(client), originalCv = structuredClone(cv)
   const prepared = buildPreparedProfile(client, cv, '2026-09-03T00:00:00Z')
+  assert.equal(prepared.cv.birthDate, '1995-04-20', 'The final CV birth date takes precedence over calculation and database')
+  assert.deepEqual(client, originalClient)
+  assert.deepEqual(cv, originalCv)
+  for (const birthDate of [undefined, '', '   ']) {
+    assert.equal(buildPreparedProfile(client, { ...cv, birthDate }, '2026-09-03T00:00:00Z').cv.birthDate,
+      '2000-06-01', 'Calculate from experience only when the CV birth date is absent')
+  }
+  for (const experience of [[], [{ ...cv.experience[0], startDate: undefined }]]) {
+    assert.equal(buildPreparedProfile(client, { ...cv, experience }, '2026-09-03T00:00:00Z').cv.birthDate,
+      '1995-04-20', 'A CV birth date does not require calculation or job dates')
+    assert.throws(() => buildPreparedProfile(client, { ...cv, experience, birthDate: undefined }, '2026-09-03T00:00:00Z'),
+      (error: unknown) => error instanceof ProfileFillerError &&
+        error.code === 'profile_legend_birth_date_unavailable',
+      'Missing CV and job dates must not silently select a database birth date')
+  }
+  assert.equal(buildPreparedProfile(client, { ...cv, birthDate: '20.04.1995' }, '2026-09-03T00:00:00Z').cv.birthDate,
+    '1995-04-20')
+  for (const birthDate of ['unknown', '2026-08-03', '31.02.1995', '2027-01-01']) {
+    assert.throws(() => buildPreparedProfile(client, { ...cv, birthDate }, '2026-09-03T00:00:00Z'),
+      (error: unknown) => error instanceof ProfileFillerError && error.code === 'profile_cv_birth_date_invalid',
+      'An explicitly invalid CV date must be corrected rather than silently replaced by calculation')
+  }
   assert.equal(prepared.cv.location, 'Tbilisi, Georgia')
   assert.equal(prepared.cv.contacts.email, 'cv@example.com')
   assert.equal(prepared.cv.contacts.phone, '+111')
@@ -82,11 +105,11 @@ export function runProfileBuilderTests() {
     error instanceof ProfileFillerError && error.code === 'profile_cv_identity_mismatch' &&
     error.stage === 'validate_sources')
   const overridden = buildPreparedProfile(ruClient, {
-    ...wrongCv, birthDate: '2026-08-03'
+    ...wrongCv, birthDate: undefined
   }, '2026-09-04T00:00:00Z', { useNocoIdentity: true })
   assert.equal(overridden.cv.fullName, 'Елена Дементьева')
   assert.equal(overridden.cv.firstName, 'Елена')
   assert.equal(overridden.cv.lastName, 'Дементьева')
-  assert.equal(overridden.cv.birthDate, undefined)
+  assert.equal(overridden.cv.birthDate, '2000-06-01')
   assert.equal(overridden.cv.contacts.email, 'cv@example.com')
 }

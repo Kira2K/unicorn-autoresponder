@@ -35,7 +35,7 @@ async function runScenario(repository: ReturnType<typeof createProfileFillerRepo
   const cv: CvProfile = { language: market === 'En' ? 'en' : 'ru',
     fullName: id === 1 ? 'Fake Author' : 'Second', contacts: { email: 'cv@example.invalid', other: [] },
     summary: 'Summary', skillGroups: [], skills: ['Go', ...Array.from({ length: 29 }, (_, i) => `Skill ${i}`)], experience: [{ company: 'Fake Co',
-      title: 'Engineer', current: true, description: 'Built tools.', technologies: ['SQL'], namedOrganizations: [] }],
+      title: 'Engineer', current: true, startDate: '06/2018', description: 'Built tools.', technologies: ['SQL'], namedOrganizations: [] }],
     education: [], languages: [], namedOrganizations: [] };
   const active = async (_page: unknown, resume: ResumeSnapshot) => {
     const row = { ...resume, isDraft: false, isActive: true, searchable: true, publicationStatus: 'new', resumeLanguage: 'EN' };
@@ -63,6 +63,7 @@ async function runScenario(repository: ReturnType<typeof createProfileFillerRepo
       async listResumes() { return structuredClone(resumes); },
       async inspectHH() { calls.push(['inspect']); return { resumes, artifact: directory }; },
       async createResumeDraft(_page, profile, title, _directory, resumeId) {
+        assert.equal(profile.cv.birthDate, '2000-06-01');
         calls.push(['create', title, resumeId, profile.cv.skills]); return putDraft(title, resumeId);
       },
       async duplicateResumeVariant(_page, _source, title) { calls.push(['duplicate', title]); return putDraft(title); },

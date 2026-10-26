@@ -26,13 +26,14 @@ export async function runPostgresWorkflowTests() {
         calls[index].push(documents[0].revision, language);
         return { language: market === 'En' ? 'en' : 'ru', fullName: id === 1 ? 'Fake Author' : 'Second',
           contacts: { email: 'cv@example.invalid', other: [] }, summary: 'Summary', skillGroups: [],
-          skills: ['Go'], experience: [{ company: 'Fake Co', title: 'Engineer', current: true,
+          skills: ['Go'], experience: [{ company: 'Fake Co', title: 'Engineer', current: true, startDate: '06/2018',
             description: 'Built tools.', technologies: [], namedOrganizations: [] }],
           education: [], languages: [], namedOrganizations: [] } satisfies CvProfile;
       } },
       withPage: async () => { throw new Error('unexpected_browser'); }
     }).prepare(id, market);
     const expected = await prepare(old, 0), actual = await prepare(sql, 1);
+    assert.equal(actual.cv.birthDate, '2000-06-01');
     assert.deepEqual({ ...actual, preparedAt: '' }, { ...expected, preparedAt: '' });
     assert.deepEqual(calls[1], calls[0]);
   }

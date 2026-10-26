@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import { chromium } from 'playwright'
 import { fillBirthDate, selectRequiredSpecialization, setWorkPreferences,
   dismissStaleContactsPrompt } from '../hh-resume-ui.ts'
+import { calculateLegendBirthDate } from '../legend-birth-date.ts'
+import { readBirthDate } from '../hh-birth-date.ts'
 const fixture = fs.readFileSync(new URL('./fixtures/hh-wizard-observed.html', import.meta.url), 'utf8')
 
 export async function runHHManualDomTests() {
@@ -58,6 +60,16 @@ export async function runHHManualDomTests() {
       element.setAttribute('aria-label', 'Year'))
     assert.equal(await fillBirthDate(page, '07.10.1988'), true)
     assert.equal(await page.evaluate(() => (window as any).dateClicks), 1)
+
+    const legendDate = calculateLegendBirthDate([{ startDate: '03/2023' }, { startDate: '06/2018' }],
+      new Date('2026-10-23T12:00:00Z'))
+    await page.setContent('<input name="birthday" value="20.04.1990"><script>window.birthEdits=0;' +
+      'document.querySelector("input").addEventListener("input",()=>window.birthEdits++)</script>')
+    assert.equal(await fillBirthDate(page, legendDate), true)
+    assert.equal(await readBirthDate(page), '1.6.2000')
+    assert.equal(await fillBirthDate(page, legendDate), true)
+    assert.equal(await page.evaluate(() => (window as any).birthEdits), 1,
+      'Repeated fills must preserve the matching calculated date without editing it again')
 
     // Partial editors can retain English labels after switching the HH UI to Russian.
     await page.setContent(`
