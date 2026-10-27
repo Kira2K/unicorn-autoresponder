@@ -150,14 +150,16 @@ application role's Octo/profile/task rights; never give it ownership or write ac
 1. Existing Octo schema, LinkLab SQL `001` → `005`, then creation-tasks `001` must already be installed.
 2. Run the new explicit runner **without `--apply`** first; it executes and rolls back the DDL for validation.
 3. Apply once: creation-tasks `002-new-proxy` then LinkLab `006-account-cycle`, in one transaction. The runner
-   grants the connecting application role SELECT/UPDATE on proxy proof and notification journals, and SELECT
-   on the cycle ledger. Its connection must be allowed to `SET ROLE unicorn_noco_copy_owner` as in prior migrations.
+   grants the selected application role SELECT/UPDATE on proxy proof and notification journals, and SELECT
+   on the cycle ledger. Connect as the migration operator allowed to `SET ROLE unicorn_noco_copy_owner`.
+   Use `--app-role unicorn_sql_app` for Render's separate restricted application role; this does not grant
+   ownership or membership in the owner role. Without this option the grant target is the connecting role.
 4. Start the new backend only after the migration. Startup validates schema and performs no DDL. Pending tasks
    require a newly verified proxy; historical confirmed tasks/accounts are not rewritten.
 
 ```powershell
-node --env-file-if-exists=.env src/features/linkedin-automation/creation-tasks/migrate-cycle.mts
-node --env-file-if-exists=.env src/features/linkedin-automation/creation-tasks/migrate-cycle.mts --apply
+node --env-file-if-exists=.env src/features/linkedin-automation/creation-tasks/migrate-cycle.mts --app-role unicorn_sql_app
+node --env-file-if-exists=.env src/features/linkedin-automation/creation-tasks/migrate-cycle.mts --app-role unicorn_sql_app --apply
 ```
 
 Do not rerun the old task `001` runner after installing this cycle migration. Do not drop the ledger/flag or

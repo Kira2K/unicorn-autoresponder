@@ -32,3 +32,10 @@ test('partial install or wrong database marker fails before commit and always re
  const wrong=fixture(false,false,'unrelated');await assert.rejects(migrateAccountCycle(env,true,()=>wrong.pool),{code:'database_not_allowed'});
  assert.equal(wrong.calls.some(sql=>sql.includes('CREATE TABLE')),false);assert.equal(wrong.done(),true);
 });
+test('owner connection can grant the separate Render application role without broadening its ownership',async()=>{
+ const f=fixture();await migrateAccountCycle(env,false,()=>f.pool,'unicorn_sql_app');
+ const grants=f.calls.filter(sql=>sql.startsWith('GRANT '));
+ assert.equal(grants.length,2);assert.ok(grants.every(sql=>sql.endsWith('TO "unicorn_sql_app"')));
+ assert.equal(grants.some(sql=>sql.includes('unicorn_noco_copy_owner')),false);
+ await assert.rejects(migrateAccountCycle(env,false,()=>f.pool,'bad;role'),/application_role_invalid/);
+});
