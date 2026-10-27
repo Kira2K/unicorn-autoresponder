@@ -25,7 +25,12 @@ test('creator completion checklist explains missing saved data and restores prox
     const page = await browser.newPage()
     page.setDefaultTimeout(10000)
     let task = { id: 12, clientId: 269, version: 1, status: 'не начата', fio: 'Test client', stack: 'JAVA' }
-    let intake = { url: 'https://www.linkedin.com/in/example', login: 'example', hasPassword: true, blockedAccounts: [] }
+    let intake = { url: 'https://www.linkedin.com/in/example', login: 'https://www.linkedin.com/in/legacy-login', hasPassword: true,
+      outlookLogin: 'student.one@custom.example', blockedAccounts: [
+        {fullName:'Earlier account',country:'Poland'},
+        {fullName:'Archived account',legacyText:'Архивный LinkedIn №11\nСсылка LinkedIn: https://linkedin.com/in/archived'}] }
+    const secondTask = { id: 13, clientId: 270, version: 1, status: 'не начата', fio: 'Second client', stack: 'JAVA' }
+    let savedResult
     let captures = 0, statusWrites = 0
     let notification = { outcome: 'sent', messageId: 77 }
     await page.route('**/api/linkedin-creator/**', async route => {
@@ -45,8 +50,17 @@ test('creator completion checklist explains missing saved data and restores prox
         task = { ...task, status: request.postDataJSON().status }
         return route.fulfill({ json: { ...task, notification } })
       }
+      if (path.endsWith('/tasks/12/result')) {
+        savedResult = request.postDataJSON()
+        intake = { ...intake, url: savedResult.url, login: savedResult.login, hasPassword: true }
+        task = { ...task, version: task.version + 1 }
+        return route.fulfill({ json: task })
+      }
       if (path.endsWith('/tasks/12')) return route.fulfill({ json: { task, intake, client: { id: 269, fio: 'Test client' } } })
-      if (path.endsWith('/tasks')) return route.fulfill({ json: [task] })
+      if (path.endsWith('/tasks/13')) return route.fulfill({ json: { task: secondTask,
+        intake: { url: '', login: '', hasPassword: false, outlookLogin: 'student.two@gmail.com', blockedAccounts: [] },
+        client: { id: 270, fio: 'Second client' } } })
+      if (path.endsWith('/tasks')) return route.fulfill({ json: [task, secondTask] })
       throw Error('unexpected_fixture_request')
     })
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/creator-checklist-test`)
@@ -54,6 +68,12 @@ test('creator completion checklist explains missing saved data and restores prox
     await open.click()
     const checklist = page.getByRole('region', { name: 'Что нужно для завершения заявки' })
     await checklist.waitFor()
+    assert.equal(await page.getByTestId('creator-blocked-account').count(),2)
+    await page.getByRole('heading',{name:'Старые заблокированные аккаунты (2)',exact:true}).waitFor()
+    await page.getByRole('heading',{name:'Аккаунт 2',exact:true}).waitFor()
+    assert.match(await page.getByTestId('creator-blocked-account').nth(1).innerText(),/https:\/\/linkedin.com\/in\/archived/)
+    assert.equal(await page.getByLabel('Логин LinkedIn', { exact: true }).inputValue(), 'https://www.linkedin.com/in/legacy-login',
+      'loading an existing account must not silently replace its historical login')
     const proxy = checklist.getByTestId('completion-proxy')
     const done = page.getByRole('option', { name: 'сделана экспертом', exact: true })
     assert.equal(await done.evaluate(option => option.disabled), true, await proxy.textContent())
@@ -67,6 +87,7 @@ test('creator completion checklist explains missing saved data and restores prox
     await page.reload()
     await open.click()
     await checklist.waitFor()
+    assert.equal(await page.getByLabel('Логин LinkedIn', { exact: true }).inputValue(), 'https://www.linkedin.com/in/legacy-login')
     await page.waitForFunction(() => !document.querySelector('select[aria-label="Статус заявки"] option:last-child').disabled)
     assert.match(await proxy.textContent(), /Выполнено/)
     assert.equal(captures, 1, 'reopening must use the saved receipt without requiring another capture')
@@ -89,12 +110,24 @@ test('creator completion checklist explains missing saved data and restores prox
     intake = { ...intake, url: '', login: '', hasPassword: false }
     await open.click()
     await checklist.waitFor()
+    assert.equal(await page.getByLabel('Логин LinkedIn', { exact: true }).inputValue(), 'student.one@custom.example')
     assert.match(await checklist.getByTestId('completion-password').textContent(), /Введите пароль LinkedIn и нажмите «Сохранить данные LinkedIn»/)
     await page.getByLabel('Ссылка LinkedIn', { exact: true }).fill('https://www.linkedin.com/in/unsaved')
-    await page.getByLabel('Логин LinkedIn', { exact: true }).fill('unsaved')
     await page.getByLabel('Пароль LinkedIn', { exact: true }).fill('unsaved')
     assert.equal(await done.evaluate(option => option.disabled), true, 'typing without saving must not count as saved account data')
     assert.match(await checklist.getByTestId('completion-url').textContent(), /Не выполнено/)
     assert.equal(statusWrites, 3)
+    assert.match(await checklist.getByTestId('completion-login').textContent(), /Не выполнено/,
+      'an autofilled email still needs an explicit result save')
+    await page.getByRole('button', { name: 'Сохранить данные LinkedIn', exact: true }).click()
+    await page.getByText('Данные LinkedIn сохранены.', { exact: true }).waitFor()
+    assert.equal(savedResult.url, 'https://www.linkedin.com/in/unsaved')
+    assert.equal(savedResult.login, 'student.one@custom.example')
+    assert.match(await checklist.getByTestId('completion-login').textContent(), /Выполнено/)
+    await page.getByTestId('creation-task-13').click()
+    await checklist.waitFor()
+    assert.equal(await page.getByLabel('Логин LinkedIn', { exact: true }).inputValue(), 'student.two@gmail.com',
+      'the next task must use its own bound mailbox instead of the previous student email')
+    assert.equal(await page.getByLabel('Ссылка LinkedIn', { exact: true }).inputValue(), '')
   } finally { await browser?.close(); await server.close() }
 })

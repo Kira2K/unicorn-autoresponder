@@ -10,16 +10,19 @@ import { claimClientPassword, saveClientState } from '../../octo-access/postgres
 import { generateProfilePassword } from '../../octo-access/password.mts';
 import { syncLinkLabAccount } from '../linklab/intake.mts';
 import { readBlockedAccounts } from './contracts.mts';
-import type { LinkedInIntake } from './contracts.mts';
+import type { LinkedInIntake, LinkedInIntakeView } from './contracts.mts';
 import { tableIds } from '../../web-console/backend/postgres/tables.mts';
-import { assertStudentEditable, readStudentTask, saveStudentTask, studentEditLocked } from '../creation-tasks/student-task.mts';
+import { assertStudentEditable, readStudentTask, readAccountTask, saveStudentTask, studentAccountAccess } from '../creation-tasks/student-task.mts';
+import { previousProfileAccess } from './previous-profile-access.mts';
+import { archiveBannedAccounts } from './archive-banned-accounts.mts';
+import type { Locale } from '../../octo-access/contracts.mts';
 
 const accountQuery = `SELECT a.id,a.platforms_id,a.url,a.login,a.password,a.linkedin_first_name,
   a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,lower(p.name) AS platform
   FROM noco.platform_accounts a JOIN noco.platforms p ON p.id=a.platforms_id
   WHERE a.clients_id=$1 AND lower(p.name) IN ('linkedin','email_outlook')
   AND NOT COALESCE(a.__nc_deleted,false) AND NOT COALESCE(p.__nc_deleted,false) ORDER BY a.id`;
-function select(rows: Record<string, unknown>[], platform: string) {
+function select(rows: Record<string, unknown>[], platform: string):Record<string,unknown>|undefined {
   const candidates = rows.filter(r => r.platform === platform);
   if (candidates.length > 1) throw new PostgresReadError('linkedin_intake_account_ambiguous');
   return candidates[0];
@@ -30,13 +33,16 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
   const read = createReadSession(pool, database);
   return {
     async checkSchema() { await read(async s => { await s.query(accountQuery + ' LIMIT 0', [0]); }); },
-    async load(clientId: number) {
+    async load(clientId: number):Promise<LinkedInIntakeView> {
       return read(async s => {
         const rows = (await s.query(accountQuery, [clientId])).rows;
         const li = select(rows, 'linkedin'), email = select(rows, 'email_outlook');
         // No secret is returned; leaving a password blank preserves its current value.
-        const task = creationTasks ? await readStudentTask(s, clientId) : undefined;
-        return { ...(creationTasks ? { task, editLocked: await studentEditLocked(s,clientId) } : {}), url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
+        const task = creationTasks && li ? await readAccountTask(s, clientId,Number(li.id)) : undefined;
+        return { ...(creationTasks ? { task, ...await studentAccountAccess(s,clientId,li?Number(li.id):undefined),
+          ...await previousProfileAccess(s,clientId,task) } : {}),
+          linkedinAccountId:li?Number(li.id):undefined,hasLinkedIn:!!li&&(!!li.url||!!li.login||!!li.password),
+          url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
           outlookLogin: String(email?.login ?? ''), hasOutlookPassword: !!email?.password,
           ...(email?.outlook_registered_at ? { outlookRegisteredAt: timestamp(email.outlook_registered_at) } : {}),
           firstName: String(li?.linkedin_first_name ?? ''), lastName: String(li?.linkedin_last_name ?? ''),
@@ -49,12 +55,31 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         await s.query('SELECT pg_advisory_xact_lock(730644, $1::integer)', [clientId]);
         const client = (await s.query('SELECT id FROM noco.clients WHERE id=$1 AND NOT COALESCE(__nc_deleted,false) FOR UPDATE', [clientId])).rows[0];
         if (!client) throw new PostgresReadError('record_not_found');
-        if (creationTasks && (await s.query('SELECT id FROM noco.dolphin_profiles WHERE "02_clients_id"=$1 AND browser=\'dolphin\' AND NOT coalesce(__nc_deleted,false) LIMIT 1', [clientId])).rows.length)
-          throw new PostgresReadError('linkedin_intake_use_dolphin');
-        if (creationTasks) await assertStudentEditable(s, clientId);
+        const replacement = data.replacesLinkedInAccountId !== undefined;
         const rows = (await s.query(accountQuery + ' FOR UPDATE OF a', [clientId])).rows;
-        const li = select(rows, 'linkedin'), email = select(rows, 'email_outlook');
-        if (data.scenario === 'new' && String(li?.url ?? '').trim()) throw new PostgresReadError('linkedin_intake_existing_account');
+        let li = select(rows, 'linkedin'), email = select(rows, 'email_outlook');
+        const current=creationTasks&&li?await readAccountTask(s,clientId,Number(li.id)):undefined;
+        const editingTask=!replacement&&current&&Number(li?.id)===current.linkedinAccountId&&Number(email?.id)===current.outlookAccountId?current:undefined;
+        if(!replacement&&current&&!editingTask)throw new PostgresReadError('linkedin_task_account_binding_invalid');
+        if (creationTasks && !replacement && (await s.query('SELECT id FROM noco.dolphin_profiles WHERE "02_clients_id"=$1 AND browser=\'dolphin\' AND NOT coalesce(__nc_deleted,false) LIMIT 1', [clientId])).rows.length) {
+          if(data.scenario!=='new'||!editingTask)
+            throw new PostgresReadError('linkedin_intake_use_dolphin');
+        }
+        if (replacement) {
+          if (!creationTasks || !li || Number(li.id)!==data.replacesLinkedInAccountId || !(li.url||li.login||li.password))
+            throw new PostgresReadError('linkedin_intake_replacement_stale');
+          const previous=await readStudentTask(s,clientId);
+          if(previous&&previous.linkedinAccountId!==Number(li.id))throw new PostgresReadError('linkedin_intake_replacement_stale');
+          if((await studentAccountAccess(s,clientId,Number(li.id))).registrationPending)
+            throw new PostgresReadError('linkedin_intake_registration_pending');
+          if (!data.outlookPassword) throw new PostgresReadError('linkedin_intake_outlook_password_required');
+          await archiveBannedAccounts(s,clientId,Number(li.id),email?Number(email.id):undefined);
+          li=undefined;email=undefined;
+        } else if (creationTasks) {
+          for(const row of [li,email])if(row)await assertStudentEditable(s,clientId,Number(row.id));
+        }
+        if(editingTask&&data.scenario!=='new')throw new PostgresReadError('linkedin_intake_registration_pending');
+        if (data.scenario === 'new' && !editingTask && [li?.url,li?.login,li?.password].some(value=>String(value??'').trim())) throw new PostgresReadError('linkedin_intake_existing_account');
         if (data.scenario === 'existing' && !data.password && !li?.password)
           throw new PostgresReadError('linkedin_intake_password_required');
         if (data.scenario === 'new' && !data.outlookPassword && !email?.password)
@@ -97,29 +122,36 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
           outlookAccountId = await upsert('email_outlook', email, { login: data.outlookLogin,
             ...(data.outlookRegisteredAt ? { outlook_registered_at: data.outlookRegisteredAt } : {}),
             ...(data.outlookPassword ? { password: data.outlookPassword } : {}) });
-          if (options.createOctoProfiles) await queueDirectProfiles(s, clientId, locales);
+          if (options.createOctoProfiles && !editingTask) await queueDirectProfiles(s, clientId, locales, replacement);
         }
         const task = creationTasks && outlookAccountId ? await saveStudentTask(s, clientId, linkedinAccountId, outlookAccountId,
           !li || !email || String(li.linkedin_first_name ?? '') !== data.firstName ||
           String(li.linkedin_last_name ?? '') !== data.lastName || String(li.real_location ?? '') !== data.realLocation ||
           String(li.old_link_blocked ?? '') !== JSON.stringify(data.blockedAccounts) || String(email.login ?? '') !== data.outlookLogin ||
           !!data.outlookRegisteredAt && timestamp(email.outlook_registered_at) !== data.outlookRegisteredAt ||
-          !!data.outlookPassword && data.outlookPassword !== email.password) : undefined;
+          !!data.outlookPassword && data.outlookPassword !== email.password,editingTask?.id) : undefined;
         return { saved: true, ...(task ? { task } : {}), linkedinAccountId, ...(outlookAccountId ? { outlookAccountId } : {}) };
       });
     }
   };
 }
-async function queueDirectProfiles(s: SqlSession, clientId: number, locales: string[]) {
+async function queueDirectProfiles(s: SqlSession, clientId: number, locales: string[], confirmDolphin = false) {
   const state = await claimClientPassword(s, clientId, generateProfilePassword());
   const profiles = (await s.query('SELECT locale,state FROM noco.octo_profiles WHERE client_id=$1', [clientId])).rows;
   if (profiles.some(p => (p.state as { deletion?: unknown })?.deletion)) throw new PostgresReadError('octo_profile_deleting');
   if (locales.every(locale => profiles.some(p => p.locale === locale))) return;
   if (state.setup?.phase === 'unknown') throw new PostgresReadError('octo_setup_outcome_unknown');
   if (state.setup && !['complete','blocked'].includes(state.setup.phase)) {
-    if (state.setup.source === 'direct') return; // Same durable intent on a repeated save.
+    if (state.setup.source === 'direct') {
+      const needed=locales as Locale[];
+      if (needed.some(locale=>!state.setup!.locales?.includes(locale)) || confirmDolphin&&!state.setup.confirmDolphin) {
+        state.setup.locales=[...new Set([...(state.setup.locales??[]),...needed])];
+        state.setup.confirmDolphin ||= confirmDolphin;await saveClientState(s,state);
+      }
+      return;
+    }
     throw new PostgresReadError('octo_setup_busy');
   }
-  state.setup = { id: randomUUID(), source: 'direct', phase: 'provisioning', createdAt: Date.now(), confirmDolphin: false };
+  state.setup = { id: randomUUID(), source: 'direct', phase: 'provisioning', createdAt: Date.now(), confirmDolphin,locales:locales as Locale[] };
   await saveClientState(s, state);
 }

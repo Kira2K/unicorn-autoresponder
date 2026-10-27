@@ -1,3 +1,4 @@
+import type { CreationTask } from '../creation-tasks/contracts.mts';
 export const blockedFields = ['fullName', 'country', 'company', 'position', 'blockedAt', 'newFullName', 'legacyText'] as const;
 export type BlockedAccount = Partial<Record<typeof blockedFields[number], string>>;
 export interface LinkedInIntake {
@@ -5,8 +6,16 @@ export interface LinkedInIntake {
   url: string; login: string; password: string;
   outlookLogin: string; outlookPassword: string;
   outlookRegisteredAt?: string;
+  replacesLinkedInAccountId?: number;
   firstName: string; lastName: string; realLocation: string;
   blockedAccounts: BlockedAccount[]; loggedIn: boolean;
+}
+export interface LinkedInIntakeView {
+  url:string;login:string;hasPassword:boolean;outlookLogin:string;hasOutlookPassword:boolean;
+  firstName:string;lastName:string;realLocation:string;blockedAccounts:BlockedAccount[];
+  outlookRegisteredAt?:string;task?:CreationTask;editLocked?:boolean;completionConfirmed?:boolean;registrationPending?:boolean;
+  linkedinAccountId?:number;hasLinkedIn?:boolean;
+  hadLinkedInBeforeTask?:boolean;previousOctoProfileIds?:number[];
 }
 export class IntakeError extends Error {
   code: string; status: number;
@@ -61,6 +70,9 @@ export function parseIntake(value: unknown): LinkedInIntake {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new IntakeError('linkedin_intake_invalid');
   const raw = value as Record<string, unknown>;
   if (!['existing', 'new'].includes(String(raw.scenario))) throw new IntakeError('linkedin_intake_scenario_required');
+  if (raw.replacesLinkedInAccountId !== undefined && (raw.scenario !== 'new' || typeof raw.replacesLinkedInAccountId !== 'number' ||
+      !Number.isSafeInteger(raw.replacesLinkedInAccountId) || raw.replacesLinkedInAccountId < 1))
+    throw new IntakeError('linkedin_intake_replacement_invalid');
   const fields = ['url', 'login', 'outlookLogin', 'firstName', 'lastName', 'realLocation'] as const;
   const data = Object.fromEntries(fields.map(key => [key, text(raw[key])])) as Pick<LinkedInIntake, typeof fields[number]>;
   if (Object.values(data).some(v => v.length > 4096)) throw new IntakeError('linkedin_intake_invalid');
@@ -77,6 +89,7 @@ export function parseIntake(value: unknown): LinkedInIntake {
   }
   const outlookRegisteredAt = raw.scenario === 'new' ? registrationTime(raw.outlookRegisteredAt) : undefined;
   return { ...data, scenario: raw.scenario as LinkedInIntake['scenario'], password, outlookPassword,
+    ...(raw.replacesLinkedInAccountId !== undefined ? {replacesLinkedInAccountId:raw.replacesLinkedInAccountId as number} : {}),
     ...(outlookRegisteredAt ? { outlookRegisteredAt } : {}),
     loggedIn: raw.loggedIn === true, blockedAccounts: normalizeBlockedAccounts(raw.blockedAccounts ?? []) };
 }

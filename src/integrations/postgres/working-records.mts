@@ -12,6 +12,9 @@ export function projection(table: WorkingTable, alias = 't'): string {
   // Keep it out of the writable catalog and the historical source projection.
   if (table.id === 'mxza381054ldlza' && !physicalColumns(table).some(c => c.dataKey === 'secured_general_chat_id'))
     pairs.push(`'secured_general_chat_id',to_jsonb(${alias})->'secured_general_chat_id'`);
+  // Existing SQL soft-delete metadata is read-only and absent from some source catalogs.
+  if (table.id === 'm8zej2vsv4iypl8' && !physicalColumns(table).some(c => c.dataKey === '__nc_deleted'))
+    pairs.push(`'__nc_deleted',to_jsonb(${alias})->'__nc_deleted'`);
   // Concatenate objects in small chunks: PostgreSQL limits arguments per function call.
   const chunks: string[] = [];
   for (let i = 0; i < pairs.length; i += 40) chunks.push(`jsonb_build_object(${pairs.slice(i, i + 40).join(',')})`);

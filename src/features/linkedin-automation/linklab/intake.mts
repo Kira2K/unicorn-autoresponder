@@ -12,11 +12,19 @@ export type IntakeTransaction = <T>(run: (session: SqlSession, tx: PostgresTrans
 
 /** Called inside the caller's client-locked transaction after saving LinkedIn credentials. */
 export async function syncLinkLabAccount(sql: SqlSession, clientId: number) {
-  const existing = await sql.query('SELECT client_id FROM noco.linklab WHERE client_id=$1', [clientId]);
-  if (existing.rows.length) return;
+  const existing = (await sql.query(`SELECT l.client_id,l.platform_account_id,a.__nc_deleted AS account_archived
+    FROM noco.linklab l LEFT JOIN noco.platform_accounts a ON a.id=l.platform_account_id
+    WHERE l.client_id=$1`, [clientId])).rows[0];
+  if (existing && !existing.account_archived) return;
   await sql.query('SELECT id FROM noco.platform_accounts WHERE clients_id=$1 FOR UPDATE', [clientId]);
   const selected = (await sql.query(`SELECT * FROM (${linkLabBaseQuery}) chosen WHERE client_id=$1`, [clientId])).rows[0];
   if (!selected?.platform_account_id || selected.data_issue) return;
+  if (existing) {
+    const updated=await sql.query(`UPDATE noco.linklab SET platform_account_id=$2
+      WHERE client_id=$1 AND platform_account_id=$3 RETURNING client_id`,[clientId,selected.platform_account_id,existing.platform_account_id]);
+    if(updated.rows.length!==1)throw new PostgresReadError('linklab_owner_mismatch');
+    return;
+  }
   await sql.query('INSERT INTO noco.linklab(client_id,platform_account_id) VALUES($1,$2)', [clientId, selected.platform_account_id]);
   await sql.query("UPDATE noco.linklab_changes SET handoff=true,source='cabinet' WHERE client_id=$1 AND version=1", [clientId]);
 }

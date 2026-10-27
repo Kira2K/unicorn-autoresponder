@@ -27,7 +27,22 @@ function fixture(creationTasks = false) {
       if (control.uncertain) { control.uncertain = false; throw Error('ack lost'); }
       return { rows: [] };
     }
-    if (sql.includes('FROM noco.linkedin_creation_task')) return { rows: state.tasks.filter(t=>Number(t.client_id)===Number(values[0])) };
+    if(sql.includes('AS had_linkedin'))return{rows:[{had_linkedin:state.accounts.some(a=>a.clients_id===values[0]&&Number(a.id)!==Number(values[1])&&a.platform==='linkedin'&&(a.url||a.login||a.password)) || state.tasks.some(t=>t.client_id===values[0]&&Number(t.id)!==Number(values[2])&&t.status==='выполнение подтверждено'&&new Date(String(t.created_at)).getTime()<Date.parse(String(values[3])))}]};
+    if(sql.startsWith('SELECT profile_id FROM noco.octo_profiles'))return{rows:state.profiles.filter(p=>Number((p.state as any).createdAt)<=Number(values[1])&&!(p.state as any).deletion)};
+    if (sql.includes('FROM noco.linkedin_creation_task')) return { rows: state.tasks.filter(t=>Number(t.client_id)===Number(values[0]) &&
+      (!sql.includes("source='student_intake'") || t.source==='student_intake') &&
+      (!values[1] || Number(t.linkedin_account_id)===Number(values[1]) || Number(t.outlook_account_id)===Number(values[1]))) };
+    if (sql.startsWith('UPDATE noco.linkedin_creation_task SET source=')) {
+      for(const row of state.tasks)if(row.client_id===values[0]&&row.linkedin_account_id===values[1]&&row.source==='student_intake')row.source='manual';
+      return{rows:[]};
+    }
+    if(sql.startsWith('UPDATE noco.linkedin_creation_task SET')){
+      const row=state.tasks.find(t=>Number(t.id)===Number(values[0])&&t.client_id===values[1]&&t.linkedin_account_id===values[2]&&t.outlook_account_id===values[3]);
+      if(!row)return{rows:[]};
+      row.version=Number(row.version)+1;
+      if(values[4]){delete row.proxy_uuid;delete row.proxy_saved_at;delete row.proxy_profile_id;}
+      return{rows:[{...row,created:false}]};
+    }
     if (sql.startsWith('INSERT INTO noco.linkedin_creation_task')) {
       if(control.failTask) throw Error('task failed');
       let row=state.tasks.find(t=>t.client_id===values[0]&&t.source==='student_intake');
@@ -38,7 +53,7 @@ function fixture(creationTasks = false) {
       return {rows:[{...row,created}]};
     }
     if (sql.includes('FROM noco.clients')) return { rows: [{ id: values[0] }] };
-    if (sql.includes('FROM noco.platform_accounts a JOIN')) return { rows: structuredClone(state.accounts) };
+    if (sql.includes('FROM noco.platform_accounts a JOIN')) return { rows: structuredClone(state.accounts.filter(row=>!row.__nc_deleted&&Number(row.clients_id)===Number(values[0]))) };
     if (sql.startsWith('SELECT id FROM noco.platforms')) return { rows: [{ id: values[0] === 'linkedin' ? 16 : 31 }] };
     if (sql.startsWith('INSERT INTO noco.platform_accounts')) {
       const columns = sql.match(/platform_accounts\(([^)]+)\)/)![1].split(',');
@@ -51,6 +66,11 @@ function fixture(creationTasks = false) {
       state.accounts.push(row); return { rows: [{ id: row.id }] };
     }
     if (sql.startsWith('UPDATE noco.platform_accounts')) {
+      if(sql.includes('__nc_deleted=true')){
+        const rows=state.accounts.filter(row=>row.clients_id===values[0]&&(values[1] as number[]).includes(Number(row.id))&&!row.__nc_deleted);
+        for(const row of rows)row.__nc_deleted=true;
+        return{rows:rows.map(row=>({id:row.id}))};
+      }
       const row = state.accounts.find(r => r.id === values[0])!;
       for (const m of sql.matchAll(/(\w+)=\$(\d+)/g)) if (!['id','clients_id'].includes(m[1])) row[m[1]] = values[Number(m[2]) - 1];
       return { rows: [] };
@@ -108,6 +128,127 @@ test('student save creates one referenced task, repeated saves update it and pre
   assert.equal(f.state.tasks[0].linkedin_account_id,f.state.accounts[0].id);
   assert.equal(f.state.tasks[0].outlook_account_id,f.state.accounts[1].id);
   assert.ok(!JSON.stringify(f.state.tasks).includes('mail-secret'));
+});
+
+test('open and blocked intake edits retain the task, account identities and expert draft without queueing profiles again',async()=>{
+  for(const status of ['не начата','блок']){
+    const f=fixture(true);const initial=await f.store.save(7,input(),['ru','en']);
+    f.state.tasks[0].status=status;
+    Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/expert-draft',login:'expert-draft',password:'expert-secret'});
+    const ids=f.state.accounts.map(a=>a.id),profileState=structuredClone(f.state.client);
+    const beforeEdit=f.calls.length;
+    const updated=await f.store.save(7,{...input(),outlookLogin:'corrected@outlook.com',outlookPassword:'',realLocation:'Yerevan'},['ru','en']);
+    assert.ok(!f.calls.slice(beforeEdit).some(sql=>sql.includes('noco.octo_')),'editing does not queue or touch Octo setup');
+    assert.equal(updated.task?.id,initial.task?.id);assert.equal(updated.task?.created,false);
+    assert.deepEqual(f.state.accounts.map(a=>a.id),ids);assert.equal(f.state.tasks.length,1);
+    assert.equal(f.state.accounts[0].url,'https://linkedin.com/in/expert-draft');
+    assert.equal(f.state.accounts[0].login,'expert-draft');assert.equal(f.state.accounts[0].password,'expert-secret');
+    assert.equal(f.state.accounts[1].login,'corrected@outlook.com');assert.equal(f.state.accounts[1].password,'mail-secret');
+    assert.deepEqual(f.state.client,profileState);
+    await assert.rejects(f.store.save(7,parseIntake({scenario:'existing',url:'https://linkedin.com/in/other',login:'other',loggedIn:true}),['ru','en']),{code:'linkedin_intake_registration_pending'});
+    f.state.tasks[0].status='сделана экспертом';const before=structuredClone(f.state);
+    await assert.rejects(f.store.save(7,input(),['ru','en']),{code:'linkedin_task_student_edit_locked'});
+    assert.deepEqual(f.state,before);
+  }
+});
+
+test('confirmed task exposes read-only Octo access; expert completion stays locked without student access',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+  f.state.tasks[0].status='сделана экспертом';
+  assert.equal((await f.store.load(7)).completionConfirmed,false);
+  f.state.tasks[0].status='выполнение подтверждено';
+  const confirmed=await f.store.load(7);
+  assert.equal(confirmed.editLocked,true);assert.equal(confirmed.completionConfirmed,true);
+});
+
+test('replacement exposes archived LinkedIn history and pre-request profiles, excluding newly prepared and deleting profiles',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});f.state.tasks[0].status='выполнение подтверждено';
+  await f.store.save(7,{...input(),replacesLinkedInAccountId:Number(f.state.accounts[0].id)},['ru','en']);
+  const at=new Date(String(f.state.tasks[1].created_at)).getTime();
+  f.state.profiles=[{profile_id:350,state:{createdAt:at-1000}},{profile_id:351,state:{createdAt:at+1000}},
+    {profile_id:352,state:{createdAt:at-1000,deletion:{}}}];
+  const loaded=await f.store.load(7);
+  assert.equal(loaded.hasLinkedIn,false);assert.equal(loaded.registrationPending,true);
+  assert.equal(loaded.hadLinkedInBeforeTask,true);assert.deepEqual(loaded.previousOctoProfileIds,[350]);
+});
+
+test('a bound manual request is edited in place instead of creating a second student request',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);f.state.tasks[0].source='manual';
+  const updated=await f.store.save(7,{...input(),outlookPassword:'',realLocation:'Yerevan'},['ru','en']);
+  assert.equal(updated.task?.id,1);assert.equal(updated.task?.created,false);assert.equal(f.state.tasks.length,1);
+  assert.equal(f.state.tasks[0].source,'manual');
+});
+
+test('in-progress registration cannot be reported banned, including manual applications with result fields already filled',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/not-yet-confirmed',login:'temporary',password:'temporary'});
+  f.state.tasks.push({...f.state.tasks[0],id:99,source:'manual',status:'выполнение подтверждено'});
+  for(const source of ['student_intake','manual'])for(const status of ['не начата','блок','сделана экспертом']){
+    Object.assign(f.state.tasks[0],{source,status});
+    const before=structuredClone(f.state);
+    assert.equal((await f.store.load(7)).registrationPending,true);
+    assert.equal((await f.store.load(7)).completionConfirmed,false,'an older confirmation cannot override the unfinished request');
+    await assert.rejects(f.store.save(7,{...input(),replacesLinkedInAccountId:Number(f.state.accounts[0].id)},['ru','en']),{code:'linkedin_intake_registration_pending'});
+    assert.deepEqual(f.state,before);
+  }
+  f.state.tasks[0].status='выполнение подтверждено';
+  assert.equal((await f.store.load(7)).registrationPending,false);
+});
+
+test('ban replacement archives old credentials and tasks, creates one fresh application and rejects a duplicate submission',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/banned',login:'old@example.org',password:'old-li-secret'});
+  f.state.tasks[0].status='выполнение подтверждено';
+  const oldAccounts=structuredClone(f.state.accounts),oldId=Number(f.state.accounts[0].id);
+  const replacement={...input(),outlookLogin:'replacement@outlook.com',outlookPassword:'new-mail-secret',replacesLinkedInAccountId:oldId};
+  const saved=await f.store.save(7,replacement,['ru','en'],{createOctoProfiles:true});
+  assert.equal(saved.task?.created,true);assert.notEqual(saved.task?.id,1);
+  assert.equal(f.state.tasks[0].status,'выполнение подтверждено');assert.equal(f.state.tasks[0].source,'manual');
+  for(const old of oldAccounts){const archived=f.state.accounts.find(row=>row.id===old.id)!;
+    assert.equal(archived.__nc_deleted,true);assert.equal(archived.password,old.password);assert.equal(archived.login,old.login);}
+  assert.equal(f.state.accounts.filter(row=>!row.__nc_deleted).length,2);
+  const loaded=await f.store.load(7);assert.equal(loaded.url,'');assert.equal(loaded.outlookLogin,'replacement@outlook.com');
+  assert.equal(loaded.editLocked,false);assert.equal(loaded.task?.id,saved.task?.id);
+  await assert.rejects(f.store.save(7,replacement,['ru','en']),{code:'linkedin_intake_replacement_stale'});
+  assert.equal(f.state.accounts.length,4);assert.equal(f.state.tasks.length,2);
+});
+
+test('replacement failure rolls back archival and task retirement; old mailbox password cannot satisfy a new mailbox',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+  f.state.tasks[0].status='выполнение подтверждено';
+  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/banned',password:'old-secret'});
+  const id=Number(f.state.accounts[0].id),before=structuredClone(f.state);
+  await assert.rejects(f.store.save(7,{...input(),outlookPassword:'',replacesLinkedInAccountId:id},['ru','en']),{code:'linkedin_intake_outlook_password_required'});
+  f.control.failTask=true;
+  await assert.rejects(f.store.save(7,{...input(),replacesLinkedInAccountId:id},['ru','en']));
+  assert.deepEqual(f.state,before);
+});
+
+test('a replacement cannot archive another client account or a stale account ID',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/current'});
+  f.state.accounts.push({id:99,clients_id:8,platform:'linkedin',platforms_id:16,url:'https://linkedin.com/in/foreign',password:'foreign-secret'});
+  const before=structuredClone(f.state);
+  await assert.rejects(f.store.save(7,{...input(),replacesLinkedInAccountId:99},['ru','en']),{code:'linkedin_intake_replacement_stale'});
+  await assert.rejects(f.store.save(8,{...input(),replacesLinkedInAccountId:1},['ru','en']),{code:'linkedin_intake_replacement_stale'});
+  assert.deepEqual(f.state,before);
+  f.state.tasks[0].linkedin_account_id=100;
+  const unrelatedTask=structuredClone(f.state);
+  await assert.rejects(f.store.save(7,{...input(),replacesLinkedInAccountId:Number(f.state.accounts[0].id)},['ru','en']),{code:'linkedin_intake_replacement_stale'});
+  assert.deepEqual(f.state,unrelatedTask,'an unrelated current student request is not silently overwritten');
+});
+
+test('an uncertain replacement commit is read back and never repeats archival or application creation',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+  f.state.tasks[0].status='выполнение подтверждено';
+  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/banned'});
+  const replacement={...input(),replacesLinkedInAccountId:Number(f.state.accounts[0].id)};
+  f.control.uncertain=true;
+  await assert.rejects(f.store.save(7,replacement,['ru','en']),{code:'commit_uncertain'});
+  assert.equal((await f.store.load(7)).task?.id,2);
+  await assert.rejects(f.store.save(7,replacement,['ru','en']),{code:'linkedin_intake_replacement_stale'});
+  assert.equal(f.state.accounts.length,4);assert.equal(f.state.tasks.length,2);
 });
 test('task failure rolls back both accounts and Octo intent; locked task rejects stale student save',async()=>{
   const f=fixture(true);f.control.failTask=true;

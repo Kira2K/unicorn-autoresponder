@@ -21,15 +21,25 @@ const { TABLES } = require('../../../integrations/noco/core/schema.ts');
 (await noco.fetchRecords(TABLES.dolphinProfiles.id)).push({ Id: 999, clients_id: 906, locale: 'En', browser: 'dolphin', dolphin_profile_id: '999' });
 const repository = createWebConsoleRepository({ nocoClient: noco });
 const saved = new Map<number, LinkedInIntake>(), requests: Array<{ id: number; payload: unknown }> = [];
+const recoveryTasks=new Map<number,any>();
+const previousProfiles=new Map<number,number[]>(),priorLinkedIn=new Set<number>();
 const profiles = new Map<number, any[]>();
 const empty = { url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
   firstName: '', lastName: '', realLocation: '', blockedAccounts: [] };
 const intake = createLinkedInIntakeService({ allowed: () => true, getClient: id => repository.getClientById(id),
   hasDolphin: async id => (await repository.getDolphinProfilesForClient(id)).length > 0, store: {
-    async load(id) { const data = saved.get(id); return data ? { ...empty, ...data, password: undefined, outlookPassword: undefined,
+    async load(id) { const data = saved.get(id),task=recoveryTasks.get(id); return data ? { ...empty, ...data, linkedinAccountId:id,task,
+      registrationPending:!!task&&task.status!=='выполнение подтверждено',completionConfirmed:task?.status==='выполнение подтверждено',
+      editLocked:['сделана экспертом','выполнение подтверждено'].includes(task?.status),
+      hadLinkedInBeforeTask:priorLinkedIn.has(id),previousOctoProfileIds:previousProfiles.get(id)||[],password: undefined, outlookPassword: undefined,
       hasPassword: !!data.password, hasOutlookPassword: !!data.outlookPassword } : empty; },
-    async save(id, data, _locales, options) { saved.set(id, structuredClone(data)); if (data.scenario === 'new' && options?.createOctoProfiles) profiles.set(id, readyProfiles(false));
-      return { saved: true, linkedinAccountId: id }; }
+    async save(id, data, _locales, options) {
+      const created=data.scenario==='new'&&(!recoveryTasks.has(id)||!!data.replacesLinkedInAccountId);
+      if(data.replacesLinkedInAccountId){priorLinkedIn.add(id);previousProfiles.set(id,(profiles.get(id)||[]).map(p=>p.id));}
+      saved.set(id, structuredClone(data));
+      if(created&&options?.createOctoProfiles&&!profiles.has(id))profiles.set(id,readyProfiles(false));
+      if(created)recoveryTasks.set(id,{id,clientId:id,linkedinAccountId:id,outlookAccountId:id+1,status:'не начата',version:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+      return { saved: true, linkedinAccountId: id,...(recoveryTasks.has(id)?{task:{...recoveryTasks.get(id),created}}:{}) }; }
   } });
 function readyProfiles(proxy: boolean) { return [ { id: 1, locale: 'ru', title: 'RU test', phase: 'ready', canEditProxy: true, proxy: { configured: false } },
   { id: 2, locale: 'en', title: 'EN test', phase: 'ready', canEditProxy: true, proxy: { configured: proxy, ...(proxy ? { host: 'proxy.example.com', type: 'http', port: 8080 } : {}) } } ]; }
@@ -69,7 +79,6 @@ try {
       !!(element.compareDocumentPosition(document.querySelector('[data-testid="telegram-card"]')!) & Node.DOCUMENT_POSITION_FOLLOWING)), true,
       'platform accounts appear before Telegram for both EN and Both clients');
     await instructionCard.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).click();
-    await instructionCard.getByText('Инструкция по созданию почты Outlook', { exact: true }).click();
     const instruction = instructionCard.locator('details ol');
     assert.equal(await instruction.isVisible(), true);
     assert.deepEqual(await instruction.locator('li').allTextContents(), [
@@ -80,14 +89,17 @@ try {
       'Двухфакторку не ставь.'
     ]);
     const registration = instructionCard.getByLabel('Дата и время регистрации Outlook-почты', { exact: true });
+    await instructionCard.getByTestId('linkedin-blocked-details').locator('summary').click();
     await instructionCard.getByRole('button', { name: '＋ Добавить заблокированный аккаунт', exact: true }).click();
     assert.equal(await instructionCard.getByLabel('Имя и фамилия латиницей для нового аккаунта', { exact: true }).count(), 0);
     assert.equal(await instructionCard.getByLabel('Какие имя и фамилия стояли?', { exact: true }).count(), 1);
     await instructionCard.getByRole('button', { name: 'Удалить аккаунт 1', exact: true }).click();
     await registration.waitFor();
-    assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi');
+    assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).inputValue(), '');
+    assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).getAttribute('placeholder'), 'Tbilisi, Georgia');
     const form = instructionCard.getByTestId('linkedin-new-form');
     const submit = form.getByRole('button', { name: 'Сохранить и подготовить Octo', exact: true });
+    await form.getByLabel('Город и страна проживания', { exact: true }).fill('Tbilisi');
     await form.getByLabel('Пароль от новой почты Outlook', { exact: true }).fill('outlook-secret');
     await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
     await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
@@ -123,7 +135,8 @@ try {
     await dialog.getByRole('button', { name: 'Понятно', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
     await instructionPage.reload();
-    await instructionCard.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).click();
+    await instructionCard.getByTestId('linkedin-new-form').waitFor();
+    assert.equal(await instructionCard.locator('.scenario-buttons').count(),0);
     assert.equal(await registration.inputValue(), '2026-10-25T10:30');
     assert.equal(await instructionPage.getByRole('dialog').count(), 0, 'reload does not reopen confirmation');
     await instructionContext.close();
@@ -159,28 +172,31 @@ try {
   await context.close();
   const second = await browser.newContext(), newPage = await login(904, second);
   const newCard = newPage.getByTestId('linkedin-octo-workflow');
-  await newCard.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).click();
+  await newCard.getByTestId('linkedin-new-form').waitFor();
+  assert.equal(await newCard.locator('.scenario-buttons').count(),0);
   const form = newCard.getByTestId('linkedin-new-form');
+  await form.getByTestId('linkedin-outlook-details').getByText('Данные Outlook',{exact:true}).click();
   await form.getByLabel('Логин от новой почты Outlook', { exact: true }).fill('new@outlook.com');
   await form.getByLabel('Пароль от новой почты Outlook', { exact: true }).fill('outlook-secret');
   await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
   await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
-  assert.equal(await form.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi');
+  assert.equal(await form.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi', 'the saved intake location is restored on reopening');
   await form.getByLabel('Дата и время регистрации Outlook-почты', { exact: true }).fill('2026-10-25T10:30');
+  await form.getByTestId('linkedin-blocked-details').locator('summary').click();
   for (let i = 0; i < 3; i++) await form.getByRole('button', { name: '＋ Добавить заблокированный аккаунт', exact: true }).click();
   await form.locator('.blocked-account').nth(0).getByLabel('Какие имя и фамилия стояли?', { exact: true }).fill('First');
   await form.locator('.blocked-account').nth(1).getByLabel('Какая страна была указана?', { exact: true }).fill('UK');
   await form.getByRole('button', { name: 'Удалить аккаунт 3', exact: true }).click();
   assert.equal(await form.locator('.blocked-account').count(), 2);
   assert.equal(await form.getByText('Желаемый стек', { exact: false }).count(), 0);
-  await form.getByRole('button', { name: 'Сохранить и подготовить Octo', exact: true }).click();
-  await newCard.getByText('Данные сохранены. Подготавливаем профили Octo.', { exact: true }).waitFor();
+  await form.getByRole('button', { name: 'Сохранить изменения', exact: true }).click();
+  await newCard.getByText('Заявка обновлена', { exact: true }).waitFor();
   assert.deepEqual(saved.get(904)?.blockedAccounts, [{ fullName: 'First' }, { country: 'UK' }]);
   assert.equal(requests.length, 1, 'new intake does not start a second manual proxy setup');
   await newPage.reload();
-  await newCard.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).click();
+  await newCard.getByTestId('linkedin-new-form').waitFor();
   assert.equal(await newCard.locator('.blocked-account').count(), 2);
-  assert.equal(await newCard.locator('.octo-proxy-settings[open]').count(), 0);
+  assert.equal(await newCard.locator('.octo-card').count(), 0,'first registration hides freshly prepared profiles');
   await mkdir('tmp/linkedin-octo', { recursive: true });
   await newPage.screenshot({ path: 'tmp/linkedin-octo/new-account.png', fullPage: true });
   assert.ok(await newCard.evaluate(element => element.getBoundingClientRect().width > 800), 'desktop intake spans the dashboard');
@@ -202,8 +218,26 @@ try {
   assert.equal(profiles.has(906), false, 'Outlook preparation cannot create Octo replacements for Dolphin');
   assert.equal(await dolphinPage.locator('.octo-card').count(), 0);
   saved.set(906, { ...empty, scenario: 'existing', password: '', outlookPassword: '', loggedIn: false, url: 'https://linkedin.com/in/existing-dolphin' });
+  (await noco.fetchRecords(TABLES.platformAccounts.id)).push({Id:9906,clients_id:906,platforms_id:16,
+    rel_platformAccounts_platform:{Id:16,name:'linkedin'},url:'https://linkedin.com/in/existing-dolphin',login:'old@example.invalid'});
   await dolphinPage.reload(); await dolphinPage.getByTestId('open-dolphin-client-button').waitFor();
-  assert.equal(await dolphinPage.getByTestId('linkedin-octo-workflow').count(), 0, 'Dolphin with existing LinkedIn keeps its current workflow');
+  const recovery=dolphinPage.getByTestId('linkedin-octo-workflow');
+  await recovery.getByRole('button',{name:'Меня забанили',exact:true}).waitFor();
+  assert.equal(await dolphinPage.getByRole('button',{name:'Меня забанили',exact:true}).count(),1);
+  assert.equal(await dolphinPage.locator('.octo-card').count(),0);
+  await recovery.getByRole('button',{name:'Меня забанили',exact:true}).click();
+  const recoveryForm=recovery.getByTestId('linkedin-new-form');await recoveryForm.waitFor();
+  assert.equal(profiles.has(906),false,'opening recovery does not provision or mutate anything');
+  await recoveryForm.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('replacement@outlook.com');
+  await recoveryForm.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('replacement-fixture');
+  await recoveryForm.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25T10:30');
+  await recoveryForm.getByLabel('Город и страна проживания',{exact:true}).fill('Tbilisi');
+  await recoveryForm.getByRole('button',{name:'Сохранить данные',exact:true}).click();
+  await dolphinPage.getByRole('dialog',{name:'Спасибо, данные сохранены ✅'}).waitFor();
+  assert.equal(saved.get(906)?.replacesLinkedInAccountId,906);
+  assert.equal(await dolphinPage.getByTestId('open-dolphin-client-button').count(),1,'pending recovery retains access to the old Dolphin profiles');
+  assert.equal(await dolphinPage.locator('.octo-card').count(),0,'new Octo profiles for Dolphin recovery stay hidden');
+  assert.equal((await repository.getDolphinProfilesForClient(906)).length,1);
   await dolphin.close();
   console.log('LinkedIn/Octo mock browser flow passed: setup, checkpoint, two scenarios, blocked arrays, reload, RU/Dolphin routing, desktop/mobile.');
 } finally { await browser.close(); await new Promise<void>(done => server.close(() => done())); }

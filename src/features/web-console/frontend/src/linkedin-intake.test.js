@@ -11,9 +11,11 @@ test('registration date converts between local input and UTC without shifting th
   assert.equal(registrationTimeInput(undefined), '')
   for (const value of ['bad', '2026-02-30T10:30']) assert.throws(() => registrationTimeUtc(value))
 })
-test('only nonblank LinkedIn URL selects existing scenario', () => {
+test('registered-account metadata or a nonblank URL selects existing; an unclassified login alone does not', () => {
   assert.equal(intakeScenario({ login: 'alex', url: ' ' }), '')
   assert.equal(intakeScenario({ url: 'https://linkedin.com/in/alex' }), 'existing')
+  assert.equal(intakeScenario({ hasLinkedIn: true, login: 'https://linkedin.com/in/legacy', url: '' }), 'existing')
+  assert.equal(intakeScenario({ hasLinkedIn: false, url: '' }), '')
 })
 test('checkpoint infrastructure depends on EN proxy, complete locales and proxy changes, not grant expiry', () => {
   const status = { requiredLocales: ['ru','en'], profiles: [{ id: 1, locale: 'ru', phase: 'ready' },

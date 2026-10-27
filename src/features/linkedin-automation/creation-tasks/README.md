@@ -15,6 +15,14 @@ The completion checklist lists saved LinkedIn URL, login, password and the task'
 instructions for each missing item. Reopening a task restores its saved proxy confirmation when the EN
 profile is idle; a new access session or proxy edit requires confirmation again in the current view.
 The backend still re-reads and validates the actual proxy when completing an unfinished task.
+The Denis result form keeps the profile URL in `url` and the account login in `login`.
+If no LinkedIn login has been saved, the form prefills it from this task's linked Outlook account,
+without checking its email domain. It remains editable and is persisted only by the explicit result save.
+Existing nonblank LinkedIn logins, including legacy URL values, are not replaced or migrated on opening.
+The expert's current task also reads the student's archived LinkedIn accounts and their submitted blocked
+history. Copied identical history cards are shown once; distinct archived account rows stay separate.
+Archived account names, URLs, logins and locations are shown without passwords. The list is numbered and
+shows its total count. This is a read-only view: opening a task does not rewrite history or migrate data.
 Initial list loading shows a spinner and skeletons; refresh keeps the current list and selected card visible.
 Failed requests show a retry hint instead of an empty-list message. Only the newest list response is applied.
 

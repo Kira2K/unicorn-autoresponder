@@ -45,7 +45,7 @@ export function consoleRecords(db: ConsoleSql) {
           for (const row of await find(id, field, [value], true)) found.set(JSON.stringify(row.key), row);
         raw = [...found.values()];
       }
-      const filtered = filterRows(raw.map(consoleRow), query?.where);
+      const filtered = filterRows(raw.map(consoleRow).filter(row=>id!==tableIds.accounts||row.__nc_deleted!==true), query?.where);
       const rows = query?.sort === 'Id' ? filtered.sort((a, b) => a.Id - b.Id) : nocoRecordOrder(filtered);
       for (const [title, targetId] of Object.entries(relations[id] ?? {})) {
         if (selected && !selected.has(title)) continue;
