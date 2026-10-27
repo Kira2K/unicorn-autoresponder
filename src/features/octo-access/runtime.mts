@@ -30,7 +30,7 @@ export function createOctoRuntime({ store, api, config, token, getClient, now = 
     try { await lease.check(); } catch { throw new OctoError('octo_leadership_lost'); }
   };
   const canGrant = (uuid: string) => !!lease && listener?.status().checkpoint !== undefined && signature.split(',').includes(uuid) && !lastError;
-  const service = createOctoService({ store, config, getClient, now, onboarding, canGrant });
+  const service = createOctoService({ store, config, getClient, now, onboarding, canGrant, readProfileProxy: api.readProfileProxy });
   async function disconnect() {
     await listener?.stop(); listener = undefined; signature = '';
     const previous = lease; lease = undefined; await previous?.release();

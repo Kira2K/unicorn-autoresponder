@@ -37,6 +37,8 @@ import { createCreationTaskStore } from '../../../linkedin-automation/creation-t
 import { createCreationTaskService } from '../../../linkedin-automation/creation-tasks/service.mts';
 import { createTaskProxyCapture } from '../../../linkedin-automation/creation-tasks/proxy-capture.mts';
 import { guardAccount } from '../../../linkedin-automation/creation-tasks/account-guard.mts';
+import { createTaskStatusReporter } from '../../../linkedin-automation/creation-tasks/status-report.mts';
+import { createRequire } from 'node:module';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const bridgeConfig = readBridgeConfig(env);
@@ -110,11 +112,19 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
       const tasks = createCreationTaskStore(pool,config.database,!!linklab);
       await tasks.checkSchema();
+      let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
+      const reportStatusChange = createTaskStatusReporter({chatId:'-1003187558078',mention:'@juliafeels',
+        client:id=>options.repository.getClientById(id),
+        sendOne:input=>{
+          taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
+            typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
+          return taskTelegram.sendOne(input);
+        }});
       linkedinCreator = createCreationTaskService({ store: tasks, profiles: octoStore, octo: octoService,
         client: id => options.repository.getClientById(id),
         secrets: (id,account) => options.repository.getPlatformAccountSecrets(id,account),
         capture: createTaskProxyCapture({store:octoStore,api,config:octoConfig,octo:octo.service}),
-        nodeMavenKey: () => env.NODEMAVEN_API_KEY || '' });
+        nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange });
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }

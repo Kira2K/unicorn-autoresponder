@@ -26,18 +26,34 @@ let listGeneration = 0
 const labels = { fullName: 'Имя и фамилия', country: 'Страна', company: 'Компания', position: 'Должность', blockedAt: 'Дата блока', newFullName: 'Новое имя', legacyText: 'Примечание' }
 const transport = computed(() => {
   const path = `${base}/tasks/${selected.value?.task.id}/octo`
-  return { profileStatus: options => request(path + '/status', options),
+  return { profileStatus: options => request(path + '/status' + (options?.proxyCredentials ? '?proxyCredentials=1' : ''), { signal: options?.signal }),
     requestGrant: (profileId, options) => request(path + '/grants', { ...options, method: 'POST', body: JSON.stringify({ profileId }) }),
     grant: (id, options) => request(path + '/grants/' + encodeURIComponent(id), options),
     saveProxy: (profileId, draft, options) => request(`${path}/profiles/${encodeURIComponent(profileId)}/proxy`,
       { ...options, method: 'POST', body: JSON.stringify(octoProxyPayload(draft)) }) }
 })
-const canComplete = computed(() => captureConfirmed.value && !!selected.value?.task.proxySavedAt &&
-  !!selected.value?.intake.url && !!selected.value?.intake.login && selected.value?.intake.hasPassword)
+const completionChecklist = computed(() => [
+  { key: 'proxy', label: 'Настройки прокси подтверждены для заявки',
+    done: !!selected.value?.task.proxySavedAt && captureConfirmed.value && !!canCaptureProxy.value,
+    hint: !profileState.value ? 'Дождитесь загрузки состояния профиля Octo.'
+      : canCaptureProxy.value ? 'Нажмите «Сохранить настройки прокси» над формой LinkedIn.'
+      : !profileState.value.profiles?.some(p => p.locale === 'en' && p.proxy?.configured)
+        ? 'Сохраните прокси в форме «Настроить прокси» и дождитесь завершения сохранения. Затем нажмите «Сохранить настройки прокси».'
+        : 'Закройте профиль Octo и дождитесь завершения доступа. Затем нажмите «Сохранить настройки прокси».' },
+  { key: 'url', label: 'Ссылка LinkedIn сохранена', done: !!selected.value?.intake.url,
+    hint: 'Введите ссылку вида https://www.linkedin.com/in/... и нажмите «Сохранить данные LinkedIn».' },
+  { key: 'login', label: 'Логин LinkedIn сохранён', done: !!selected.value?.intake.login,
+    hint: 'Введите логин LinkedIn и нажмите «Сохранить данные LinkedIn».' },
+  { key: 'password', label: 'Пароль LinkedIn сохранён', done: !!selected.value?.intake.hasPassword,
+    hint: 'Введите пароль LinkedIn и нажмите «Сохранить данные LinkedIn».' }
+])
+const canComplete = computed(() => completionChecklist.value.every(item => item.done))
 function errorText(error) {
   const code = error.message
   if (code === 'linkedin_task_proxy_pending') return 'Прокси сохраняется. Дождитесь завершения и нажмите кнопку ещё раз.'
   if (code === 'linkedin_task_close_profile_first') return 'Закройте профиль Octo и дождитесь завершения доступа.'
+  if (code === 'linkedin_task_proxy_required' || code === 'linkedin_task_proxy_changed') return 'Подтвердите актуальный прокси: закройте профиль Octo, дождитесь завершения доступа и нажмите «Сохранить настройки прокси».'
+  if (code === 'linkedin_task_result_required') return 'Сохраните ссылку, логин и пароль LinkedIn кнопкой «Сохранить данные LinkedIn».'
   if (code === 'linkedin_task_stale_version') return 'Заявка изменилась. Откройте её заново перед сохранением.'
   if (code === 'commit_uncertain') return 'Результат неизвестен. Откройте заявку заново для проверки; повторная отправка не запускается.'
   return 'Не удалось выполнить действие. Проверьте поля и состояние профиля; при повторной ошибке обратитесь в поддержку.'
@@ -67,7 +83,7 @@ async function open(id) {
   try {
     const data = await request(`${base}/tasks/${id}`, { signal: taskController.signal })
     if (current !== selection || controller.signal.aborted) return
-    selected.value = data; selectedStatus.value = data.task.status
+    selected.value = data; selectedStatus.value = data.task.status; captureConfirmed.value = !!data.task.proxySavedAt
     result.value = { url: data.intake.url, login: data.intake.login, password: '' }
   } catch (e) {
     if (e.name !== 'AbortError' && !controller.signal.aborted && current === selection) taskLoadError.value = errorText(e)
@@ -88,10 +104,22 @@ async function save(action, body) {
       if (current !== selection || controller.signal.aborted) return
       selected.value = detail; result.value.password = ''; message.value = 'Данные LinkedIn сохранены.'
     }
-    if (action === 'status') { selectedStatus.value = task.status; message.value = 'Статус сохранён.' }
+    if (action === 'status') {
+      selectedStatus.value = task.status
+      message.value = task.notification?.outcome === 'failed'
+        ? 'Статус сохранён. Не удалось отправить уведомление в менеджерский Telegram-чат.'
+        : task.notification?.outcome === 'uncertain'
+          ? 'Статус сохранён. Подтверждение отправки уведомления в Telegram не получено.'
+          : task.notification?.outcome === 'sent'
+            ? 'Статус сохранён. Уведомление отправлено в менеджерский Telegram-чат.'
+            : 'Статус сохранён.'
+    }
     await loadTasks()
   } catch (e) {
-    if (current === selection && !controller.signal.aborted) { message.value = errorText(e); if (action === 'capture-proxy') captureConfirmed.value = false }
+    if (current === selection && !controller.signal.aborted) {
+      message.value = errorText(e)
+      if (action === 'capture-proxy' || ['linkedin_task_proxy_required', 'linkedin_task_proxy_changed'].includes(e.message)) captureConfirmed.value = false
+    }
   } finally { busy.value = false }
 }
 async function copy(kind) {
@@ -149,14 +177,23 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
         <p v-if="captureConfirmed">Прокси сохранён и проверен.</p>
         <form @submit.prevent="save('result', result)">
           <h3>Созданный LinkedIn</h3>
-          <label>Ссылка LinkedIn<input v-model="result.url" required autocomplete="off"></label>
+          <label>Ссылка LinkedIn<input v-model="result.url" required placeholder="https://www.linkedin.com/in/..." autocomplete="off"></label>
           <label>Логин LinkedIn<input v-model="result.login" required autocomplete="off"></label>
           <label>Пароль LinkedIn<input v-model="result.password" type="password" :required="!selected.intake.hasPassword" :placeholder="selected.intake.hasPassword ? 'Сохранён; пустое поле оставляет прежний' : ''" autocomplete="new-password"></label>
           <button type="submit" :disabled="busy">Сохранить данные LinkedIn</button>
         </form>
-        <label>Статус заявки<select v-model="selectedStatus" aria-label="Статус заявки"><option>не начата</option><option>блок</option><option :disabled="!canComplete">{{ expertDoneStatus }}</option></select></label>
+        <section class="completion-checklist" aria-labelledby="completion-checklist-title">
+          <h3 id="completion-checklist-title">Что нужно для завершения заявки</h3>
+          <ul>
+            <li v-for="item in completionChecklist" :key="item.key" :data-testid="`completion-${item.key}`" :class="{ 'completion-checklist__done': item.done }">
+              <strong>{{ item.done ? '✓ Выполнено' : '○ Не выполнено' }}: {{ item.label }}</strong>
+              <p v-if="!item.done">{{ item.hint }}</p>
+            </li>
+          </ul>
+          <p v-if="!canComplete">Статус «сделана экспертом» станет доступен после выполнения всех пунктов.</p>
+        </section>
+        <label>Статус заявки<select v-model="selectedStatus" aria-label="Статус заявки" aria-describedby="completion-checklist-title"><option>не начата</option><option>блок</option><option :disabled="!canComplete">{{ expertDoneStatus }}</option></select></label>
         <p v-if="expertCompleted" class="task-completion-note" role="status">Заявка сделана экспертом и ожидает подтверждения.</p>
-        <p v-else-if="!canComplete">Для завершения сохраните данные LinkedIn и настройки прокси.</p>
         <button type="button" :disabled="busy || selectedStatus === expertDoneStatus && !canComplete" @click="save('status', { status: selectedStatus })">Сохранить статус</button>
       </article>
       <div v-else class="task-placeholder"><p>Выберите заявку, чтобы открыть карточку ученика.</p></div>
@@ -165,6 +202,9 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
   </section>
 </template>
 <style scoped>
+.completion-checklist{padding:16px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155}
+.completion-checklist h3{margin:0 0 12px}.completion-checklist ul{list-style:none;padding:0;margin:0;display:grid;gap:12px}
+.completion-checklist p{margin:4px 0 0}.completion-checklist__done{color:#166534}
 .creator-console{padding:24px;border-radius:12px;background:var(--p-content-background,#fff);color:var(--p-text-color,#1f2937)}
 .creator-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,2fr);gap:24px;margin-top:24px}nav,form,article{display:grid;align-content:start;gap:12px}nav button{text-align:left}label{display:grid;gap:6px}input,select,button{font:inherit;padding:10px;border:1px solid #cbd5e1;border-radius:6px;max-width:100%;min-width:0}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}.key-row{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;width:100%}.key-row input,.key-copy-button{width:100%;box-sizing:border-box}.key-copy-button{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;font-weight:600;min-height:44px}.key-copy-button:hover{background:#dbeafe}.task-button{background:#f8fafc;transition:background-color .15s,border-color .15s,box-shadow .15s}.task-button:hover{background:#f1f5f9}.task-button--selected,.task-button--selected:hover{background:#eaf2ff;border-color:#93b4f4;color:#1e40af;box-shadow:inset 3px 0 #3b82f6}.task-button:focus-visible,.key-copy-button:focus-visible{outline:3px solid #bfdbfe;outline-offset:2px}.task-panel{min-width:0}.task-loader,.task-placeholder{padding:28px;border:1px solid #e2e8f0;border-radius:12px;background:linear-gradient(145deg,#f8fbff,#fff);min-height:320px;box-sizing:border-box}.loader-heading{display:flex;align-items:center;gap:14px;color:#334155}.loader-heading strong{font-size:17px}.loader-heading p{margin:6px 0 0;color:#64748b;font-size:14px}.loader-ring{width:32px;height:32px;flex:0 0 32px;border:3px solid #dbeafe;border-top-color:#3b82f6;border-right-color:#93c5fd;border-radius:50%;animation:loader-spin .85s linear infinite}.loader-skeleton{display:grid;gap:18px;margin-top:30px}.skeleton-line,.skeleton-box{display:block;border-radius:7px;background:linear-gradient(100deg,#edf2f8 15%,#f8fbff 40%,#edf2f8 65%);background-size:220% 100%;animation:loader-shimmer 1.6s ease-in-out infinite}.skeleton-line{height:14px}.skeleton-title{height:22px;width:75%}.skeleton-short{width:45%}.skeleton-box{height:76px}.task-placeholder{color:#64748b}dt{font-weight:600}dd{margin:4px 0 12px;overflow-wrap:anywhere}form{border-top:1px solid #dbe3ee;padding-top:16px}p{line-height:1.5}@keyframes loader-spin{to{transform:rotate(360deg)}}@keyframes loader-shimmer{to{background-position:-220% 0}}@media(prefers-reduced-motion:reduce){.loader-ring,.skeleton-line,.skeleton-box{animation:none}.task-button{transition:none}}@media(max-width:800px){.creator-layout{grid-template-columns:minmax(0,1fr)}.task-loader,.task-placeholder{padding:20px}}
 .task-button{display:grid;gap:6px;padding:14px;min-width:0;line-height:1.4}

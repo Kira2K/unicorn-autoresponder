@@ -15,7 +15,7 @@ export async function request(path, options = {}) {
 
 export const octoApi = {
   profileStatus(options = {}) {
-    return request('/api/octo/profiles/status', { signal: options.signal })
+    return request('/api/octo/profiles/status' + (options.proxyCredentials ? '?proxyCredentials=1' : ''), { signal: options.signal })
   },
   startOnboarding(payload, options = {}) {
     return request('/api/octo/onboarding', {
@@ -59,7 +59,8 @@ export const octoApi = {
 }
 
 export function octoProxyDraft(proxy = {}) {
-  return { type: proxy.type || 'http', host: proxy.host || '', port: proxy.port ?? '', login: '', password: '', changeIpUrl: '' }
+  return { type: proxy.type || 'http', host: proxy.host || '', port: proxy.port ?? '',
+    login: proxy.login ?? '', password: proxy.password ?? '', changeIpUrl: proxy.changeIpUrl ?? '' }
 }
 
 export function octoProxyPayload(draft) {

@@ -55,6 +55,7 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
       const status = providerStatus(value);
       return writeTransaction(pool, database, async s => {
         const task = await lock(s, id, version);
+        if (task.status === status) return task;
         if (status === 'сделана экспертом') {
           const row = (await s.query(`SELECT p.state FROM noco.octo_profiles p WHERE p.profile_id=$1 AND p.client_id=$2 AND p.locale='en' FOR UPDATE`,
           [task.proxyProfileId ?? null, task.clientId])).rows[0];

@@ -20,7 +20,7 @@ export function registerCreationTaskRoutes(app: Express, requireAuth: RequestHan
   app.put(base+'/tasks/:id/result',requireAuth,handle((s,r)=>s.result(r.params.id,r.body??{})));
   app.put(base+'/tasks/:id/status',requireAuth,handle((s,r)=>s.status(r.params.id,r.body??{})));
   app.post(base+'/tasks/:id/capture-proxy',requireAuth,handle((s,r)=>s.capture(r.params.id,r.body??{})));
-  app.get(base+'/tasks/:id/octo/status',requireAuth,handle((s,r)=>s.profileStatus(r.params.id)));
+  app.get(base+'/tasks/:id/octo/status',requireAuth,handle((s,r)=>s.profileStatus(r.params.id,r.query.proxyCredentials==='1')));
   app.post(base+'/tasks/:id/octo/grants',requireAuth,handle((s,r)=>s.acquire(r.params.id,r.body?.profileId)));
   app.post(base+'/tasks/:id/octo/profiles/:profile/proxy',requireAuth,handle((s,r)=>s.saveProxy(r.params.id,r.params.profile,r.body)));
   app.get(base+'/tasks/:id/octo/grants/:grant',requireAuth,handle((s,r)=>s.grant(r.params.id,String(r.params.grant))));

@@ -20,22 +20,32 @@ test('Octo credentials are kept only during a valid granted window, preserving l
   assert.equal(grant.password, '00123', 'sanitizing does not mutate transport data')
 })
 
-test('Proxy drafts use safe metadata only; submission validates fields and preserves entered credentials', () => {
+test('Proxy drafts hydrate returned credentials; submission validates fields and preserves entered credentials', () => {
   const proxy = { type: 'socks5', host: 'proxy.example.test', port: 1080, login: 'saved-login', password: 'saved-password', changeIpUrl: 'https://private.example.test/secret' }
   const draft = octoProxyDraft(proxy)
-  assert.deepEqual(draft, { type: 'socks5', host: 'proxy.example.test', port: 1080, login: '', password: '', changeIpUrl: '' })
+  assert.deepEqual(draft, proxy)
   assert.deepEqual(octoProxyDraft(), { type: 'http', host: '', port: '', login: '', password: '', changeIpUrl: '' })
   const entered = { ...draft, host: ' proxy.example.test ', port: '1080', login: ' entered login ', password: ' entered password ', changeIpUrl: ' https://proxy.example.test/change ' }
   const payload = octoProxyPayload(entered)
   assert.deepEqual(payload, { type: 'socks5', host: 'proxy.example.test', port: 1080, login: ' entered login ', password: ' entered password ', changeIpUrl: 'https://proxy.example.test/change' })
   assert.equal(entered.port, '1080', 'payload preparation does not mutate user input')
-  assert.equal('changeIpUrl' in octoProxyPayload(draft), false)
+  assert.equal(octoProxyPayload(draft).changeIpUrl, proxy.changeIpUrl)
   assert.deepEqual(octoProxyPayload({ ...draft, type: 'https', port: '443' }), {
-    type: 'https', host: 'proxy.example.test', port: 443, login: '', password: ''
+    type: 'https', host: 'proxy.example.test', port: 443, login: 'saved-login', password: 'saved-password', changeIpUrl: proxy.changeIpUrl
   })
   for (const fields of [{ type: 'ftp' }, { host: '' }, { host: 'bad host' }, { port: '' }, { port: 0 }, { port: 65536 }, { port: 1.5 }, { changeIpUrl: 'bad-url' }, { changeIpUrl: 'file:///secret' }]) {
     assert.throws(() => octoProxyPayload({ ...draft, ...fields }), /^Error: invalid_proxy_fields$/)
   }
+})
+
+test('proxy credentials use the same status request only when explicitly requested', async () => {
+  const originalFetch = globalThis.fetch, paths = []
+  globalThis.fetch = async path => { paths.push(path); return { ok: true, json: async () => ({ profiles: [] }) } }
+  try {
+    await octoApi.profileStatus({ proxyCredentials: true })
+    await octoApi.profileStatus()
+    assert.deepEqual(paths, ['/api/octo/profiles/status?proxyCredentials=1', '/api/octo/profiles/status'])
+  } finally { globalThis.fetch = originalFetch }
 })
 
 test('Proxy save uses authenticated profile-scoped POST and rejects invalid input before fetch', async () => {

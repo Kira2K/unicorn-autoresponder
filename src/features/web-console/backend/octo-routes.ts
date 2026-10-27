@@ -18,7 +18,8 @@ export function registerOctoRoutes(app: Express, requireAuth: RequestHandler, se
       res.status(e.status && e.status >= 400 && e.status < 600 ? e.status : 503).json({ error: code });
     }
   };
-  app.get('/api/octo/profiles/status', requireAuth, guard, run(req => service!.status(Number(req.webSession!.clientId))));
+  app.get('/api/octo/profiles/status', requireAuth, guard, run(req => service!.status(Number(req.webSession!.clientId),
+    { proxyCredentials: req.query.proxyCredentials === '1' })));
   app.post('/api/octo/onboarding', requireAuth, guard,
     run(req => service!.startOnboarding(Number(req.webSession!.clientId), req.body), 202));
   app.post('/api/octo/onboarding/:id/continue', requireAuth, guard,

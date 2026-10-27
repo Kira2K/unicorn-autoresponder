@@ -58,6 +58,36 @@ test('proxy ownership and blocked phase protect other users and running/shared p
   await f.advance(); assert.deepEqual(f.counts(), { creates: 0, attaches: 0 });
   assert.equal((await f.store.get(f.id))!.proxyChange!.phase, 'blocked');
 });
+
+test('status retrieves whitelisted proxy credentials only on request, after client authorization, without persisting them', async () => {
+  const f = await fixture(); await f.service.saveProxy(901, f.id, input); await f.advance();
+  let reads = 0;
+  const service = createOctoService({ store: f.store, config: testConfig, getClient: async id => mockClient(id),
+    readProfileProxy: async () => { reads++; return { saved: { ...f.proxies[0], changeIpUrl: 'https://proxy.example/change', externalId: 'private-operation-marker' } }; } });
+  await service.status(901); assert.equal(reads, 0);
+  await assert.rejects(service.status(903, { proxyCredentials: true }), { code: 'forbidden' }); assert.equal(reads, 0);
+  const before = await f.store.get(f.id);
+  const status = await service.status(901, { proxyCredentials: true });
+  assert.equal(reads, 1); assert.equal(status.profiles[0].proxy.credentialsLoaded, true);
+  assert.equal(status.profiles[0].proxy.login, input.login); assert.equal(status.profiles[0].proxy.password, input.password);
+  assert.equal(status.profiles[0].proxy.changeIpUrl, 'https://proxy.example/change');
+  assert.ok(!JSON.stringify(status).includes('private-operation-marker'));
+  assert.equal('password' in status.profiles[0], false);
+  assert.deepEqual(await f.store.get(f.id), before, 'retrieval is read only');
+});
+
+test('proxy credential reads reject changed binding and sanitize provider failures while retaining status', async () => {
+  const f = await fixture(); await f.service.saveProxy(901, f.id, input); await f.advance();
+  for (const reader of [async () => ({ saved: { ...f.proxies[0], uuid: 'someone-elses-proxy' } }),
+    async () => { throw Error('private-provider-secret'); }]) {
+    const service = createOctoService({ store: f.store, config: testConfig, getClient: async id => mockClient(id), readProfileProxy: reader });
+    const status = await service.status(901, { proxyCredentials: true });
+    assert.equal(status.profiles[0].phase, 'ready');
+    assert.equal(status.profiles[0].proxy.credentialsError, 'octo_proxy_credentials_unavailable');
+    assert.equal(status.profiles[0].proxy.password, undefined);
+    assert.ok(!JSON.stringify(status).includes('private-provider-secret'));
+  }
+});
 test('lost create/attach acknowledgement reconciles exact marker without duplicate writes', async () => {
   for (const step of ['create', 'attach'] as const) {
     const f = await fixture(); await f.service.saveProxy(901, f.id, input); f.lose(step);
