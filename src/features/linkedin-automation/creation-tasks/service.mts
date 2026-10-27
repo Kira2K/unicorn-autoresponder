@@ -4,6 +4,7 @@ import type { OctoService } from '../../octo-access/service.mts';
 import type { WebClient } from '../../web-console/backend/types.ts';
 import { IntakeError } from '../console-intake/contracts.mts';
 import { taskId } from './contracts.mts';
+import type { StatusNotification, TaskStatusChange } from './status-report.mts';
 
 export function createCreationTaskService(deps: {
   store: CreationTaskStore; profiles: Pick<OctoStore,'list'|'get'>; octo: OctoService;
@@ -11,6 +12,7 @@ export function createCreationTaskService(deps: {
   secrets(clientId: number, accountId: number): Promise<unknown>;
   capture(profile: ManagedProfile): Promise<ManagedProfile>;
   nodeMavenKey(): string;
+  reportStatusChange?(change: TaskStatusChange): Promise<StatusNotification>;
 }) {
   const detail = async (id: unknown) => deps.store.detail(taskId(id));
   async function en(id: unknown) {
@@ -34,8 +36,8 @@ export function createCreationTaskService(deps: {
       if (!['outlook','linkedin'].includes(String(kind))) throw new IntakeError('linkedin_task_invalid_account');
       return deps.secrets(d.task.clientId, kind === 'outlook' ? d.task.outlookAccountId : d.task.linkedinAccountId);
     },
-    async profileStatus(id: unknown) {
-      const d = await detail(id), s = await deps.octo.status(d.task.clientId);
+    async profileStatus(id: unknown, proxyCredentials = false) {
+      const d = await detail(id), s = await deps.octo.status(d.task.clientId, { proxyCredentials, locales: ['en'] });
       return { ...s, profiles: s.profiles.filter(p => p.locale === 'en'), requiredLocales: ['en'] };
     },
     async acquire(id: unknown, profileId: unknown) {
@@ -56,7 +58,8 @@ export function createCreationTaskService(deps: {
     },
     async result(id: unknown, body: Record<string, unknown>) { return deps.store.result(taskId(id), taskId(body.version), body); },
     async status(id: unknown, body: Record<string, unknown>) {
-      if (body.status === 'сделана экспертом') {
+      const before = await detail(id), previousStatus = before.task.status;
+      if (body.status === 'сделана экспертом' && previousStatus !== body.status) {
         const d = await en(id);
         if (d.task.version !== taskId(body.version)) throw new IntakeError('linkedin_task_stale_version',409);
         if (!d.task.proxySavedAt || !d.task.proxyUuid || !d.task.proxyProfileId) throw new IntakeError('linkedin_task_proxy_required',409);
@@ -65,7 +68,13 @@ export function createCreationTaskService(deps: {
         if (!d.task.proxySavedAt || p.proxy?.uuid !== d.task.proxyUuid || p.id !== d.task.proxyProfileId)
           throw new IntakeError('linkedin_task_proxy_required',409);
       }
-      return deps.store.status(taskId(id), taskId(body.version), body.status);
+      const task = await deps.store.status(taskId(id), taskId(body.version), body.status);
+      if (task.status === previousStatus || !deps.reportStatusChange) return task;
+      let notification: StatusNotification;
+      try {
+        notification = await deps.reportStatusChange({ taskId:task.id,clientId:task.clientId,from:previousStatus,to:task.status });
+      } catch { notification = {outcome:'uncertain',code:'notification_internal'}; }
+      return { ...task, notification };
     },
     async capture(id: unknown, body: Record<string, unknown>) {
       const d = await en(id);

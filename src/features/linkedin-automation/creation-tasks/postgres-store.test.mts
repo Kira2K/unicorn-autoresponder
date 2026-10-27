@@ -72,3 +72,14 @@ test('proxy receipt is committed only for the verified profile revision; unknown
   await assert.rejects(f.store.status(1,2,'блок'),{code:'linkedin_task_stale_version'});
   assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,updates);
 });
+
+test('saving the same status is a version-checked no-op, including after reopening a completed task',async()=>{
+  const f=fixture();
+  assert.equal((await f.store.status(1,1,'не начата')).version,1);
+  assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,0);
+  const done=await f.store.status(1,1,'сделана экспертом');
+  f.state.profile.state.grant={phase:'granted'};
+  assert.deepEqual(await f.store.status(1,done.version,'сделана экспертом'),done);
+  assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,1);
+  await assert.rejects(f.store.status(1,1,'сделана экспертом'),{code:'linkedin_task_stale_version'});
+});

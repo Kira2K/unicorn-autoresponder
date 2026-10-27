@@ -78,3 +78,92 @@ test('Octo access: failed request survives polling, retry displays credentials, 
     assert.deepEqual(requests, [{ profileId: 331 }, { profileId: 331 }])
   } finally { await browser?.close(); await server.close() }
 })
+
+test('proxy draft survives tab hiding; password toggles without submitting; client change and denied access clear it', { timeout: 45000 }, async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const fixture = `import { createApp, h, ref } from 'vue'
+    import Access from '/src/components/OctoAccessCard.vue'
+    const clientId = ref(261)
+    window.changeFixtureClient = () => { clientId.value = 262 }
+    createApp({ render: () => h(Access, { clientId: clientId.value, setupEnabled: false, proxyExpanded: true }) }).mount('#app')`
+  const server = await createServer({ configFile: false, root, plugins: [vue(), {
+    name: 'octo-proxy-fixture', resolveId: id => id === 'virtual:octo-proxy' ? '\0octo-proxy' : null,
+    load: id => id === '\0octo-proxy' ? fixture : null,
+    configureServer(server) { server.middlewares.use('/octo-proxy-test', async (_req, res) => {
+      res.setHeader('Content-Type', 'text/html')
+      res.end(await server.transformIndexHtml('/octo-proxy-test', '<div id="app"></div><script type="module" src="/@id/virtual:octo-proxy"></script>'))
+    }) }
+  }], server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' })
+  let browser
+  try {
+    await server.listen()
+    browser = await chromium.launch({ channel: process.env.OCTO_E2E_BROWSER_CHANNEL || undefined })
+    const page = await browser.newPage()
+    page.setDefaultTimeout(10000)
+    let denied = false, writes = 0, otherClient = false, credentialReads = 0
+    await page.route('**/api/octo/**', async route => {
+      if (route.request().method() !== 'GET') { writes++; throw Error('fixture must not write') }
+      if (denied) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+      const credentials = new URL(route.request().url()).searchParams.get('proxyCredentials') === '1'
+      if (credentials) credentialReads++
+      return route.fulfill({ json: { profiles: [
+        { id: 332, title: 'Proxy fixture En', locale: 'en', phase: 'ready', canEditProxy: true,
+          proxy: { configured: true, type: 'socks5', host: 'gateway.example.test', port: 1080,
+            ...(credentials ? { credentialsLoaded: true, login: otherClient ? '' : 'saved-proxy-user', password: otherClient ? '' : 'saved-proxy-password' } : {}) } }
+      ], requiredLocales: ['en'], onboarding: { phase: 'complete' } } })
+    })
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/octo-proxy-test`)
+    const form = page.getByTestId('octo-proxy-form-332')
+    const login = form.getByLabel('Логин прокси', { exact: true })
+    const password = form.getByLabel('Пароль прокси', { exact: true })
+    await login.waitFor()
+    assert.equal(await login.inputValue(), 'saved-proxy-user')
+    assert.equal(await password.inputValue(), 'saved-proxy-password')
+    await page.reload()
+    await login.waitFor()
+    assert.equal(await password.inputValue(), 'saved-proxy-password', 'reload must retrieve saved credentials again')
+    const readsAfterReload = credentialReads
+    await page.waitForResponse(r => new URL(r.url()).pathname === '/api/octo/profiles/status' && !new URL(r.url()).search)
+    assert.equal(credentialReads, readsAfterReload, 'ordinary polling must not reread cloud credentials')
+    assert.equal(await password.inputValue(), 'saved-proxy-password')
+    await login.fill('unsaved-proxy-user')
+    await password.fill('unsaved-proxy-password')
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    assert.equal(await form.count(), 1, 'hiding the tab must not remove the proxy form')
+    const resumed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/octo/profiles/status')
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await resumed
+    assert.equal(await login.inputValue(), 'unsaved-proxy-user')
+    assert.equal(await password.inputValue(), 'unsaved-proxy-password')
+    assert.equal(await password.getAttribute('type'), 'password')
+    await form.getByRole('button', { name: 'Показать пароль прокси', exact: true }).click()
+    assert.equal(await password.getAttribute('type'), 'text')
+    assert.equal(await password.inputValue(), 'unsaved-proxy-password')
+    await form.getByRole('button', { name: 'Скрыть пароль прокси', exact: true }).click()
+    assert.equal(await password.getAttribute('type'), 'password')
+    assert.equal(writes, 0, 'password visibility must not submit the form')
+    otherClient = true
+    const switched = page.waitForResponse(r => new URL(r.url()).pathname === '/api/octo/profiles/status')
+    await page.evaluate(() => window.changeFixtureClient())
+    await switched
+    await form.waitFor()
+    assert.equal(await login.inputValue(), '', 'a different client must not inherit the draft')
+    assert.equal(await password.inputValue(), '')
+    await login.fill('must-clear-on-denial')
+    await password.fill('must-clear-on-denial')
+    denied = true
+    await form.waitFor({ state: 'detached' })
+    denied = false
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await form.waitFor()
+    assert.equal(await login.inputValue(), '')
+    assert.equal(await password.inputValue(), '')
+    assert.equal(writes, 0)
+  } finally { await browser?.close(); await server.close() }
+})

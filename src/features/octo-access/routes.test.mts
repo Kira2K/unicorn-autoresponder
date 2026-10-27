@@ -7,12 +7,13 @@ test('real Console auth gates every Octo route, keeps third users and other owne
     const call=async(path:string,method='GET',cookie='',body?:unknown)=>fetch(f.url+path,{method,headers:{Cookie:cookie,
       ...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
     assert.equal((await call('/api/octo/profiles/status')).status,401);
+    assert.equal((await call('/api/octo/profiles/status?proxyCredentials=1')).status,401);
     const login=async(email:string,password='1234')=>call('/api/auth/login','POST','',{email,password});
     assert.equal((await login('alex.octo@example.com','wrong')).status,401);
     const a=(await login('alex.octo@example.com')).headers.get('set-cookie')!.split(';')[0];
     const b=(await login('bob.octo@example.com')).headers.get('set-cookie')!.split(';')[0];
     const other=(await login('alexeevalydia@gmail.com')).headers.get('set-cookie')!.split(';')[0];
-    for(const [path,method,body] of [['/api/octo/profiles/status','GET',undefined],['/api/octo/profiles/ensure','POST',{}],
+    for(const [path,method,body] of [['/api/octo/profiles/status','GET',undefined],['/api/octo/profiles/status?proxyCredentials=1','GET',undefined],['/api/octo/profiles/ensure','POST',{}],
       ['/api/octo/grants','POST',{profileId:1}],['/api/octo/grants/anything','GET',undefined],
       ['/api/octo/profiles/1/proxy','POST',{}], ['/api/octo/onboarding','POST',{source:'none'}],
       ['/api/octo/onboarding/anything/continue','POST',{acceptLowScore:true}],

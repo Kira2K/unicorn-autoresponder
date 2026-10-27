@@ -15,6 +15,7 @@ const grants = ref({})
 const requesting = ref({})
 const requestErrors = ref({})
 const proxyDrafts = ref({})
+const proxyDirty = ref({})
 const proxySaving = ref({})
 const proxyMessages = ref({})
 const message = ref('')
@@ -37,7 +38,7 @@ function proxyPending(profile) {
   return ['queued', 'creating', 'attaching'].includes(profile.proxy?.phase)
 }
 function canEditProxy(profile) {
-  return profile.canEditProxy === true && !proxyPending(profile) && !proxySaving.value[profile.id] &&
+  return profile.canEditProxy === true && !profile.proxy?.credentialsError && !proxyPending(profile) && !proxySaving.value[profile.id] &&
     !requesting.value[profile.id] && !['preparing', 'granted', 'awaiting_close'].includes(grants.value[profile.id]?.phase || profile.phase)
 }
 function failureMessage(profile) {
@@ -52,6 +53,7 @@ let mounted = false
 let pollTimer
 let clockTimer
 let controller
+let loadProxyCredentials = true
 
 function active(version) {
   return mounted && version === generation && !document.hidden
@@ -64,7 +66,6 @@ function stop() {
   controller?.abort()
   controller = undefined
   requesting.value = {}
-  proxyDrafts.value = {}
   proxySaving.value = {}
   proxyMessages.value = {}
   copied.value = ''
@@ -78,6 +79,8 @@ function stop() {
 function denied(error) {
   if (![401, 403].includes(error.status)) return false
   stop()
+  proxyDrafts.value = {}
+  proxyDirty.value = {}
   visible.value = false
   status.value = { profiles: [], requiredLocales: [] }
   grants.value = {}
@@ -95,15 +98,20 @@ function expireCredentials() {
 async function refresh(version) {
   if (!active(version)) return
   try {
-    const nextStatus = await props.transport.profileStatus({ signal: controller.signal })
+    const requestedCredentials = loadProxyCredentials
+    const nextStatus = await props.transport.profileStatus({ signal: controller.signal, proxyCredentials: requestedCredentials })
     if (!active(version)) return
+    loadProxyCredentials = requestedCredentials && (octoOnboardingBusy(nextStatus) || nextStatus.profiles.some(profile =>
+      proxyPending(profile) || ['queued', 'creating'].includes(profile.phase) || profile.proxy?.credentialsError))
     status.value = nextStatus
     emit('status', nextStatus)
     visible.value = true
     message.value = ''
     const profileIds = new Set(nextStatus.profiles.map(profile => String(profile.id)))
-    proxyDrafts.value = Object.fromEntries(nextStatus.profiles.map(profile =>
-      [profile.id, proxyDrafts.value[profile.id] || octoProxyDraft(profile.proxy)]))
+    proxyDrafts.value = Object.fromEntries(nextStatus.profiles.map(profile => [profile.id,
+      !proxyDrafts.value[profile.id] || profile.proxy?.credentialsLoaded && !proxyDirty.value[profile.id]
+        ? octoProxyDraft(profile.proxy) : proxyDrafts.value[profile.id]]))
+    proxyDirty.value = Object.fromEntries(Object.entries(proxyDirty.value).filter(([id]) => profileIds.has(id)))
     proxyMessages.value = Object.fromEntries(Object.entries(proxyMessages.value).filter(([id]) => profileIds.has(id)))
     grants.value = Object.fromEntries(Object.entries(grants.value).filter(([id]) => profileIds.has(id)))
     requestErrors.value = Object.fromEntries(Object.entries(requestErrors.value).filter(([id]) => profileIds.has(id)))
@@ -149,6 +157,7 @@ function start() {
   stop()
   if (!mounted || document.hidden || !props.clientId) return
   controller = new AbortController()
+  loadProxyCredentials = true
   const version = generation
   expireCredentials()
   clockTimer = setInterval(expireCredentials, 1000)
@@ -156,6 +165,7 @@ function start() {
 }
 
 function onboardingQueued() {
+  loadProxyCredentials = true
   status.value = { ...status.value, onboarding: { ...status.value.onboarding, phase: 'queued', error: undefined } }
 }
 
@@ -175,8 +185,8 @@ async function saveProxy(profile) {
     await props.transport.saveProxy(profile.id, proxyDrafts.value[profile.id], { signal: controller.signal })
     emit('proxy-changed')
     if (active(version)) {
-      const draft = proxyDrafts.value[profile.id]
-      proxyDrafts.value[profile.id] = octoProxyDraft({ type: draft.type, host: draft.host, port: draft.port })
+      proxyDirty.value[profile.id] = false
+      loadProxyCredentials = true
       status.value = { ...status.value, profiles: status.value.profiles.map(item => item.id === profile.id
         ? { ...item, canEditProxy: false, proxy: { ...item.proxy, phase: 'queued' } } : item) }
       proxyMessages.value[profile.id] = 'Прокси отправлен на сохранение.'
@@ -235,6 +245,8 @@ function visibilityChanged() {
 
 watch(() => props.clientId, () => {
   stop()
+  proxyDrafts.value = {}
+  proxyDirty.value = {}
   visible.value = false
   status.value = { profiles: [], requiredLocales: [] }
   grants.value = {}
@@ -301,12 +313,13 @@ onUnmounted(() => {
         <p v-else>Прокси пока не настроен.</p>
         <p v-if="profile.proxy?.phase" :role="profile.proxy.phase === 'blocked' ? 'alert' : 'status'">{{ proxyPhaseLabels[profile.proxy.phase] || 'Проверяем состояние прокси…' }}</p>
         <p v-else-if="profile.proxy?.error" role="alert">Не удалось обновить прокси. Обратитесь к команде поддержки.</p>
+        <p v-if="profile.proxy?.credentialsError" role="alert">Не удалось загрузить реквизиты прокси из Octo. Повторяем загрузку…</p>
         <p v-if="proxyMessages[profile.id]" role="status">{{ proxyMessages[profile.id] }}</p>
       </div>
       <details v-if="proxyEditingEnabled" :open="proxyExpanded" class="octo-proxy-settings">
         <summary>Свой прокси — дополнительные настройки</summary>
         <p>Этот раздел нужен только для пользователей со своей настройкой прокси.</p>
-        <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :data-testid="`octo-proxy-form-${profile.id}`" @submit.prevent="saveProxy(profile)">
+        <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :data-testid="`octo-proxy-form-${profile.id}`" @input="proxyDirty[profile.id] = true" @change="proxyDirty[profile.id] = true" @submit.prevent="saveProxy(profile)">
           <fieldset :disabled="!canEditProxy(profile)">
             <legend>Настроить прокси</legend>
             <OctoProxyFields v-model="proxyDrafts[profile.id]" :prefix="`octo-proxy-${profile.id}`" />

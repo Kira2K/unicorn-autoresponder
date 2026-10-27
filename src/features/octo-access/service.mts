@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { WebClient } from '../web-console/backend/types.ts';
 import { OctoError } from './contracts.mts';
-import type { ManagedProfile, OctoConfig, OctoStore } from './contracts.mts';
+import type { CloudApi, Locale, ManagedProfile, OctoConfig, OctoStore, ProxyInput } from './contracts.mts';
 import { generateProfilePassword } from './password.mts';
 import { parseProxyInput } from './proxy-input.mts';
 import { canEditProxy, proxyBusy } from './proxy-workflow.mts';
@@ -12,10 +12,11 @@ import { readGrantCandidate } from './acquire-profile.mts';
 import type { OnboardingDependencies } from './onboarding-service.mts';
 const { requiredLocalesForMarket } = profileRules;
 export function createOctoService({ store, config, getClient, now = Date.now, password = generateProfilePassword,
-  canGrant = () => true, onboarding }: {
+  canGrant = () => true, onboarding, readProfileProxy }: {
   store: OctoStore; config: OctoConfig; getClient(id: number): Promise<WebClient>; now?: () => number;
   password?: () => string; canGrant?: (uuid: string) => boolean;
   onboarding?: OnboardingDependencies;
+  readProfileProxy?: CloudApi['readProfileProxy'];
 }) {
   const allow = (id: number) => {
     if (!octoClientAllowed(config, id)) throw new OctoError('forbidden', 403);
@@ -26,16 +27,30 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
     checker: { check: unavailable, best: unavailable }, catalogue: { list: unavailable, validate: unavailable },
     dolphin: { list: async () => [], proxy: unavailable }
   }) });
-  const snapshot = (p: ManagedProfile) => ({ id: p.id, locale: p.locale, title: p.original.title,
+  const snapshot = (p: ManagedProfile, connection?: ProxyInput, credentialsError?: string) => ({ id: p.id, locale: p.locale, title: p.original.title,
     phase: p.deletion ? (p.deletion.phase === 'blocked' ? 'deletion_blocked' : 'deleting') : p.grant && p.grant.phase !== 'complete' ? p.grant.phase : p.phase,
     grantId: p.deletion ? undefined : p.grant?.id, error: p.deletion?.error ?? p.grant?.error ?? p.error,
     canEditProxy: canEditProxy(p), proxy: { configured: !!p.proxy && !proxyBusy(p),
-      phase: p.proxyChange?.phase, error: p.proxyChange?.error, type: p.proxy?.type, host: p.proxy?.host, port: p.proxy?.port } });
+      phase: p.proxyChange?.phase, error: p.proxyChange?.error, type: p.proxy?.type, host: p.proxy?.host, port: p.proxy?.port,
+      ...(connection ? { ...connection, credentialsLoaded: true } : {}), ...(credentialsError ? { credentialsError } : {}) } });
   return {
     allowed: (id: number) => octoClientAllowed(config, id),
-    async status(clientId: number) {
+    async status(clientId: number, options: { proxyCredentials?: boolean; locales?: readonly Locale[] } = {}) {
       const c = await client(clientId), profiles = await store.list(clientId);
-      return { profiles: profiles.map(snapshot), requiredLocales: requiredLocalesForMarket(c.market),
+      const selected = options.locales ? profiles.filter(p => options.locales!.includes(p.locale)) : profiles;
+      const snapshots = await Promise.all(selected.map(async p => {
+        if (!options.proxyCredentials || !p.uuid || !p.proxy || p.deletion || proxyBusy(p)) return snapshot(p);
+        try {
+          if (!readProfileProxy) throw new Error('proxy_reader_unavailable');
+          const actual = await readProfileProxy(p.uuid);
+          if (!actual.saved || actual.saved.uuid.replaceAll('-', '').toLowerCase() !== p.proxy.uuid.replaceAll('-', '').toLowerCase())
+            throw new Error('proxy_binding_changed');
+          return snapshot(p, parseProxyInput(actual.saved));
+        } catch {
+          return snapshot(p, undefined, 'octo_proxy_credentials_unavailable');
+        }
+      }));
+      return { profiles: snapshots, requiredLocales: requiredLocalesForMarket(c.market),
         onboarding: await setup.status(clientId),
         provisioning: { phase: profiles.some(p => p.phase === 'blocked') ? 'blocked'
           : profiles.some(p => p.phase !== 'ready') ? 'preparing' : 'ready',

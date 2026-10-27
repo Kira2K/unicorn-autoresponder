@@ -58,8 +58,25 @@ The bridge README describes the Render/PC setup. The PC needs no local backend.
   the private NodeMaven key/setup operation. Every owned profile has that same password,
   enforced by a composite foreign key. Leading zeros and existing passwords survive migration
   and protection removal. Common inventory exposes only
-  `browser`, never private state/passwords. Secrets are returned only for the owner's
-  currently published grant, with `Cache-Control: no-store`.
+  `browser`, never private state/passwords. Profile-access secrets are returned only for
+  the owner's currently published grant, with `Cache-Control: no-store`.
+
+### Reading saved proxy credentials
+
+The existing authenticated profile-status requests accept `?proxyCredentials=1`.
+This opt-in reads the profile's bound saved proxy through the existing cloud adapter
+and includes only its connection fields (`type`, `host`, `port`, `login`, `password`,
+`changeIpUrl`) in the same no-store response. Student requests are scoped to their
+own client; contractor requests read only the selected task's EN profile. Ordinary
+status polling remains metadata-only. No credentials are persisted or migrated by
+this read, and no browser storage is added.
+
+The form requests credentials on opening/resuming and after proxy setup/save,
+preserves unsaved edits across polling/tab changes, and keeps the password masked
+until its show/hide button is pressed. A failed read or changed proxy binding returns
+`octo_proxy_credentials_unavailable` without upstream secrets and disables saving
+until retrieval succeeds. Empty credentials stored in Octo remain empty; retrieval
+does not invent or copy credentials from another profile.
 
 The worker keeps hiding expired profiles even while the event stream is disconnected.
 Clearing protection waits for replay, a matching post-hide event, ordinary closure (or

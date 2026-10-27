@@ -11,9 +11,31 @@ repeated/concurrent saves update that row. Existing-account saves never create a
 
 The expert task picker shows unfinished tasks first; tasks already done by the expert remain available below
 them as compact, muted buttons. A completed task shows that it awaits confirmation, including after reloading.
-This display does not bypass the fresh proxy-capture requirement for completing an unfinished task.
+The completion checklist lists saved LinkedIn URL, login, password and the task's proxy confirmation, with
+instructions for each missing item. Reopening a task restores its saved proxy confirmation when the EN
+profile is idle; a new access session or proxy edit requires confirmation again in the current view.
+The backend still re-reads and validates the actual proxy when completing an unfinished task.
 Initial list loading shows a spinner and skeletons; refresh keeps the current list and selected card visible.
 Failed requests show a retry hint instead of an empty-list message. Only the newest list response is applied.
+
+## Denis status notifications
+
+The SQL Console composes a post-commit status reporter using the shared Telegram Bot API facade and
+the existing `VEU_SUPPORT_BOT` preset. Every real status change through the contractor's status endpoint
+reports the application number, current client first/last name, primary stack, previous/new status and `@juliafeels`
+to the agreed manager group `-1003187558078`. This includes returning to `не начата`; initial task creation,
+result/proxy saves, SQL/admin changes and saving the same status do not send a status message.
+The destination is independent of each client's own group. No TDLib/personal Telegram account is used.
+The stack is read from the client's `primaryStack`; a missing value is shown explicitly as `Стек: не указан`.
+
+Status saves retain their optimistic version checks. Re-saving the same status is a locked no-op that
+keeps the task version. Notification attempts start only after a successful status commit; a stale save,
+rejected completion or uncertain SQL commit cannot trigger a send. A Telegram failure leaves the saved
+status intact. The response adds `notification` (`sent`, `failed` or `uncertain`) and the Console displays
+the separate delivery result. Failed/uncertain sends are not retried, and opening/refreshing a task does
+not replay its previous notifications. There is no durable notification queue: a process interruption
+between commit and send can leave that transition unreported. No schema migration or new ENV is required.
+Standalone test compositions without the injected reporter do not send notifications.
 
 ## Composition and authorization
 
