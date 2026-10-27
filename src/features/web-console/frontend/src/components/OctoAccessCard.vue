@@ -171,7 +171,7 @@ function onboardingQueued() {
 
 function canRequest(profile) {
   const phase = grants.value[profile.id]?.phase
-  return profile.phase === 'ready' && !octoOnboardingBusy(status.value) && status.value.onboarding?.phase !== 'awaiting_confirmation' &&
+  return profile.phase === 'ready' && (profile.canAcquire ?? (!octoOnboardingBusy(status.value) && status.value.onboarding?.phase !== 'awaiting_confirmation')) &&
     !requesting.value[profile.id] && !proxySaving.value[profile.id] && !proxyPending(profile) &&
     !['preparing', 'granted', 'awaiting_close'].includes(phase)
 }
@@ -194,7 +194,13 @@ async function saveProxy(profile) {
   } catch (error) {
     if (active(version) && error.name !== 'AbortError' && !denied(error)) {
       proxyMessages.value[profile.id] = error.message === 'invalid_proxy_fields'
-        ? 'Проверьте тип, адрес, порт и URL смены IP.' : 'Не удалось сохранить прокси. Попробуйте ещё раз.'
+        ? 'Проверьте тип, адрес, порт и URL смены IP.'
+        : error.message === 'linkedin_task_proxy_reused' ? 'Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.'
+        : error.message === 'linkedin_task_proxy_ip_reused' ? 'Внешний IP совпадает с прежним. Укажите другое подключение.'
+        : error.message === 'linkedin_task_proxy_check_failed' ? 'Не удалось проверить новое подключение. Проверьте реквизиты прокси.'
+        : error.message === 'linkedin_task_close_profile_first' ? 'Закройте профиль и дождитесь завершения доступа перед заменой прокси.'
+        : error.message === 'commit_uncertain' ? 'Результат сохранения неизвестен. Обновите страницу для проверки, не отправляйте повторно вслепую.'
+        : 'Не удалось сохранить прокси. Попробуйте ещё раз.'
     }
   } finally {
     if (active(version)) proxySaving.value[profile.id] = false

@@ -23,6 +23,17 @@ test('login projection reads all pages without loading every student relation', 
   assert.deepEqual(data, before);
 });
 
+test('archived banned platform accounts are absent from the Console and LinkedIn record feed, including by ID',async()=>{
+  const f=workflowFixture();
+  f.set(tableIds.accounts,91,{clients_id:7,platforms_id:16,login:'archived',__nc_deleted:true});
+  f.set(tableIds.accounts,92,{clients_id:7,platforms_id:16,login:'replacement',__nc_deleted:false});
+  const records=consoleRecords(f.db);
+  const rows=await records.fetchRecords(tableIds.accounts,100,{where:'(clients_id,eq,7)',fields:'Id,login'});
+  assert.ok(!rows.some(row=>row.Id===91));assert.ok(rows.some(row=>row.Id===92));
+  assert.deepEqual(await records.fetchRecords(tableIds.accounts,100,{where:'(Id,eq,91)'}),[]);
+  assert.ok(await f.db.getRecord(tableIds.accounts,['91']),'the archive remains available to explicit database reads');
+});
+
 test('selected relations are fresh; full records and default order retain their contract', async () => {
   const f = workflowFixture(); let related = 0;
   f.db.listRelated = async () => { related++; return { records: [], nextKey: null }; };

@@ -1,4 +1,4 @@
-import type { ProxyInput } from './contracts.mts';
+import type { ProxyInput, Locale } from './contracts.mts';
 
 export interface ProxySetup {
   id: string;
@@ -8,6 +8,7 @@ export interface ProxySetup {
   input?: ProxyInput;
   location?: { country: string; region?: string; city?: string };
   profileIds?: number[]; acceptLowScore?: boolean; confirmDolphin: boolean;
+  locales?: Locale[];
 }
 export interface ClientState {
   clientId: number; revision: number; password: string; nodeMavenKey?: string; setup?: ProxySetup;

@@ -16,10 +16,10 @@ export function assertClientReady(client: WebClient) {
     throw new OctoError('octo_client_data_required', 409);
 }
 export async function reserveClientProfiles(store: OctoStore, client: WebClient, ownProxy: boolean,
-  now = Date.now, password?: () => string) {
+  now = Date.now, password?: () => string, requiredLocales = profileRules.requiredLocalesForMarket(client.market)) {
   assertClientReady(client);
   const existing = await store.list(client.id);
-  const missing = profileRules.requiredLocalesForMarket(client.market).filter(locale => !existing.some(p => p.locale === locale));
+  const missing = requiredLocales.filter(locale => !existing.some(p => p.locale === locale));
   if (!missing.length) return existing;
   const account = await ensureClientPassword(store, client.id, password);
   const { transliterate, buildProfileName } = profileRules;

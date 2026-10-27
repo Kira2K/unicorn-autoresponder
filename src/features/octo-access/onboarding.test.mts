@@ -16,7 +16,7 @@ function fixture(market = 'En') {
       final_score: score, proxy_url: 'socks5h://user:secret@proxy.example.com:1080' }; },
     best: async (_key: string, _location: unknown) => { throw Error('unexpected'); } },
     catalogue: { list: async () => [], validate: async (_key: string, location: any) => location },
-    dolphin: { list: async (_id: number) => [], proxy: async (_id: number) => input },
+    dolphin: { list: async (_id: number):Promise<Array<{id:number;locale:string;hasProxy:boolean}>> => [], proxy: async (_id: number) => input },
   };
   const service = createOnboardingService({ store, getClient, ...deps });
   const advance = async () => advanceOnboarding((await store.clientState(901))!, { store, ...deps, check: async () => {},
@@ -31,6 +31,21 @@ test('En cannot be created through legacy ensure without an accepted setup; all-
   assert.equal(service.allowed(903), true);
   await assert.rejects(service.ensure(903, true), { code: 'octo_proxy_setup_required' });
   assert.equal((await f.store.list()).length, 0);
+});
+
+test('direct LinkedIn recovery adds missing EN for a RU Dolphin student without recreating existing profiles',async()=>{
+  const f=fixture('Ru');
+  const ru=await reserveClientProfiles(f.store,await f.getClient(901),true);
+  const account=(await f.store.clientState(901))!;
+  account.setup={id:'recovery',source:'direct',phase:'provisioning',createdAt:Date.now(),confirmDolphin:true,locales:['ru','en']};
+  await f.store.saveClientState(account);
+  f.deps.dolphin.list=async()=>[{id:100,locale:'ru',hasProxy:true}];
+  const service=createOctoService({store:f.store,config:testConfig,getClient:f.getClient,onboarding:f.deps});
+  await service.reserve(901);await service.reserve(901);
+  const profiles=await f.store.list(901);
+  assert.equal(profiles.length,2);assert.deepEqual(profiles.find(p=>p.locale==='ru'),ru[0]);
+  assert.equal(profiles.filter(p=>p.locale==='en').length,1);
+  assert.equal(profiles[0].password,profiles[1].password);assert.equal(f.checks(),0);
 });
 test('accepted own proxy is checked once, creates no profile before checking and reserves shared-password Ru/En', async () => {
   const f = fixture();

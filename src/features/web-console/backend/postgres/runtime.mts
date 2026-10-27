@@ -38,6 +38,10 @@ import { createCreationTaskService } from '../../../linkedin-automation/creation
 import { createTaskProxyCapture } from '../../../linkedin-automation/creation-tasks/proxy-capture.mts';
 import { guardAccount } from '../../../linkedin-automation/creation-tasks/account-guard.mts';
 import { createTaskStatusReporter } from '../../../linkedin-automation/creation-tasks/status-report.mts';
+import {taskProxyStore} from '../../../linkedin-automation/creation-tasks/proxy-store.mts';
+import {createNewTaskProxy} from '../../../linkedin-automation/creation-tasks/new-proxy-service.mts';
+import {cycleNotificationRuntime,cycleNotificationStore,deliverCycleNotification} from '../../../linkedin-automation/creation-tasks/cycle-notifications.mts';
+import type {SendOneInput} from '../../../../integrations/telegram/types.ts';
 import { createRequire } from 'node:module';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
@@ -51,8 +55,9 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
   let lifecycle: ReturnType<typeof createLifecycleRuntime> | undefined;
   let linkedinIntake: ReturnType<typeof createLinkedInIntakeService> | undefined;
   let linkedinCreator: ReturnType<typeof createCreationTaskService> | undefined;
+  let cycleNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
   const close = () => closing ??= (async () => {
-    try { await lifecycle?.stop(); } finally {
+    try { await cycleNotices?.stop();await lifecycle?.stop(); } finally {
       try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
     }
   })();
@@ -89,6 +94,8 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       if (clients.some(c => !c.id || !c.calendarEmail))
         throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
       const api = createCloudApi(env.OCTO_API_TOKEN!);
+      const proxyChecker=env.PROXY_CHECKER_BASE_URL&&env.UNICORN_PROXY_CHECKER_SECRET_KEY
+        ?createProxyChecker({baseUrl:env.PROXY_CHECKER_BASE_URL,secret:env.UNICORN_PROXY_CHECKER_SECRET_KEY}):undefined;
       octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig, allowLegacyChecks: false,
         token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
         onboarding: {
@@ -113,6 +120,13 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       const tasks = createCreationTaskStore(pool,config.database,!!linklab);
       await tasks.checkSchema();
       let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
+      const sendTaskNotice=(input:SendOneInput)=>{
+        taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
+          typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
+        return taskTelegram.sendOne(input);
+      };
+      cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database),
+        client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
       const reportStatusChange = createTaskStatusReporter({chatId:'-1003187558078',mention:'@juliafeels',
         client:id=>options.repository.getClientById(id),
         sendOne:input=>{
@@ -124,12 +138,19 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         client: id => options.repository.getClientById(id),
         secrets: (id,account) => options.repository.getPlatformAccountSecrets(id,account),
         capture: createTaskProxyCapture({store:octoStore,api,config:octoConfig,octo:octo.service}),
+        newProxy:createNewTaskProxy({store:taskProxyStore(pool,config.database),api,check:async p=>{
+          if(!proxyChecker)throw new OctoError('octo_checker_configuration_required',503);
+          const host=p.host.includes(':')&&!p.host.startsWith('[')?`[${p.host}]`:p.host;
+          const auth=p.login||p.password?`${encodeURIComponent(p.login)}:${encodeURIComponent(p.password)}@`:'';
+          const checked=await proxyChecker.check(`${p.type==='socks5'?'socks5h':p.type}://${auth}${host}:${p.port}`);
+          return checked.exit_ip||'';
+        }}),
         nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange });
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }
     return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),
       ...(linkedinCreator ? { linkedinCreator, linkedinCreatorAuth: { login: env.LINKEDIN_CREATOR_LOGIN || '', password: env.LINKEDIN_CREATOR_PASSWORD || '' } } : {}) }, close, octoBridge, octoControl,
-      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start(); } };
+      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start(); } };
   } catch (error) { await close(); throw error; }
 }

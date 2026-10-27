@@ -27,20 +27,34 @@ test('registration time is required and round-trips for every eligible client', 
   await service.save(7, { scenario: 'existing', url: 'https://linkedin.com/in/alex', login: 'alex', loggedIn: true });
   assert.equal(saved.outlookRegisteredAt, undefined, 'existing LinkedIn does not require Outlook registration time');
 });
-test('intake rejects RU/outside-scope clients and ignores payload client identity', async () => {
+test('owner reads support Dolphin and RU recovery; normal writes keep market/scope guards and ignore payload identity', async () => {
   let dolphin = false, market = 'En', savedId = 0;
   const store = { load: async () => ({ url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
     firstName: '', lastName: '', realLocation: '', blockedAccounts: [] }),
     save: async (id: number) => { savedId = id; return { saved: true, linkedinAccountId: 1 }; } };
   const service = createLinkedInIntakeService({ store, allowed: id => id === 7, hasDolphin: async () => dolphin,
     getClient: async id => ({ ...mockClient(id), market }) });
-  await assert.rejects(service.load(8), { code: 'forbidden' });
-  dolphin = true; await assert.rejects(service.load(7), {code:'linkedin_intake_use_dolphin'});
-  dolphin = false; market = 'Ru'; await assert.rejects(service.load(7), { code: 'forbidden' });
+  await service.load(8);
+  dolphin = true; await service.load(7);
+  dolphin = false; market = 'Ru'; await service.load(7);
+  const fresh={scenario:'new',outlookLogin:'test@outlook.com',outlookPassword:'secret',firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
+  await assert.rejects(service.save(8,fresh),{code:'forbidden'});
+  await assert.rejects(service.save(7,fresh),{code:'forbidden'});
   market = 'En';
   await service.save(7, { clientId: 8, scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'secret',
     firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', outlookRegisteredAt: '2026-10-25T10:30:00.000Z' });
   assert.equal(savedId, 7);
+});
+
+test('explicit banned-account replacement supports Dolphin and RU with an EN profile for Denis',async()=>{
+  let saved:unknown;
+  const store={load:async()=>({url:'https://linkedin.com/in/old',login:'old',hasPassword:true,outlookLogin:'old@outlook.com',hasOutlookPassword:true,firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',blockedAccounts:[]}),
+    save:async(...args:unknown[])=>{saved=args;return{saved:true,linkedinAccountId:42};}};
+  const service=createLinkedInIntakeService({store,allowed:()=>true,hasDolphin:async()=>true,getClient:async id=>({...mockClient(id),market:'Ru'})});
+  await service.save(7,{scenario:'new',replacesLinkedInAccountId:11,outlookLogin:'new@outlook.com',outlookPassword:'new-secret',
+    firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'});
+  assert.deepEqual((saved as unknown[])[2],['ru','en']);
+  assert.deepEqual((saved as unknown[])[3],{createOctoProfiles:true});
 });
 
 test('Dolphin users cannot enter either Octo intake scenario or create tasks', async () => {

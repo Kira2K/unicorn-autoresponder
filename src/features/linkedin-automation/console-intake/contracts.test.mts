@@ -1,7 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseIntake, readBlockedAccounts, normalizeBlockedAccounts } from './contracts.mts';
+import { parseIntake, parseLinkedInResult, readBlockedAccounts, normalizeBlockedAccounts } from './contracts.mts';
 const draft = { scenario: 'new', outlookLogin: 'test@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' };
+
+test('banned-account replacement is explicit, new-scenario only and bound to a positive account ID', () => {
+  assert.equal(parseIntake({...draft,replacesLinkedInAccountId:42}).replacesLinkedInAccountId,42);
+  for(const replacesLinkedInAccountId of [0,-1,1.5,'42',null])
+    assert.throws(()=>parseIntake({...draft,replacesLinkedInAccountId}),{code:'linkedin_intake_replacement_invalid'});
+  assert.throws(()=>parseIntake({scenario:'existing',url:'https://linkedin.com/in/test',login:'test',loggedIn:true,replacesLinkedInAccountId:42}),{code:'linkedin_intake_replacement_invalid'});
+});
+
+test('LinkedIn result validates URL separately from login and accepts email logins from any domain', () => {
+  for (const login of ['student@outlook.com','student@gmail.com','student@company.example']) {
+    assert.deepEqual(parseLinkedInResult({url:'https://www.linkedin.com/in/student',login,password:'secret'}),
+      {url:'https://www.linkedin.com/in/student',login,password:'secret'});
+    assert.throws(() => parseLinkedInResult({url:login,login,password:'secret'}), {code:'linkedin_intake_account_required'});
+  }
+});
 test('Outlook accepts only the exact outlook.com domain', () => {
   for (const login of ['a@gmail.com', 'a@hotmail.com', 'a@outlook.com.evil.com', 'a@sub.outlook.com', 'a@@outlook.com'])
     assert.throws(() => parseIntake({ ...draft, outlookLogin: login }), { code: 'linkedin_intake_outlook_required' });

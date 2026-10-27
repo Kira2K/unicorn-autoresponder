@@ -2,8 +2,8 @@ import { createReadSession } from '../../../integrations/postgres/read-session.m
 import { writeTransaction } from '../../../integrations/postgres/working-session.mts';
 import type { CopyDatabase, SqlPool, SqlSession } from '../../../integrations/postgres/contracts.mts';
 import { PostgresReadError } from '../../../integrations/postgres/contracts.mts';
-import { parseLinkedInResult, readBlockedAccounts } from '../console-intake/contracts.mts';
-import { syncLinkLabAccount } from '../linklab/intake.mts';
+import { parseLinkedInResult } from '../console-intake/contracts.mts';
+import { loadBlockedHistory } from './blocked-history.mts';
 import { taskRow, providerStatus } from './contracts.mts';
 
 const fail = (code: string): never => { throw new PostgresReadError(code); };
@@ -15,14 +15,24 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
     // Shared lock order with the student intake, so a completion cannot race its save.
     await s.query('SELECT pg_advisory_xact_lock(730644,$1::integer)', [hint.client_id]);
     await s.query('SELECT id FROM noco.clients WHERE id=$1 FOR UPDATE', [hint.client_id]);
-    const row = (await s.query('SELECT * FROM noco.linkedin_creation_task WHERE id=$1 FOR UPDATE', [id])).rows[0];
+    const row = (await s.query(`SELECT t.* FROM noco.linkedin_creation_task t WHERE t.id=$1
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.linkedin_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.outlook_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
+      FOR UPDATE OF t`, [id])).rows[0];
     if (!row || row.status === 'выполнение подтверждено') return fail('linkedin_task_not_found');
     if (Number(row.version) !== version) return fail('linkedin_task_stale_version');
     return taskRow(row);
   }
   return {
-    async checkSchema() { await read(s => s.query('SELECT proxy_saved_at,source,version FROM noco.linkedin_creation_task LIMIT 0')); },
-    async list() { return read(async s => (await s.query("SELECT * FROM noco.linkedin_creation_task WHERE status<>'выполнение подтверждено' ORDER BY id")).rows.map(taskRow)); },
+    async checkSchema() { await read(async s => {
+      await s.query('SELECT proxy_saved_at,source,version,requires_new_proxy FROM noco.linkedin_creation_task LIMIT 0');
+      await s.query('SELECT baseline_uuid FROM noco.linkedin_creation_proxy LIMIT 0');
+      await s.query('SELECT state FROM noco.linkedin_cycle_notifications LIMIT 0');
+    }); },
+    async list() { return read(async s => (await s.query(`SELECT t.* FROM noco.linkedin_creation_task t WHERE t.status<>'выполнение подтверждено'
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.linkedin_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.outlook_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
+      ORDER BY t.id`)).rows.map(taskRow)); },
     async detail(id: number) {
       return read(async s => {
         const row = (await s.query("SELECT * FROM noco.linkedin_creation_task WHERE id=$1 AND status<>'выполнение подтверждено'", [id])).rows[0];
@@ -36,7 +46,8 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
         return { task, intake: { url: String(li.url ?? ''), login: String(li.login ?? ''), hasPassword: !!li.password,
           outlookLogin: String(mail.login ?? ''), hasOutlookPassword: !!mail.password,
           firstName: String(li.linkedin_first_name ?? ''), lastName: String(li.linkedin_last_name ?? ''),
-          realLocation: String(li.real_location ?? ''), blockedAccounts: readBlockedAccounts(li.old_link_blocked) } };
+          realLocation: String(li.real_location ?? ''),
+          blockedAccounts: await loadBlockedHistory(s,task.clientId,task.linkedinAccountId,li.old_link_blocked) } };
       });
     },
     async result(id: number, version: number, raw: Record<string, unknown>) {
@@ -47,7 +58,7 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
         if (!data.password && !previous?.password) return fail('linkedin_intake_password_required');
         await s.query(`UPDATE noco.platform_accounts SET url=$2,login=$3,password=CASE WHEN $4='' THEN password ELSE $4 END,
           updated_at=statement_timestamp() WHERE id=$1`, [task.linkedinAccountId, data.url, data.login, data.password]);
-        if (linklab) await syncLinkLabAccount(s, task.clientId);
+        // Application handoff is owned by the confirmation trigger, never by a draft result save.
         return taskRow((await s.query('UPDATE noco.linkedin_creation_task SET updated_at=clock_timestamp() WHERE id=$1 RETURNING *', [id])).rows[0]);
       });
     },

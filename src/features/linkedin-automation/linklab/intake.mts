@@ -12,8 +12,11 @@ export type IntakeTransaction = <T>(run: (session: SqlSession, tx: PostgresTrans
 
 /** Called inside the caller's client-locked transaction after saving LinkedIn credentials. */
 export async function syncLinkLabAccount(sql: SqlSession, clientId: number) {
-  const existing = await sql.query('SELECT client_id FROM noco.linklab WHERE client_id=$1', [clientId]);
-  if (existing.rows.length) return;
+  const existing = (await sql.query(`SELECT l.client_id,l.platform_account_id,a.__nc_deleted AS account_archived
+    FROM noco.linklab l LEFT JOIN noco.platform_accounts a ON a.id=l.platform_account_id
+    WHERE l.client_id=$1`, [clientId])).rows[0];
+  if (existing) return; // Rebinding is exclusively owned by confirmed account-cycle transitions.
+  if((await sql.query("SELECT id FROM noco.linkedin_creation_task WHERE client_id=$1 AND status<>'выполнение подтверждено' LIMIT 1",[clientId])).rows.length)return;
   await sql.query('SELECT id FROM noco.platform_accounts WHERE clients_id=$1 FOR UPDATE', [clientId]);
   const selected = (await sql.query(`SELECT * FROM (${linkLabBaseQuery}) chosen WHERE client_id=$1`, [clientId])).rows[0];
   if (!selected?.platform_account_id || selected.data_issue) return;

@@ -1,20 +1,53 @@
 # LinkedIn intake in Console
 
-Students with Dolphin profiles keep the Dolphin card. Without a LinkedIn URL they
-can also select the Outlook preparation form; saving it does not create Octo
-replacements, edit Dolphin bindings or require Octo setup prerequisites. Existing
-LinkedIn users with Dolphin keep their current account-editing/opening workflow.
+Students with Dolphin profiles keep access to their previous Dolphin profiles during
+a replacement LinkedIn registration. Every student with a registered LinkedIn has
+one “Меня забанили” button in the single LinkedIn section, including Dolphin, Octo
+and RU students. It opens the same Outlook/identity/blocked-history form without
+writing anything. Cancelling restores the saved state. The button is hidden while
+any registration request for the current account is unconfirmed (`не начата`, `блок`,
+`сделана экспертом`), even if Denis already saved its credentials. It becomes available
+after `выполнение подтверждено`, or for an existing account without a registration
+request. The backend rejects replacement attempts during an unfinished registration too.
 Without Dolphin, RU-only
 students use Octo directly; EN/Both students choose existing LinkedIn or preparation
-for a new account. A nonblank saved LinkedIn URL locks the card to the existing
-scenario. Login-only and preparation-only rows do not count as registered profiles.
+for a new account. The server's registered-account flag (URL, login or password present)
+or a saved URL selects the existing scenario, so legacy URL-in-login accounts can
+also report a ban without a data migration. Preparation-only rows remain unregistered.
 The student's stack comes from the existing client record; this form never edits it.
+
+## Pending registration in the student Console
+
+An existing unconfirmed request always opens its preparation form, even if Denis already
+saved a draft LinkedIn URL/login. Scenario selection and repeat-registration/ban actions
+are hidden until confirmation. The existing three-day preparation message remains visible.
+`не начата` and `блок` allow editing the current Outlook/identity/history data with
+“Сохранить изменения”; `сделана экспертом` and `выполнение подтверждено` lock editing.
+Status polling updates this lock in both directions without replacing unsaved drafts.
+Saved Outlook data and blocked history are collapsible sections; a new Outlook form
+opens for entry, and validation reveals any collapsed section containing an invalid field.
+
+GET adds `hadLinkedInBeforeTask` and `previousOctoProfileIds`, computed read-only from
+owned current/archived registered accounts, earlier confirmed tasks and profile creation
+times. A draft entered after this request began does not establish prior LinkedIn ownership.
+For a returning student, only non-deleting Octo profiles created by the request's start
+remain visible during preparation, with access controls but without setup/proxy editing;
+previous Dolphin access remains visible too. Freshly prepared Octo profiles stay hidden.
+First-time students see the existing instruction to wait before opening Octo; returning
+students with previous LinkedIn do not receive that blanket warning.
+
+Editing updates the same bound LinkedIn/Outlook rows and task (including a bound manual
+request), preserves the expert's URL/login/password, and does not queue profile setup again.
+The client lock and terminal-status guard apply before writes. A changed preparation still
+invalidates its existing proxy receipt. This requires no schema or data migration.
 
 ## Boundaries and persistence
 
 `GET/PUT /api/client/linkedin-intake` derives ownership from the authenticated client
-session, checks Octo access scope and market. Existing-account Octo saves reject
-Dolphin bindings; preparation-only saves accept them. No
+session. Reads are available to all owners for the recovery section; ordinary saves
+retain the existing Octo scope, market and Dolphin guards. An explicit replacement
+or its pending student request may use the common Octo preparation even with Dolphin.
+No
 administrator/provider impersonation is supported. Read responses contain password
 presence flags, never credentials. A blank password on update preserves its value.
 
@@ -23,6 +56,42 @@ self-confirmation after obtaining access through the normal Octo grant workflow.
 The checkbox does not inspect LinkedIn, create Unipile bindings or set verified flags.
 Changing credentials, profile identity or proxy invalidates the UI confirmation.
 The generic platform account editor and automation eligibility rules are unchanged.
+
+## Banned-account replacement and confirmed access
+
+Replacement submits `scenario: new` and `replacesLinkedInAccountId` from the owner's
+loaded account. Inside the existing client-locked transaction, the active account
+ID is checked before any write. The old student request becomes a historical manual
+request and the old LinkedIn/Outlook rows are soft-archived, retaining their credentials
+and original IDs. New account rows and a new student request are created atomically.
+An empty new Outlook password cannot reuse the archived mailbox's password. A stale
+or repeated replacement rejects without creating more rows; uncertain commits require
+a read-back and are never automatically replayed. A rollback restores the archive,
+accounts, task source and Octo intent together. No schema/data migration is run.
+
+Archived accounts are excluded from the Console/LinkedIn record feed. Historical
+tasks referring to them are hidden from the Denis queue and cannot be edited there.
+The read-only SQL projection exposes the existing archive flag without adding it to
+the writable catalog. Only the transition to `выполнение подтверждено` can rebind LinkLab
+from this student's archived account and reset the local cycle. Draft result saves do not
+switch it; the explicit cycle migration and CRM fence are described in
+[creation tasks](../creation-tasks/README.md#new-local-cycle-and-release-order-pr-100).
+
+Existing Octo profiles and their passwords are reused. Each new LinkedIn requires Denis
+to enter and validate a new connection for the same EN profile; RU is untouched. Missing profiles are
+queued through the existing direct workflow. A recovery request also includes EN for
+RU clients so Denis can work in the same EN flow; only the internal intent carries
+these locales and the client's market is unchanged. Dolphin bindings are retained.
+During a Dolphin replacement, the cabinet shows the Octo request while retaining access
+to previous Dolphin profiles. After confirmation it uses the completed Octo profiles.
+Ordinary Dolphin users do not enter this path silently.
+
+`сделана экспертом` locks student editing while awaiting confirmation; access to previous
+profiles is retained for students who had LinkedIn before the request.
+`выполнение подтверждено` keeps account editing locked but restores access to the
+existing Octo profiles, with setup/proxy editing hidden. Pending request state is
+checked while the page is visible; confirmation restores access without a page reload
+or recreating profiles. “Меня забанили” remains available for another registration.
 
 Preparation saves LinkedIn metadata in existing `platform_accounts` text columns:
 `linkedin_first_name`, `linkedin_last_name`, `real_location`, `old_link_blocked`.

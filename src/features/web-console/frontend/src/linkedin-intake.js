@@ -1,4 +1,4 @@
-export function intakeScenario(data) { return String(data?.url || '').trim() ? 'existing' : '' }
+export function intakeScenario(data) { return data?.hasLinkedIn === true || String(data?.url || '').trim() ? 'existing' : '' }
 export function registrationTimeInput(value) {
   if (!value) return ''
   const date = new Date(value)

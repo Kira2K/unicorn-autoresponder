@@ -39,15 +39,18 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
       const c = await client(clientId), profiles = await store.list(clientId);
       const selected = options.locales ? profiles.filter(p => options.locales!.includes(p.locale)) : profiles;
       const snapshots = await Promise.all(selected.map(async p => {
-        if (!options.proxyCredentials || !p.uuid || !p.proxy || p.deletion || proxyBusy(p)) return snapshot(p);
+        let canAcquire=false;
+        try{await readGrantCandidate(store,clientId,p.id,now);canAcquire=true;}catch{/* Owner-scoped read; acquire repeats the authoritative checks. */}
+        const view=(connection?:ProxyInput,credentialsError?:string)=>({...snapshot(p,connection,credentialsError),canAcquire});
+        if (!options.proxyCredentials || !p.uuid || !p.proxy || p.deletion || proxyBusy(p)) return view();
         try {
           if (!readProfileProxy) throw new Error('proxy_reader_unavailable');
           const actual = await readProfileProxy(p.uuid);
           if (!actual.saved || actual.saved.uuid.replaceAll('-', '').toLowerCase() !== p.proxy.uuid.replaceAll('-', '').toLowerCase())
             throw new Error('proxy_binding_changed');
-          return snapshot(p, parseProxyInput(actual.saved));
+          return view(parseProxyInput(actual.saved));
         } catch {
-          return snapshot(p, undefined, 'octo_proxy_credentials_unavailable');
+          return view(undefined, 'octo_proxy_credentials_unavailable');
         }
       }));
       return { profiles: snapshots, requiredLocales: requiredLocalesForMarket(c.market),
@@ -60,7 +63,8 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
       const c = await client(clientId);
       const existing = await store.list(clientId), operation = (await store.clientState(clientId))?.setup;
       if (existing.some(p => p.deletion)) throw new OctoError('octo_profile_deleting', 409);
-      const missing = requiredLocalesForMarket(c.market).filter(locale => !existing.some(p => p.locale === locale));
+      const requiredLocales = operation?.source==='direct'&&operation.locales?.length?operation.locales:requiredLocalesForMarket(c.market);
+      const missing = requiredLocales.filter(locale => !existing.some(p => p.locale === locale));
       const explicitSetup = operation?.phase === 'provisioning' &&
         (operation.source === 'direct' || (operation.source === 'manual' && !!operation.input));
       if (missing.includes('en') && !explicitSetup && (!operation || operation.phase !== 'provisioning' || operation.source === 'none' ||
@@ -69,7 +73,7 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
         throw new OctoError('octo_proxy_setup_required', 409);
       if (missing.length && onboarding && (await onboarding.dolphin.list(clientId)).length && !operation?.confirmDolphin)
         throw new OctoError('octo_dolphin_confirmation_required', 409);
-      return reserveClientProfiles(store, c, ownProxy || !!explicitSetup, now, password);
+      return reserveClientProfiles(store, c, ownProxy || !!explicitSetup, now, password,requiredLocales);
     },
     async ensure(clientId: number, ownProxy = false) {
       await this.reserve(clientId, ownProxy);

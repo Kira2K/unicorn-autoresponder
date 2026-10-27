@@ -8,6 +8,7 @@ function fixture() {
     created_at:new Date(),updated_at:new Date(),proxy_profile_id:2 as number|null,proxy_uuid:'proxy' as string|null,proxy_saved_at:new Date() as Date|null},
     li:{id:11,url:'https://linkedin.com/in/test',login:'test',password:'secret'},
     mail:{id:12,login:'mail@outlook.com',password:'mail-secret'},
+    archived:[] as Record<string,unknown>[],
     profile:{revision:4,state:{phase:'ready',proxy:{uuid:'proxy'},grant:undefined as undefined|{phase:string},proxyChange:undefined as undefined|{phase:string}}}};
   let state=structuredClone(initial),backup=structuredClone(state),uncertain=false;
   const calls:string[]=[];
@@ -20,6 +21,7 @@ function fixture() {
     if(sql.startsWith('SELECT client_id FROM'))return{rows:[{client_id:901}]};
     if(sql.includes('FROM noco.linkedin_creation_task'))return{rows:state.task.status==='выполнение подтверждено'&&sql.includes("status<>")?[]:[structuredClone(state.task)]};
     if(sql.includes('FROM noco.octo_profiles'))return{rows:[structuredClone(state.profile)]};
+    if(sql.includes('FROM noco.platform_accounts a JOIN noco.platforms'))return{rows:structuredClone(state.archived)};
     if(sql.includes('FROM noco.platform_accounts'))return{rows:sql.includes('ANY')?[structuredClone(state.li),structuredClone(state.mail)]:[structuredClone(state.li)]};
     if(sql.startsWith('UPDATE noco.platform_accounts')){state.li={...state.li,url:String(v[1]),login:String(v[2]),password:v[3]?String(v[3]):state.li.password};return{rows:[]};}
     if(sql.startsWith('UPDATE noco.linkedin_creation_task')) {
@@ -32,6 +34,23 @@ function fixture() {
   }})} as SqlPool;
   return{store:createCreationTaskStore(pool,'unicorn_noco_copy_restore'),get state(){return state;},calls,uncertain(){uncertain=true;}};
 }
+
+test('Denis detail includes the archived account alongside the current submitted blocked history',async()=>{
+  const f=fixture();
+  const entered={fullName:'Earlier account',country:'Poland'};
+  Object.assign(f.state.li,{old_link_blocked:JSON.stringify([entered])});
+  f.state.archived.push({id:5,linkedin_first_name:'Alex',linkedin_last_name:'Smith',
+    url:'https://linkedin.com/in/previous',old_link_blocked:JSON.stringify([entered])});
+  const before=structuredClone(f.state);
+  const detail=await f.store.detail(1);
+  assert.equal(detail.intake.blockedAccounts.length,2);
+  assert.deepEqual(detail.intake.blockedAccounts[0],entered);
+  assert.equal(detail.intake.blockedAccounts[1].fullName,'Alex Smith');
+  assert.match(detail.intake.blockedAccounts[1].legacyText!,/https:\/\/linkedin.com\/in\/previous/);
+  assert.deepEqual(f.state,before);
+  assert.ok(!JSON.stringify(detail).includes('mail-secret'));
+  assert.ok(!JSON.stringify(detail).includes('"password"'));
+});
 test('completion requires result and matching saved proxy; active grants and stale edits cannot bypass it',async()=>{
   for(const variant of ['receipt','proxy','grant','pending','password','url']){
     const f=fixture();

@@ -16,10 +16,12 @@ export interface CreationTask {
   id: number; clientId: number; linkedinAccountId: number; outlookAccountId: number;
   status: TaskStatus; version: number; proxyProfileId?: number; proxyUuid?: string; proxySavedAt?: string;
   createdAt: string; updatedAt: string;
+  requiresNewProxy?:boolean;
 }
 export function taskRow(row: Record<string, unknown>): CreationTask {
   return { id: Number(row.id), clientId: Number(row.client_id), linkedinAccountId: Number(row.linkedin_account_id),
     outlookAccountId: Number(row.outlook_account_id), status: row.status as TaskStatus, version: Number(row.version),
+    requiresNewProxy:row.requires_new_proxy===true,
     ...(row.proxy_profile_id ? { proxyProfileId: Number(row.proxy_profile_id) } : {}),
     ...(row.proxy_uuid ? { proxyUuid: String(row.proxy_uuid) } : {}),
     ...(row.proxy_saved_at ? { proxySavedAt: new Date(String(row.proxy_saved_at)).toISOString() } : {}),

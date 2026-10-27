@@ -22,6 +22,13 @@ test('optional secured projection is whitelisted, safe when missing, and leaves 
     { Id: 1, telegram_general_chat_id: '-12' });
 });
 
+test('platform-account archive flag is projected read-only without changing the source catalog',()=>{
+  const accounts={...clients,id:'m8zej2vsv4iypl8'};
+  assert.match(projection(accounts),/'__nc_deleted',to_jsonb\(t\)->'__nc_deleted'/);
+  assert.doesNotMatch(projection({...accounts,id:'unrelated'}),/__nc_deleted/);
+  assert.throws(()=>fields(accounts,{__nc_deleted:true}),{code:'field_not_writable'});
+});
+
 test('registered secured fields are projected once using their catalog mapping', () => {
   const sql = projection({ ...clients, columns: [...clients.columns, {
     id: 'secured', title: 'secured_general_chat_id', dataKey: 'secured_general_chat_id', sqlName: 'secured_chat', sqlType: 'text'
