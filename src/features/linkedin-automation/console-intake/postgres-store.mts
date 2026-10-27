@@ -15,7 +15,7 @@ import { tableIds } from '../../web-console/backend/postgres/tables.mts';
 import { assertStudentEditable, readStudentTask, saveStudentTask, studentEditLocked } from '../creation-tasks/student-task.mts';
 
 const accountQuery = `SELECT a.id,a.platforms_id,a.url,a.login,a.password,a.linkedin_first_name,
-  a.linkedin_last_name,a.real_location,a.old_link_blocked,lower(p.name) AS platform
+  a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,lower(p.name) AS platform
   FROM noco.platform_accounts a JOIN noco.platforms p ON p.id=a.platforms_id
   WHERE a.clients_id=$1 AND lower(p.name) IN ('linkedin','email_outlook')
   AND NOT COALESCE(a.__nc_deleted,false) AND NOT COALESCE(p.__nc_deleted,false) ORDER BY a.id`;
@@ -24,6 +24,8 @@ function select(rows: Record<string, unknown>[], platform: string) {
   if (candidates.length > 1) throw new PostgresReadError('linkedin_intake_account_ambiguous');
   return candidates[0];
 }
+const timestamp = (value: unknown) => value == null ? '' :
+  (value instanceof Date ? value : new Date(String(value))).toISOString();
 export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false, creationTasks = false) {
   const read = createReadSession(pool, database);
   return {
@@ -36,6 +38,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         const task = creationTasks ? await readStudentTask(s, clientId) : undefined;
         return { ...(creationTasks ? { task, editLocked: await studentEditLocked(s,clientId) } : {}), url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
           outlookLogin: String(email?.login ?? ''), hasOutlookPassword: !!email?.password,
+          ...(email?.outlook_registered_at ? { outlookRegisteredAt: timestamp(email.outlook_registered_at) } : {}),
           firstName: String(li?.linkedin_first_name ?? ''), lastName: String(li?.linkedin_last_name ?? ''),
           realLocation: String(li?.real_location ?? ''), blockedAccounts: readBlockedAccounts(li?.old_link_blocked) };
       });
@@ -92,6 +95,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
           linkedinAccountId = await upsert('linkedin', li, { linkedin_first_name: data.firstName,
             linkedin_last_name: data.lastName, real_location: data.realLocation, old_link_blocked: JSON.stringify(data.blockedAccounts) });
           outlookAccountId = await upsert('email_outlook', email, { login: data.outlookLogin,
+            ...(data.outlookRegisteredAt ? { outlook_registered_at: data.outlookRegisteredAt } : {}),
             ...(data.outlookPassword ? { password: data.outlookPassword } : {}) });
           if (options.createOctoProfiles) await queueDirectProfiles(s, clientId, locales);
         }
@@ -99,6 +103,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
           !li || !email || String(li.linkedin_first_name ?? '') !== data.firstName ||
           String(li.linkedin_last_name ?? '') !== data.lastName || String(li.real_location ?? '') !== data.realLocation ||
           String(li.old_link_blocked ?? '') !== JSON.stringify(data.blockedAccounts) || String(email.login ?? '') !== data.outlookLogin ||
+          !!data.outlookRegisteredAt && timestamp(email.outlook_registered_at) !== data.outlookRegisteredAt ||
           !!data.outlookPassword && data.outlookPassword !== email.password) : undefined;
         return { saved: true, ...(task ? { task } : {}), linkedinAccountId, ...(outlookAccountId ? { outlookAccountId } : {}) };
       });

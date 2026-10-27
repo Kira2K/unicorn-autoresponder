@@ -2522,7 +2522,7 @@ onUnmounted(() => {
         </Card>
       </div>
 
-      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled"
+      <StudentDashboardLayout v-else-if="dashboard && (!isAdmin || adminSection === 'overview')" :preview="validatedProfileEnabled || isClient"
         :class="{ 'linkedin-intake-layout': isClient && dolphinProfileStatus && ['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase()) }">
         <template #profile>
         <Card class="profile-card">

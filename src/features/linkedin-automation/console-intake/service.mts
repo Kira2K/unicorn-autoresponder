@@ -20,6 +20,8 @@ export function createLinkedInIntakeService(deps: {
     async load(id: number) { await client(id); return deps.store.load(id); },
     async save(id: number, raw: unknown) {
       const c = await client(id), data = parseIntake(raw);
+      if (data.scenario === 'new' && !data.outlookRegisteredAt)
+        throw new IntakeError('linkedin_intake_outlook_registration_required');
       if (data.scenario === 'new' && profileRules.getRequiredClientDataIssues(c, { requireCalendarEmail: true }).length)
         throw new IntakeError('octo_client_data_required', 409);
       return deps.store.save(id, data, profileRules.requiredLocalesForMarket(c.market), { createOctoProfiles: true });

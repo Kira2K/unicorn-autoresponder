@@ -2,6 +2,31 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createLinkedInIntakeService } from './service.mts';
 import { mockClient } from '../../octo-access/testing.mts';
+
+test('registration time is required and round-trips for every eligible client', async () => {
+  let calendarEmail = 'first@example.invalid', saves = 0;
+  let saved: { outlookRegisteredAt?: string } = {};
+  const store = { load: async () => ({ url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
+    firstName: '', lastName: '', realLocation: '', blockedAccounts: [], ...saved }),
+    save: async (_id: number, data: { outlookRegisteredAt?: string }) => { saves++; saved = data; return { saved: true, linkedinAccountId: 1 }; } };
+  const service = createLinkedInIntakeService({ store, allowed: () => true, hasDolphin: async () => false,
+    getClient: async id => ({ ...mockClient(id), calendarEmail, market: 'En' }) });
+  const data = { scenario: 'new', outlookLogin: 'test@outlook.com', outlookPassword: 'secret',
+    firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', userEmail: 'other@example.com' };
+  for (const email of ['first@example.invalid', 'second@example.invalid']) {
+    calendarEmail = email;
+    const previousSaves = saves;
+    await assert.rejects(service.save(7, data), { code: 'linkedin_intake_outlook_registration_required' });
+    await assert.rejects(service.save(7, { ...data, outlookRegisteredAt: 'invalid' }), { code: 'linkedin_intake_outlook_registration_invalid' });
+    assert.equal(saves, previousSaves);
+    const input = { ...data, outlookRegisteredAt: '2026-10-25T10:30:00.000Z' };
+    await service.save(7, input);
+    assert.equal((await service.load(7)).outlookRegisteredAt, input.outlookRegisteredAt);
+    assert.equal(saves, previousSaves + 1);
+  }
+  await service.save(7, { scenario: 'existing', url: 'https://linkedin.com/in/alex', login: 'alex', loggedIn: true });
+  assert.equal(saved.outlookRegisteredAt, undefined, 'existing LinkedIn does not require Outlook registration time');
+});
 test('intake rejects RU/outside-scope clients and ignores payload client identity', async () => {
   let dolphin = false, market = 'En', savedId = 0;
   const store = { load: async () => ({ url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
@@ -14,7 +39,7 @@ test('intake rejects RU/outside-scope clients and ignores payload client identit
   dolphin = false; market = 'Ru'; await assert.rejects(service.load(7), { code: 'forbidden' });
   market = 'En';
   await service.save(7, { clientId: 8, scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'secret',
-    firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' });
+    firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', outlookRegisteredAt: '2026-10-25T10:30:00.000Z' });
   assert.equal(savedId, 7);
 });
 
