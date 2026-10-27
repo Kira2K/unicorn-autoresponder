@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {SqlSession} from '../../../integrations/postgres/contracts.mts';
 import {syncLinkLabAccount} from './intake.mts';
-test('completed replacement retargets only an archived LinkLab account; active bindings and ambiguous candidates remain intact',async()=>{
+test('draft intake never retargets LinkLab; confirmation owns replacement transitions',async()=>{
   for(const variant of ['archived','active','ambiguous']){
     const writes:unknown[][]=[];
     const sql={query:async(query:string,values:unknown[]=[])=>{
@@ -12,6 +12,6 @@ test('completed replacement retargets only an archived LinkLab account; active b
       return{rows:[]};
     }} as unknown as SqlSession;
     await syncLinkLabAccount(sql,7);
-    assert.deepEqual(writes,variant==='archived'?[[7,21,11]]:[]);
+    assert.deepEqual(writes,[]);
   }
 });

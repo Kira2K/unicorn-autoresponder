@@ -33,11 +33,19 @@ test('creator completion checklist explains missing saved data and restores prox
     let savedResult
     let captures = 0, statusWrites = 0
     let notification = { outcome: 'sent', messageId: 77 }
+    let newProxyRequired=false,newProxyReady=false,proxyWrites=0
     await page.route('**/api/linkedin-creator/**', async route => {
       const request = route.request(), path = new URL(request.url()).pathname
+      if(path.endsWith('/profiles/349/proxy')){
+        proxyWrites++
+        if(request.postDataJSON().login==='same')return route.fulfill({status:409,json:{error:'linkedin_task_proxy_reused'}})
+        task={...task,version:task.version+1,proxySavedAt:undefined};newProxyReady=true
+        return route.fulfill({json:{queued:true,task}})
+      }
       if (path.endsWith('/octo/status')) return route.fulfill({ json: {
-        profiles: [{ id: 349, locale: 'en', title: 'Fixture EN', phase: 'ready', canEditProxy: true,
-          proxy: { configured: true, credentialsLoaded: true, type: 'socks5', host: 'example.test', port: 1080 } }],
+        ...(newProxyRequired?{newProxyRequired,newProxyReady}:{}),
+        profiles: [{ id: 349, locale: 'en', title: 'Fixture EN', phase: 'ready', canEditProxy: true,canAcquire:!newProxyRequired||newProxyReady,
+          proxy: { configured: true, credentialsLoaded: true, type: 'socks5', host: 'example.test', port: 1080, ...(newProxyRequired&&newProxyReady?{phase:'complete'}:{}) } }],
         requiredLocales: ['en'], onboarding: { phase: 'complete' }
       } })
       if (path.endsWith('/capture-proxy')) {
@@ -129,5 +137,25 @@ test('creator completion checklist explains missing saved data and restores prox
     assert.equal(await page.getByLabel('Логин LinkedIn', { exact: true }).inputValue(), 'student.two@gmail.com',
       'the next task must use its own bound mailbox instead of the previous student email')
     assert.equal(await page.getByLabel('Ссылка LinkedIn', { exact: true }).inputValue(), '')
+    newProxyRequired=true;task={...task,requiresNewProxy:true};await open.click()
+    const capture=page.getByRole('button',{name:'Сохранить настройки прокси',exact:true})
+    await checklist.waitFor()
+    assert.equal(await capture.isEnabled(),false)
+    assert.equal(await page.getByRole('button',{name:'Получить доступ',exact:true}).isEnabled(),false)
+    assert.match(await proxy.textContent(),/Введите новые реквизиты/)
+    await page.getByLabel('Логин прокси',{exact:true}).fill('same')
+    await page.getByLabel('Пароль прокси',{exact:true}).fill('fixture')
+    await page.getByRole('button',{name:'Показать пароль прокси',exact:true}).click()
+    assert.equal(await page.getByLabel('Пароль прокси',{exact:true}).getAttribute('type'),'text')
+    await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click()
+    await page.getByText('Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.',{exact:true}).waitFor()
+    await page.getByLabel('Логин прокси',{exact:true}).fill('new')
+    await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click()
+    await page.waitForFunction(()=>!document.querySelector('[data-testid="octo-profile-349"] button').disabled)
+    await page.getByText('Прокси сохранён',{exact:true}).waitFor()
+    assert.equal(await capture.isEnabled(),true)
+    await capture.click()
+    await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor()
+    assert.equal(captures,2);assert.equal(proxyWrites,2)
   } finally { await browser?.close(); await server.close() }
 })

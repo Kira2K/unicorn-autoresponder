@@ -10,7 +10,7 @@ test('registration keeps current edits and prior access, locks completed data, a
   const fixture=`import {createApp,h} from 'vue';import PrimeVue from 'primevue/config';
     import Workflow from '/src/components/LinkedInOctoWorkflow.vue';
     const query=new URLSearchParams(location.search);
-    createApp({render:()=>h(Workflow,{client:{id:7,market:query.get('market'),firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi'},hasDolphin:query.get('dolphin')==='1'})}).use(PrimeVue).mount('#app')`
+    createApp({render:()=>h(Workflow,{client:{id:7,market:query.get('market'),firstName:'Николай',lastName:'Соколов',realLocation:'Tbilisi'},hasDolphin:query.get('dolphin')==='1'})}).use(PrimeVue).mount('#app')`
   const server=await createServer({configFile:false,root,cacheDir:'node_modules/.vite-linkedin-recovery',plugins:[vue(),{
     name:'recovery-fixture',resolveId:id=>id==='virtual:recovery'?'\0recovery':null,load:id=>id==='\0recovery'?fixture:null,
     configureServer(s){s.middlewares.use('/recovery-test',async(_req,res)=>{
@@ -24,7 +24,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     const page=await browser.newPage();page.setDefaultTimeout(10000)
     const errors=[];page.on('pageerror',error=>errors.push(error.message))
     let status='сделана экспертом',writes=0,allowSave=false,fresh=false,prior=false
-    let newTask=false
+    let newTask=false,missingLatin=false,setupPhase='complete'
     const submissions=[]
     await page.route('**/api/**',async route=>{
       if(route.request().method()!=='GET'){
@@ -44,10 +44,10 @@ test('registration keeps current edits and prior access, locks completed data, a
         registrationPending:!!status&&status!=='выполнение подтверждено',
         editLocked:['сделана экспертом','выполнение подтверждено'].includes(status),completionConfirmed:status==='выполнение подтверждено',
         url:'https://linkedin.com/in/fixture',login:'old@example.test',hasPassword:true,outlookLogin:'old@outlook.com',hasOutlookPassword:true,
-        firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',blockedAccounts:[{fullName:'Earlier account'}]
+        firstName:missingLatin?'Николай':'Alex',lastName:missingLatin?'Соколов':'Smith',realLocation:'Tbilisi',blockedAccounts:[{fullName:'Earlier account'}]
       }})
-      return route.fulfill({json:{profiles:[{id:1,locale:'en',title:'Existing EN',phase:'ready',canEditProxy:true,proxy:{configured:true,type:'socks5',host:'proxy.example.test',port:1080,credentialsLoaded:true}},
-        {id:2,locale:'en',title:'New EN',phase:'ready',canEditProxy:true,proxy:{configured:true}}],requiredLocales:['en'],onboarding:{phase:'complete'}}})
+      return route.fulfill({json:{profiles:[{id:1,locale:'en',title:'Existing EN',phase:'ready',canAcquire:true,canEditProxy:true,proxy:{configured:true,type:'socks5',host:'proxy.example.test',port:1080,credentialsLoaded:true}},
+        {id:2,locale:'en',title:'New EN',phase:'ready',canAcquire:false,canEditProxy:true,proxy:{configured:true}}],requiredLocales:['en'],onboarding:{phase:setupPhase}}})
     })
     const visit=async(dolphin,market,expectBan=true)=>{
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/recovery-test?dolphin=${dolphin?1:0}&market=${market}`)
@@ -73,7 +73,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     assert.equal(await page.getByTestId('linkedin-existing-form').count(),0)
     assert.equal(await page.locator('.octo-proxy-form').count(),0)
     // Polling locks and unlocks the same application without replacing an unsaved draft.
-    prior=true;status='блок'
+    prior=true;status='блок';setupPhase='provisioning'
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).waitFor()
     const outlookDetails=page.getByTestId('linkedin-outlook-details')
     const blockedDetails=page.getByTestId('linkedin-blocked-details')
@@ -84,6 +84,8 @@ test('registration keeps current edits and prior access, locks completed data, a
     await blockedDetails.locator('summary').click()
     await outlookDetails.getByText('Данные Outlook',{exact:true}).click()
     await page.getByTestId('octo-profile-1').waitFor()
+    assert.equal(await page.getByTestId('octo-profile-1').getByRole('button',{name:'Получить доступ',exact:true}).isEnabled(),true,'a ready old profile stays usable while a new one is provisioning')
+    setupPhase='complete'
     assert.equal(await page.getByTestId('octo-profile-2').count(),0,'new profiles are filtered from previous access')
     assert.equal(await page.locator('.octo-proxy-form').count(),0)
     await page.getByLabel('Город и страна проживания',{exact:true}).fill('Unsaved draft')
@@ -151,6 +153,11 @@ test('registration keeps current edits and prior access, locks completed data, a
     assert.equal(submissions[0].replacesLinkedInAccountId,11)
     assert.equal(submissions[0].outlookLogin,'replacement@outlook.com')
     assert.equal(await page.getByRole('dialog').getByText('Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.',{exact:true}).count(),0)
+    newTask=false;status='выполнение подтверждено';missingLatin=true
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/recovery-test?market=En`)
+    await page.getByTestId('linkedin-report-ban').click()
+    assert.equal(await page.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).inputValue(),'')
+    assert.equal(await page.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true}).inputValue(),'')
     fresh=true
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/recovery-test?market=En`)
     await page.getByRole('button',{name:'Нет LinkedIn / аккаунт заблокирован',exact:true}).click()

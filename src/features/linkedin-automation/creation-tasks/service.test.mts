@@ -35,6 +35,14 @@ test('statuses use expert wording; contractor cannot choose confirmation',()=>{
   assert.throws(()=>providerStatus('сделана исполнителем'));
   assert.equal(studentLocked('сделана экспертом'),true);assert.equal(studentLocked('блок'),false);
 });
+test('new applications cannot acquire/capture/finish using their previous proxy, including a missing validator',async()=>{
+ const f=await fixture();Object.assign(f.task,{requiresNewProxy:true});
+ const en=(await f.profiles.list()).find(p=>p.locale==='en')!;
+ assert.equal((await f.service.profileStatus(1)).newProxyReady,false);
+ await assert.rejects(f.service.acquire(1,en.id),{code:'linkedin_task_new_proxy_required'});
+ await assert.rejects(f.service.capture(1,{version:1}),{code:'linkedin_task_new_proxy_required'});
+ await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}),{code:'linkedin_task_new_proxy_required'});
+});
 
 test('only a committed real status change reports; same values, stale versions and uncertain commits never send',async()=>{
   const reports:unknown[]=[];

@@ -5,6 +5,7 @@ import type { WebClient } from '../../web-console/backend/types.ts';
 import { IntakeError } from '../console-intake/contracts.mts';
 import { taskId } from './contracts.mts';
 import type { StatusNotification, TaskStatusChange } from './status-report.mts';
+import type {createNewTaskProxy} from './new-proxy-service.mts';
 
 export function createCreationTaskService(deps: {
   store: CreationTaskStore; profiles: Pick<OctoStore,'list'|'get'>; octo: OctoService;
@@ -12,6 +13,7 @@ export function createCreationTaskService(deps: {
   secrets(clientId: number, accountId: number): Promise<unknown>;
   capture(profile: ManagedProfile): Promise<ManagedProfile>;
   nodeMavenKey(): string;
+  newProxy?:ReturnType<typeof createNewTaskProxy>;
   reportStatusChange?(change: TaskStatusChange): Promise<StatusNotification>;
 }) {
   const detail = async (id: unknown) => deps.store.detail(taskId(id));
@@ -19,6 +21,9 @@ export function createCreationTaskService(deps: {
     const d = await detail(id), rows = (await deps.profiles.list(d.task.clientId)).filter(p => p.locale === 'en' && !p.deletion);
     if (rows.length !== 1) throw new IntakeError('linkedin_task_en_profile_required', 409);
     return { ...d, profile: rows[0] };
+  }
+  async function requireNewProxy(d:Awaited<ReturnType<typeof en>>){
+    if(d.task.requiresNewProxy){if(!deps.newProxy)throw new IntakeError('linkedin_task_new_proxy_required',503);await deps.newProxy.assert(d.task,d.profile);}
   }
   return {
     async list() {
@@ -38,22 +43,30 @@ export function createCreationTaskService(deps: {
     },
     async profileStatus(id: unknown, proxyCredentials = false) {
       const d = await detail(id), s = await deps.octo.status(d.task.clientId, { proxyCredentials, locales: ['en'] });
-      return { ...s, profiles: s.profiles.filter(p => p.locale === 'en'), requiredLocales: ['en'] };
+      let newProxyReady=!d.task.requiresNewProxy;
+      if(d.task.requiresNewProxy&&deps.newProxy){const p=(await deps.profiles.list(d.task.clientId)).find(p=>p.locale==='en');newProxyReady=!!p&&await deps.newProxy.ready(d.task,p);}
+      return { ...s,newProxyRequired:!!d.task.requiresNewProxy,newProxyReady,
+        profiles: s.profiles.filter(p => p.locale === 'en').map(p=>({...p,canAcquire:newProxyReady&&p.canAcquire})), requiredLocales: ['en'] };
     },
     async acquire(id: unknown, profileId: unknown) {
       const d = await en(id);
       if (taskId(profileId) !== d.profile.id) throw new IntakeError('forbidden',403);
+      await requireNewProxy(d);
       return deps.octo.acquire(d.task.clientId, d.profile.id);
     },
     async saveProxy(id: unknown, profileId: unknown, input: unknown) {
       const d = await en(id);
       if (taskId(profileId) !== d.profile.id) throw new IntakeError('forbidden',403);
-      await deps.octo.saveProxy(d.task.clientId, d.profile.id, input);
-      return { queued: true };
+      if(d.task.requiresNewProxy){
+        if(!deps.newProxy)throw new IntakeError('linkedin_task_new_proxy_required',503);
+        await deps.newProxy.queue(d.task,d.profile,input);
+      }else await deps.octo.saveProxy(d.task.clientId, d.profile.id, input);
+      return { queued: true,...(d.task.requiresNewProxy?{task:(await detail(id)).task}:{}) };
     },
     async grant(id: unknown, grantId: string) {
       const d = await en(id);
       if (d.profile.grant?.id !== grantId) throw new IntakeError('forbidden',403);
+      await requireNewProxy(d);
       return deps.octo.grant(d.task.clientId, grantId);
     },
     async result(id: unknown, body: Record<string, unknown>) { return deps.store.result(taskId(id), taskId(body.version), body); },
@@ -62,6 +75,7 @@ export function createCreationTaskService(deps: {
       if (body.status === 'сделана экспертом' && previousStatus !== body.status) {
         const d = await en(id);
         if (d.task.version !== taskId(body.version)) throw new IntakeError('linkedin_task_stale_version',409);
+        await requireNewProxy(d);
         if (!d.task.proxySavedAt || !d.task.proxyUuid || !d.task.proxyProfileId) throw new IntakeError('linkedin_task_proxy_required',409);
         // Re-read the cloud proxy at completion too; a changed proxy invalidates the old receipt.
         const p = await deps.capture(d.profile);
@@ -79,6 +93,7 @@ export function createCreationTaskService(deps: {
     async capture(id: unknown, body: Record<string, unknown>) {
       const d = await en(id);
       if (d.task.version !== taskId(body.version)) throw new IntakeError('linkedin_task_stale_version',409);
+      await requireNewProxy(d);
       const p = await deps.capture(d.profile);
       if (!p.proxy) throw new IntakeError('linkedin_task_proxy_required',409);
       return deps.store.receipt(d.task.id, d.task.version, p.id, p.proxy.uuid, p.revision);

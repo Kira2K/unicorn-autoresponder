@@ -232,6 +232,8 @@ try {
   await recoveryForm.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('replacement-fixture');
   await recoveryForm.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25T10:30');
   await recoveryForm.getByLabel('Город и страна проживания',{exact:true}).fill('Tbilisi');
+  await recoveryForm.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).fill('Alex');
+  await recoveryForm.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true}).fill('Test');
   await recoveryForm.getByRole('button',{name:'Сохранить данные',exact:true}).click();
   await dolphinPage.getByRole('dialog',{name:'Спасибо, данные сохранены ✅'}).waitFor();
   assert.equal(saved.get(906)?.replacesLinkedInAccountId,906);

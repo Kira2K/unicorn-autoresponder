@@ -72,11 +72,13 @@ accounts, task source and Octo intent together. No schema/data migration is run.
 Archived accounts are excluded from the Console/LinkedIn record feed. Historical
 tasks referring to them are hidden from the Denis queue and cannot be edited there.
 The read-only SQL projection exposes the existing archive flag without adding it to
-the writable catalog. When a completed replacement is handed to LinkLab, a binding
-to an archived account can be retargeted to the current valid account; active bindings
-and ambiguous account selections are preserved.
+the writable catalog. Only the transition to `выполнение подтверждено` can rebind LinkLab
+from this student's archived account and reset the local cycle. Draft result saves do not
+switch it; the explicit cycle migration and CRM fence are described in
+[creation tasks](../creation-tasks/README.md#new-local-cycle-and-release-order-pr-100).
 
-Existing Octo profiles, their passwords and proxies are reused. Missing profiles are
+Existing Octo profiles and their passwords are reused. Each new LinkedIn requires Denis
+to enter and validate a new connection for the same EN profile; RU is untouched. Missing profiles are
 queued through the existing direct workflow. A recovery request also includes EN for
 RU clients so Denis can work in the same EN flow; only the internal intent carries
 these locales and the client's market is unchanged. Dolphin bindings are retained.

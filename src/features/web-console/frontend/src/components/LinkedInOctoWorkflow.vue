@@ -4,7 +4,7 @@ import OctoAccessCard from './OctoAccessCard.vue'
 import Dialog from 'primevue/dialog'
 import { octoApi } from '../octo-api.js'
 import { intakeRequest, intakeScenario, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
-import { isOutlookLogin } from '../../../../linkedin-automation/console-intake/contracts.mts'
+import { isOutlookLogin, isLatinIntakeName } from '../../../../linkedin-automation/console-intake/contracts.mts'
 const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false } })
 const registrationDate = ref(''), showSavedDialog = ref(false)
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -54,6 +54,8 @@ async function load() {
     const data = await intakeRequest('GET', undefined, controller.signal)
     if (controller.signal.aborted) return
     form.value = { ...form.value, ...data, realLocation: data.realLocation || '', password: '', outlookPassword: '', loggedIn: false }
+    form.value.firstName = isLatinIntakeName(data.firstName) ? data.firstName : ''
+    form.value.lastName = isLatinIntakeName(data.lastName) ? data.lastName : ''
     registrationDate.value = registrationTimeInput(data.outlookRegisteredAt)
     replacementId.value = null
     updateTaskState(data)
@@ -85,7 +87,8 @@ function reportBan() {
   if (!canReportBan.value || !secrets.value.linkedinAccountId || saving.value) return
   replacementId.value = secrets.value.linkedinAccountId
   form.value = { ...form.value, url: '', login: '', password: '', outlookLogin: '', outlookPassword: '', loggedIn: false,
-    firstName: form.value.firstName || props.client.firstName || '', lastName: form.value.lastName || props.client.lastName || '' }
+    firstName: isLatinIntakeName(form.value.firstName) ? form.value.firstName : '',
+    lastName: isLatinIntakeName(form.value.lastName) ? form.value.lastName : '' }
   registrationDate.value = ''; secrets.value = { ...secrets.value, hasPassword: false, hasOutlookPassword: false }
   editLocked.value = false; existing.value = false; newSaved.value = false; scenario.value = 'new'; message.value = ''
 }

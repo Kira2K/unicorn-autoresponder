@@ -13,7 +13,7 @@ const message = ref(''), busy = ref(false), selectedStatus = ref('не нача�
 const captureConfirmed = ref(false)
 const profileState = ref(null)
 const canCaptureProxy = computed(() => profileState.value?.profiles?.some(p => p.locale === 'en' &&
-  p.phase === 'ready' && p.canEditProxy === true && p.proxy?.configured))
+  p.phase === 'ready' && p.canEditProxy === true && p.proxy?.configured) && profileState.value?.newProxyReady !== false)
 function updateProfileStatus(status) {
   profileState.value = status
   if (!canCaptureProxy.value) captureConfirmed.value = false
@@ -29,13 +29,17 @@ const transport = computed(() => {
   return { profileStatus: options => request(path + '/status' + (options?.proxyCredentials ? '?proxyCredentials=1' : ''), { signal: options?.signal }),
     requestGrant: (profileId, options) => request(path + '/grants', { ...options, method: 'POST', body: JSON.stringify({ profileId }) }),
     grant: (id, options) => request(path + '/grants/' + encodeURIComponent(id), options),
-    saveProxy: (profileId, draft, options) => request(`${path}/profiles/${encodeURIComponent(profileId)}/proxy`,
-      { ...options, method: 'POST', body: JSON.stringify(octoProxyPayload(draft)) }) }
+    saveProxy: async (profileId, draft, options) => {
+      const data=await request(`${path}/profiles/${encodeURIComponent(profileId)}/proxy`,{ ...options, method: 'POST', body: JSON.stringify(octoProxyPayload(draft)) });
+      if(data.task&&selected.value?.task.id===data.task.id)selected.value.task=data.task;
+      return data;
+    } }
 })
 const completionChecklist = computed(() => [
   { key: 'proxy', label: 'Настройки прокси подтверждены для заявки',
     done: !!selected.value?.task.proxySavedAt && captureConfirmed.value && !!canCaptureProxy.value,
     hint: !profileState.value ? 'Дождитесь загрузки состояния профиля Octo.'
+      : profileState.value.newProxyReady === false ? 'Введите новые реквизиты прокси в форме выше и дождитесь назначения. Прежнее подключение для нового LinkedIn не подходит.'
       : canCaptureProxy.value ? 'Нажмите «Сохранить настройки прокси» над формой LinkedIn.'
       : !profileState.value.profiles?.some(p => p.locale === 'en' && p.proxy?.configured)
         ? 'Сохраните прокси в форме «Настроить прокси» и дождитесь завершения сохранения. Затем нажмите «Сохранить настройки прокси».'
@@ -50,6 +54,7 @@ const completionChecklist = computed(() => [
 const canComplete = computed(() => completionChecklist.value.every(item => item.done))
 function errorText(error) {
   const code = error.message
+  if(code==='linkedin_task_new_proxy_required')return 'Для нового LinkedIn сначала назначьте и проверьте новый прокси.'
   if (code === 'linkedin_task_proxy_pending') return 'Прокси сохраняется. Дождитесь завершения и нажмите кнопку ещё раз.'
   if (code === 'linkedin_task_close_profile_first') return 'Закройте профиль Octo и дождитесь завершения доступа.'
   if (code === 'linkedin_task_proxy_required' || code === 'linkedin_task_proxy_changed') return 'Подтвердите актуальный прокси: закройте профиль Octo, дождитесь завершения доступа и нажмите «Сохранить настройки прокси».'
@@ -173,7 +178,7 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
           <h4>Аккаунт {{ index + 1 }}</h4>
           <dl><template v-for="(value,key) in account" :key="key"><dt>{{ labels[key] }}</dt><dd class="blocked-account-value">{{ value }}</dd></template></dl>
         </section>
-        <p><strong>Введи данные прокси прямо здесь, в форме «Настроить прокси» ниже, и нажми «Сохранить прокси».</strong> Дождись статуса «Прокси сохранён». В приложении Octo Browser прокси вводить или менять не нужно.</p>
+        <p><strong>Для нового LinkedIn введи новые реквизиты прокси в форме ниже и нажми «Сохранить прокси».</strong> Старое подключение повторно использовать нельзя. Дождись статуса «Прокси сохранён». В приложении Octo Browser прокси вводить или менять не нужно.</p>
         <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :transport="transport" @status="updateProfileStatus" @access-issued="captureConfirmed = false" @proxy-changed="captureConfirmed = false" />
         <p>После настройки прокси в этой форме и работы в Octo закрой профиль обычным способом и дождись завершения доступа. Затем нажми «Сохранить настройки прокси» ниже: эта кнопка проверит фактические настройки профиля и подтвердит их для заявки.</p>
         <button type="button" :disabled="busy || !canCaptureProxy" @click="save('capture-proxy', {})">Сохранить настройки прокси</button>

@@ -23,6 +23,7 @@ export class IntakeError extends Error {
 }
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 export const isOutlookLogin = (value: unknown) => /^[^@\s]+@outlook\.com$/i.test(text(value));
+export const isLatinIntakeName = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z][A-Za-z '\-]*$/.test(value);
 function registrationTime(value: unknown): string | undefined {
   if (value === undefined || value === '') return undefined;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ||
@@ -84,7 +85,7 @@ export function parseIntake(value: unknown): LinkedInIntake {
     if (raw.loggedIn !== true) throw new IntakeError('linkedin_intake_login_confirmation_required');
   } else {
     if (!isOutlookLogin(data.outlookLogin)) throw new IntakeError('linkedin_intake_outlook_required');
-    if (![data.firstName, data.lastName].every(v => /^[A-Za-z][A-Za-z '\-]*$/.test(v)) || !data.realLocation)
+    if (![data.firstName, data.lastName].every(isLatinIntakeName) || !data.realLocation)
       throw new IntakeError('linkedin_intake_identity_required');
   }
   const outlookRegisteredAt = raw.scenario === 'new' ? registrationTime(raw.outlookRegisteredAt) : undefined;

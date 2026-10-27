@@ -95,11 +95,79 @@ the Octo store, then writes a task receipt after revision/read-back checks. Inli
 durable proxy creation/attachment workflow; pending or uncertain results cannot produce a success receipt.
 No input password is copied into a task. Concurrent profile edits invalidate the operation.
 
+Every new LinkedIn application requires a new connection, entered manually by Denis. Only EN is changed;
+RU and the profile set/password remain intact. The baseline UUID is recorded when the task is created.
+The server compares a hash of protocol/host/port/login/password, ignoring the Octo UUID/title and rotation URL.
+The existing proxy checker must return a valid `exit_ip` for the proposed connection before it is queued.
+Its existing `PROXY_CHECKER_BASE_URL` and `UNICORN_PROXY_CHECKER_SECRET_KEY` must be configured on the backend.
+The same provider gateway is allowed; identical credentials or a known identical exit IP are refused.
+If the old IP is unknown or its connection is unavailable, comparison is explicitly recorded as `skipped`.
+This is successful validation of the new connection, not proof that the old and new IP differ.
+Baseline fingerprints/IP and the old saved Octo proxy reference remain in the verification journal.
+Before the first queued replacement, its old connection fields are also saved in `baseline_connection`,
+restricted to the backend/owner alongside existing sensitive proxy state; they are not returned by task DTOs,
+included in notifications or logged. This preserves connection history independently of the Octo saved object;
+the previous saved proxy is not deleted. No automatic proxy purchase or selection is performed.
+
+Network validation runs outside SQL transactions. The queue locks the client/task/EN profile and checks
+versions and the old binding again before storing the existing durable proxy operation. Active access must
+finish first. A pending or uncertain external create/attach is read back by its operation marker and is
+never blindly repeated. Denis access, capture and expert completion require this verified operation;
+capture/completion also re-read actual cloud connection fields. Substitution invalidates the receipt.
+
 Expert result editing writes URL/login/password to the linked platform account and preserves a blank submitted
-password. The existing LinkLab handoff runs in the same transaction when configured. Completion verifies full
+password. Draft result saves do not rebind LinkLab. Completion verifies full
 LinkedIn credentials and the current closed EN proxy against the receipt, with SQL checks as a second barrier.
 Student saves, result saves and status changes serialize on the client; stale task versions return 409.
 An uncertain commit requires reloading the task, never automatic retry.
+
+## New local cycle and release order (PR #100)
+
+**CRM СЕЙЧАС НЕ ПОДКЛЮЧАЕМ. ДЛЯ БУДУЩЕГО ПОДКЛЮЧЕНИЯ НУЖНО ИЗМЕНИТЬ ЕЁ ЛОГИКУ: ПЕРЕДАВАТЬ НОВЫЙ ЦИКЛ И ПРИВЯЗЫВАТЬ РЕЗУЛЬТАТЫ К КОНКРЕТНОМУ LINKEDIN-АККАУНТУ.**
+
+The SQL transition to `выполнение подтверждено`, including a direct staff SQL update, atomically rebinds
+LinkLab to the new owned account and resets status to `Новый`, progress to 0 and revision to -1. It clears
+the block/completion dates and next-account URL, preserving the CRM student ID, EN CV approval, history
+and active physical proxy pause. A missing LinkLab row is created. A different previous binding must refer
+to this student's archived account; arbitrary rebinds remain forbidden. The per-task/account ledger makes
+confirmation idempotent. Already confirmed tasks are not replayed when installing the migration.
+
+This local reset is required independently of `LINKLAB_ENABLED`; the flag still governs legacy exchange.
+Reset rows have `crm_integration_required=true`: the legacy queue excludes them and locked SQL entry points
+reject/ignore delayed CRM writes, acknowledgements and errors. Other students retain their existing behavior.
+Do not clear the flag to reconnect the old worker; the future CRM protocol must identify the cycle/account.
+
+In the same confirmation transaction, an event is inserted into `linkedin_cycle_notifications`. After commit,
+the Console background dispatcher sends one `VEU_SUPPORT_BOT` message to `-1003187558078`, with headline
+`🚨 НОВЫЙ LINKEDIN — ЗАПУЩЕН НОВЫЙ ЦИКЛ`, name, stack, task number, new URL and `@juliafeels fyi`.
+Delivery is persisted as `sent`, `failed` or `uncertain`. An expired in-flight claim becomes `uncertain`;
+failed/uncertain events are never automatically resent. Telegram failure cannot roll back confirmation.
+This confirmation journal is separate from the older non-durable Denis status reporter described above.
+
+Install with the Console/Octo writers stopped and an owner-authorized connection. Keep the existing
+application role's Octo/profile/task rights; never give it ownership or write access to the cycle ledger.
+
+1. Existing Octo schema, LinkLab SQL `001` → `005`, then creation-tasks `001` must already be installed.
+2. Run the new explicit runner **without `--apply`** first; it executes and rolls back the DDL for validation.
+3. Apply once: creation-tasks `002-new-proxy` then LinkLab `006-account-cycle`, in one transaction. The runner
+   grants the connecting application role SELECT/UPDATE on proxy proof and notification journals, and SELECT
+   on the cycle ledger. Its connection must be allowed to `SET ROLE unicorn_noco_copy_owner` as in prior migrations.
+4. Start the new backend only after the migration. Startup validates schema and performs no DDL. Pending tasks
+   require a newly verified proxy; historical confirmed tasks/accounts are not rewritten.
+
+```powershell
+node --env-file-if-exists=.env src/features/linkedin-automation/creation-tasks/migrate-cycle.mts
+node --env-file-if-exists=.env src/features/linkedin-automation/creation-tasks/migrate-cycle.mts --apply
+```
+
+Do not rerun the old task `001` runner after installing this cycle migration. Do not drop the ledger/flag or
+restore old CRM functions as an automatic rollback after cycles exist. Preserve data and use a reviewed
+forward repair. This PR does not apply these migrations, modify working data, send real messages or deploy.
+
+For actual SQL verification, `LINKEDIN_CYCLE_ISOLATED_CONFIG` names a private JSON config for a fresh disposable
+loopback PostgreSQL at port 55439, user `cycle_owner`, database `unicorn_noco_copy_restore`, `local_proof:true`.
+The test refuses an existing `noco` schema, loads real migrations and checks restricted app rights, CAS,
+atomicity, CRM fences, preserved state and concurrent notification claims. Never point it at working ENV.
 
 ## Verification
 

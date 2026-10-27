@@ -39,15 +39,18 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
       const c = await client(clientId), profiles = await store.list(clientId);
       const selected = options.locales ? profiles.filter(p => options.locales!.includes(p.locale)) : profiles;
       const snapshots = await Promise.all(selected.map(async p => {
-        if (!options.proxyCredentials || !p.uuid || !p.proxy || p.deletion || proxyBusy(p)) return snapshot(p);
+        let canAcquire=false;
+        try{await readGrantCandidate(store,clientId,p.id,now);canAcquire=true;}catch{/* Owner-scoped read; acquire repeats the authoritative checks. */}
+        const view=(connection?:ProxyInput,credentialsError?:string)=>({...snapshot(p,connection,credentialsError),canAcquire});
+        if (!options.proxyCredentials || !p.uuid || !p.proxy || p.deletion || proxyBusy(p)) return view();
         try {
           if (!readProfileProxy) throw new Error('proxy_reader_unavailable');
           const actual = await readProfileProxy(p.uuid);
           if (!actual.saved || actual.saved.uuid.replaceAll('-', '').toLowerCase() !== p.proxy.uuid.replaceAll('-', '').toLowerCase())
             throw new Error('proxy_binding_changed');
-          return snapshot(p, parseProxyInput(actual.saved));
+          return view(parseProxyInput(actual.saved));
         } catch {
-          return snapshot(p, undefined, 'octo_proxy_credentials_unavailable');
+          return view(undefined, 'octo_proxy_credentials_unavailable');
         }
       }));
       return { profiles: snapshots, requiredLocales: requiredLocalesForMarket(c.market),
