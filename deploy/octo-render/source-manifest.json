@@ -1,0 +1,22 @@
+{
+  "source_archive_sha256": "92826aeca365418587a9c6258cf88c546a8c4f944b6172f9855f92986ef6c77d",
+  "checked_master": "774afa5847910a5c4a522966b9d052eeb8b16b3d",
+  "private_files_copied": false,
+  "archive_bridge_files_sha256": {
+    "bridge/agent.mjs": "9594959fe1be6b03b3fc8343349bba2777d5117b6e8bc308b532cf8f1e8baf20",
+    "bridge/journal.mjs": "530f89cab31eec1da248721287bb493b804667536f818a1912aa36834e3bacea",
+    "bridge/local-api.mjs": "8725adc4bbfa68af80524fdd4fe1237bbbe6658f1240724d0dab0c6d3595d9cd",
+    "bridge/agent.test.mjs": "984c1e5f4c0cf4f898bb46aa7af6421d32bcf6c96eee163a126ccc9f04bd40d8",
+    "bridge/journal.test.mjs": "d063aca97dc65a53f248de6dcf9a093e8e512785a7ec30285ab6460cfeaff54f",
+    "bridge/local-api.test.mjs": "dff3010894c46a7857594f8e6584cea57a6aa3eaa4b5715df5f70ee9cf44a515"
+  },
+  "shipped_bridge_files_sha256": {
+    "bridge/agent.mjs": "012de549edc5ce2d189c48e230b96d07db4f070a8519ded9f155c3a89a72b6c1",
+    "bridge/journal.mjs": "67f52dbbe51bd59cdb6743b64c8891d9d48a9c2e667ffa4e2151469412a95ef7",
+    "bridge/local-api.mjs": "cf0d97d4763cf7f3a981c780e7893111b4514e292e8af9a392bec412aa6bd4dc",
+    "bridge/agent.test.mjs": "816e186eb0868d24399d64e753df207355da4bca9015b4114e5111b56bdc5b97",
+    "bridge/journal.test.mjs": "365c527563e98d66e402773e4c5db37142de5d6b7a048fb53f858e00c2fe9c6b",
+    "bridge/local-api.test.mjs": "2c4d1ae3d67a80367e924852b334e1213b741a0fe4e650fbb1ddb341157bab24"
+  },
+  "bridge_normalization": "CRLF to LF only; bridge source logic unchanged"
+}

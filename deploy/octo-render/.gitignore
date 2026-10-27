@@ -1,0 +1,7 @@
+private/
+secrets/
+.env*
+*.log
+*.zip
+test-artifacts/
+vendor/OctoBrowser.linux.tar.gz

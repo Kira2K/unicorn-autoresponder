@@ -1,0 +1,48 @@
+Local Docker vs Render: deployment constraints for this exact package
+
+Image/runtime
+- Both run a Linux amd64 container; the package keeps the original Ubuntu 22.04 owner baseline.
+- Docker Desktop uses a WSL VM on this Windows PC. Render manages its own Linux hosts.
+  Windows/WSL idle RAM is not part of the Render container's RAM requirement.
+- A successful local build alone does not prove Render kernel/security compatibility.
+
+Compose and networking
+- The old handoff uses two Compose containers with network_mode:host and depends_on.
+- This package has one image/worker. Octo and the bridge share its private loopback.
+- Render background workers receive no incoming traffic; the agent polls the existing backend.
+- No port, public Local API, host networking, privileged mode or extra Linux capabilities are requested.
+
+Files and identity
+- A Docker container can retain its writable layer when simply stopped and started locally.
+- Render replaces instances on deploy; paths outside /var/data must be treated as ephemeral.
+- One attached Render disk is accessible to one service instance. It prevents overlapping
+  instances and horizontal scaling. This package additionally holds flock for the journal.
+- The old hostname-based machine identity is unsuitable for replacement containers.
+  This adapter uses the stable RENDER_SERVICE_ID and retains the original device/operation journal.
+- Token/config come from Render secret files; neither enters the production image or data disk.
+
+Shutdown/resources
+- Ordinary local docker stop defaults to a shorter grace period; the test explicitly uses 30 seconds.
+- Render defaults to 30 seconds, and a service with a disk cannot change that delay.
+- The adapter drains requests for 18 seconds and reserves time for result persistence/child cleanup.
+- The original Compose shm_size:1gb is not assumed on Render. The local smoke test uses
+  Docker's default shared-memory setup and no privilege overrides; Xvfb uses an allocated display
+  and the owner disables X11 MIT-SHM. Actual Render /dev/shm capacity remains unmeasured.
+- Local test limits: 512 MB RAM, no extra swap, 0.5 CPU. A Docker VM with ample host RAM is
+  not proof that the service fits Render's $7 plan. Real owner startup/cleanup peaks are still required.
+
+Release and visibility
+- Build the separate codex/octo-render-check-20261027 branch and deploy manually.
+  Auto-deploy is disabled; master is not linked to this worker.
+- Background worker readiness is emitted as safe lifecycle JSON; Compose healthcheck/depends_on
+  settings are not relied on. The supervisor watches Octo/display processes and stops on their exit.
+- Check mode performs owner/version/backend-health reads only. No existing production tasks are claimed.
+- HH/Dolphin remain on the existing VDS; no HH runner or command channel is added.
+
+Primary sources checked 2026-10-27
+https://render.com/docs/docker
+https://render.com/docs/background-workers
+https://render.com/docs/disks
+https://render.com/docs/deploys
+https://render.com/docs/environment-variables
+https://docs.docker.com/desktop/features/wsl/

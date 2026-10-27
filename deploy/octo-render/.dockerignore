@@ -1,0 +1,13 @@
+private
+secrets
+.env*
+**/.env*
+**/private
+**/secrets
+.git
+node_modules
+*.log
+*.zip
+test-artifacts
+vendor/OctoBrowser.linux.tar.gz
+**/*.test.mjs

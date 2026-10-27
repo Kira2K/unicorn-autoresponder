@@ -1,0 +1,24 @@
+One Render background worker: owner Octo + the existing password-cleanup bridge.
+
+Inputs: two runtime secret files (owner token, bridge config), RENDER_SERVICE_ID,
+OCTO_BRIDGE_MODE=check|worker (default check), optional pilot profile UUID allowlist.
+Storage: one exclusively mounted /var/data disk, cache and durable operation journal.
+Outputs: safe JSON lifecycle/state codes; existing backend result acknowledgements.
+
+Check mode must never poll/claim a job, authorize or clear a profile password.
+Worker mode retains the supplied bridge's owner/scope/authorization/history gates.
+No HH, new backend, database, public API, profile launch or profile force-stop.
+No secret file may enter the image, source package, logs or persistent disk.
+
+The journal belongs to the logical Render service, not a container hostname.
+An existing live process or unknown lock owner blocks startup. A demonstrably dead
+process lock can be archived while holding the exclusive kernel lock; its journal
+is preserved. Uncertain external outcomes retain the original no-blind-retry rule.
+
+SIGTERM stops admission immediately, lets already-dispatched operations drain,
+aborts remaining requests after 18 seconds, and permits result acknowledgement
+within a bounded remaining interval. Close the journal before stopping owner Octo.
+Entire container shutdown must fit Render's fixed 30-second disk-backed deadline.
+
+External accounts are never exercised by tests. A real build/runtime/512 MB memory
+measurement is separate evidence and must not be inferred from mock tests.

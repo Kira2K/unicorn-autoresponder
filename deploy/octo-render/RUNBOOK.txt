@@ -1,0 +1,76 @@
+Octo owner + bridge on Render (one extra service, no HH)
+
+This is a locally prepared deployment package, not an installed service.
+The existing Unicorn backend and Kira's current PC bridge stay in place until cutover.
+Source is published only under deploy/octo-render on a separate branch.
+The primary master branch and the existing services are not updated by this release.
+
+Local preparation
+1. Use project Node 24.20.0: npm test (or node --test bridge/*.test.mjs runtime/*.test.mjs).
+2. docker build --platform linux/amd64 -t unicorn-octo-render:20261027 .
+   The official installer is downloaded at build and its fixed SHA-256 is checked.
+   A changed vendor download fails the build rather than silently accepting a different client.
+   Node is pinned and its checksum checked. No private ZIP or binary is committed.
+3. Run docker/smoke/run.ps1 for the isolated lifecycle/512 MB smoke test before any
+   real-account activation. It uses fake credentials and --network none, verifies
+   graceful and forced restarts, and retains the same journal device identity.
+   Its memory result covers the fixture, not real Octo.
+   Unit tests alone do not establish Linux runtime or RAM requirements.
+
+Render configuration (check-mode $7 compute pilot authorized 2026-10-27)
+- One Docker background worker, one instance, manual releases with auto-deploy disabled.
+- Build only deploy/octo-render from codex/octo-render-check-20261027; master stays unchanged.
+- Initial candidate: $7 / 512 MB; measure before accepting it. A 10 GB disk adds $2.50/month.
+- Disk mounted at /var/data. render.example.yaml is a review template, not an applied blueprint.
+- Add octo-api-token and bridge.config.json from Kira's private handoff as Render secret files.
+  Do not commit/upload the private ZIP to a source repository or bake secrets into an image.
+- Default OCTO_BRIDGE_MODE=check starts Octo and verifies identity/version/backend health.
+  It does not poll, claim, authorize or clear any job.
+- RENDER_SERVICE_ID is supplied by Render and binds the journal across container replacements.
+- Octo and the agent run as UID 1000 after startup permissions and the exclusive file lock.
+- There is no listening public port. Local Octo API stays inside this service.
+- Expected tested client baseline is 3.1.3, update_required=false. Another version can be
+  inspected in check mode, but worker mode refuses it until that build is accepted and released.
+
+State and recovery
+- /var/data/octo-cache: owner components/cache; /var/data/bridge: durable operation journal.
+- Secret files are copied only into ephemeral /run/octo-secrets, not the persistent disk.
+- Never copy the old PC journal into this service. Never delete/restore an old snapshot over
+  the current journal to force a retry. Preserve unknown outcomes and reconcile them.
+- A stale lock is recovered only if the logical service matches and the original process
+  has demonstrably ended (Linux boot ID, PID namespace, start time). Unknown locks fail closed.
+- SIGTERM stops new calls. In-flight work drains for 18 seconds, then remaining requests are
+  aborted; result receipts have a 3-second bound. A 27-second last-resort exit preserves the
+  executing journal record if storage/network cannot drain. A lost outcome may require review.
+- Normal shutdown closes the journal first, then stops owner Octo and its virtual display.
+
+Cutover (Kira stops the old PC bridge when agreed)
+1. Keep the new worker in check mode; verify identity, tested client version, backend and memory.
+2. Pause new grants for the window. Let active profiles close normally and existing grants,
+   claims, and result acknowledgements finish. Run the original read-only cutover audit.
+3. Kira stops the old bridge. Confirm it has exited; preserve its original .state directory.
+4. Set OCTO_BRIDGE_PROFILE_UUIDS to one explicitly approved disposable Octo profile UUID and
+   OCTO_BRIDGE_MODE=worker. Do not invent a UUID or enable all managed profiles for a test.
+5. On a separate guest PC, perform access -> ordinary close -> password cleanup -> successful
+   completion. Verify another login, restart recovery and no duplicate mutation.
+6. After acceptance, remove the pilot override to restore the original configured scope.
+   HH/Dolphin/VDS work and the main backend configuration are not part of this cutover.
+
+Rollback
+Stop/drain the Render bridge and inspect/reconcile pending operations first. Then Kira may
+restart the old agent with its original journal. Never run both as a recovery shortcut.
+Return to the previous image only with its compatible current journal; do not overwrite SQL.
+
+Remaining external checks
+- Linux image build, actual owner cold start and peak memory under 512 MB.
+- Render runtime restrictions, actual token validity and independently approved profile test.
+- Verify actual deployment and runtime state in Render; local tests are not live proof.
+
+Primary references
+https://render.com/docs/background-workers
+https://render.com/docs/disks
+https://render.com/docs/deploys
+https://render.com/docs/environment-variables
+https://render.com/docs/configure-environment-variables
+https://docs.octobrowser.net/en/faq/octo-docker/
+https://docs.octobrowser.net/en/faq/api-faq/

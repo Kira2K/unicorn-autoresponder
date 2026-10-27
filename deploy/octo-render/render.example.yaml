@@ -1,0 +1,21 @@
+# Review template only. The isolated source branch is released manually.
+services:
+  - type: worker
+    name: unicorn-octo-owner
+    runtime: docker
+    repo: https://github.com/Kira2K/unicorn-autoresponder
+    branch: codex/octo-render-check-20261027
+    autoDeployTrigger: off
+    dockerfilePath: ./deploy/octo-render/Dockerfile
+    dockerContext: ./deploy/octo-render
+    numInstances: 1
+    plan: starter
+    disk:
+      name: octo-state
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: OCTO_BRIDGE_MODE
+        value: check
+# Add octo-api-token and bridge.config.json as Render secret files at deployment.
+# RENDER_SERVICE_ID is supplied by Render. This template contains no database/HH worker.

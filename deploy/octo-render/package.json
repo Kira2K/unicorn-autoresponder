@@ -1,0 +1,7 @@
+{
+  "name": "unicorn-octo-render-service",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "test": "node --test bridge/*.test.mjs runtime/*.test.mjs", "start": "node runtime/main.mjs" }
+}
