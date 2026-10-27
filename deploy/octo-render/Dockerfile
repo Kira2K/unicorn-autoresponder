@@ -32,4 +32,4 @@ COPY --chown=1000:1000 runtime/ /app/runtime/
 COPY --chmod=755 docker/entrypoint.sh /app/entrypoint.sh
 ENV OCTO_BRIDGE_MODE=check LANG=C.UTF-8 HOME=/home/octo
 # Bootstrap permissions as root, then entrypoint drops to UID 1000. No public port.
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]

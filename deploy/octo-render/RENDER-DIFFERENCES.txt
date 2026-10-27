@@ -24,6 +24,9 @@ Files and identity
 Shutdown/resources
 - Ordinary local docker stop defaults to a shorter grace period; the test explicitly uses 30 seconds.
 - Render defaults to 30 seconds, and a service with a disk cannot change that delay.
+- The bootstrap drops to UID 1000 before execing tini as PID 1. The init and its
+  child must share a UID so signal forwarding does not depend on root CAP_KILL.
+  The first Render restart exposed EPERM when root tini tried to signal UID 1000.
 - The adapter drains requests for 18 seconds and reserves time for result persistence/child cleanup.
 - The original Compose shm_size:1gb is not assumed on Render. The local smoke test uses
   Docker's default shared-memory setup and no privilege overrides; Xvfb uses an allocated display
