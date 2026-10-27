@@ -1,6 +1,8 @@
 private
 secrets
 .env*
+octo-api-token
+bridge.config.json
 **/.env*
 **/private
 **/secrets
