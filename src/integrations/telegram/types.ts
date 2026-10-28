@@ -35,6 +35,8 @@ export type SendOneInput = {
   }
 
   text: string
+  /** Server-side document bytes; text is the caption. Never accepted as a path/URL. */
+  attachment?: { fileName: string; mimeType: 'application/pdf'; data: Uint8Array }
   /** Edit this bot-owned message instead of creating a new message. */
   editMessageId?: number
   messageThreadId?: number
@@ -78,7 +80,7 @@ export type TelegramCallResult<T> =
       failure: ClientFailure
     }
 
-export type TelegramSentMessage = Message.TextMessage | Message.RichMessageMessage
+export type TelegramSentMessage = Message.TextMessage | Message.RichMessageMessage | Message.DocumentMessage
 
 export type SendOneResult =
   TelegramCallResult<TelegramSentMessage>

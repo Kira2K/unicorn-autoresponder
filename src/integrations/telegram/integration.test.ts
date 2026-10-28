@@ -611,7 +611,7 @@ function compileTimeContract(
       result.failure.stage
     void stage
   } else if (result.response.ok) {
-    const telegramMessage: Message.TextMessage | Message.RichMessageMessage = result.response.result
+    const telegramMessage: Message.TextMessage | Message.RichMessageMessage | Message.DocumentMessage = result.response.result
     const messageId: number = telegramMessage.message_id
     const chatType: string = telegramMessage.chat.type
     void messageId

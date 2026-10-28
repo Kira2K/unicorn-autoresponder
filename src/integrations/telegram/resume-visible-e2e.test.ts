@@ -199,6 +199,7 @@ function makeVisibleTelegramHarness() {
 }
 
 async function runTests() {
+  process.env.WEB_CONSOLE_USE_MOCK_DATA = 'true'
   process.env.RESUME_WORKFLOW_PROVIDER_TELEGRAM_USER_IDS = '8222949251'
   process.env.RESUME_WORKFLOW_PROVIDER_NOTIFY_CHAT_ID = '8222949251'
   process.env.RESUME_WORKFLOW_KIRA_TELEGRAM_USER_IDS = '343610488'

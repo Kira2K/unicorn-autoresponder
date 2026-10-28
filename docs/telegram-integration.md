@@ -18,6 +18,16 @@ breaks become `<br>` without changing newlines inside `pre`/`code`. Literal plai
 text uses a paragraph block, not Markdown parsing. Short messages keep their
 existing `sendMessage` payload. Markdown/MarkdownV2 delivery remains unchanged.
 Nothing is split or truncated, and failure never triggers a second delivery.
+
+Server callers can attach one PDF to `sendOne` via
+`attachment: { fileName, mimeType: 'application/pdf', data: Uint8Array }`.
+The text becomes the caption (at most 1024 characters). The file must have a
+basename ending in `.pdf`, a PDF signature, and a size between 1 byte and 5 MiB.
+One multipart `sendDocument` request returns the native typed document message.
+Documents do not support message editing, parse mode or link preview options.
+An uncertain result is never retried or converted to a text send. Custom Bot API
+adapters must explicitly implement document delivery. JSON HTTP send endpoints
+remain text-only; there is no binary upload endpoint.
 More than 32768 rendered characters returns a `validation` failure before send.
 The selection is implemented in `prepare-message.ts`; HTTP remains in
 `bot-api.ts`. Explicit link-preview options apply only to ordinary messages,
