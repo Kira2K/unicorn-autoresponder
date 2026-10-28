@@ -39,13 +39,17 @@ def create_report(report_path, output, private_path=None):
     date = datetime.now(timezone(timedelta(hours=4))).strftime('%d.%m.%Y %H:%M')
     p(f'Отчёт сформирован: {date}, Тбилиси', 'SmallReport')
     success = report.get('passed') and report.get('manualClientId')
-    p('РЕЗУЛЬТАТ: ПРОЙДЕНО' if success else 'РЕЗУЛЬТАТ: ЕСТЬ ОШИБКИ ИЛИ НЕЗАВЕРШЁННЫЕ ПРОВЕРКИ', 'Heading1')
+    warning_approved = bool(report.get('warningDeliveryApprovedAt')) and report.get('completedCycles') == [1, 2]
+    manual_available = bool(report.get('manualClientId') and private.get('manualLogin') and private.get('manualPassword'))
+    p('РЕЗУЛЬТАТ: ПРОЙДЕНО' if success else 'ДВА ЦИКЛА ПРОЙДЕНЫ. ПРЕДУПРЕЖДЕНИЕ: LINKLAB' if warning_approved else 'РЕЗУЛЬТАТ: ЕСТЬ ОШИБКИ ИЛИ НЕЗАВЕРШЁННЫЕ ПРОВЕРКИ', 'Heading1')
     p('Настоящие Outlook и LinkedIn не регистрировались. Внешние реквизиты синтетические. Проверялись наш кабинет, рабочая БД, Octo и подключения прокси.')
     p(f"Пройденные циклы: {', '.join(map(str, report.get('completedCycles', []))) or 'пока нет'}. Тестовый ученик: {report.get('clientId', 'не создан')}.")
-    if success and private.get('manualLogin'):
+    if manual_available:
+        start = len(story)
         p('Твой пользователь для ручной проверки', 'Heading1')
         p(f"ФИО: Илья Проверкин\nКабинет: https://very-evil-unicorn.onrender.com/\nЛогин: {private['manualLogin']}\nПароль кабинета: {private['manualPassword']}")
         p('Это чистый кабинет: LinkedIn, Outlook-анкета, заявки и Octo-профили ещё не созданы. ФИО сохранено кириллицей. Название будущих Octo-профилей проверено правилом, а не на живом профиле.')
+        story[start:] = [KeepTogether(story[start:])]
     else:
         p('Отдельный ручной пользователь пока не создан: по согласованному правилу он появляется только после полностью успешной live-проверки. Уведомление об успехе не отправлено.')
     for finding in report.get('findings', []):
@@ -54,7 +58,7 @@ def create_report(report_path, output, private_path=None):
     story.append(PageBreak())
     p('Как пройти тот же путь самостоятельно', 'Heading1')
     steps = [
-        ('Войти в кабинет', ('Используй данные выше.' if success else 'Чистый ручной кабинет пока не создан. После выпуска исправления и успешной повторной проверки будут выданы отдельные данные входа.') + ' Если появится уведомление о новом браузере, нажми «Понятно, продолжить».'),
+        ('Войти в кабинет', ('Используй данные выше.' if manual_available else 'Чистый ручной кабинет пока не создан. После выпуска исправления и успешной повторной проверки будут выданы отдельные данные входа.') + ' Если появится уведомление о новом браузере, нажми «Понятно, продолжить».'),
         ('Начать оформление', 'В разделе LinkedIn выбери «Нет LinkedIn / аккаунт заблокирован». Открой «Данные Outlook».'),
         ('Заполнить анкету', 'Укажи полный адрес почты, пароль и время её регистрации; имя и фамилию латиницей, город и страну. Старые заблокированные аккаунты можно не добавлять. Для этого E2E используются тестовые данные, а не существующая почта.'),
         ('Сохранить заявку', 'Нажми «Сохранить и подготовить Octo». Появится сообщение, что аккаунт создаётся. Повторную заявку во время ожидания оформить нельзя.'),
