@@ -31,6 +31,7 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
     (31,102,16,'https://linkedin.com/in/other','legacy','fixture');`);owned=true;
   for(const name of ['001-status','002-crm-results','003-intake','004-proxy-status','005-credentials-refresh'])await q(sql(`../linklab/sql/${name}.up.sql`));
   await q(sql('./sql/001.up.sql'));await q(sql('./sql/002-new-proxy.up.sql'));await q(sql('../linklab/sql/006-account-cycle.up.sql'));
+  await q(sql('../linklab/sql/007-account-ownership.up.sql'));
   const profile={id:1,clientId:101,locale:'en' as const,revision:1,operationId:'fixture',password:'fixture',createdAt:1,phase:'ready' as const,ownProxy:true,uuid:'a'.repeat(32),original:{title:'Fixture',description:'fixture',tags:[],start_pages:[]},proxy:{uuid:'old',title:'old'}};
   await q('INSERT INTO noco.octo_profiles VALUES(1,101,\'en\',1,$1::jsonb)',[JSON.stringify(profile)]);
   await q(`INSERT INTO noco.linklab(client_id,platform_account_id,status,blocked_at,profile_revision,profile_filled_count,profile_first_completed_at)
@@ -139,6 +140,29 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications WHERE task_id=$1',[first])).rows[0].count,'1');
    await q('UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id=31');
    await error(()=>q('UPDATE noco.linklab SET platform_account_id=31 WHERE client_id=101'),/binding_immutable/);
+  });
+  await t.test('a referenced LinkedIn account cannot change owner or platform outside the cycle',async()=>{
+   await q('GRANT UPDATE(clients_id,platforms_id,login,password,__nc_deleted) ON noco.platform_accounts TO cycle_test_app');
+   const account=(await q('SELECT platform_account_id FROM noco.linklab WHERE client_id=101')).rows[0].platform_account_id;
+   for(const column of ['clients_id','platforms_id']){
+    await q('BEGIN;SET LOCAL ROLE cycle_test_app');try{
+     await assert.rejects(q(`UPDATE noco.platform_accounts SET ${column}=$2 WHERE id=$1`,[account,column==='clients_id'?102:31]),/linkedin_account_binding_immutable/);
+    }finally{await q('ROLLBACK');}
+   }
+   await q('BEGIN;SET LOCAL ROLE cycle_test_app');
+   await q("UPDATE noco.platform_accounts SET login='updated',password='fixture-new' WHERE id=$1",[account]);
+   await q('UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id=$1',[account]);await q('COMMIT');
+   assert.equal((await q('SELECT clients_id FROM noco.platform_accounts WHERE id=$1',[account])).rows[0].clients_id,'101');
+   await q('BEGIN');try{await assert.rejects(q('UPDATE noco.platform_accounts SET clients_id=102 WHERE id=42'),/linkedin_account_binding_immutable/);}finally{await q('ROLLBACK');}
+  });
+  await t.test('installation refuses existing mismatches without silently repairing records',async()=>{
+   await q(sql('../linklab/sql/007-account-ownership.down.sql'));
+   const account=(await q('SELECT platform_account_id FROM noco.linklab WHERE client_id=101')).rows[0].platform_account_id;
+   await q('UPDATE noco.platform_accounts SET clients_id=102 WHERE id=$1',[account]);
+   await error(()=>q(sql('../linklab/sql/007-account-ownership.up.sql')),/linklab_existing_account_ownership_requires_review/);
+   assert.equal((await q('SELECT clients_id FROM noco.platform_accounts WHERE id=$1',[account])).rows[0].clients_id,'102');
+   await q('UPDATE noco.platform_accounts SET clients_id=101 WHERE id=$1',[account]);
+   await q(sql('../linklab/sql/007-account-ownership.up.sql'));
   });
  }finally{await pool.end();await q('RESET ROLE');if(owned){await q('DROP SCHEMA noco CASCADE');await q('DROP OWNED BY cycle_test_app').catch(()=>{});await q('DROP ROLE IF EXISTS cycle_test_app');}await db.end();}
 });
