@@ -19,7 +19,7 @@ export function createTaskProxyCapture(deps: { store: OctoStore; api: CloudApi; 
     const actual = await deps.api.readProfileProxy(p.uuid!);
     if (actual.inline) {
       // Reuse the durable proxy workflow: unknown create/attach outcomes are reconciled by its operation marker.
-      await deps.octo.queueProxy(p.clientId, p.id, actual.inline);
+      await deps.octo.queueProxy(p.clientId, p.id, actual.inline,undefined,true);
       throw new IntakeError('linkedin_task_proxy_pending', 409);
     }
     const proxy = actual.saved;
@@ -28,7 +28,7 @@ export function createTaskProxyCapture(deps: { store: OctoStore; api: CloudApi; 
     if (!before || before.revision !== p.revision) throw new IntakeError('linkedin_task_proxy_changed', 409);
     const live = await idle(before);
     if (live.proxy?.uuid !== proxy.uuid) throw new IntakeError('linkedin_task_proxy_changed', 409);
-    const saved = await deps.store.save({ ...before, proxy: { uuid: proxy.uuid, title: proxy.title, type: proxy.type, host: proxy.host, port: proxy.port } });
+    const saved = await deps.store.save({ ...before, proxy: { uuid: proxy.uuid, title: proxy.title, type: proxy.type, host: proxy.host, port: proxy.port,isMadeByExpert:true } });
     if ((await idle(saved)).proxy?.uuid !== proxy.uuid) throw new IntakeError('linkedin_task_proxy_changed',409);
     return saved;
   };

@@ -35,6 +35,40 @@ function fixture() {
   return{store:createCreationTaskStore(pool,'unicorn_noco_copy_restore'),get state(){return state;},calls,uncertain(){uncertain=true;}};
 }
 
+test('admin confirmation requires expert completion and a current idle proxy, and is idempotent after confirmation',async()=>{
+  const f=fixture();
+  await assert.rejects(f.store.confirm(1,1),{code:'linkedin_task_not_confirmable'});
+  const done=await f.store.status(1,1,'сделана экспертом');
+  await assert.rejects(f.store.confirm(1,1),{code:'linkedin_task_stale_version'});
+  f.state.profile.state.grant={phase:'granted'};
+  await assert.rejects(f.store.confirm(1,done.version),{code:'linkedin_task_proxy_required'});
+  f.state.profile.state.grant=undefined;
+  const confirmed=await f.store.confirm(1,done.version);
+  assert.equal(confirmed.status,'выполнение подтверждено');
+  const updates=f.calls.filter(sql=>sql.includes('SET status=')).length;
+  assert.deepEqual(await f.store.confirm(1,done.version),confirmed);
+  assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,updates);
+  await assert.rejects(f.store.detail(1),{code:'linkedin_task_not_found'});
+  assert.equal((await f.store.detail(1,true)).task.status,'выполнение подтверждено');
+});
+
+test('admin confirmation preserves a committed unknown outcome for read-back instead of starting another cycle',async()=>{
+  const f=fixture(),done=await f.store.status(1,1,'сделана экспертом');
+  f.uncertain();
+  await assert.rejects(f.store.confirm(1,done.version),{code:'commit_uncertain'});
+  assert.equal(f.state.task.status,'выполнение подтверждено');
+  const updates=f.calls.filter(sql=>sql.includes('SET status=')).length;
+  assert.equal((await f.store.confirm(1,done.version)).status,'выполнение подтверждено');
+  assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,updates);
+});
+
+test('expert and admin detail return Outlook creation time without account passwords',async()=>{
+  const f=fixture();Object.assign(f.state.mail,{outlook_registered_at:new Date('2026-10-25T10:30:00.000Z')});
+  const detail=await f.store.detail(1);
+  assert.equal(detail.intake.outlookRegisteredAt,'2026-10-25T10:30:00.000Z');
+  assert.ok(!JSON.stringify(detail).includes('mail-secret'));
+});
+
 test('Denis detail includes the archived account alongside the current submitted blocked history',async()=>{
   const f=fixture();
   const entered={fullName:'Earlier account',country:'Poland'};

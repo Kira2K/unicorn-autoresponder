@@ -61,6 +61,15 @@ The bridge README describes the Render/PC setup. The PC needs no local backend.
   `browser`, never private state/passwords. Profile-access secrets are returned only for
   the owner's currently published grant, with `Cache-Control: no-store`.
 
+### Expert-managed proxy privacy
+
+A proxy assigned/captured by an expert carries durable `isMadeByExpert: true`.
+For students its status is compact and its host, port, login and password are omitted,
+even with `?proxyCredentials=1`; cloud credentials are not read for that response.
+Student replacement of a managed proxy is rejected server-side. Internal staff calls
+opt into the full view after admin/expert authorization. The HTTP query cannot set
+this staff option. Pending expert operations are already redacted before completion.
+
 ### Reading saved proxy credentials
 
 The existing authenticated profile-status requests accept `?proxyCredentials=1`.

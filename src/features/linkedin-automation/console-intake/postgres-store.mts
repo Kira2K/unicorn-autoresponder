@@ -15,10 +15,11 @@ import { tableIds } from '../../web-console/backend/postgres/tables.mts';
 import { assertStudentEditable, readStudentTask, readAccountTask, saveStudentTask, studentAccountAccess } from '../creation-tasks/student-task.mts';
 import { previousProfileAccess } from './previous-profile-access.mts';
 import { archiveBannedAccounts } from './archive-banned-accounts.mts';
+import {loadBlockedHistory} from '../creation-tasks/blocked-history.mts';
 import type { Locale } from '../../octo-access/contracts.mts';
 
 const accountQuery = `SELECT a.id,a.platforms_id,a.url,a.login,a.password,a.linkedin_first_name,
-  a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,lower(p.name) AS platform
+  a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,to_jsonb(a)->'is_banned' AS is_banned,lower(p.name) AS platform
   FROM noco.platform_accounts a JOIN noco.platforms p ON p.id=a.platforms_id
   WHERE a.clients_id=$1 AND lower(p.name) IN ('linkedin','email_outlook')
   AND NOT COALESCE(a.__nc_deleted,false) AND NOT COALESCE(p.__nc_deleted,false) ORDER BY a.id`;
@@ -32,21 +33,40 @@ const timestamp = (value: unknown) => value == null ? '' :
 export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false, creationTasks = false) {
   const read = createReadSession(pool, database);
   return {
-    async checkSchema() { await read(async s => { await s.query(accountQuery + ' LIMIT 0', [0]); }); },
+    async checkSchema() { await read(async s => { await s.query(accountQuery + ' LIMIT 0', [0]);await s.query('SELECT is_banned FROM noco.platform_accounts LIMIT 0');await s.query('SELECT account_id,state FROM noco.linkedin_intake_notifications LIMIT 0'); }); },
     async load(clientId: number):Promise<LinkedInIntakeView> {
       return read(async s => {
         const rows = (await s.query(accountQuery, [clientId])).rows;
         const li = select(rows, 'linkedin'), email = select(rows, 'email_outlook');
         // No secret is returned; leaving a password blank preserves its current value.
         const task = creationTasks && li ? await readAccountTask(s, clientId,Number(li.id)) : undefined;
+        const editableBlockedAccounts=readBlockedAccounts(li?.old_link_blocked);
+        const blockedAccounts=li?await loadBlockedHistory(s,clientId,Number(li.id),li.old_link_blocked):editableBlockedAccounts;
+        const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+        const archivedBlockedAccounts=blockedAccounts.filter(card=>!editableBlockedAccounts.some(entered=>same(card,entered)));
+        const confirmedAt=task?.status==='выполнение подтверждено'?(await s.query('SELECT applied_at FROM noco.linkedin_account_cycles WHERE task_id=$1',[task.id])).rows[0]?.applied_at:undefined;
         return { ...(creationTasks ? { task, ...await studentAccountAccess(s,clientId,li?Number(li.id):undefined),
           ...await previousProfileAccess(s,clientId,task) } : {}),
           linkedinAccountId:li?Number(li.id):undefined,hasLinkedIn:!!li&&(!!li.url||!!li.login||!!li.password),
+          outlookAccountId:email?Number(email.id):undefined,isBanned:li?.is_banned===true,
+          ...(confirmedAt?{warmupUntil:new Date(new Date(String(confirmedAt)).getTime()+30*86400000).toISOString()}:{}),
           url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
           outlookLogin: String(email?.login ?? ''), hasOutlookPassword: !!email?.password,
           ...(email?.outlook_registered_at ? { outlookRegisteredAt: timestamp(email.outlook_registered_at) } : {}),
           firstName: String(li?.linkedin_first_name ?? ''), lastName: String(li?.linkedin_last_name ?? ''),
-          realLocation: String(li?.real_location ?? ''), blockedAccounts: readBlockedAccounts(li?.old_link_blocked) };
+          realLocation: String(li?.real_location ?? ''), blockedAccounts,editableBlockedAccounts,archivedBlockedAccounts };
+      });
+    },
+    async reportBan(clientId:number,expectedAccountId:number){
+      return writeTransaction(pool,database,async s=>{
+        await s.query('SELECT pg_advisory_xact_lock(730644,$1::integer)',[clientId]);
+        if(!(await s.query('SELECT id FROM noco.clients WHERE id=$1 AND NOT coalesce(__nc_deleted,false) FOR UPDATE',[clientId])).rows.length)throw new PostgresReadError('record_not_found');
+        const rows=(await s.query(accountQuery+' FOR UPDATE OF a',[clientId])).rows,li=select(rows,'linkedin');
+        if(!li||Number(li.id)!==expectedAccountId||!(li.url||li.login||li.password))throw new PostgresReadError('linkedin_intake_replacement_stale');
+        if((await studentAccountAccess(s,clientId,expectedAccountId)).registrationPending)throw new PostgresReadError('linkedin_intake_registration_pending');
+        if(li.is_banned!==true){const result=await s.query('UPDATE noco.platform_accounts SET is_banned=true,updated_at=statement_timestamp() WHERE id=$1 AND clients_id=$2 RETURNING id',[expectedAccountId,clientId]);
+          if(result.rows.length!==1)throw new PostgresReadError('linkedin_intake_replacement_stale');}
+        return{reported:true,linkedinAccountId:expectedAccountId,isBanned:true};
       });
     },
     async save(clientId: number, data: LinkedInIntake, locales: string[], options = { createOctoProfiles: true }) {
@@ -106,6 +126,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         };
         let linkedinAccountId: number, outlookAccountId: number | undefined;
         if (data.scenario === 'existing') {
+          if(li?.is_banned===true)throw new PostgresReadError('linkedin_intake_banned_account');
           const profiles = (await s.query('SELECT locale,state FROM noco.octo_profiles WHERE client_id=$1', [clientId])).rows;
           if (!locales.every(locale => profiles.some(p => p.locale === locale &&
             (p.state as { phase?: string; deletion?: unknown }).phase === 'ready' && !(p.state as { deletion?: unknown }).deletion)) ||
@@ -116,6 +137,8 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
           linkedinAccountId = await upsert('linkedin', li, { url: data.url, login: data.login,
             ...(data.password ? { password: data.password } : {}) });
           if (linklab) await syncLinkLabAccount(s, clientId);
+          const changed=!li||String(li.url??'')!==data.url||String(li.login??'')!==data.login||!!data.password&&data.password!==li.password;
+          if(changed)await s.query('INSERT INTO noco.linkedin_intake_notifications(account_id,client_id) VALUES($1,$2) ON CONFLICT(account_id) DO NOTHING',[linkedinAccountId,clientId]);
         } else {
           linkedinAccountId = await upsert('linkedin', li, { linkedin_first_name: data.firstName,
             linkedin_last_name: data.lastName, real_location: data.realLocation, old_link_blocked: JSON.stringify(data.blockedAccounts) });

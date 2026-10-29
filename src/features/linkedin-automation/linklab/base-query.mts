@@ -8,6 +8,7 @@ export const linkLabBaseQuery = `WITH candidates AS (
   WHERE p.id = 16 AND lower(p.name) = 'linkedin'
     AND NOT COALESCE(p.__nc_deleted, false)
     AND NOT COALESCE(a.__nc_deleted, false)
+    AND NOT COALESCE((to_jsonb(a)->>'is_banned')::boolean,false)
 ), accounts AS (
   SELECT clients_id, count(*) AS account_count, count(*) FILTER(WHERE has_link) AS linked_count,
     min(id) AS account_id, min(url) AS url, bool_or(ready) AS ready,

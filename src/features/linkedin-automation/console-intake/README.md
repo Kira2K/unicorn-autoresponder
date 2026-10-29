@@ -3,8 +3,10 @@
 Students with Dolphin profiles keep access to their previous Dolphin profiles during
 a replacement LinkedIn registration. Every student with a registered LinkedIn has
 one “Меня забанили” button in the single LinkedIn section, including Dolphin, Octo
-and RU students. It opens the same Outlook/identity/blocked-history form without
-writing anything. Cancelling restores the saved state. The button is hidden while
+and RU students. It records the owner-scoped `is_banned` flag and opens recovery instructions. It does
+not create a replacement application. The student attests that a week of recovery
+attempts has passed before opening the Outlook/identity/history form; no server timer
+is enforced. Cancelling restores the saved form state. The button is hidden while
 any registration request for the current account is unconfirmed (`не начата`, `блок`,
 `сделана экспертом`), even if Denis already saved its credentials. It becomes available
 after `выполнение подтверждено`, or for an existing account without a registration
@@ -24,8 +26,9 @@ are hidden until confirmation. The existing three-day preparation message remain
 `не начата` and `блок` allow editing the current Outlook/identity/history data with
 “Сохранить изменения”; `сделана экспертом` and `выполнение подтверждено` lock editing.
 Status polling updates this lock in both directions without replacing unsaved drafts.
-Saved Outlook data and blocked history are collapsible sections; a new Outlook form
-opens for entry, and validation reveals any collapsed section containing an invalid field.
+Outlook fields stay visible; only the instructions are collapsible. A blocked-history
+checkbox reveals required cards. Archived history is read-only and shared with Denis
+through the same loader, so both views show the same total.
 
 GET adds `hadLinkedInBeforeTask` and `previousOctoProfileIds`, computed read-only from
 owned current/archived registered accounts, earlier confirmed tasks and profile creation
@@ -33,8 +36,9 @@ times. A draft entered after this request began does not establish prior LinkedI
 For a returning student, only non-deleting Octo profiles created by the request's start
 remain visible during preparation, with access controls but without setup/proxy editing;
 previous Dolphin access remains visible too. Freshly prepared Octo profiles stay hidden.
-First-time students see the existing instruction to wait before opening Octo; returning
-students with previous LinkedIn do not receive that blanket warning.
+Every pending registration, including a replacement, warns against opening Octo
+while the expert works. Existing access remains available. During the first 30 days
+after confirmation, each access request requires acknowledgment of the warmup warning.
 
 Editing updates the same bound LinkedIn/Outlook rows and task (including a bound manual
 request), preserves the expert's URL/login/password, and does not queue profile setup again.
@@ -101,11 +105,12 @@ the write. Normal intake requests never mutate the schema.
 New rows use the shared SQL ID allocator and encoded `_copy_id`, with source
 metadata/timestamps. They never rely on the nonunique default `[]` for identity.
 
-`old_link_blocked` contains a JSON array of optional blocked-account objects:
+`old_link_blocked` contains a JSON array of blocked-account objects:
 `fullName`, `country`, `company`, `position`, `blockedAt`, `newFullName`.
-Empty cards are removed, partial cards and ordering survive. Legacy formatted text
-is read as one card; unrecognized content is retained in optional `legacyText`.
-Zero blocked accounts is valid. There is no date or name-difference rule.
+New cards require full name, country, company, position and block date. Zero cards
+is valid with the checkbox clear. Legacy formatted text and unchanged partial cards
+remain readable without destructive rewriting; new/changed partial cards are rejected
+server-side even if an older caller omits the checkbox field. Ordering is preserved.
 
 The preparation records and durable `source: direct` Octo setup intent commit in
 one client-locked SQL transaction. Retries reuse accounts and the current intent;
@@ -122,7 +127,10 @@ The SQL Console composition disables dispatch of retired queued proxy-checker jo
 already dispatched unknown checks are not retried or reinterpreted.
 
 Saving existing credentials retains the LinkLab handoff inside the same transaction
-when LinkLab is enabled. Preparation-only LinkedIn rows do not trigger it.
+when LinkLab is enabled. It queues one durable manager notification per account after
+a credential change; duplicate saves do not enqueue another message. The recipient
+mention is injected, default Julia; the current composition passes Kira. Preparation-only
+LinkedIn rows do not trigger the existing-account notification.
 
 ## Local verification and release
 
@@ -165,3 +173,13 @@ Apply the column migration, then deploy backend before frontend. Startup validat
 Octo is configured. Runtime profile creation still needs the existing Octo worker,
 cloud configuration and owner bridge; this code change alone does not create live
 accounts or prove live login. No Octo-to-Unipile automation is introduced.
+
+## Denis follow-up migration
+
+Deploy this version only after explicitly applying
+`creation-tasks/migrate-denis.mts --apply` against the marked copy database. Without
+`--apply`, the migration is a rolled-back rehearsal. It adds ban/proxy provenance
+flags and the existing-account notification outbox. Startup checks schema, never DDL.
+Location prefills from the client record but editing the intake does not edit that
+record. Future Outlook timestamps reject with a specific error; missing Octo client
+data returns only known field IDs and labels, never provider diagnostics.

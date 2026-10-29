@@ -41,6 +41,7 @@ import { createTaskStatusReporter } from '../../../linkedin-automation/creation-
 import {taskProxyStore} from '../../../linkedin-automation/creation-tasks/proxy-store.mts';
 import {createNewTaskProxy} from '../../../linkedin-automation/creation-tasks/new-proxy-service.mts';
 import {cycleNotificationRuntime,cycleNotificationStore,deliverCycleNotification} from '../../../linkedin-automation/creation-tasks/cycle-notifications.mts';
+import {existingNotificationStore,deliverExistingNotification} from '../../../linkedin-automation/console-intake/existing-notifications.mts';
 import type {SendOneInput} from '../../../../integrations/telegram/types.ts';
 import { createRequire } from 'node:module';
 
@@ -56,8 +57,9 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
   let linkedinIntake: ReturnType<typeof createLinkedInIntakeService> | undefined;
   let linkedinCreator: ReturnType<typeof createCreationTaskService> | undefined;
   let cycleNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
+  let existingNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
   const close = () => closing ??= (async () => {
-    try { await cycleNotices?.stop();await lifecycle?.stop(); } finally {
+    try { await cycleNotices?.stop();await existingNotices?.stop();await lifecycle?.stop(); } finally {
       try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
     }
   })();
@@ -125,9 +127,12 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
         return taskTelegram.sendOne(input);
       };
-      cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database),
+      const notificationMention='@KiraSamsonova';
+      existingNotices=cycleNotificationRuntime(()=>deliverExistingNotification({store:existingNotificationStore(pool,config.database),mention:notificationMention,
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
-      const reportStatusChange = createTaskStatusReporter({chatId:'-1003187558078',mention:'@juliafeels',
+      cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database),mention:notificationMention,
+        client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
+      const reportStatusChange = createTaskStatusReporter({chatId:'-1003187558078',mention:notificationMention,
         client:id=>options.repository.getClientById(id),
         sendOne:input=>{
           taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
@@ -145,12 +150,12 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           const checked=await proxyChecker.check(`${p.type==='socks5'?'socks5h':p.type}://${auth}${host}:${p.port}`);
           return checked.exit_ip||'';
         }}),
-        nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange });
+        nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange,notificationMention });
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }
     return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),
       ...(linkedinCreator ? { linkedinCreator, linkedinCreatorAuth: { login: env.LINKEDIN_CREATOR_LOGIN || '', password: env.LINKEDIN_CREATOR_PASSWORD || '' } } : {}) }, close, octoBridge, octoControl,
-      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start(); } };
+      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start();await existingNotices?.start(); } };
   } catch (error) { await close(); throw error; }
 }

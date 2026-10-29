@@ -170,7 +170,8 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
       <article v-else-if="selected" :key="selected.task.id" data-testid="creation-task-detail">
         <h2>{{ selected.client.fio }}</h2><p>Стек: {{ selected.client.stack || 'Не указан' }}</p>
         <dl><dt>Имя латиницей</dt><dd>{{ selected.intake.firstName }} {{ selected.intake.lastName }}</dd>
-          <dt>Реальная локация</dt><dd>{{ selected.intake.realLocation }}</dd><dt>Почта Outlook</dt><dd>{{ selected.intake.outlookLogin }}</dd></dl>
+          <dt>Реальная локация</dt><dd>{{ selected.intake.realLocation }}</dd><dt>Почта Outlook</dt><dd>{{ selected.intake.outlookLogin }}</dd>
+          <dt>Дата и время регистрации Outlook</dt><dd>{{ selected.intake.outlookRegisteredAt?new Date(selected.intake.outlookRegisteredAt).toLocaleString():'Не указаны' }}</dd></dl>
         <label>Пароль Outlook <input type="password" value="saved-password" readonly aria-label="Пароль Outlook"></label>
         <button type="button" @click="copy('outlook')">{{ copied === 'outlook' ? 'Скопировано' : 'Копировать пароль Outlook' }}</button>
         <h3>Старые заблокированные аккаунты ({{ selected.intake.blockedAccounts.length }})</h3><p v-if="!selected.intake.blockedAccounts.length">Не указаны.</p>

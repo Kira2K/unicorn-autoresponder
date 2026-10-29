@@ -24,7 +24,7 @@ test('Proxy drafts hydrate returned credentials; submission validates fields and
   const proxy = { type: 'socks5', host: 'proxy.example.test', port: 1080, login: 'saved-login', password: 'saved-password', changeIpUrl: 'https://private.example.test/secret' }
   const draft = octoProxyDraft(proxy)
   assert.deepEqual(draft, proxy)
-  assert.deepEqual(octoProxyDraft(), { type: 'http', host: '', port: '', login: '', password: '', changeIpUrl: '' })
+  assert.deepEqual(octoProxyDraft(), { type: 'socks5', host: '', port: '', login: '', password: '', changeIpUrl: '' })
   const entered = { ...draft, host: ' proxy.example.test ', port: '1080', login: ' entered login ', password: ' entered password ', changeIpUrl: ' https://proxy.example.test/change ' }
   const payload = octoProxyPayload(entered)
   assert.deepEqual(payload, { type: 'socks5', host: 'proxy.example.test', port: 1080, login: ' entered login ', password: ' entered password ', changeIpUrl: 'https://proxy.example.test/change' })

@@ -43,6 +43,7 @@ export async function completeCycleByCreator(c:CycleContext,page:Page,journal:Ru
  await submitAndRead(page,`/api/linkedin-creator/tasks/${taskId}/result`,()=>page.getByRole('button',{name:'Сохранить данные LinkedIn',exact:true}).click());
  if(cycle===2){await page.getByLabel('Статус заявки',{exact:true}).selectOption('блок');await submitAndRead(page,`/api/linkedin-creator/tasks/${taskId}/status`,()=>page.getByRole('button',{name:'Сохранить статус',exact:true}).click());await onBlock();}
  await page.getByLabel('Статус заявки',{exact:true}).selectOption('сделана экспертом');
- await submitAndRead(page,`/api/linkedin-creator/tasks/${taskId}/status`,()=>page.getByRole('button',{name:'Сохранить статус',exact:true}).click());
+ const completed=await submitAndRead(page,`/api/linkedin-creator/tasks/${taskId}/status`,()=>page.getByRole('button',{name:'Сохранить статус',exact:true}).click());
+ if(completed.notification?.outcome!=='sent'||!(Number(completed.notification.messageId)>0))throw Error('e2e_expert_notice_not_verified');
  await journal.record({step:`cycle-${cycle}-expert-done`,expected:'Результат сохранён; логин взят из Outlook этой заявки',actual:'Денис сохранил синтетический результат и завершил заявку через UI',state:'passed',screenshot:await evidenceScreenshot(page,journal,`cycle-${cycle}-expert-done`)});
 }

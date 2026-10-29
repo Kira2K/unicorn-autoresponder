@@ -28,7 +28,7 @@ export function cycleDatabase(c:CycleContext,runId:string,clientId:number){
  const owned=async()=>c.read(async s=>{const r=(await s.query('SELECT * FROM noco.clients WHERE id=$1',[clientId])).rows[0];if(!r)throw Error('e2e_fixture_missing');assertFixture(r,runId,'auto');return r;});
  return{
   async snapshot(){await owned();return c.read(async s=>({
-   accounts:(await s.query('SELECT id,platforms_id,url,login,__nc_deleted,old_link_blocked FROM noco.platform_accounts WHERE clients_id=$1 ORDER BY id',[clientId])).rows,
+   accounts:(await s.query('SELECT id,platforms_id,url,login,__nc_deleted,old_link_blocked,is_banned FROM noco.platform_accounts WHERE clients_id=$1 ORDER BY id',[clientId])).rows,
    tasks:(await s.query('SELECT * FROM noco.linkedin_creation_task WHERE client_id=$1 ORDER BY id',[clientId])).rows,
    profiles:(await s.query('SELECT profile_id,locale,revision,state FROM noco.octo_profiles WHERE client_id=$1 ORDER BY locale',[clientId])).rows.map(p=>({profile_id:Number(p.profile_id),locale:String(p.locale),revision:Number(p.revision),state:p.state as ManagedProfile})),
    linklab:(await s.query('SELECT * FROM noco.linklab WHERE client_id=$1',[clientId])).rows[0],
@@ -36,12 +36,6 @@ export function cycleDatabase(c:CycleContext,runId:string,clientId:number){
    notices:(await s.query('SELECT task_id,state,message_id FROM noco.linkedin_cycle_notifications WHERE client_id=$1 ORDER BY task_id',[clientId])).rows,
    proof:(await s.query('SELECT v.task_id,v.baseline_uuid,v.baseline_fingerprint,v.fingerprint,v.comparison,v.exit_ip,v.baseline_ip FROM noco.linkedin_creation_proxy v JOIN noco.linkedin_creation_task t ON t.id=v.task_id WHERE t.client_id=$1 ORDER BY t.id',[clientId])).rows
   }));},
-  async confirm(taskId:number){await owned();return writeTransaction(c.pool,c.config.database,async s=>{
-   await s.query('SELECT pg_advisory_xact_lock(730644,$1::integer)',[clientId]);await s.query('SELECT id FROM noco.clients WHERE id=$1 FOR UPDATE',[clientId]);
-   const row=(await s.query('SELECT status FROM noco.linkedin_creation_task WHERE id=$1 AND client_id=$2 FOR UPDATE',[taskId,clientId])).rows[0];
-   if(!row||!['сделана экспертом','выполнение подтверждено'].includes(String(row.status)))throw Error('e2e_task_not_confirmable');
-   await s.query("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено' WHERE id=$1 AND client_id=$2",[taskId,clientId]);
-  });},
   async profilePasswordHash(){await owned();return c.read(async s=>createHash('sha256').update(JSON.stringify((await s.query("SELECT locale,state->>'password' AS password FROM noco.octo_profiles WHERE client_id=$1 ORDER BY locale",[clientId])).rows)).digest('hex'));}
  };
 }

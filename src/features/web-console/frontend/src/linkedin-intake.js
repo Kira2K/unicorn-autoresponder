@@ -25,6 +25,6 @@ export async function intakeRequest(method = 'GET', data, signal) {
   const response = await fetch('/api/client/linkedin-intake', { method, signal, credentials: 'include',
     headers: { 'Content-Type': 'application/json' }, ...(data ? { body: JSON.stringify(data) } : {}) })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw Object.assign(new Error(body.error || 'linkedin_intake_unavailable'), { status: response.status })
+  if (!response.ok) throw Object.assign(new Error(body.error || 'linkedin_intake_unavailable'), { status: response.status,fields:body.fields })
   return body
 }

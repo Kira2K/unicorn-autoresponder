@@ -4,13 +4,22 @@ import {proxyFingerprint} from '../../../linkedin-automation/creation-tasks/new-
 import type {ProxyInput} from '../../../octo-access/contracts.mts';
 import type {CycleContext} from './context.mts';
 import type {Evidence} from './contracts.mts';
+import {createRequire} from 'node:module';
+import {verifyNotificationRecipient} from './notification-recipient.mts';
+import {consoleUrl} from './context.mts';
 export async function cyclePreflight(c:CycleContext){
  const checks:Evidence[]=[],connections:Array<{sourceUuid:string;input:ProxyInput;exitIp:string}>=[];
  const check=async(step:string,expected:string,fn:()=>Promise<Record<string,unknown>>)=>{
   try{const db=await fn();checks.push({step,expected,actual:'Проверка выполнена',db,state:'passed',at:new Date().toISOString()});}
   catch(e){checks.push({step,expected,actual:/^e2e_[a-z_]+$/.test((e as Error).message)?(e as Error).message:'e2e_preflight_unavailable',state:'blocked',at:new Date().toISOString()});}
  };
- await check('render','Кабинет и бот опубликованы из актуального master',async()=>{
+ await check('render',c.localConsoleTarget?'Локальный кабинет доступен; production worker остановлен оператором':'Кабинет и бот опубликованы из одного актуального commit',async()=>{
+  if(c.localConsoleTarget){
+   if(c.env.LINKEDIN_E2E_PRODUCTION_WORKER_STOPPED!=='1')throw Error('e2e_production_worker_must_be_stopped');
+   const response=await fetch(consoleUrl+'/api/auth/me',{signal:AbortSignal.timeout(5000)});
+   if(![200,401].includes(response.status))throw Error('e2e_local_console_unavailable');
+   return{target:'loopback',productionWorkerStopped:'operator-attested'};
+  }
   const deployments=await Promise.all(['srv-d8nnraok1i2s73dhp190','srv-d9cp1uu1a83c739ht35g'].map(id=>c.render(`services/${id}/deploys?limit=1`)));
   if(deployments.some(a=>a[0]?.deploy.status!=='live')||deployments[0][0].deploy.commit.id!==deployments[1][0].deploy.commit.id)throw Error('e2e_deployment_not_live');
   return{commit:deployments[0][0].deploy.commit.id};
@@ -20,6 +29,16 @@ export async function cyclePreflight(c:CycleContext){
   const r=(await s.query("SELECT has_table_privilege('unicorn_sql_app','noco.linkedin_creation_proxy','SELECT,UPDATE') AS proof,has_table_privilege('unicorn_sql_app','noco.linkedin_cycle_notifications','SELECT,UPDATE') AS notice,pg_has_role('unicorn_sql_app','unicorn_noco_copy_owner','MEMBER') AS owner")).rows[0];
   if(!r.proof||!r.notice||r.owner)throw Error('e2e_database_rights_invalid');return r;
  }));
+ await check('denis-schema','Схема блокировок, экспертных прокси и уведомлений существующего LinkedIn установлена',()=>c.read(async s=>{
+  await s.query('SELECT is_banned FROM noco.platform_accounts LIMIT 0');
+  await s.query('SELECT proxy_is_made_by_expert FROM noco.octo_profiles LIMIT 0');
+  await s.query('SELECT account_id,state FROM noco.linkedin_intake_notifications LIMIT 0');return{ready:true};
+ }));
+ await check('notification-recipient','Опубликованный кабинет направляет уведомления Кире, не Юлии',async()=>{
+  const {ADMIN_EMAIL,ADMIN_PASSWORD}=createRequire(import.meta.url)('../../backend/app.ts');
+  return verifyNotificationRecipient({url:consoleUrl,email:ADMIN_EMAIL,password:ADMIN_PASSWORD,
+    expectedMention:c.env.LINKEDIN_E2E_NOTIFY_MENTION||'@KiraSamsonova'});
+ });
  await check('guest_rights','Гость видит только выделенную папку и не может менять профили/прокси',async()=>{
   await c.cloud.validateGuest(c.vars.OCTO_GUEST_EMAIL!,c.vars.OCTO_GUEST_FOLDER_UUID!);return{validated:true};
  });
@@ -30,7 +49,7 @@ export async function cyclePreflight(c:CycleContext){
  });
  await check('bridge','Штатный backend готов обрабатывать cleanup',async()=>{
   if(c.vars.OCTO_PASSWORD_CLEANUP!=='bridge')return{mode:'cloud'};
-  const r=await fetch('https://very-evil-unicorn.onrender.com/internal/octo-bridge/v1/health',{headers:{Authorization:`Bearer ${c.vars.OCTO_BRIDGE_SECRET}`},signal:AbortSignal.timeout(15000)});
+  const r=await fetch(consoleUrl+'/internal/octo-bridge/v1/health',{headers:{Authorization:`Bearer ${c.vars.OCTO_BRIDGE_SECRET}`},signal:AbortSignal.timeout(15000)});
   if(!r.ok||(await r.json()).ready!==true)throw Error('e2e_bridge_unavailable');return{mode:'bridge',ready:true};
  });
  await check('proxies','Два свободных тестовых подключения работают и дают разные IP',async()=>{

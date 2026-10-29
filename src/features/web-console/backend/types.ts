@@ -52,6 +52,7 @@ export type WebClient = {
 }
 
 export type WebPlatformAccount = {
+  isBanned?:boolean
   id: number
   clientId?: number
   platform: string

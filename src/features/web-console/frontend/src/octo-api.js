@@ -8,6 +8,7 @@ export async function request(path, options = {}) {
   if (!response.ok) {
     const error = new Error(body.message || body.error || `Request failed: ${response.status}`)
     error.status = response.status
+    error.fields = body.fields
     throw error
   }
   return body
@@ -59,7 +60,7 @@ export const octoApi = {
 }
 
 export function octoProxyDraft(proxy = {}) {
-  return { type: proxy.type || 'http', host: proxy.host || '', port: proxy.port ?? '',
+  return { type: proxy.type || 'socks5', host: proxy.host || '', port: proxy.port ?? '',
     login: proxy.login ?? '', password: proxy.password ?? '', changeIpUrl: proxy.changeIpUrl ?? '' }
 }
 

@@ -7,13 +7,15 @@ export interface TaskStatusChange {
 }
 export type StatusNotification = { outcome:'sent'; messageId:number } |
   { outcome:'failed'|'uncertain'; code:string };
+export const DEFAULT_NOTIFICATION_MENTION = '@juliafeels';
 
 /** One post-commit notification attempt. The status transition is never retried here. */
 export function createTaskStatusReporter(deps: {
-  chatId:string; mention:string;
+  chatId:string; mention?:string;
   client(id:number):Promise<Pick<WebClient,'firstName'|'lastName'|'fio'|'clientName'|'primaryStack'>>;
   sendOne(input:SendOneInput):Promise<SendOneResult>;
 }) {
+  const mention=deps.mention??DEFAULT_NOTIFICATION_MENTION;
   return async (change:TaskStatusChange):Promise<StatusNotification> => {
     let client;
     try { client=await deps.client(change.clientId); }
@@ -23,7 +25,7 @@ export function createTaskStatusReporter(deps: {
     const stack=client.primaryStack?.replace(/\s+/g,' ').trim() || 'не указан';
     try {
       const result=await deps.sendOne({chatId:deps.chatId,
-        text:`Заявка на создание LinkedIn №${change.taskId}\nКлиент: ${name}\nСтек: ${stack}\nДенис изменил статус: «${change.from}» → «${change.to}».\n\n${deps.mention} fyi`,
+        text:`Заявка на создание LinkedIn №${change.taskId}\nКлиент: ${name}\nСтек: ${stack}\nДенис изменил статус: «${change.from}» → «${change.to}».\n\n${mention} fyi`,
         reportContext:{clientId:change.clientId,clientName:name,chatPurpose:'Уведомления о заявках LinkedIn',chatType:'supergroup'}});
       if(result.kind==='client-failure')return{
         outcome:['validation','configuration'].includes(result.failure.stage)?'failed':'uncertain',code:result.failure.stage};

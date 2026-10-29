@@ -14,6 +14,7 @@ export function assertReplacement(before:any,after:any,newTaskId:number){
   assert.notEqual(String(old[key]),String(fresh[key]));assert.equal(after.accounts.find((a:any)=>String(a.id)===String(old[key])).__nc_deleted,true);
   assert.equal(!!after.accounts.find((a:any)=>String(a.id)===String(fresh[key])).__nc_deleted,false);
  }
+ assert.equal(after.accounts.find((a:any)=>String(a.id)===String(old.linkedin_account_id)).is_banned,true);
  assert.deepEqual(after.profiles.map((p:any)=>[p.profile_id,p.state.uuid]),before.profiles.map((p:any)=>[p.profile_id,p.state.uuid]));
  assert.equal(Number(after.linklab.platform_account_id),Number(old.linkedin_account_id),'intake does not switch LinkLab');
 }

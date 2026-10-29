@@ -6,6 +6,7 @@ import { IntakeError } from '../console-intake/contracts.mts';
 import { taskId } from './contracts.mts';
 import type { StatusNotification, TaskStatusChange } from './status-report.mts';
 import type {createNewTaskProxy} from './new-proxy-service.mts';
+import {DEFAULT_NOTIFICATION_MENTION} from './status-report.mts';
 
 export function createCreationTaskService(deps: {
   store: CreationTaskStore; profiles: Pick<OctoStore,'list'|'get'>; octo: OctoService;
@@ -15,6 +16,7 @@ export function createCreationTaskService(deps: {
   nodeMavenKey(): string;
   newProxy?:ReturnType<typeof createNewTaskProxy>;
   reportStatusChange?(change: TaskStatusChange): Promise<StatusNotification>;
+  notificationMention?:string;
 }) {
   const detail = async (id: unknown) => deps.store.detail(taskId(id));
   async function en(id: unknown) {
@@ -26,6 +28,34 @@ export function createCreationTaskService(deps: {
     if(d.task.requiresNewProxy){if(!deps.newProxy)throw new IntakeError('linkedin_task_new_proxy_required',503);await deps.newProxy.assert(d.task,d.profile);}
   }
   return {
+    notificationConfig(){return{notificationMention:deps.notificationMention??DEFAULT_NOTIFICATION_MENTION};},
+    async adminList() {
+      return Promise.all((await deps.store.list(true)).map(async task=>{
+        const c=await deps.client(task.clientId);return{...task,fio:c.fio||c.clientName,stack:c.primaryStack};
+      }));
+    },
+    async adminDetail(id:unknown) {
+      const d=await deps.store.detail(taskId(id),true),c=await deps.client(d.task.clientId);
+      return{...d,client:{id:c.id,fio:c.fio||c.clientName,stack:c.primaryStack},notification:await deps.store.notification(d.task.id)};
+    },
+    async adminProfileStatus(id:unknown,proxyCredentials=false) {
+      const d=await deps.store.detail(taskId(id),true);
+      return deps.octo.status(d.task.clientId,{proxyCredentials,locales:['en'],staff:true});
+    },
+    async confirm(id:unknown,body:Record<string,unknown>) {
+      const d=await deps.store.detail(taskId(id),true);
+      if(d.task.status!=='выполнение подтверждено'){
+        if(d.task.status!=='сделана экспертом')throw new IntakeError('linkedin_task_not_confirmable',409);
+        if(d.task.version!==taskId(body.version))throw new IntakeError('linkedin_task_stale_version',409);
+        const p=(await deps.profiles.list(d.task.clientId)).find(p=>p.id===d.task.proxyProfileId&&p.locale==='en'&&!p.deletion);
+        if(!p)throw new IntakeError('linkedin_task_en_profile_required',409);
+        await requireNewProxy({...d,profile:p});
+        const actual=await deps.capture(p);
+        if(actual.proxy?.uuid!==d.task.proxyUuid)throw new IntakeError('linkedin_task_proxy_changed',409);
+      }
+      await deps.store.confirm(taskId(id),taskId(body.version));
+      return this.adminDetail(id);
+    },
     async list() {
       return Promise.all((await deps.store.list()).map(async task => {
         const c = await deps.client(task.clientId);
@@ -42,7 +72,7 @@ export function createCreationTaskService(deps: {
       return deps.secrets(d.task.clientId, kind === 'outlook' ? d.task.outlookAccountId : d.task.linkedinAccountId);
     },
     async profileStatus(id: unknown, proxyCredentials = false) {
-      const d = await detail(id), s = await deps.octo.status(d.task.clientId, { proxyCredentials, locales: ['en'] });
+      const d = await detail(id), s = await deps.octo.status(d.task.clientId, { proxyCredentials, locales: ['en'],staff:true });
       let newProxyReady=!d.task.requiresNewProxy;
       if(d.task.requiresNewProxy&&deps.newProxy){const p=(await deps.profiles.list(d.task.clientId)).find(p=>p.locale==='en');newProxyReady=!!p&&await deps.newProxy.ready(d.task,p);}
       return { ...s,newProxyRequired:!!d.task.requiresNewProxy,newProxyReady,
@@ -60,7 +90,7 @@ export function createCreationTaskService(deps: {
       if(d.task.requiresNewProxy){
         if(!deps.newProxy)throw new IntakeError('linkedin_task_new_proxy_required',503);
         await deps.newProxy.queue(d.task,d.profile,input);
-      }else await deps.octo.saveProxy(d.task.clientId, d.profile.id, input);
+      }else await deps.octo.saveProxy(d.task.clientId, d.profile.id, input,true);
       return { queued: true,...(d.task.requiresNewProxy?{task:(await detail(id)).task}:{}) };
     },
     async grant(id: unknown, grantId: string) {

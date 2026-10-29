@@ -1373,6 +1373,8 @@ function createWebConsoleApp(options: {
   registerLinkedInIntakeRoutes(app, requireAuth, options.linkedinIntake)
   const { registerCreationTaskRoutes } = require('./linkedin-creation-routes.ts') as typeof import('./linkedin-creation-routes.ts')
   registerCreationTaskRoutes(app, requireAuth, options.linkedinCreator)
+  const { registerAdminCreationTaskRoutes } = require('./linkedin-admin-creation-routes.ts') as typeof import('./linkedin-admin-creation-routes.ts')
+  registerAdminCreationTaskRoutes(app, requireAuth, options.linkedinCreator)
 
   app.get('/api/dolphin/profiles/status', requireAuth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {

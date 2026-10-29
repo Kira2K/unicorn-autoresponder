@@ -8,6 +8,6 @@ test('confirmation evidence rejects stale binding, repeated resets and unsent no
 });
 test('replacement must preserve profiles, archive both old accounts and keep LinkLab on the old account',()=>{
  const profiles=[{profile_id:2,state:{uuid:'same'}}],before={tasks:[task],profiles};
- const after={tasks:[task,{id:2,linkedin_account_id:21,outlook_account_id:22}],accounts:[{id:11,__nc_deleted:true},{id:12,__nc_deleted:true},{id:21},{id:22}],profiles,linklab:{platform_account_id:11}};
+ const after={tasks:[task,{id:2,linkedin_account_id:21,outlook_account_id:22}],accounts:[{id:11,__nc_deleted:true,is_banned:true},{id:12,__nc_deleted:true},{id:21},{id:22}],profiles,linklab:{platform_account_id:11}};
  assert.doesNotThrow(()=>assertReplacement(before,after,2));assert.throws(()=>assertReplacement(before,{...after,profiles:[]},2));
 });

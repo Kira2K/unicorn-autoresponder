@@ -22,7 +22,10 @@ async function submit() {
   } catch (error) {
     if (error.name === 'AbortError') return
     if ([401,403].includes(error.status)) emit('denied', error)
-    message.value = error.message === 'invalid_proxy_fields' ? 'Проверьте поля прокси.' : 'Не удалось начать настройку. Проверьте личные данные или обратитесь в поддержку.'
+    const fields=(error.fields||[]).map(item=>item.label).filter(Boolean)
+    message.value = error.message === 'octo_client_data_required'
+      ? (fields.length ? `Не хватает данных ученика: ${fields.join(', ')}. Заполни личные данные; если поле недоступно, обратись в поддержку.` : 'Не хватает обязательных данных ученика для Octo. Проверь личные данные или обратись в поддержку.')
+      : error.message === 'invalid_proxy_fields' ? 'Проверь поля прокси.' : 'Не удалось начать настройку. Проверь личные данные или обратись в поддержку.'
   } finally { saving.value = false }
 }
 onUnmounted(() => { controller.abort(); proxy.value = octoProxyDraft() })
@@ -34,7 +37,7 @@ onUnmounted(() => { controller.abort(); proxy.value = octoProxyDraft() })
     <p v-else-if="unresolved" role="alert">Предыдущая настройка требует проверки поддержки. Повторное создание не запускается.</p>
     <form v-else @submit.prevent="submit">
       <fieldset :disabled="saving">
-        <legend>{{ needsProxy ? 'Сначала настройте свой прокси для EN-профиля' : 'Создание профилей Octo' }}</legend>
+        <legend>{{ needsProxy ? 'Сначала настрой свой прокси для EN-профиля' : 'Создание профилей Octo' }}</legend>
         <OctoProxyFields v-if="needsProxy" v-model="proxy" prefix="octo-setup-proxy" />
         <button type="submit">{{ missing.length ? 'Создать профили Octo' : 'Сохранить прокси' }}</button>
       </fieldset>

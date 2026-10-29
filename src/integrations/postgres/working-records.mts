@@ -15,6 +15,8 @@ export function projection(table: WorkingTable, alias = 't'): string {
   // Existing SQL soft-delete metadata is read-only and absent from some source catalogs.
   if (table.id === 'm8zej2vsv4iypl8' && !physicalColumns(table).some(c => c.dataKey === '__nc_deleted'))
     pairs.push(`'__nc_deleted',to_jsonb(${alias})->'__nc_deleted'`);
+  if (table.id === 'm8zej2vsv4iypl8' && !physicalColumns(table).some(c => c.dataKey === 'is_banned'))
+    pairs.push(`'is_banned',to_jsonb(${alias})->'is_banned'`);
   // Concatenate objects in small chunks: PostgreSQL limits arguments per function call.
   const chunks: string[] = [];
   for (let i = 0; i < pairs.length; i += 40) chunks.push(`jsonb_build_object(${pairs.slice(i, i + 40).join(',')})`);

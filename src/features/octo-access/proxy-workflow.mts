@@ -2,6 +2,7 @@ import { OctoError } from './contracts.mts';
 import type { CloudApi, ManagedProfile, OctoConfig, OctoStore, SavedProxy } from './contracts.mts';
 import { inFolder, safeCode } from './provision.mts';
 export const proxyBusy = (p: ManagedProfile) => !!p.proxyChange && p.proxyChange.phase !== 'complete';
+export const expertProxy = (p:ManagedProfile) => p.proxy?.isMadeByExpert===true || p.proxyChange?.isMadeByExpert===true;
 export const canEditProxy = (p: ManagedProfile) => !p.deletion && p.phase === 'ready' && !p.pending && !proxyBusy(p) && (!p.grant || p.grant.phase === 'complete');
 export async function advanceProxy(initial: ManagedProfile, deps: {
   store: OctoStore; api: CloudApi; config: OctoConfig; check(): Promise<void>;
@@ -34,14 +35,14 @@ export async function advanceProxy(initial: ManagedProfile, deps: {
     if (!attached) {
       if (operation.pending === 'attach') throw new OctoError('octo_proxy_write_unknown');
       // Persist the reservation before attaching; the unique index rejects shared assignments.
-      p.proxy = { uuid: proxy.uuid, title: proxy.title, type: proxy.type, host: proxy.host, port: proxy.port };
+      p.proxy = { uuid: proxy.uuid, title: proxy.title, type: proxy.type, host: proxy.host, port: proxy.port,isMadeByExpert:operation.isMadeByExpert===true };
       operation.phase = 'attaching'; operation.pending = 'attach'; await save(); await check();
       await api.attachProxy(p.uuid!, proxy.uuid);
       const verified = await api.getProfile(p.uuid!);
       if (verified.proxy?.uuid !== proxy.uuid || !inFolder(verified, config.homeFolder) || verified.status !== 0)
         throw new OctoError('octo_proxy_write_unknown');
     }
-    p.proxy = { uuid: proxy.uuid, title: proxy.title, type: proxy.type, host: proxy.host, port: proxy.port };
+    p.proxy = { uuid: proxy.uuid, title: proxy.title, type: proxy.type, host: proxy.host, port: proxy.port,isMadeByExpert:operation.isMadeByExpert===true };
     operation.phase = 'complete'; delete operation.pending; delete operation.input; delete operation.error; await save();
   } catch (error) {
     if (/^(postgres_|octo_stale_revision|commit_|octo_leadership)/.test(String((error as any)?.code))) throw error;

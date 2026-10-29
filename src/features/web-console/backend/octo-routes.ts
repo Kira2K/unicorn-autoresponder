@@ -1,5 +1,6 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import type { OctoService } from '../../octo-access/service.mts';
+import {safeClientFields} from '../../linkedin-automation/console-intake/contracts.mts';
 type SessionRequest = Request & { webSession?: { role: string; clientId?: number } };
 export function registerOctoRoutes(app: Express, requireAuth: RequestHandler, service?: OctoService) {
   const guard: RequestHandler = (req: SessionRequest, res, next) => {
@@ -13,9 +14,10 @@ export function registerOctoRoutes(app: Express, requireAuth: RequestHandler, se
   const run = (fn: (req: SessionRequest) => Promise<unknown>, status = 200): RequestHandler => async (req, res: Response) => {
     try { res.status(status).json(await fn(req)); }
     catch (error) {
-      const e = error as { code?: string; status?: number };
+      const e = error as { code?: string; status?: number;fields?:Array<{field:string}> };
       const code = e.code && /^(octo_|forbidden$|not_found$|invalid_profile_id$)/.test(e.code) ? e.code : 'octo_operation_failed';
-      res.status(e.status && e.status >= 400 && e.status < 600 ? e.status : 503).json({ error: code });
+      res.status(e.status && e.status >= 400 && e.status < 600 ? e.status : 503).json({ error: code,
+        ...(code==='octo_client_data_required'?{fields:safeClientFields(e.fields?.map(item=>item.field))}:{}) });
     }
   };
   app.get('/api/octo/profiles/status', requireAuth, guard, run(req => service!.status(Number(req.webSession!.clientId),

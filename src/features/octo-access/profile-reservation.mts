@@ -12,8 +12,8 @@ export const profileRules = createRequire(import.meta.url)('../web-console/backe
   transliterate(value: string): string;
 };
 export function assertClientReady(client: WebClient) {
-  if (profileRules.getRequiredClientDataIssues(client, { requireCalendarEmail: true }).length)
-    throw new OctoError('octo_client_data_required', 409);
+  const issues=profileRules.getRequiredClientDataIssues(client,{requireCalendarEmail:true}) as Array<{field:string}>;
+  if(issues.length)throw Object.assign(new OctoError('octo_client_data_required',409),{fields:issues.map(issue=>({field:issue.field}))});
 }
 export async function reserveClientProfiles(store: OctoStore, client: WebClient, ownProxy: boolean,
   now = Date.now, password?: () => string, requiredLocales = profileRules.requiredLocalesForMarket(client.market)) {

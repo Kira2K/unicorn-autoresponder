@@ -8,8 +8,9 @@ import {createHash} from 'node:crypto';
 import {writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {auditCompletedCycles,auditPrivateRecipients} from './audit.mts';
+import {confirmCycleByAdmin} from './admin.mts';
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-const {CLIENT_PASSWORD}=createRequire(import.meta.url)('../../backend/app.ts');
+const {CLIENT_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD}=createRequire(import.meta.url)('../../backend/app.ts');
 export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connections:Array<{input:ProxyInput}>){
  const browser=await chromium.launch({headless:true});
  try{
@@ -18,6 +19,8 @@ export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connect
   journal.data.clientId=await ensureCycleClient(c,journal.data.runId,'auto');await journal.save();
   const clientId=journal.data.clientId,db=cycleDatabase(c,journal.data.runId,clientId);
   const student=await loginCycleUser(browser,fixtureEmail(journal.data.runId,'auto'),CLIENT_PASSWORD),creator=await loginCycleUser(browser,c.vars.LINKEDIN_CREATOR_LOGIN!,c.vars.LINKEDIN_CREATOR_PASSWORD!);
+  const admin=await loginCycleUser(browser,ADMIN_EMAIL,ADMIN_PASSWORD);
+  await admin.page.getByTestId('admin-linkedin-tab').click();await admin.page.getByTestId('linkedin-admin-confirmations').waitFor();
   await creator.page.getByTestId('linkedin-creator-console').waitFor();
   let passwordHash=journal.data.baseline?.passwordHash,firstProfiles=journal.data.baseline?.profiles,oldRuHash=journal.data.baseline?.ruHash;
   for(const cycle of [1,2]){
@@ -34,18 +37,20 @@ export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connect
    const onBlock=async()=>{
     await waitForCycle(async()=>await student.page.getByRole('button',{name:'Сохранить изменения',exact:true}).count()===1,'e2e_block_edit_timeout');
     const before=await readJson(creator.context,`/api/linkedin-creator/tasks/${taskId}`);
-    const r=await student.context.request.put(consoleUrl+'/api/client/linkedin-intake',{data:{...await readJson(student.context,'/api/client/linkedin-intake'),scenario:'new',password:'',outlookPassword:'',loggedIn:false}});
+    const intake=await readJson(student.context,'/api/client/linkedin-intake');
+    const r=await student.context.request.put(consoleUrl+'/api/client/linkedin-intake',{data:{...intake,blockedAccounts:intake.editableBlockedAccounts??intake.blockedAccounts,scenario:'new',password:'',outlookPassword:'',loggedIn:false}});
     assert.equal(r.status(),200);assert.equal((await r.json()).task.id,taskId);
     const after=await readJson(creator.context,`/api/linkedin-creator/tasks/${taskId}`);assert.equal(after.intake.url,before.intake.url);assert.equal(after.intake.login,before.intake.login);assert.equal(after.intake.hasPassword,true);
     await creator.page.getByTestId(`creation-task-${taskId}`).click();
    };
    if(current?.status!=='сделана экспертом')await completeCycleByCreator(c,creator.page,journal,taskId,cycle,connections[cycle-1].input,cycle===2?connections[0].input:undefined,onBlock);
    await waitForCycle(async()=>await student.page.getByTestId('linkedin-new-form').count()===0,'e2e_student_lock_timeout');
-   const closed=await student.context.request.put(consoleUrl+'/api/client/linkedin-intake',{data:{...await readJson(student.context,'/api/client/linkedin-intake'),scenario:'new',password:'',outlookPassword:'',loggedIn:false}});assert.equal(closed.status(),409);
-   await db.confirm(taskId);
+   const lockedIntake=await readJson(student.context,'/api/client/linkedin-intake');
+   const closed=await student.context.request.put(consoleUrl+'/api/client/linkedin-intake',{data:{...lockedIntake,blockedAccounts:lockedIntake.editableBlockedAccounts??lockedIntake.blockedAccounts,scenario:'new',password:'',outlookPassword:'',loggedIn:false}});assert.equal(closed.status(),409);
+   await confirmCycleByAdmin(admin,journal,taskId,cycle);
    await waitForCycle(async()=>{const s=await db.snapshot();return s.notices.find(n=>Number(n.task_id)===taskId)?.state==='sent';},'e2e_notification_timeout',90000);
    snapshot=await db.snapshot();assertConfirmed(snapshot,taskId,cycle);
-   await db.confirm(taskId);assertConfirmed(await db.snapshot(),taskId,cycle);
+   assertConfirmed(await db.snapshot(),taskId,cycle);
    await student.page.getByTestId('linkedin-report-ban').waitFor();
    assert.equal(await student.page.getByRole('button',{name:'Меня забанили',exact:true}).count(),1);
    const names=snapshot.profiles.map(p=>p.state.original.title);assert.ok(names.every(n=>String(n).startsWith('Павел Тестов')));
@@ -53,7 +58,7 @@ export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connect
     journal.data.baseline={passwordHash,profiles:firstProfiles,ruHash:oldRuHash};await journal.save();}
    else{assert.deepEqual(snapshot.profiles.map(p=>[Number(p.profile_id),String(p.state.uuid)]),firstProfiles);assert.equal(hash(snapshot.profiles.find(p=>p.locale==='ru')?.state),oldRuHash);}
    journal.data.completedCycles=[...new Set([...journal.data.completedCycles,cycle])];
-   await journal.record({step:`cycle-${cycle}-confirmed`,expected:'Новый цикл, одна отправка, повтор не сбрасывает данные',actual:'Подтверждено SQL, read-back БД и уведомление sent; доступ ученика восстановлен',state:'passed',db:{taskId,cycles:snapshot.cycles.length},screenshot:await evidenceScreenshot(student.page,journal,`cycle-${cycle}-confirmed`)});
+   await journal.record({step:`cycle-${cycle}-confirmed`,expected:'Новый цикл, одна отправка, повтор не сбрасывает данные',actual:'Подтверждено через кнопку главного админа; read-back БД и уведомление sent проверены, доступ ученика восстановлен',state:'passed',db:{taskId,cycles:snapshot.cycles.length},screenshot:await evidenceScreenshot(student.page,journal,`cycle-${cycle}-confirmed`)});
   }
   await auditCompletedCycles(c,journal);
   await auditPrivateRecipients(c,journal);

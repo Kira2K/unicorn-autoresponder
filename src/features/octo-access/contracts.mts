@@ -13,6 +13,7 @@ export interface SavedProxy extends ProxyRef, ProxyInput { externalId?: string }
 export interface ProxyChange {
   id: string; phase: 'queued' | 'creating' | 'attaching' | 'complete' | 'blocked';
   input?: ProxyInput; uuid?: string; title: string; error?: string; pending?: 'create' | 'attach';
+  isMadeByExpert?:boolean;
 }
 export interface Grant {
   id: string; phase: 'preparing' | 'granted' | 'awaiting_close' | 'complete' | 'blocked';
@@ -38,7 +39,7 @@ export interface ManagedProfile {
   id: number; clientId: number; locale: Locale; revision: number; operationId: string;
   password: string; uuid?: string; original: Metadata; createdAt: number; ownProxy: boolean;
   phase: 'queued' | 'creating' | 'ready' | 'blocked'; error?: string;
-  proxy?: { uuid: string; title: string; type?: string; host?: string; port?: number }; proxyName?: string;
+  proxy?: { uuid: string; title: string; type?: string; host?: string; port?: number;isMadeByExpert?:boolean }; proxyName?: string;
   proxyChange?: ProxyChange;
   pending?: 'create' | 'proxy_name'; grant?: Grant;
   deletion?: ProfileDeletion;

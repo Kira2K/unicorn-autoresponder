@@ -3,9 +3,9 @@ import type {RunJournal} from './journal.mts';import {evidenceScreenshot,submitA
 export async function submitCycleIntake(page:Page,journal:RunJournal,cycle:number){
  const workflow=page.getByTestId('linkedin-octo-workflow');await workflow.waitFor();
  if(cycle===1)await workflow.getByRole('button',{name:'Нет LinkedIn / аккаунт заблокирован',exact:true}).click();
- else await workflow.getByRole('button',{name:'Меня забанили',exact:true}).click();
+ else{await workflow.getByRole('button',{name:'Меня забанили',exact:true}).click();await page.getByRole('dialog',{name:'Попробуй восстановить LinkedIn',exact:true}).getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();}
  const form=workflow.getByTestId('linkedin-new-form');await form.waitFor();
- const outlook=form.getByTestId('linkedin-outlook-details');if(!await outlook.evaluate((e:HTMLDetailsElement)=>e.open))await outlook.locator('summary').click();
+ await form.getByTestId('linkedin-outlook-details').waitFor();
  assert.equal(await form.getByLabel('Логин от новой почты Outlook',{exact:true}).inputValue(),'');
  await form.getByLabel('Логин от новой почты Outlook',{exact:true}).fill(`e2e-${journal.data.runId}-${cycle}@outlook.com`);
  await form.getByRole('button',{name:cycle===1?'Сохранить и подготовить Octo':'Сохранить и подготовить Octo',exact:true}).click();

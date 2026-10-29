@@ -24,15 +24,17 @@ const saved = new Map<number, LinkedInIntake>(), requests: Array<{ id: number; p
 const recoveryTasks=new Map<number,any>();
 const previousProfiles=new Map<number,number[]>(),priorLinkedIn=new Set<number>();
 const profiles = new Map<number, any[]>();
+const banned = new Set<number>();
 const empty = { url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
   firstName: '', lastName: '', realLocation: '', blockedAccounts: [] };
 const intake = createLinkedInIntakeService({ allowed: () => true, getClient: id => repository.getClientById(id),
   hasDolphin: async id => (await repository.getDolphinProfilesForClient(id)).length > 0, store: {
     async load(id) { const data = saved.get(id),task=recoveryTasks.get(id); return data ? { ...empty, ...data, linkedinAccountId:id,task,
-      registrationPending:!!task&&task.status!=='выполнение подтверждено',completionConfirmed:task?.status==='выполнение подтверждено',
+      isBanned:banned.has(id),registrationPending:!!task&&task.status!=='выполнение подтверждено',completionConfirmed:task?.status==='выполнение подтверждено',
       editLocked:['сделана экспертом','выполнение подтверждено'].includes(task?.status),
       hadLinkedInBeforeTask:priorLinkedIn.has(id),previousOctoProfileIds:previousProfiles.get(id)||[],password: undefined, outlookPassword: undefined,
       hasPassword: !!data.password, hasOutlookPassword: !!data.outlookPassword } : empty; },
+    async reportBan(id,accountId){assert.equal(id,accountId);banned.add(id);return{reported:true,linkedinAccountId:accountId,isBanned:true};},
     async save(id, data, _locales, options) {
       const created=data.scenario==='new'&&(!recoveryTasks.has(id)||!!data.replacesLinkedInAccountId);
       if(data.replacesLinkedInAccountId){priorLinkedIn.add(id);previousProfiles.set(id,(profiles.get(id)||[]).map(p=>p.id));}
@@ -89,14 +91,14 @@ try {
       'Двухфакторку не ставь.'
     ]);
     const registration = instructionCard.getByLabel('Дата и время регистрации Outlook-почты', { exact: true });
-    await instructionCard.getByTestId('linkedin-blocked-details').locator('summary').click();
-    await instructionCard.getByRole('button', { name: '＋ Добавить заблокированный аккаунт', exact: true }).click();
+    await instructionCard.getByRole('checkbox',{name:'У меня есть заблокированные аккаунты',exact:true}).check();
     assert.equal(await instructionCard.getByLabel('Имя и фамилия латиницей для нового аккаунта', { exact: true }).count(), 0);
     assert.equal(await instructionCard.getByLabel('Какие имя и фамилия стояли?', { exact: true }).count(), 1);
     await instructionCard.getByRole('button', { name: 'Удалить аккаунт 1', exact: true }).click();
+    await instructionCard.getByRole('checkbox',{name:'У меня есть заблокированные аккаунты',exact:true}).uncheck();
     await registration.waitFor();
-    assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).inputValue(), '');
-    assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).getAttribute('placeholder'), 'Tbilisi, Georgia');
+    assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi');
+    assert.equal(await instructionCard.getByLabel('Город и страна проживания', { exact: true }).getAttribute('placeholder'), null);
     const form = instructionCard.getByTestId('linkedin-new-form');
     const submit = form.getByRole('button', { name: 'Сохранить и подготовить Octo', exact: true });
     await form.getByLabel('Город и страна проживания', { exact: true }).fill('Tbilisi');
@@ -175,23 +177,26 @@ try {
   await newCard.getByTestId('linkedin-new-form').waitFor();
   assert.equal(await newCard.locator('.scenario-buttons').count(),0);
   const form = newCard.getByTestId('linkedin-new-form');
-  await form.getByTestId('linkedin-outlook-details').getByText('Данные Outlook',{exact:true}).click();
   await form.getByLabel('Логин от новой почты Outlook', { exact: true }).fill('new@outlook.com');
   await form.getByLabel('Пароль от новой почты Outlook', { exact: true }).fill('outlook-secret');
   await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
   await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
   assert.equal(await form.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi', 'the saved intake location is restored on reopening');
   await form.getByLabel('Дата и время регистрации Outlook-почты', { exact: true }).fill('2026-10-25T10:30');
-  await form.getByTestId('linkedin-blocked-details').locator('summary').click();
-  for (let i = 0; i < 3; i++) await form.getByRole('button', { name: '＋ Добавить заблокированный аккаунт', exact: true }).click();
-  await form.locator('.blocked-account').nth(0).getByLabel('Какие имя и фамилия стояли?', { exact: true }).fill('First');
-  await form.locator('.blocked-account').nth(1).getByLabel('Какая страна была указана?', { exact: true }).fill('UK');
+  await form.getByRole('checkbox',{name:'У меня есть заблокированные аккаунты',exact:true}).check();
+  for (let i = 0; i < 2; i++) await form.getByRole('button', { name: '＋ Добавить заблокированный аккаунт', exact: true }).click();
+  const histories=[{fullName:'First',country:'UK',company:'One',position:'Developer',blockedAt:'2025-01-01'},
+    {fullName:'Second',country:'Georgia',company:'Two',position:'Engineer',blockedAt:'2025-02-01'}];
+  for(const [index,history] of histories.entries()){
+    const inputs=form.locator('.blocked-account').nth(index).locator('input');
+    for(const [field,value] of Object.values(history).entries())await inputs.nth(field).fill(value);
+  }
   await form.getByRole('button', { name: 'Удалить аккаунт 3', exact: true }).click();
   assert.equal(await form.locator('.blocked-account').count(), 2);
   assert.equal(await form.getByText('Желаемый стек', { exact: false }).count(), 0);
   await form.getByRole('button', { name: 'Сохранить изменения', exact: true }).click();
   await newCard.getByText('Заявка обновлена', { exact: true }).waitFor();
-  assert.deepEqual(saved.get(904)?.blockedAccounts, [{ fullName: 'First' }, { country: 'UK' }]);
+  assert.deepEqual(saved.get(904)?.blockedAccounts, histories);
   assert.equal(requests.length, 1, 'new intake does not start a second manual proxy setup');
   await newPage.reload();
   await newCard.getByTestId('linkedin-new-form').waitFor();
@@ -226,6 +231,10 @@ try {
   assert.equal(await dolphinPage.getByRole('button',{name:'Меня забанили',exact:true}).count(),1);
   assert.equal(await dolphinPage.locator('.octo-card').count(),0);
   await recovery.getByRole('button',{name:'Меня забанили',exact:true}).click();
+  await dolphinPage.getByRole('dialog',{name:'Попробуй восстановить LinkedIn'}).waitFor();
+  assert.equal(banned.has(906),true,'ban is recorded before a replacement application');
+  assert.equal(recoveryTasks.has(906),false,'ban alone does not create an application');
+  await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
   const recoveryForm=recovery.getByTestId('linkedin-new-form');await recoveryForm.waitFor();
   assert.equal(profiles.has(906),false,'opening recovery does not provision or mutate anything');
   await recoveryForm.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('replacement@outlook.com');

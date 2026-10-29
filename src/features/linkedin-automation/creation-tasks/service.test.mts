@@ -9,7 +9,7 @@ import { providerStatus, studentLocked } from './contracts.mts';
 import { guardAccount } from './account-guard.mts';
 import type { SqlSession } from '../../../integrations/postgres/contracts.mts';
 import { PostgresReadError } from '../../../integrations/postgres/contracts.mts';
-async function fixture(reportStatusChange?: Parameters<typeof createCreationTaskService>[0]['reportStatusChange']) {
+async function fixture(reportStatusChange?: Parameters<typeof createCreationTaskService>[0]['reportStatusChange'],newProxy?:Parameters<typeof createCreationTaskService>[0]['newProxy']) {
   const profiles=createMemoryStore(),cloud=createMockCloud(profiles);
   const config={...testConfig,allowAll:true};
   const octo=createOctoService({store:profiles,config,getClient:async (id:number)=>({...mockClient(id),market:'Both'}),
@@ -26,7 +26,7 @@ async function fixture(reportStatusChange?: Parameters<typeof createCreationTask
   const capture=createTaskProxyCapture({store:profiles,api:cloud.api,config,octo});
   const secrets:unknown[]=[];
   const service=createCreationTaskService({store,profiles,octo,client:async id=>mockClient(id),capture,
-    secrets:async(...args)=>{secrets.push(args);return{password:'secret'};},nodeMavenKey:()=> 'key-secret',reportStatusChange});
+    secrets:async(...args)=>{secrets.push(args);return{password:'secret'};},nodeMavenKey:()=> 'key-secret',reportStatusChange,newProxy});
   return {service,profiles,cloud,task,capture,received:()=>received,secrets,store};
 }
 test('statuses use expert wording; contractor cannot choose confirmation',()=>{
@@ -34,6 +34,27 @@ test('statuses use expert wording; contractor cannot choose confirmation',()=>{
   assert.throws(()=>providerStatus('выполнение подтверждено'));
   assert.throws(()=>providerStatus('сделана исполнителем'));
   assert.equal(studentLocked('сделана экспертом'),true);assert.equal(studentLocked('блок'),false);
+});
+
+test('admin confirmation rechecks actual cloud closure for both new and legacy proxies; confirmed read-back makes no new write',async()=>{
+ for(const requiresNewProxy of [false,true]){
+  const f=await fixture(undefined,{assert:async()=>{},ready:async()=>true,queue:async()=>({queued:true})});
+  Object.assign(f.task,{status:'сделана экспертом',requiresNewProxy,proxyUuid:'proxy',proxyProfileId:2,proxySavedAt:new Date().toISOString()});
+  let writes=0;
+  f.store.confirm=async()=>{writes++;Object.assign(f.task,{status:'выполнение подтверждено'});return f.task;};
+  f.store.notification=async()=>({state:'pending'});
+  const en=(await f.profiles.get(2))!,live=f.cloud.profiles.get(en.uuid!)!;
+  live.status=1;
+  await assert.rejects(f.service.confirm(1,{version:1}),{code:'linkedin_task_close_profile_first'});
+  assert.equal(writes,0);
+  live.status=0;
+  assert.equal((await f.service.confirm(1,{version:1})).task.status,'выполнение подтверждено');
+  assert.equal(writes,1);
+  const revision=(await f.profiles.get(2))!.revision;
+  live.status=1;
+  await f.service.confirm(1,{version:1});
+  assert.equal((await f.profiles.get(2))!.revision,revision,'confirmed read-back never recaptures the proxy');
+ }
 });
 test('new applications cannot acquire/capture/finish using their previous proxy, including a missing validator',async()=>{
  const f=await fixture();Object.assign(f.task,{requiresNewProxy:true});

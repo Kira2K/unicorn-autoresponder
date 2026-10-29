@@ -3,6 +3,7 @@ import {writeTransaction} from '../../../integrations/postgres/working-session.m
 import type {SqlPool,CopyDatabase} from '../../../integrations/postgres/contracts.mts';
 import type {SendOneInput,SendOneResult} from '../../../integrations/telegram/types.ts';
 import type {WebClient} from '../../web-console/backend/types.ts';
+import {DEFAULT_NOTIFICATION_MENTION} from './status-report.mts';
 export interface CycleNotice{taskId:number;clientId:number;url:string;token:string}
 export function cycleNotificationStore(pool:SqlPool,database:CopyDatabase){
  return{
@@ -18,14 +19,15 @@ export function cycleNotificationStore(pool:SqlPool,database:CopyDatabase){
  };
 }
 /** One claimed event, one send attempt. Business confirmation is already committed. */
-export async function deliverCycleNotification(deps:{store:ReturnType<typeof cycleNotificationStore>;
+export async function deliverCycleNotification(deps:{store:ReturnType<typeof cycleNotificationStore>;mention?:string;
  client(id:number):Promise<Pick<WebClient,'firstName'|'lastName'|'fio'|'clientName'|'primaryStack'>>;
  sendOne(input:SendOneInput):Promise<SendOneResult>}){
  const event=await deps.store.claim();if(!event)return false;
+ const mention=deps.mention??DEFAULT_NOTIFICATION_MENTION;
  try{
   const c=await deps.client(event.clientId),name=[c.firstName,c.lastName].filter(Boolean).join(' ')||c.fio||c.clientName;
   const result=await deps.sendOne({chatId:'-1003187558078',
-   text:`🚨 НОВЫЙ LINKEDIN — ЗАПУЩЕН НОВЫЙ ЦИКЛ\nКлиент: ${name}\nСтек: ${c.primaryStack||'не указан'}\nЗаявка №${event.taskId}: выполнение подтверждено\nНовый LinkedIn: ${event.url}\nLinkLab: Новый, прогресс 0%\n\n@juliafeels fyi`,
+   text:`🚨 НОВЫЙ LINKEDIN — ЗАПУЩЕН НОВЫЙ ЦИКЛ\nКлиент: ${name}\nСтек: ${c.primaryStack||'не указан'}\nЗаявка №${event.taskId}: выполнение подтверждено\nНовый LinkedIn: ${event.url}\nLinkLab: Новый, прогресс 0%\n\n${mention} fyi`,
    reportContext:{clientId:event.clientId,clientName:name,chatType:'supergroup',chatPurpose:'Новый цикл LinkedIn'}});
   if(result.kind==='telegram-response'){
    if(result.response.ok)await deps.store.finish(event,'sent',result.response.result.message_id);
