@@ -87,6 +87,33 @@ URL читаются из связанных записей, без второй
 
 ## Проверки
 
+### Команды нового API CRM
+
+`crm-account-command.mts` знает три команды: `ban`, `replacement`, `unban`.
+`accountCommandBody` добавляет константы протокола; `sendAccountCommand` делает один
+подписанный POST `/integrations/linkedin/account-commands/` и проверяет подтверждение.
+Бан ожидает `blocked`; замена/разбан — `warmup`, тот же Student и дату первого дня.
+Вся обработка статуса, задач и истории выполняется CRM.
+
+Общие поля: `schema_version=1`, `event_type=linkedin.account_command`, `source=unicorn`,
+`command`, постоянный UUIDv4 `event_id`, `client_id`, `account_id`, `linklab_version`,
+UTC `confirmed_at`. Для замены/разбана также нужны `cycle_id`, `old_account_id`,
+`account_url`; у разбана ID аккаунта совпадают, у замены различаются. Все bigint ID —
+десятичные строки. Бан не создаёт цикл и не передаёт его поля.
+
+Вызывающий код сохраняет ID и исходные байты; повтор передаёт их без изменений.
+Подпись: HMAC-SHA256 от `v1:<unix_seconds>:` + raw UTF-8 body, заголовки
+`X-CRM-Timestamp` и `X-CRM-Signature: v1=<hex>`, отдельный сервисный ключ.
+Ответ201/200 должен совпасть по event/client/account/command/version/hash/Student,
+подтвердить `applied`, `effects_applied`, `current`, текущие статус/версию; для
+замены/разбана также cycle и `warmup_started_on`. Другой ответ — ошибка.
+
+Это библиотечная команда: без подключения к БД, ENV, таймеров, автоматических повторов
+и вызовов при импорте. Подключение её к событию подтверждения Киры и включение отправок
+выполняются отдельно. Старый SQL006 и существующий обмен не изменяются.
+
+Проверка: `node --test src/features/linkedin-automation/linklab/crm-account-command.test.mts`.
+
 Node 24.20.0 использовался для проверок; новых npm-зависимостей нет.
 Unit: `node --test src/features/linkedin-automation/linklab/*.test.mts`.
 SQL-наборы без отдельной конфигурации пропускаются, что не считается успехом SQL.
