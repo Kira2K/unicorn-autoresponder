@@ -33,6 +33,7 @@ import { createClientSender } from '../../../client-lifecycle/sender.mts';
 import { loadClientNotificationSettings } from '../../../client-lifecycle/postgres-settings.mts';
 import { createLinkedInIntakeStore } from '../../../linkedin-automation/console-intake/postgres-store.mts';
 import { createLinkedInIntakeService } from '../../../linkedin-automation/console-intake/service.mts';
+import {createAccountCommandActions,readAccountCommandConfig} from '../../../linkedin-automation/linklab/crm-account-actions.mts';
 import { createCreationTaskStore } from '../../../linkedin-automation/creation-tasks/postgres-store.mts';
 import { createCreationTaskService } from '../../../linkedin-automation/creation-tasks/service.mts';
 import { createTaskProxyCapture } from '../../../linkedin-automation/creation-tasks/proxy-capture.mts';
@@ -46,6 +47,7 @@ import type {SendOneInput} from '../../../../integrations/telegram/types.ts';
 import { createRequire } from 'node:module';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
+  const crmCommandConfig=readAccountCommandConfig(env);
   const bridgeConfig = readBridgeConfig(env);
   const control = readControlConfig(env);
   const config = readPostgresAppDbConfig(env), pool = open(config);
@@ -114,12 +116,14 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         store: octoStore, config: octoConfig, allowed: octo.service.allowed }) } : octo.service;
       if (control && !control.url) octoControl = controlRoutes({ secret: control.secret, store: octoStore,
         config: octoConfig, service: octo.service, ready: uuid => octo!.grantReady(uuid) });
-      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true);
+      const crmCommands=createAccountCommandActions({pool,database:config.database,config:crmCommandConfig,
+        report:event=>console.error(JSON.stringify({feature:'crm_account_command',...event}))});
+      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true,crmCommands?.ban);
       await intakeStore.checkSchema();
       linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
         getClient: id => options.repository.getClientById(id),
         hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
-      const tasks = createCreationTaskStore(pool,config.database,!!linklab);
+      const tasks = createCreationTaskStore(pool,config.database,!!linklab,crmCommands?.replacement);
       await tasks.checkSchema();
       let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
       const sendTaskNotice=(input:SendOneInput)=>{

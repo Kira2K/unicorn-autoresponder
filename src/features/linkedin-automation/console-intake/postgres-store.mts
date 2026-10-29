@@ -30,7 +30,8 @@ function select(rows: Record<string, unknown>[], platform: string):Record<string
 }
 const timestamp = (value: unknown) => value == null ? '' :
   (value instanceof Date ? value : new Date(String(value))).toISOString();
-export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false, creationTasks = false) {
+export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false, creationTasks = false,
+  afterBan?: (clientId:number,accountId:number)=>Promise<unknown>) {
   const read = createReadSession(pool, database);
   return {
     async checkSchema() { await read(async s => { await s.query(accountQuery + ' LIMIT 0', [0]);await s.query('SELECT is_banned FROM noco.platform_accounts LIMIT 0');await s.query('SELECT account_id,state FROM noco.linkedin_intake_notifications LIMIT 0'); }); },
@@ -58,16 +59,20 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
       });
     },
     async reportBan(clientId:number,expectedAccountId:number){
-      return writeTransaction(pool,database,async s=>{
+      const {result,changed}=await writeTransaction(pool,database,async s=>{
         await s.query('SELECT pg_advisory_xact_lock(730644,$1::integer)',[clientId]);
         if(!(await s.query('SELECT id FROM noco.clients WHERE id=$1 AND NOT coalesce(__nc_deleted,false) FOR UPDATE',[clientId])).rows.length)throw new PostgresReadError('record_not_found');
         const rows=(await s.query(accountQuery+' FOR UPDATE OF a',[clientId])).rows,li=select(rows,'linkedin');
         if(!li||Number(li.id)!==expectedAccountId||!(li.url||li.login||li.password))throw new PostgresReadError('linkedin_intake_replacement_stale');
         if((await studentAccountAccess(s,clientId,expectedAccountId)).registrationPending)throw new PostgresReadError('linkedin_intake_registration_pending');
-        if(li.is_banned!==true){const result=await s.query('UPDATE noco.platform_accounts SET is_banned=true,updated_at=statement_timestamp() WHERE id=$1 AND clients_id=$2 RETURNING id',[expectedAccountId,clientId]);
+        const changed=li.is_banned!==true;
+        if(changed){const result=await s.query('UPDATE noco.platform_accounts SET is_banned=true,updated_at=statement_timestamp() WHERE id=$1 AND clients_id=$2 RETURNING id',[expectedAccountId,clientId]);
           if(result.rows.length!==1)throw new PostgresReadError('linkedin_intake_replacement_stale');}
-        return{reported:true,linkedinAccountId:expectedAccountId,isBanned:true};
+        return{result:{reported:true,linkedinAccountId:expectedAccountId,isBanned:true},changed};
       });
+      // An external notification must not roll back or repeat the committed business action.
+      if(changed&&afterBan)try{await afterBan(clientId,expectedAccountId);}catch{/* Delivery owner reports failures. */}
+      return result;
     },
     async save(clientId: number, data: LinkedInIntake, locales: string[], options = { createOctoProfiles: true }) {
       return writeTransaction(pool, database, async s => {

@@ -7,7 +7,8 @@ import { loadBlockedHistory } from './blocked-history.mts';
 import { taskRow, providerStatus } from './contracts.mts';
 
 const fail = (code: string): never => { throw new PostgresReadError(code); };
-export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, linklab = false) {
+export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, linklab = false,
+  afterConfirm?: (taskId:number)=>Promise<unknown>) {
   const read = createReadSession(pool, database);
   async function lock(s: SqlSession, id: number, version: number, allowConfirmed = false) {
     const hint = (await s.query('SELECT client_id FROM noco.linkedin_creation_task WHERE id=$1', [id])).rows[0];
@@ -84,14 +85,16 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
       });
     },
     async confirm(id:number,version:number) {
-      return writeTransaction(pool,database,async s=>{
+      const {task,changed}=await writeTransaction(pool,database,async s=>{
         const task=await lock(s,id,version,true);
-        if(task.status==='выполнение подтверждено')return task;
+        if(task.status==='выполнение подтверждено')return{task,changed:false};
         if(task.status!=='сделана экспертом')return fail('linkedin_task_not_confirmable');
         await requireResult(s,task);
-        return taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *',
-          [id,'выполнение подтверждено'])).rows[0]);
+        return{task:taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *',
+          [id,'выполнение подтверждено'])).rows[0]),changed:true};
       });
+      if(changed&&afterConfirm)try{await afterConfirm(task.id);}catch{/* Delivery owner reports failures. */}
+      return task;
     },
     async notification(id:number) {
       return read(async s=>{
