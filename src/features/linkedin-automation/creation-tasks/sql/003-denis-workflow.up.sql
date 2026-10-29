@@ -24,7 +24,12 @@ CREATE TRIGGER octo_proxy_expert_projection BEFORE INSERT OR UPDATE ON noco.octo
 FOR EACH ROW EXECUTE FUNCTION noco.octo_proxy_expert_projection();
 
 -- Only a saved expert receipt for this exact current student/profile/proxy proves provenance.
-UPDATE noco.octo_profiles p SET state=jsonb_set(p.state,'{proxy,isMadeByExpert}','true'::jsonb,true),revision=p.revision+1
+UPDATE noco.octo_profiles p SET
+  state=jsonb_set(
+    jsonb_set(p.state,'{proxy,isMadeByExpert}','true'::jsonb,true),
+    '{revision}',to_jsonb(p.revision+1),true
+  ),
+  revision=p.revision+1
 WHERE p.state->'proxy'->>'uuid' IS NOT NULL AND NOT coalesce((p.state->'proxy'->>'isMadeByExpert')::boolean,false)
 AND EXISTS(SELECT 1 FROM noco.linkedin_creation_task t WHERE t.client_id=p.client_id AND t.proxy_profile_id=p.profile_id
   AND t.proxy_uuid=p.state->'proxy'->>'uuid' AND t.proxy_saved_at IS NOT NULL);

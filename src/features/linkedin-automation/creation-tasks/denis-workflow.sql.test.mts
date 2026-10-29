@@ -19,17 +19,20 @@ test('actual PostgreSQL: Denis migration rolls back, backfills exact receipts, a
    CREATE TABLE noco.clients(id bigint PRIMARY KEY,client_name text,__nc_deleted boolean DEFAULT false);
    CREATE TABLE noco.platforms(id bigint PRIMARY KEY,name text,__nc_deleted boolean DEFAULT false);
    CREATE TABLE noco.platform_accounts(id bigint PRIMARY KEY,clients_id bigint REFERENCES noco.clients(id),platforms_id bigint REFERENCES noco.platforms(id),url text,login text,password text,__nc_deleted boolean DEFAULT false);
-   CREATE TABLE noco.octo_profiles(profile_id bigint PRIMARY KEY,client_id bigint REFERENCES noco.clients(id),locale text,revision bigint,state jsonb);
+   CREATE TABLE noco.octo_profiles(profile_id bigint PRIMARY KEY,client_id bigint REFERENCES noco.clients(id),locale text,revision bigint,state jsonb,
+    CONSTRAINT octo_profiles_state_check CHECK ((state->>'revision')::bigint=revision));
    INSERT INTO noco.clients VALUES(101,'Test'),(102,'Other');INSERT INTO noco.platforms VALUES(16,'LinkedIn'),(31,'email_outlook');
    INSERT INTO noco.platform_accounts(id,clients_id,platforms_id,url,login,password) VALUES(11,101,16,'https://linkedin.com/in/test','test','fixture'),(12,101,31,'','test@outlook.com','fixture');`);owned=true;
   await q(sql('./sql/001.up.sql'));
   for(const [id,clientId,uuid] of [[1,101,'known'],[2,102,'known'],[3,101,'unproven']] as const){
-   await q('INSERT INTO noco.octo_profiles VALUES($1,$2,\'en\',1,$3::jsonb)',[id,clientId,JSON.stringify({id,clientId,locale:'en',phase:'ready',proxy:{uuid},createdAt:1,original:{title:'Fixture'}})]);
+   await q('INSERT INTO noco.octo_profiles VALUES($1,$2,\'en\',1,$3::jsonb)',[id,clientId,JSON.stringify({id,revision:1,clientId,locale:'en',phase:'ready',proxy:{uuid},createdAt:1,original:{title:'Fixture'}})]);
   }
   await q(`INSERT INTO noco.linkedin_creation_task(client_id,linkedin_account_id,outlook_account_id,proxy_profile_id,proxy_uuid,proxy_saved_at)
    VALUES(101,11,12,1,'known',clock_timestamp()),(101,11,12,2,'known',clock_timestamp());`);
   await q('BEGIN');await q(migration);
   assert.equal((await q('SELECT proxy_is_made_by_expert FROM noco.octo_profiles WHERE profile_id=1')).rows[0].proxy_is_made_by_expert,true);
+  assert.deepEqual((await q('SELECT revision,(state->>\'revision\')::bigint AS state_revision FROM noco.octo_profiles WHERE profile_id=1')).rows[0],
+   {revision:'2',state_revision:'2'});
   await q('ROLLBACK');
   assert.equal((await q("SELECT count(*)::int AS count FROM information_schema.columns WHERE table_schema='noco' AND table_name='platform_accounts' AND column_name='is_banned'")).rows[0].count,0);
   await q(sql('./sql/003-denis-workflow.up.sql'));
