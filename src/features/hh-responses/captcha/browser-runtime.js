@@ -18,7 +18,7 @@
         const sleep = options.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
         const visible = options.visible || (() => visibleChallenge(options.document || root.document));
         const isStopped = options.isStopped || (() => false);
-        const timeoutMs = options.timeoutMs ?? 120000;
+        const timeoutMs = options.timeoutMs ?? 300000;
         let pausedAt, pausedMs = 0, pending, failed = false;
         return {
             visible,

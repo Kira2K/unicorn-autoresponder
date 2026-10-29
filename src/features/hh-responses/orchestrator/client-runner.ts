@@ -137,7 +137,7 @@ async function openClientScenario(
       event: lifecycleEvent
     })
   }
-  const pageResult = await openScenarioAndInjectIndex(
+  const pageResult = await withTimeout(openScenarioAndInjectIndex(
     port,
     clientData.stackScenario,
     responseCounter,
@@ -148,7 +148,8 @@ async function openClientScenario(
       skipManualVacanciesCleanup: options.skipManualVacanciesCleanup,
       logLifecycleEvent: logScenarioLifecycleEvent
     }
-  )
+  ), 10 * 60 * 1000, 'HH scenario preparation exceeded 10 minutes',
+    async () => { await stopDolphinProfile(clientData.dolphinProfileId) })
   const nextStatus = {
     ...status,
     ...pageResult.result,

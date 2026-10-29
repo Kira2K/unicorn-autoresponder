@@ -6,7 +6,7 @@ second autoresponder, profile cleaner or scheduling mechanism is introduced.
 `browser-runtime.js` holds the current browser operation while a visible text
 captcha is present. The vacancy watchdog does not navigate away from the
 challenge. Captcha time is excluded from form/confirmation timeouts; waiting
-is bounded to 120 seconds, then the existing `captcha_detected` outcome ends
+is bounded to 5 minutes, then the existing `captcha_detected` outcome ends
 only that client. STOP cancels waiting. The normal response quota still applies.
 
 `solve.ts` takes capture, image-storage, recognition, input and submission
@@ -17,6 +17,15 @@ business action. `playwright-adapter.ts` supplies the HH DOM operations through
 the profile's CDP connection. Its English selection comes from branch
 `hh-captha-solver`, commit `61ee360f873009b907dc9e41ab72adb612dcbd69`;
 Russian modal text is not treated as proof that the image stayed Russian.
+The current HH `captcha-language` button names the target language; the adapter
+waits for the replacement image before taking the recognition screenshot.
+
+`supervisor.ts` attaches only to valid profile IDs/ports started by one supplied
+normal-orchestrator ledger. It ignores other browser origins, saves the image
+through the caller's adapter and requests reviewed recognition. Polling and
+job state live in one module instance; repeated/new image identities are handled
+without retrying the application itself. Auth captchas retain their page for
+the same bounded operator window before normal authorization continues.
 
 Recognition is a required injected dependency, with no browser access. There
 is no default OCR provider, API key or paid service. The production browser
@@ -47,7 +56,7 @@ history across tabs, visibility skips, and report errors. Live confirmation of
 the visibility predicate used the collapsed HH warning and an enabled submit
 button, with the original privacy restored and without sending another application.
 
-The requested remaining-profile cycle has not run: the configured Dolphin cloud
-token returns HTTP 401, so the normal automation tag/status locks are unavailable.
-The preflight must pass before a live concurrency-3 cycle or end-to-end captcha
-claim. Local start/stop availability alone does not satisfy that preflight.
+The normal Dolphin cloud/local preflight must pass before a live concurrency-3
+cycle. Local start/stop availability alone does not prove that the usual cloud
+profile locks can be applied and restored. Live full-cycle results belong in
+the PR validation record rather than in a permanent configuration workaround.

@@ -945,6 +945,8 @@ module.exports = {
   formatCaptchaProfilesSummary,
   formatAuthProfilesSummary,
   formatPrelaunchReadinessLog,
+  formatClientLifecycleLog,
+  formatClientErrorLog,
   formatRunSummaryLog,
   formatAuthCheckBrief,
   formatManualVacanciesCleanupBrief,

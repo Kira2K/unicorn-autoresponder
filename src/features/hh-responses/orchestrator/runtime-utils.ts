@@ -41,9 +41,11 @@ async function withTimeout<T>(
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
-        timeout = setTimeout(async () => {
+        timeout = setTimeout(() => {
           try {
-            await onTimeout?.()
+            // Cleanup is initiated, not awaited: it may be the operation that
+            // is stuck. Callers still own their normal finally cleanup.
+            Promise.resolve(onTimeout?.()).catch(() => undefined)
           } catch {
             // Preserve the original timeout reason.
           }

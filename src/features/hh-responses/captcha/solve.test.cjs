@@ -55,3 +55,8 @@ test('uncertain submission failure does not trigger another submission', async (
   assert.equal(result.reason,'captcha_adapter_error');
   assert.equal(f.calls.filter(x=>x==='submit').length,1);
 });
+test('navigation after acceptance may lose click acknowledgement; absent challenge confirms resolution',async()=>{
+ const f=fixture();f.adapters.submit=async()=>{f.calls.push('submit');f.setPresent(false);throw Error('execution context destroyed')};
+ const result=await solveCaptcha(f.adapters);
+ assert.equal(result.solved,true);assert.equal(f.calls.filter(x=>x==='submit').length,1);
+});

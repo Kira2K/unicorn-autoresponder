@@ -2,6 +2,7 @@ const { closePageQuietly } = require('../../../platform/browser/page-utils.ts')
 const { removeAutoResponderUi } = require('../auto-responder/browser.ts')
 const {
   ensureHHAuthOnCurrentPage,
+  detectHhAuthState,
   formatAuthCheckBrief,
   isIndecisiveHhAuthState,
   shouldRunHHAuthFallback,
@@ -9,6 +10,7 @@ const {
 } = require('../hh-auth/orchestrator.ts')
 const { addLifecycleEvent } = require('./reporting.ts')
 const { HH_SCENARIO_AUTH_UNKNOWN_RECHECK_MS } = require('./config.ts')
+const { waitForCaptchaAuth } = require('../captcha/wait-for-auth.ts')
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
 type OpenScenarioResult = import('./types.ts').OpenScenarioResult
@@ -41,6 +43,7 @@ type ScenarioAuthWorkflowDependencies = {
     page: OpenScenarioResult['page']
   ): Promise<HhAuthCheck>
   removeAutoResponderUi(page: OpenScenarioResult['page']): Promise<unknown>
+  waitForCaptchaResolution(page: OpenScenarioResult['page'], initialCheck: HhAuthCheck): Promise<HhAuthCheck>
   waitForScenarioAuthDecision(
     page: OpenScenarioResult['page'],
     initialCheck: HhAuthCheck
@@ -51,6 +54,7 @@ const defaultDependencies: ScenarioAuthWorkflowDependencies = {
   closePageQuietly,
   ensureHHAuthOnCurrentPage,
   removeAutoResponderUi,
+  waitForCaptchaResolution: (page, check) => waitForCaptchaAuth(page, check, {detect: detectHhAuthState}),
   waitForScenarioAuthDecision
 }
 
@@ -63,6 +67,13 @@ async function waitForStableAuthState(
   initialCheck: HhAuthCheck,
   dependencies: ScenarioAuthWorkflowDependencies
 ): Promise<{ check: HhAuthCheck; status: OrchestratorStatus }> {
+  if (initialCheck.state === 'captcha') {
+    status = addLifecycleEvent(status, runStartedAt, 'captcha awaiting resolution', 'auth; timeout 300000ms')
+    const check = await dependencies.waitForCaptchaResolution(pageResult.page, initialCheck)
+    status = addLifecycleEvent({...status, authBeforeStart: check}, runStartedAt,
+      check.state === 'captcha' ? 'captcha resolution timed out' : 'captcha resolved', check.state)
+    return {check, status}
+  }
   if (!isIndecisiveHhAuthState(initialCheck.state)) {
     return {
       check: initialCheck,
@@ -91,6 +102,9 @@ async function waitForStableAuthState(
     recheckEvent,
     `${formatAuthCheckBrief(check)}; rechecks ${authDecision.recheckCount}`
   )
+
+  if (check.state === 'captcha') return waitForStableAuthState(pageResult, status,
+    runStartedAt, unclearEvent, recheckEvent, check, dependencies)
 
   return {
     check,
@@ -196,10 +210,20 @@ async function ensureScenarioAuthorizedBeforeStart(
     disposeWatcher = undefined
     await dependencies.removeAutoResponderUi(pageResult.page)
 
-    const currentPageAuth = await dependencies.ensureHHAuthOnCurrentPage(
-      clientData,
-      pageResult.page
-    )
+    let currentPageAuth: HhAuthCheck
+    try {
+      currentPageAuth = await dependencies.ensureHHAuthOnCurrentPage(clientData, pageResult.page)
+    } catch (error) {
+      if (!/captcha/i.test(error instanceof Error ? error.message : String(error))) throw error
+      currentPageAuth = await dependencies.waitForCaptchaResolution(pageResult.page, {
+        state:'captcha', checkedAt:new Date().toISOString(), url:pageResult.page.url(), title:'', signals:{}
+      })
+      if (currentPageAuth.state === 'captcha') throw error
+    }
+    if (currentPageAuth.state === 'captcha') {
+      currentPageAuth = await dependencies.waitForCaptchaResolution(pageResult.page, currentPageAuth)
+      if (currentPageAuth.state === 'captcha') throw new Error('HH captcha detected after auth resolution timeout')
+    }
     status = addLifecycleEvent(
       status,
       runStartedAt,

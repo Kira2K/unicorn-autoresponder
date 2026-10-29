@@ -20,6 +20,7 @@ async function solveCaptcha(adapters: CaptchaAdapters, options: { maxAttempts?: 
   const maxAttempts = options.maxAttempts ?? 3
   const controller = new AbortController()
   let attempts = 0
+  let submitted = false
   const context = () => ({ signal: controller.signal, timeoutMs: Math.max(1, end - now()) })
   async function bounded<T>(run: () => Promise<T>): Promise<T> {
     if (now() >= end) throw new Error('captcha_timeout')
@@ -44,6 +45,7 @@ async function solveCaptcha(adapters: CaptchaAdapters, options: { maxAttempts?: 
       await bounded(() => adapters.fill(answer, context()))
       // Filling can also race with challenge expiry. Never submit stale text.
       if ((await bounded(() => adapters.capture(context()))).id !== image.id) continue
+      submitted = true
       await bounded(() => adapters.submit(context()))
       const decisionEnd = Math.min(end, now() + 3000)
       while (now() < decisionEnd) {
@@ -54,6 +56,11 @@ async function solveCaptcha(adapters: CaptchaAdapters, options: { maxAttempts?: 
     }
     return { solved: !await bounded(() => adapters.present()), attempts, reason: 'captcha_attempt_limit' }
   } catch (error: any) {
+    if (submitted && error.message !== 'captcha_timeout' && !controller.signal.aborted) {
+      try {
+        if (!await bounded(() => adapters.present())) return { solved: true, attempts }
+      } catch { /* A closed browser is not proof that the answer was accepted. */ }
+    }
     return { solved: false, attempts, reason: error.message === 'captcha_timeout' ? 'captcha_timeout' : 'captcha_adapter_error' }
   } finally { controller.abort() }
 }

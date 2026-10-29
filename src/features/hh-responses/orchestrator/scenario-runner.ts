@@ -147,7 +147,8 @@ async function openScenarioAndInjectIndex(
         ]
       }
     } finally {
-      await dependencies.closePageQuietly(cleanupPage)
+      await dependencies.withTimeout(dependencies.closePageQuietly(cleanupPage), 5000,
+        'Manual cleanup page did not close in 5000ms').catch(() => undefined)
     }
   }
 

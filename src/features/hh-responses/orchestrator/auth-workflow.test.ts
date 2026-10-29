@@ -94,6 +94,7 @@ function makeDependencies(patch: Record<string, unknown> = {}) {
       return authCheck('logged_in')
     },
     async removeAutoResponderUi() {},
+    async waitForCaptchaResolution(_page: any, check: any) { return check },
     async waitForScenarioAuthDecision() {
       return {
         check: authCheck('logged_in'),
@@ -271,6 +272,23 @@ async function testUnknownStaysUnknownFailsBeforeResponder(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  for (const initial of ['captcha', 'logged_out']) {
+    const events: string[] = []
+    const result = await ensureScenarioAuthorizedBeforeStart({
+      clientData: makeStatus(initial), runStartedAt: Date.now(),
+      state: {pageResult:makePageResult(initial),status:makeStatus(initial)},
+      async reopenScenario(status: any) {
+        events.push('reopen')
+        return {pageResult:makePageResult('logged_in',{startButtonClicked:true}),status:{...status,authBeforeStart:authCheck('logged_in'),startButtonClicked:true}}
+      }
+    },makeDependencies({
+      async closePageQuietly() {events.push('close')},
+      async ensureHHAuthOnCurrentPage() {throw new Error('captcha_detected during login')},
+      async waitForCaptchaResolution() {events.push('wait');return authCheck('logged_in')}
+    }))
+    assert.deepEqual(events,['wait','close','reopen'])
+    assert.equal(result.status.startButtonClicked,true)
+  }
   await testUnknownBecomesLoggedInAfterRecheck()
   await testLoggedOutRunsCurrentPageAuth()
   await testCaptchaFailsFast()

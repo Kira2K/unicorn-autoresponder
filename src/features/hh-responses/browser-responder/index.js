@@ -415,7 +415,7 @@
         document, isStopped: () => stopSignal,
         onTimeout: () => {
             stopSignal = true;
-            StateManager.setStopReason('captcha_detected', 'Captcha was not resolved within 120000ms', true);
+            StateManager.setStopReason('captcha_detected', 'Captcha was not resolved within 300000ms', true);
             StateManager.setRunning(false);
             StateManager.releaseInstanceLock(TAB_ID);
             setStatus('error', 'Капча: истёк таймаут');
