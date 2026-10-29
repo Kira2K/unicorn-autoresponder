@@ -49,6 +49,8 @@ const intake = createLinkedInIntakeService({ allowed: () => true, getClient: id 
       saved.set(id, { ...structuredClone(data), password:data.password||saved.get(id)?.password||'' });
       if(created&&options?.createOctoProfiles&&!profiles.has(id))profiles.set(id,readyProfiles(false));
       if(created)recoveryTasks.set(id,{id,clientId:id,linkedinAccountId:id,outlookAccountId:id+1,status:'не начата',version:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+      if(created)(await noco.fetchRecords(TABLES.platformAccounts.id)).push({Id:id,clients_id:id,platforms_id:16,
+        rel_platformAccounts_platform:{Id:16,name:'linkedin'},url:'',login:''});
       return { saved: true, linkedinAccountId: id,...(recoveryTasks.has(id)?{task:{...recoveryTasks.get(id),created}}:{}) }; }
   } });
 function readyProfiles(proxy: boolean) { return [ { id: 1, locale: 'ru', title: 'RU test', phase: 'ready', canEditProxy: true, proxy: { configured: false } },
@@ -149,6 +151,21 @@ try {
     assert.equal(await instructionCard.locator('.scenario-buttons').count(),0);
     assert.equal(await registration.inputValue(), '2026-10-25T10:30');
     assert.equal(await instructionPage.getByRole('dialog').count(), 0, 'reload does not reopen confirmation');
+    const accountRow=instructionPage.getByTestId('accounts-table').locator('tbody tr').filter({has:instructionPage.getByRole('cell',{name:/^linkedin$/i})});
+    await accountRow.getByText('В процессе создания',{exact:true}).waitFor();
+    if(id===907){
+      saved.set(id,{...saved.get(id)!,url:'https://linkedin.com/in/expert-draft',login:'draft@outlook.com'});
+      for(const nextStatus of ['блок','сделана экспертом','выполнение подтверждено','блок']){
+        recoveryTasks.get(id).status=nextStatus;
+        await accountRow.getByText(nextStatus==='выполнение подтверждено'?'Активен':'В процессе создания',{exact:true}).waitFor({timeout:20000});
+        assert.equal(await accountRow.getByText(nextStatus==='выполнение подтверждено'?'В процессе создания':'Активен',{exact:true}).count(),0);
+      }
+      await instructionPage.reload();await accountRow.getByText('В процессе создания',{exact:true}).waitFor();
+      const record=(await noco.fetchRecords(TABLES.platformAccounts.id)).find((row:any)=>row.Id===id)!;
+      record.is_banned=true;await instructionPage.reload();await accountRow.getByText('Заблокирован',{exact:true}).waitFor();
+      assert.equal(await accountRow.getByText('В процессе создания',{exact:true}).count(),0,'ban status takes precedence');
+      record.is_banned=false;
+    }
     await instructionContext.close();
   }
   const context = await browser.newContext(), page = await login(903, context);
