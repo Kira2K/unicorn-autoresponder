@@ -2851,6 +2851,10 @@
     // HH can replace the panel's DOM without replacing this document. A later
     // injection must restore that UI, not create another loop/lock owner.
     window.__hhArV2Runtime = {
-        restoreUI: () => { if (document.body) setupUI(); }
+        restoreUI: () => {
+            if (!document.body) return;
+            setupUI();
+            if (StateManager.amIRunning() && !isLoopActive) startLoop();
+        }
     };
 })();

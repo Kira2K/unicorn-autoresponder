@@ -58,16 +58,24 @@ test('reinjection after HH removes the panel restores UI without another loop or
   const program=guard+`
     window.boots++;
     window.lockAdmissions++;
+    let isLoopActive=true;
+    const StateManager={amIRunning:()=>window.running};
+    function startLoop(){window.resumes++;isLoopActive=true}
+    window.endLoop=()=>{isLoopActive=false};
     function setupUI(){if(!window.panel){window.panel=true;window.restores++}}
   `+registration+'})();';
   const saved=storage({'hh_ar_v2_successful_responses':'89'});
-  const sandbox={window:{boots:0,lockAdmissions:0,restores:0,panel:true},document:{body:{}},sessionStorage:saved};
+  const sandbox={window:{boots:0,lockAdmissions:0,restores:0,resumes:0,running:true,panel:true},document:{body:{}},sessionStorage:saved};
   vm.createContext(sandbox);
   vm.runInContext(program,sandbox);vm.runInContext(program,sandbox);
   assert.equal(sandbox.window.boots,1);assert.equal(sandbox.window.lockAdmissions,1);
-  sandbox.window.panel=false;vm.runInContext(program,sandbox);
+  sandbox.window.panel=false;sandbox.window.endLoop();vm.runInContext(program,sandbox);
   assert.equal(sandbox.window.restores,1);assert.equal(sandbox.window.boots,1);
   assert.equal(sandbox.window.lockAdmissions,1);
+  assert.equal(sandbox.window.resumes,1);
+  vm.runInContext(program,sandbox);assert.equal(sandbox.window.resumes,1);
+  sandbox.window.running=false;sandbox.window.endLoop();sandbox.window.panel=false;
+  vm.runInContext(program,sandbox);assert.equal(sandbox.window.resumes,1);
   assert.equal(saved.getItem('hh_ar_v2_successful_responses'),'89');
   const other={window:{boots:0,lockAdmissions:0,panel:true},document:{body:{}}};
   vm.createContext(other);vm.runInContext(program,other);
