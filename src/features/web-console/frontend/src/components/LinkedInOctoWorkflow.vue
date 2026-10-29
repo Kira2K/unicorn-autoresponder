@@ -97,7 +97,6 @@ async function reportBan(){
       const result=await response.json().catch(()=>({}))
       if(!response.ok)throw new Error(result.error||'linkedin_intake_ban_unavailable')
       updateTaskState({...secrets.value,isBanned:true});emit('saved')
-      if(['failed','uncertain'].includes(result.crm?.state))message.value='Блокировка сохранена. Передачу в CRM подтвердить не удалось. Сообщи менеджеру; повторно отмечать бан не нужно.'
     }
     showBanDialog.value=true
   }catch(error){if(error.name!=='AbortError')message.value=error.message==='commit_uncertain'?'Результат неизвестен. Перечитай данные перед следующим действием.':'Не удалось отметить блокировку. Перечитай данные и попробуй снова.'}

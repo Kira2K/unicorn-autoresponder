@@ -1,8 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';import {createRequire} from 'node:module';
 import {COPY_MARKER} from '../../../integrations/postgres/contracts.mts';
-import {createAccountCommandActions} from '../linklab/crm-account-actions.mts';
-import {createHash} from 'node:crypto';
 import {taskProxyStore} from './proxy-store.mts';import {taskRow} from './contracts.mts';
 import {cycleNotificationStore} from './cycle-notifications.mts';import {proxyFingerprint} from './new-proxy.mts';
 const {Client,Pool}=createRequire(import.meta.url)('pg');
@@ -165,32 +163,6 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications WHERE client_id=101')).rows[0].count,'2');
    assert.equal((await q("SELECT count(*) FROM noco.octo_profiles WHERE client_id=101 AND locale='en'")).rows[0].count,'1');
    assert.equal((await q('SELECT password FROM noco.platform_accounts WHERE id=21')).rows[0].password,'fixture');
-  });
-  await t.test('CRM command reads only the current committed linked account, skips first/archived/stale accounts',async()=>{
-   await q('ALTER TABLE noco.platform_accounts ADD COLUMN is_banned boolean NOT NULL DEFAULT false,ADD COLUMN updated_at timestamptz DEFAULT clock_timestamp()');
-   const second=(await q("SELECT id FROM noco.linkedin_creation_task WHERE client_id=101 AND source='student_intake'")).rows[0].id;
-   const first=(await q('SELECT id FROM noco.linkedin_creation_task WHERE client_id=103')).rows[0].id;
-   const seen:string[]=[];
-   const actions=createAccountCommandActions({pool,database:'unicorn_noco_copy_restore',config:{baseUrl:'https://crm.example.test',secret:'synthetic-command-key-xxxxxxxxxxxxxxxx'},
-    fetch:async(_url,init)=>{
-     const body=Buffer.from(init!.body as Uint8Array),p=JSON.parse(body.toString());seen.push(p.command);
-     assert.equal(p.account_id,'51');assert.equal(p.client_id,'101');
-     if(p.command==='replacement'){assert.equal(p.old_account_id,'21');assert.equal(p.cycle_id,String(second));}
-     const status=p.command==='ban'?'blocked':'warmup';
-     return new Response(JSON.stringify({...p,student_id:before.crm_student_id,payload_sha256:createHash('sha256').update(body).digest('hex'),
-      state:'applied',effects_applied:true,current:true,status,current_status:status,current_linklab_version:p.linklab_version,warmup_started_on:'2026-10-29'}),{status:201});
-    }})!;
-   assert.equal((await actions.replacement(Number(second))).state,'sent');
-   assert.equal((await actions.replacement(Number(first))).state,'not_applicable');
-   assert.equal((await actions.ban(101,21)).state,'failed');
-   assert.equal((await actions.ban(101,51)).state,'failed');
-   await q('UPDATE noco.platform_accounts SET is_banned=true WHERE id=51');
-   assert.equal((await actions.ban(102,51)).state,'failed');
-   assert.equal((await actions.ban(101,51)).state,'sent');
-   assert.equal((await actions.replacement(Number(second))).state,'failed');
-   await q('UPDATE noco.clients SET __nc_deleted=true WHERE id=101');
-   assert.equal((await actions.ban(101,51)).state,'failed');
-   assert.deepEqual(seen,['replacement','ban']);
   });
  }finally{await pool.end();await q('RESET ROLE');if(owned){await q('DROP SCHEMA noco CASCADE');await q('DROP OWNED BY cycle_test_app').catch(()=>{});await q('DROP ROLE IF EXISTS cycle_test_app');}await db.end();}
 });

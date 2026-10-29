@@ -2,14 +2,12 @@ import type { WebClient } from '../../web-console/backend/types.ts';
 import { profileRules } from '../../octo-access/profile-reservation.mts';
 import { IntakeError, parseIntake, safeClientFields, completeBlockedAccount, sameBlockedAccount } from './contracts.mts';
 import type { createLinkedInIntakeStore } from './postgres-store.mts';
-import type {CommandDelivery} from '../linklab/crm-account-actions.mts';
 
 export function createLinkedInIntakeService(deps: {
   store: Pick<ReturnType<typeof createLinkedInIntakeStore>, 'load' | 'save'> & Partial<Pick<ReturnType<typeof createLinkedInIntakeStore>,'reportBan'>>;
   allowed(id: number): boolean;
   getClient(id: number): Promise<WebClient>;
   hasDolphin(id: number): Promise<boolean>;
-  reportCrmBan?(clientId: number, accountId: number): Promise<CommandDelivery>;
 }) {
   return {
     async reportBan(id:number,raw:unknown){
@@ -17,12 +15,7 @@ export function createLinkedInIntakeService(deps: {
       const accountId=(raw as {linkedinAccountId?:unknown})?.linkedinAccountId;
       if(typeof accountId!=='number'||!Number.isSafeInteger(accountId)||accountId<1)throw new IntakeError('linkedin_intake_replacement_invalid');
       if(!deps.store.reportBan)throw new IntakeError('linkedin_intake_ban_unavailable',503);
-      const result=await deps.store.reportBan(id,accountId);
-      const {banChanged,...saved}=result;
-      if(!banChanged||!deps.reportCrmBan)return saved;
-      let crm:CommandDelivery;
-      try{crm=await deps.reportCrmBan(id,accountId);}catch{crm={state:'uncertain',code:'crm_account_command_unconfirmed'};}
-      return {...saved,crm};
+      return deps.store.reportBan(id,accountId);
     },
     async load(id: number) { const client=await deps.getClient(id),data=await deps.store.load(id);return{...data,realLocation:data.realLocation||client.realLocation||''}; },
     async save(id: number, raw: unknown) {

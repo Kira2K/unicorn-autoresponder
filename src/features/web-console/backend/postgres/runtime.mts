@@ -116,14 +116,14 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         store: octoStore, config: octoConfig, allowed: octo.service.allowed }) } : octo.service;
       if (control && !control.url) octoControl = controlRoutes({ secret: control.secret, store: octoStore,
         config: octoConfig, service: octo.service, ready: uuid => octo!.grantReady(uuid) });
-      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true);
-      const crmCommands=createAccountCommandActions({pool,database:config.database,config:crmCommandConfig});
+      const crmCommands=createAccountCommandActions({pool,database:config.database,config:crmCommandConfig,
+        report:event=>console.error(JSON.stringify({feature:'crm_account_command',...event}))});
+      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true,crmCommands?.ban);
       await intakeStore.checkSchema();
       linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
         getClient: id => options.repository.getClientById(id),
-        hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0,
-        reportCrmBan:crmCommands?.ban });
-      const tasks = createCreationTaskStore(pool,config.database,!!linklab);
+        hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
+      const tasks = createCreationTaskStore(pool,config.database,!!linklab,crmCommands?.replacement);
       await tasks.checkSchema();
       let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
       const sendTaskNotice=(input:SendOneInput)=>{
@@ -154,8 +154,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           const checked=await proxyChecker.check(`${p.type==='socks5'?'socks5h':p.type}://${auth}${host}:${p.port}`);
           return checked.exit_ip||'';
         }}),
-        nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange,notificationMention,
-        reportCrmReplacement:crmCommands?.replacement });
+        nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange,notificationMention });
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
     }
