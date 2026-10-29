@@ -40,6 +40,13 @@ recognizer's output before wiring it into a live supervisor.
 
 Related protections requested for the same run:
 
+- Explicit client-name runs may pass `responseLimitsByProfileId` to the normal
+  CLI `main` function. Remaining quotas are validated and snapshotted before any
+  profile starts; a missing/invalid value fails closed. The same concurrency
+  queue, history, scenario/recovery flow, reports and cleanup apply. The selected
+  client's quota is retained when its scenario reopens. Ordinary runs keep their
+  configured default. No database or ENV mutation is needed for these run inputs.
+
 - Preserve confirmed vacancy IDs from existing HH tabs into the existing
   `hh_ar_v2_processed_ids` local-storage key before opening a new scenario.
   Session-only skips, including a real visibility rejection, remain retryable.

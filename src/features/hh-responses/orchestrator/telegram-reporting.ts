@@ -8,6 +8,7 @@ const {
 } = require('./config.ts')
 const { writeLocalRunLog } = require('./local-run-log.ts')
 const { getErrorMessage, getErrorStack } = require('./runtime-utils.ts')
+const { createResponseLimitResolver } = require('./response-limit.ts')
 const {
   classifyClientRun,
   isClientRunSuccessful,
@@ -44,6 +45,7 @@ type PrelaunchReadinessTarget = {
 type PrelaunchReadinessReport = {
   market?: string
   responseLimit: number
+  responseLimitsByProfileId?: Readonly<Record<string, number>>
   readyTargets: PrelaunchReadinessTarget[]
   blockedTargets: PrelaunchReadinessTarget[]
 }
@@ -671,6 +673,10 @@ function formatRunSummaryLog(results: OrchestratorStatus[]): string {
 function formatPrelaunchReadinessLog(
   report: PrelaunchReadinessReport
 ): string {
+  const limitFor = createResponseLimitResolver(report.responseLimit, report.responseLimitsByProfileId)
+  const limitRows = report.responseLimitsByProfileId ? report.readyTargets.map(target =>
+    `- ${escapeTelegramHtml(target.clientName)}${target.market ? ` / ${escapeTelegramHtml(target.market)}` : ''}: response limit ${limitFor(Number(target.dolphinProfileId))}`
+  ) : []
   const blockedRows = report.blockedTargets.map(target => {
     const name = `${target.clientName}${target.market ? ` / ${target.market}` : ''}`
     const details = target.problems.length
@@ -684,9 +690,10 @@ function formatPrelaunchReadinessLog(
     [
       '<b>HH prelaunch readiness</b>',
       `Market: ${escapeTelegramHtml(report.market ?? 'unknown')}`,
-      `Response limit: ${report.responseLimit}`,
+      report.responseLimitsByProfileId ? 'Response limits: individual remaining quotas' : `Response limit: ${report.responseLimit}`,
       `Ready to launch: ${report.readyTargets.length}`,
       `Will be skipped: ${report.blockedTargets.length}`,
+      ...limitRows,
       '',
       report.blockedTargets.length
         ? '<b>Skipped before launch</b>'

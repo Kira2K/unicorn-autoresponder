@@ -66,6 +66,7 @@ const {
 } = require('./config.ts')
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
+const { createResponseLimitResolver } = require('./response-limit.ts')
 type LifecycleEvent = import('./types.ts').LifecycleEvent
 type ManualVacancy = import('./types.ts').ManualVacancy
 type OrchestratorStatus = import('./types.ts').OrchestratorStatus
@@ -144,7 +145,7 @@ async function openClientScenario(
     {
       coverText: clientData.coverText,
       blockedCompanies: clientData.blockedCompanies,
-      responseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+      responseLimit: status.requiredResponseLimit ?? ORCHESTRATOR_RESPONSE_LIMIT,
       skipManualVacanciesCleanup: options.skipManualVacanciesCleanup,
       logLifecycleEvent: logScenarioLifecycleEvent
     }
@@ -600,8 +601,12 @@ async function cleanupClientDolphinProfile(
 }
 
 async function runClientOrchestrator(
-  clientData: ClientAutomationData
+  clientData: ClientAutomationData,
+  options: { responseLimit?: number } = {}
 ): Promise<OrchestratorStatus> {
+  const responseLimit = createResponseLimitResolver(ORCHESTRATOR_RESPONSE_LIMIT,
+    options.responseLimit === undefined ? undefined : { [clientData.dolphinProfileId]: options.responseLimit }
+  )(clientData.dolphinProfileId)
   if (!clientData.stackScenario) {
     throw new Error(`Stack scenario for ${clientData.clientName} was not found`)
   }
@@ -623,10 +628,10 @@ async function runClientOrchestrator(
     indexScriptInjected: false,
     watcherInstalled: false,
     startButtonClicked: false,
-    requiredResponseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+    requiredResponseLimit: responseLimit,
     metResponseLimit: false,
     completionGap: 'not_finished',
-    responsesRemaining: ORCHESTRATOR_RESPONSE_LIMIT,
+    responsesRemaining: responseLimit,
     responseLimitWatchMs: AUTO_RESPONDER_WATCH_MS
   }
   let disposeWatcher: (() => void) | undefined

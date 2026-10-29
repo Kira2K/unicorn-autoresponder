@@ -52,6 +52,16 @@ test('failed durable history write retains the confirmed count and stops further
   assert.equal(sandbox.state.amIRunning(),false);
 });
 
+test('a remaining quota of one prevents trying another resume after the first confirmation',()=>{
+  const sandbox=makeState(storage());sandbox.config={limit:1};
+  const begin=source.indexOf('                const successfulResponses = StateManager.addSuccessfulResponseID(vid);');
+  const end=source.indexOf('                let apply2DTime',begin);
+  assert.ok(begin>0&&end>begin);
+  const confirmed=new Function('StateManager','vid','log',source.slice(begin,end)+';return "NEXT_RESUME";');
+  assert.equal(confirmed(sandbox.state,'v_7',()=>{}),'OK');
+  assert.equal(sandbox.state.getSuccessfulResponses(),1);
+});
+
 test('reinjection after HH removes the panel restores UI without another loop or lock owner',()=>{
   const guard=source.slice(0,source.indexOf('  console.log("start");'));
   const registration=source.slice(source.lastIndexOf('    window.__hhArV2Runtime ='),source.lastIndexOf('})();'));
