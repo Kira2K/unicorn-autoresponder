@@ -33,11 +33,18 @@ test('Octo SQL console always provides expert tasks, including with an obsolete 
       assert.ok(runtime.options.linkedinIntake);
       assert.deepEqual(runtime.options.linkedinCreatorAuth, { login: 'expert-fixture', password: 'fixture-password' });
       assert.deepEqual(await runtime.options.linkedinCreator.list(), []);
-      assert.ok(f.calls.some(sql => sql.includes('proxy_saved_at,source,version FROM noco.linkedin_creation_task LIMIT 0')));
+      assert.ok(f.calls.some(sql => sql.includes('proxy_saved_at,source,version,requires_new_proxy FROM noco.linkedin_creation_task LIMIT 0')));
       assert.ok(!f.calls.some(sql => /^\s*(CREATE|ALTER|INSERT|UPDATE|DELETE|DROP)\b/.test(sql)));
     } finally { await runtime.close(); }
     assert.equal(f.state.ends, 2);
   }
+});
+
+test('enabled CRM command integration rejects absent credentials before opening SQL',async()=>{
+  let opens=0;
+  await assert.rejects(openSqlConsole({CRM_ACCOUNT_COMMANDS_ENABLED:'1'},()=>{opens++;throw Error('must not open');}),
+    {message:'crm_account_command_configuration_required'});
+  assert.equal(opens,0);
 });
 
 test('always-on expert tasks require the existing schema; startup closes pools without migrations', async () => {

@@ -3,6 +3,22 @@ import assert from 'node:assert/strict';
 import { createLinkedInIntakeService } from './service.mts';
 import { mockClient } from '../../octo-access/testing.mts';
 
+test('ban dispatch follows the committed first transition, never repeat/failed/uncertain writes',async()=>{
+  let marked=false,committed=false,sends=0,writeError:Error|undefined;
+  const service=createLinkedInIntakeService({allowed:()=>true,getClient:async id=>mockClient(id),hasDolphin:async()=>false,
+    store:{load:async()=>({}) as any,save:async()=>({}) as any,
+      reportBan:async()=>{if(writeError)throw writeError;const banChanged=!marked;marked=true;committed=true;return{reported:true,linkedinAccountId:21,isBanned:true,banChanged};}},
+    reportCrmBan:async(id,account)=>{assert.equal(committed,true);assert.deepEqual([id,account],[7,21]);sends++;throw Error('private upstream');}});
+  const first=await service.reportBan(7,{linkedinAccountId:21});
+  assert.equal('crm' in first&&first.crm.state,'uncertain');assert.equal(first.isBanned,true);
+  assert.ok(!JSON.stringify(first).includes('private'));
+  await service.reportBan(7,{linkedinAccountId:21});assert.equal(sends,1);
+  for(const code of ['commit_uncertain','refused']){
+    writeError=Object.assign(Error(),{code});
+    await assert.rejects(service.reportBan(7,{linkedinAccountId:21}));assert.equal(sends,1);
+  }
+});
+
 test('omitting blocked-history declaration cannot add partial cards; unchanged legacy history survives',async()=>{
  let writes=0;
  const legacy={fullName:'Old',legacyText:'Original history'};

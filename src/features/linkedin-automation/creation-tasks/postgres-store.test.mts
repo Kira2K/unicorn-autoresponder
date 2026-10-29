@@ -46,7 +46,10 @@ test('admin confirmation requires expert completion and a current idle proxy, an
   const confirmed=await f.store.confirm(1,done.version);
   assert.equal(confirmed.status,'выполнение подтверждено');
   const updates=f.calls.filter(sql=>sql.includes('SET status=')).length;
-  assert.deepEqual(await f.store.confirm(1,done.version),confirmed);
+  assert.equal(confirmed.confirmationChanged,true);
+  const replay=await f.store.confirm(1,done.version);
+  assert.equal(replay.confirmationChanged,false);
+  assert.deepEqual({...replay,confirmationChanged:true},confirmed);
   assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,updates);
   await assert.rejects(f.store.detail(1),{code:'linkedin_task_not_found'});
   assert.equal((await f.store.detail(1,true)).task.status,'выполнение подтверждено');

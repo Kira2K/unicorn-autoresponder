@@ -5,6 +5,12 @@ const base='/api/admin/linkedin-creation/tasks'
 const tasks=ref([]),selected=ref(null),profiles=ref([]),busy=ref(false),loading=ref(false),detailLoading=ref(false),error=ref(''),unknown=ref(false),showProxyPassword=ref(false)
 const controller=new AbortController()
 let timer,selection=0
+const crmResults=new Map()
+function rememberCrm(detail){
+ if(detail.crm)crmResults.set(detail.task.id,detail.crm)
+ const crm=crmResults.get(detail.task.id)
+ return {...detail,...(crm?{crm}:{})}
+}
 const visibleTasks=computed(()=>tasks.value.filter(t=>['сделана экспертом','выполнение подтверждено'].includes(t.status))
   .sort((a,b)=>Number(a.status==='выполнение подтверждено')-Number(b.status==='выполнение подтверждено')||b.id-a.id))
 const confirmed=computed(()=>selected.value?.task.status==='выполнение подтверждено')
@@ -34,20 +40,20 @@ async function open(id){
  try{
   const [detail,status]=await Promise.all([request(`${base}/${id}`,{signal:controller.signal}),request(`${base}/${id}/octo/status?proxyCredentials=1`,{signal:controller.signal})])
   if(current!==selection||controller.signal.aborted)return
-  selected.value=detail;profiles.value=status.profiles;unknown.value=false
+  selected.value=rememberCrm(detail);profiles.value=status.profiles;unknown.value=false
  }catch(e){if(current===selection&&e.name!=='AbortError')error.value=failure(e)}finally{if(current===selection)detailLoading.value=false}
 }
 async function confirm(){
  if(!canConfirm.value)return
  busy.value=true;error.value=''
  const id=selected.value.task.id
- try{selected.value=await request(`${base}/${id}/confirm`,{method:'POST',body:JSON.stringify({version:selected.value.task.version}),signal:controller.signal});await load()}
+ try{selected.value=rememberCrm(await request(`${base}/${id}/confirm`,{method:'POST',body:JSON.stringify({version:selected.value.task.version}),signal:controller.signal}));await load()}
  catch(e){if(e.name!=='AbortError'){unknown.value=true;error.value=failure(e)}}finally{busy.value=false}
 }
 onMounted(()=>{load();timer=setInterval(async()=>{
  if(document.hidden||busy.value||!selected.value||!confirmed.value||['sent','failed','uncertain'].includes(selected.value.notification?.state))return
  const id=selected.value.task.id,current=selection
- try{const detail=await request(`${base}/${id}`,{signal:controller.signal});if(current===selection&&!controller.signal.aborted)selected.value=detail}catch{/* Polling never repeats confirmation. */}
+ try{const detail=await request(`${base}/${id}`,{signal:controller.signal});if(current===selection&&!controller.signal.aborted)selected.value=rememberCrm(detail)}catch{/* Polling never repeats confirmation. */}
 },2000)})
 onUnmounted(()=>{clearInterval(timer);controller.abort();profiles.value=[]})
 </script>
@@ -88,6 +94,7 @@ onUnmounted(()=>{clearInterval(timer);controller.abort();profiles.value=[]})
     <button v-if="!confirmed" type="button" :disabled="!canConfirm" data-testid="admin-confirm-creation" @click="confirm">{{ busy?'Подтверждаем…':'Подтвердить выполнение' }}</button>
     <button type="button" :disabled="busy" @click="open(selected.task.id)">Перечитать результат</button>
     <p v-if="notification" role="status" data-testid="admin-confirmation-notification">{{ notification }}</p>
+    <p v-if="confirmed&&selected.crm&&selected.crm.state!=='not_applicable'" role="status" data-testid="admin-confirmation-crm">{{ selected.crm.state==='sent'?'Команда замены передана в CRM.':'Заявка подтверждена, но передачу в CRM подтвердить не удалось. Не подтверждай заявку повторно.' }}</p>
    </article>
   </div>
  </section>

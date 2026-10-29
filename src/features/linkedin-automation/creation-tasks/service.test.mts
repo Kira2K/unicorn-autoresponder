@@ -5,11 +5,11 @@ import type { CreationTaskStore } from './postgres-store.mts';
 import { createMemoryStore, createMockCloud, mockClient, testConfig } from '../../octo-access/testing.mts';
 import { createOctoService } from '../../octo-access/service.mts';
 import { createTaskProxyCapture } from './proxy-capture.mts';
-import { providerStatus, studentLocked } from './contracts.mts';
+import { providerStatus, studentLocked, type CreationTask } from './contracts.mts';
 import { guardAccount } from './account-guard.mts';
 import type { SqlSession } from '../../../integrations/postgres/contracts.mts';
 import { PostgresReadError } from '../../../integrations/postgres/contracts.mts';
-async function fixture(reportStatusChange?: Parameters<typeof createCreationTaskService>[0]['reportStatusChange'],newProxy?:Parameters<typeof createCreationTaskService>[0]['newProxy']) {
+async function fixture(reportStatusChange?: Parameters<typeof createCreationTaskService>[0]['reportStatusChange'],newProxy?:Parameters<typeof createCreationTaskService>[0]['newProxy'],reportCrmReplacement?:Parameters<typeof createCreationTaskService>[0]['reportCrmReplacement']) {
   const profiles=createMemoryStore(),cloud=createMockCloud(profiles);
   const config={...testConfig,allowAll:true};
   const octo=createOctoService({store:profiles,config,getClient:async (id:number)=>({...mockClient(id),market:'Both'}),
@@ -19,16 +19,32 @@ async function fixture(reportStatusChange?: Parameters<typeof createCreationTask
   for(const p of await profiles.list()) { const uuid=await cloud.api.createProfile({...p.original,folder:'home',password:p.password}); await profiles.save({...p,uuid}); }
   cloud.api.readProfileProxy=async()=>({saved:{uuid:'proxy',title:'saved',profiles_count:1,type:'socks5',host:'example.org',port:1080,login:'login',password:'secret'}});
   for(const p of await profiles.list()) cloud.profiles.get(p.uuid!)!.proxy={uuid:'proxy'};
-  const task={id:1,clientId:901,linkedinAccountId:11,outlookAccountId:12,status:'не начата' as const,version:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+  const task:CreationTask={id:1,clientId:901,linkedinAccountId:11,outlookAccountId:12,status:'не начата',version:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
   let received:unknown;
   const store={async list(){return[task];},async detail(id:number){if(id!==1)throw Object.assign(Error(),{code:'linkedin_task_not_found'});return {task,intake:{url:'',login:'',hasPassword:false,outlookLogin:'outlook@outlook.com',hasOutlookPassword:true,firstName:'A',lastName:'B',realLocation:'C',blockedAccounts:[]}};},
     async receipt(...args:unknown[]){received=args;return task;},async status(){return task;}} as unknown as CreationTaskStore;
   const capture=createTaskProxyCapture({store:profiles,api:cloud.api,config,octo});
   const secrets:unknown[]=[];
   const service=createCreationTaskService({store,profiles,octo,client:async id=>mockClient(id),capture,
-    secrets:async(...args)=>{secrets.push(args);return{password:'secret'};},nodeMavenKey:()=> 'key-secret',reportStatusChange,newProxy});
+    secrets:async(...args)=>{secrets.push(args);return{password:'secret'};},nodeMavenKey:()=> 'key-secret',reportStatusChange,newProxy,reportCrmReplacement});
   return {service,profiles,cloud,task,capture,received:()=>received,secrets,store};
 }
+
+test('replacement dispatch follows committed admin confirmation, not expert completion or replay',async()=>{
+  let committed=false,sends=0,writeError:Error|undefined;
+  const f=await fixture(undefined,undefined,async id=>{
+    assert.equal(committed,true);assert.equal(id,1);sends++;return{state:'sent'};
+  });
+  Object.assign(f.task,{status:'сделана экспертом',proxyUuid:'proxy',proxyProfileId:2,proxySavedAt:new Date().toISOString()});
+  f.store.notification=async()=>({state:'pending'});
+  f.store.confirm=async()=>{if(writeError)throw writeError;const confirmationChanged=f.task.status!=='выполнение подтверждено';Object.assign(f.task,{status:'выполнение подтверждено'});committed=true;return{...f.task,confirmationChanged};};
+  const result=await f.service.confirm(1,{version:1});
+  assert.equal(result.crm?.state,'sent');assert.equal(sends,1);
+  await f.service.confirm(1,{version:1});assert.equal(sends,1);
+  for(const code of ['commit_uncertain','linkedin_task_stale_version']){
+    writeError=Object.assign(Error(),{code});await assert.rejects(f.service.confirm(1,{version:1}));assert.equal(sends,1);
+  }
+});
 test('statuses use expert wording; contractor cannot choose confirmation',()=>{
   assert.equal(providerStatus('сделана экспертом'),'сделана экспертом');
   assert.throws(()=>providerStatus('выполнение подтверждено'));
@@ -41,7 +57,7 @@ test('admin confirmation rechecks actual cloud closure for both new and legacy p
   const f=await fixture(undefined,{assert:async()=>{},ready:async()=>true,queue:async()=>({queued:true})});
   Object.assign(f.task,{status:'сделана экспертом',requiresNewProxy,proxyUuid:'proxy',proxyProfileId:2,proxySavedAt:new Date().toISOString()});
   let writes=0;
-  f.store.confirm=async()=>{writes++;Object.assign(f.task,{status:'выполнение подтверждено'});return f.task;};
+  f.store.confirm=async()=>{const confirmationChanged=f.task.status!=='выполнение подтверждено';if(confirmationChanged)writes++;Object.assign(f.task,{status:'выполнение подтверждено'});return {...f.task,confirmationChanged};};
   f.store.notification=async()=>({state:'pending'});
   const en=(await f.profiles.get(2))!,live=f.cloud.profiles.get(en.uuid!)!;
   live.status=1;

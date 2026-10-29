@@ -64,9 +64,10 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         const rows=(await s.query(accountQuery+' FOR UPDATE OF a',[clientId])).rows,li=select(rows,'linkedin');
         if(!li||Number(li.id)!==expectedAccountId||!(li.url||li.login||li.password))throw new PostgresReadError('linkedin_intake_replacement_stale');
         if((await studentAccountAccess(s,clientId,expectedAccountId)).registrationPending)throw new PostgresReadError('linkedin_intake_registration_pending');
-        if(li.is_banned!==true){const result=await s.query('UPDATE noco.platform_accounts SET is_banned=true,updated_at=statement_timestamp() WHERE id=$1 AND clients_id=$2 RETURNING id',[expectedAccountId,clientId]);
+        const banChanged=li.is_banned!==true;
+        if(banChanged){const result=await s.query('UPDATE noco.platform_accounts SET is_banned=true,updated_at=statement_timestamp() WHERE id=$1 AND clients_id=$2 RETURNING id',[expectedAccountId,clientId]);
           if(result.rows.length!==1)throw new PostgresReadError('linkedin_intake_replacement_stale');}
-        return{reported:true,linkedinAccountId:expectedAccountId,isBanned:true};
+        return{reported:true,linkedinAccountId:expectedAccountId,isBanned:true,banChanged};
       });
     },
     async save(clientId: number, data: LinkedInIntake, locales: string[], options = { createOctoProfiles: true }) {

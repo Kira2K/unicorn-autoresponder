@@ -44,13 +44,16 @@ test('actual PostgreSQL: Denis migration rolls back, backfills exact receipts, a
   const store=createCreationTaskStore(pool,'unicorn_noco_copy_restore');
   const done=await store.status(1,1,'сделана экспертом');
   const confirmed=await Promise.all([store.confirm(1,done.version),store.confirm(1,done.version)]);
-  assert.ok(confirmed.every(task=>task.status==='выполнение подтверждено'));assert.equal(confirmed[0].version,done.version+1);assert.deepEqual(confirmed[0],confirmed[1]);
+  assert.ok(confirmed.every(task=>task.status==='выполнение подтверждено'));assert.equal(confirmed[0].version,done.version+1);
+  assert.equal(confirmed.filter(task=>task.confirmationChanged).length,1);
+  assert.deepEqual({...confirmed[0],confirmationChanged:false},{...confirmed[1],confirmationChanged:false});
   await q(`DELETE FROM noco.linkedin_creation_task WHERE id=2;
    ALTER TABLE noco.platform_accounts ADD COLUMN linkedin_first_name text,ADD COLUMN linkedin_last_name text,
    ADD COLUMN real_location text,ADD COLUMN old_link_blocked text,ADD COLUMN outlook_registered_at timestamptz,ADD COLUMN updated_at timestamptz;`);
   const intake=createLinkedInIntakeStore(pool,'unicorn_noco_copy_restore');
   await assert.rejects(intake.reportBan(102,11),{code:'linkedin_intake_replacement_stale'});
-  await intake.reportBan(101,11);
+  const bans=await Promise.all([intake.reportBan(101,11),intake.reportBan(101,11)]);
+  assert.equal(bans.filter(ban=>ban.banChanged).length,1);
   const markedAt=(await q('SELECT updated_at FROM noco.platform_accounts WHERE id=11')).rows[0].updated_at;
   await intake.reportBan(101,11);
   assert.deepEqual((await q('SELECT updated_at FROM noco.platform_accounts WHERE id=11')).rows[0].updated_at,markedAt);

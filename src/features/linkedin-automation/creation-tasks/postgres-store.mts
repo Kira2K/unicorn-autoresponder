@@ -86,11 +86,11 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
     async confirm(id:number,version:number) {
       return writeTransaction(pool,database,async s=>{
         const task=await lock(s,id,version,true);
-        if(task.status==='выполнение подтверждено')return task;
+        if(task.status==='выполнение подтверждено')return {...task,confirmationChanged:false};
         if(task.status!=='сделана экспертом')return fail('linkedin_task_not_confirmable');
         await requireResult(s,task);
-        return taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *',
-          [id,'выполнение подтверждено'])).rows[0]);
+        return {...taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *',
+          [id,'выполнение подтверждено'])).rows[0]),confirmationChanged:true};
       });
     },
     async notification(id:number) {

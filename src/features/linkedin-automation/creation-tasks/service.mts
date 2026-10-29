@@ -7,6 +7,7 @@ import { taskId } from './contracts.mts';
 import type { StatusNotification, TaskStatusChange } from './status-report.mts';
 import type {createNewTaskProxy} from './new-proxy-service.mts';
 import {DEFAULT_NOTIFICATION_MENTION} from './status-report.mts';
+import type {CommandDelivery} from '../linklab/crm-account-actions.mts';
 
 export function createCreationTaskService(deps: {
   store: CreationTaskStore; profiles: Pick<OctoStore,'list'|'get'>; octo: OctoService;
@@ -17,6 +18,7 @@ export function createCreationTaskService(deps: {
   newProxy?:ReturnType<typeof createNewTaskProxy>;
   reportStatusChange?(change: TaskStatusChange): Promise<StatusNotification>;
   notificationMention?:string;
+  reportCrmReplacement?(taskId: number): Promise<CommandDelivery>;
 }) {
   const detail = async (id: unknown) => deps.store.detail(taskId(id));
   async function en(id: unknown) {
@@ -53,8 +55,12 @@ export function createCreationTaskService(deps: {
         const actual=await deps.capture(p);
         if(actual.proxy?.uuid!==d.task.proxyUuid)throw new IntakeError('linkedin_task_proxy_changed',409);
       }
-      await deps.store.confirm(taskId(id),taskId(body.version));
-      return this.adminDetail(id);
+      const confirmed=await deps.store.confirm(taskId(id),taskId(body.version));
+      let crm:CommandDelivery|undefined;
+      if('confirmationChanged' in confirmed&&confirmed.confirmationChanged===true&&deps.reportCrmReplacement){
+        try{crm=await deps.reportCrmReplacement(confirmed.id);}catch{crm={state:'uncertain',code:'crm_account_command_unconfirmed'};}
+      }
+      return {...await this.adminDetail(id),...(crm?{crm}:{})};
     },
     async list() {
       return Promise.all((await deps.store.list()).map(async task => {

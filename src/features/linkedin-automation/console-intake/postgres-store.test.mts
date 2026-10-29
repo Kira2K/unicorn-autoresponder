@@ -99,7 +99,8 @@ test('reporting a ban is owner-scoped and idempotent without creating tasks; bot
  f.state.tasks[0].status='выполнение подтверждено';
  const counts=[f.state.accounts.length,f.state.tasks.length];
  await assert.rejects(f.store.reportBan(7,999),{code:'linkedin_intake_replacement_stale'});
- await f.store.reportBan(7,Number(f.state.accounts[0].id));await f.store.reportBan(7,Number(f.state.accounts[0].id));
+ assert.equal((await f.store.reportBan(7,Number(f.state.accounts[0].id))).banChanged,true);
+ assert.equal((await f.store.reportBan(7,Number(f.state.accounts[0].id))).banChanged,false);
  assert.equal(f.state.accounts[0].is_banned,true);assert.deepEqual([f.state.accounts.length,f.state.tasks.length],counts);
  assert.equal(f.calls.filter(sql=>sql.includes('SET is_banned=true')).length,1);
  assert.equal((await f.store.load(7)).isBanned,true);

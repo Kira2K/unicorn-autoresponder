@@ -14,7 +14,7 @@ test('admin confirms through UI, distinguishes pending delivery, and reconciles 
  let browser
  try{
   await server.listen();browser=await chromium.launch();const page=await browser.newPage();page.setDefaultTimeout(10000)
-  let status='сделана экспертом',notice='pending',posts=0,unknown=false
+  let status='сделана экспертом',notice='pending',posts=0,unknown=false,crmState='uncertain'
   const task=()=>({id:12,clientId:7,version:2,status,fio:'Test Admin Student',proxyProfileId:21,proxySavedAt:'2026-10-25T12:00:00Z'})
   await page.route('**/api/admin/linkedin-creation/tasks**',async route=>{
    const path=new URL(route.request().url()).pathname
@@ -23,7 +23,7 @@ test('admin confirms through UI, distinguishes pending delivery, and reconciles 
    }
    if(path.endsWith('/octo/status'))return route.fulfill({json:{profiles:[{id:21,phase:'ready',canEditProxy:true,proxy:{configured:true,credentialsLoaded:true,type:'socks5',host:'proxy.example',port:1080,login:'fixture',password:'fixture'}}]}})
    if(path.endsWith('/tasks'))return route.fulfill({json:[task()]})
-   return route.fulfill({json:{task:task(),client:{id:7,fio:'Test Admin Student'},intake:{url:'https://linkedin.com/in/test',login:'test@example.invalid',hasPassword:true,outlookRegisteredAt:'2026-10-25T10:30:00.000Z'},notification:{state:notice,...(notice==='sent'?{messageId:77}:{})}}})
+   return route.fulfill({json:{task:task(),client:{id:7,fio:'Test Admin Student'},intake:{url:'https://linkedin.com/in/test',login:'test@example.invalid',hasPassword:true,outlookRegisteredAt:'2026-10-25T10:30:00.000Z'},notification:{state:notice,...(notice==='sent'?{messageId:77}:{})},...(path.endsWith('/confirm')?{crm:{state:crmState}}:{})}})
   })
   const open=async()=>{await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/admin-confirm-test`);await page.getByTestId('admin-creation-task-12').click()}
   await open();await page.getByTestId('admin-confirm-creation').waitFor()
@@ -32,11 +32,18 @@ test('admin confirms through UI, distinguishes pending delivery, and reconciles 
   await page.getByTestId('admin-confirm-creation').click()
   await page.getByTestId('admin-creation-status').filter({hasText:'выполнение подтверждено'}).waitFor()
   assert.match(await page.getByTestId('admin-confirmation-notification').innerText(),/Ожидаем отправки/)
+  assert.match(await page.getByTestId('admin-confirmation-crm').innerText(),/передачу в CRM подтвердить не удалось/)
+  await page.getByRole('button',{name:'Перечитать результат',exact:true}).click()
+  await page.getByTestId('admin-confirmation-crm').waitFor()
   notice='sent';await page.getByText('Уведомление отправлено. Сообщение №77.',{exact:true}).waitFor();assert.equal(posts,1)
+  assert.match(await page.getByTestId('admin-confirmation-crm').innerText(),/передачу в CRM подтвердить не удалось/)
   status='сделана экспертом';notice='pending';unknown=true;await open();await page.getByTestId('admin-confirm-creation').click()
   await page.getByRole('alert').filter({hasText:'Результат подтверждения неизвестен'}).waitFor()
   assert.equal(await page.getByTestId('admin-confirm-creation').isDisabled(),true)
   await page.getByRole('button',{name:'Перечитать результат',exact:true}).click()
   await page.getByTestId('admin-creation-status').filter({hasText:'выполнение подтверждено'}).waitFor();assert.equal(posts,2)
+  status='сделана экспертом';notice='pending';unknown=false;crmState='not_applicable';await open();await page.getByTestId('admin-confirm-creation').click()
+  await page.getByTestId('admin-creation-status').filter({hasText:'выполнение подтверждено'}).waitFor()
+  assert.equal(await page.getByTestId('admin-confirmation-crm').count(),0,'first account intake must not display a failed replacement')
  }finally{await browser?.close();await server.close()}
 })
