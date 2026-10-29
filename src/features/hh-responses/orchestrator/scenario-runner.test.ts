@@ -88,6 +88,8 @@ function makeDependencies(states: string[]) {
       },
       closePageQuietly: async () => undefined,
       createCompanyStopListBrowserSource: () => 'stop-list-source',
+      createCaptchaBrowserSource: () => 'captcha-source',
+      preserveSuccessfulVacancyHistory: async () => 0,
       detectHhAuthState: async () => {
         const state = states[detectCount] ?? states[states.length - 1] ?? 'unknown'
         detectCount += 1
