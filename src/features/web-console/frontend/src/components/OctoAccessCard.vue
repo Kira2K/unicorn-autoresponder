@@ -8,7 +8,7 @@ import { octoOnboardingBusy } from '../octo-onboarding.js'
 
 const props = defineProps({ clientId: { type: [Number, String], required: true }, setupEnabled: { type: Boolean, default: true },
   transport: { type: Object, default: () => octoApi }, proxyEditingEnabled: { type: Boolean, default: true },
-  proxyExpanded: { type: Boolean, default: false },warmupUntil:{type:String,default:''} })
+  proxyExpanded: { type: Boolean, default: false },warmupUntil:{type:String,default:''},friendlyErrors:{type:Boolean,default:false} })
 const accessWarning=ref(null)
 const emit = defineEmits(['status', 'access-issued', 'proxy-changed'])
 const visible = ref(false)
@@ -33,6 +33,11 @@ function phaseLabel(profile) {
   if ((grant?.phase || profile.phase) === 'awaiting_close' && (grant?.error || profile.error) === 'octo_bridge_waiting')
     return 'Браузер закрыт. Завершаем доступ…'
   return phaseLabels[grant?.phase || profile.phase] || (profile.phase === 'ready' ? 'Профиль готов' : 'Профиль подготавливается…')
+}
+function profilePending(profile) {
+  const grant = grants.value[profile.id], phase = grant?.phase || profile.phase, error = grant?.error || profile.error
+  return !error && ['queued', 'creating', 'preparing', 'deleting'].includes(phase) ||
+    phase === 'awaiting_close' && error === 'octo_bridge_waiting'
 }
 const proxyPhaseLabels = { queued: 'Прокси ожидает сохранения…', creating: 'Создаём прокси…',
   attaching: 'Подключаем прокси к профилю…', complete: 'Прокси сохранён', blocked: 'Не удалось сохранить прокси. Обратись к команде поддержки.' }
@@ -284,13 +289,15 @@ onUnmounted(() => {
     <OctoManualSetup v-if="setupEnabled" :status="status" @queued="onboardingQueued" @denied="denied" />
     <p v-if="visible && !status.profiles.length" role="status">Профиль Octo пока не создан. После подготовки он появится здесь.</p>
     <p v-if="status.provisioning?.phase === 'blocked' || status.provisioning?.error" role="alert">
-      {{ status.provisioning.error || 'Создание профилей заблокировано.' }}
+      {{ friendlyErrors ? 'Octo пока не завершил подготовку профилей. Уже созданные профили сохраняются. Мы проверяем результат предыдущей операции, чтобы не создать дубли.' : status.provisioning.error || 'Создание профилей заблокировано.' }}
     </p>
+    <a v-if="friendlyErrors&&(status.provisioning?.phase==='blocked'||status.provisioning?.error)" href="https://t.me/veu_support_bot" target="_blank" rel="noopener noreferrer">Напиши в поддержку</a>
     <p v-if="message" role="status">{{ message }}</p>
     <article v-for="profile in status.profiles" :key="profile.id" class="octo-profile" :data-testid="`octo-profile-${profile.id}`">
       <h3>{{ profile.title }} · {{ profile.locale.toUpperCase() }}</h3>
-      <p>{{ phaseLabel(profile) }}</p>
+      <p class="octo-progress"><i v-if="profilePending(profile)" class="pi pi-spin pi-spinner" aria-hidden="true" /><span>{{ phaseLabel(profile) }}</span></p>
       <button type="button" :disabled="!canRequest(profile)" @click="requestAccess(profile)">
+        <i v-if="requesting[profile.id]" class="pi pi-spin pi-spinner" aria-hidden="true" />
         {{ requesting[profile.id] ? 'Запрашиваем доступ…' : 'Получить доступ' }}
       </button>
       <div v-if="requestErrors[profile.id]" role="alert">
@@ -323,7 +330,7 @@ onUnmounted(() => {
         <p v-else-if="profile.proxy?.configured">Текущий прокси: {{ profile.proxy.type }} · {{ profile.proxy.host }}:{{ profile.proxy.port }}</p>
         <p v-else>Прокси пока не настроен.</p>
         <p v-if="proxyMessages[profile.id]" role="status">{{ proxyMessages[profile.id] }}</p>
-        <p v-else-if="profile.proxy?.phase" :role="profile.proxy.phase === 'blocked' ? 'alert' : 'status'">{{ proxyPhaseLabels[profile.proxy.phase] || 'Проверяем состояние прокси…' }}</p>
+        <p v-else-if="profile.proxy?.phase" class="octo-progress" :role="profile.proxy.phase === 'blocked' ? 'alert' : 'status'"><i v-if="proxyPending(profile) && !profile.proxy.error" class="pi pi-spin pi-spinner" aria-hidden="true" /><span>{{ proxyPhaseLabels[profile.proxy.phase] || 'Проверяем состояние прокси…' }}</span></p>
         <p v-else-if="profile.proxy?.error" role="alert">Не удалось обновить прокси. Обратись к команде поддержки.</p>
         <p v-if="profile.proxy?.credentialsError" role="alert">Не удалось загрузить реквизиты прокси из Octo. Повторяем загрузку…</p>
       </div>
@@ -334,7 +341,7 @@ onUnmounted(() => {
           <fieldset :disabled="!canEditProxy(profile)">
             <legend>Настроить прокси</legend>
             <OctoProxyFields v-model="proxyDrafts[profile.id]" :prefix="`octo-proxy-${profile.id}`" />
-            <button type="submit" :data-testid="`octo-proxy-save-${profile.id}`">{{ proxySaving[profile.id] ? 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
+            <button type="submit" :data-testid="`octo-proxy-save-${profile.id}`"><i v-if="proxySaving[profile.id]" class="pi pi-spin pi-spinner" aria-hidden="true" />{{ proxySaving[profile.id] ? 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
           </fieldset>
         </form>
       </details>
@@ -352,6 +359,7 @@ onUnmounted(() => {
 .octo-card h2 { margin: 0 0 12px; font-size: 20px; }
 .octo-card h3 { margin: 0; font-size: 17px; }
 .octo-card p { line-height: 1.5; }
+.octo-progress{display:flex;align-items:center;gap:10px}.octo-progress>.pi{flex-shrink:0}.octo-card button>.pi{margin-right:8px}
 .octo-create, .octo-credentials { display: grid; gap: 12px; }
 .octo-profile { margin-top: 20px; padding-top: 20px; border-top: 1px solid #dbe3ee; }
 .octo-field { display: grid; gap: 6px; font-weight: 600; }

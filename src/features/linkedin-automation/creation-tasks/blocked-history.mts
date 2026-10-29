@@ -2,6 +2,15 @@ import type { SqlSession } from '../../../integrations/postgres/contracts.mts';
 import { blockedFields, readBlockedAccounts } from '../console-intake/contracts.mts';
 import type { BlockedAccount } from '../console-intake/contracts.mts';
 
+/** Account identity only: credentials are never copied into history. */
+export function blockedHistoryCard(account:Record<string,unknown>,archived=true):BlockedAccount|undefined {
+  if(!account.url&&!account.login&&!account.has_password)return;
+  const fullName=[account.linkedin_first_name,account.linkedin_last_name].filter(Boolean).join(' ');
+  const notes=[['Ссылка LinkedIn',account.url],['Логин LinkedIn',account.login],['Локация',account.real_location]]
+    .filter(([,value])=>value).map(([label,value])=>`${label}: ${value}`);
+  return {...(fullName?{fullName}:{}),legacyText:[`${archived?'Архивный':'Заблокированный'} LinkedIn №${account.id}`,...notes].join('\n')};
+}
+
 /** Read-only expert view: submitted cards plus previously archived accounts owned by this student. */
 export async function loadBlockedHistory(sql:Pick<SqlSession,'query'>,clientId:number,currentAccountId:number,currentHistory:unknown):Promise<BlockedAccount[]> {
   const archived=(await sql.query(`SELECT a.id,a.url,a.login,a.linkedin_first_name,a.linkedin_last_name,
@@ -20,11 +29,7 @@ export async function loadBlockedHistory(sql:Pick<SqlSession,'query'>,clientId:n
   appendEntered(currentHistory);
   for(const account of archived){
     appendEntered(account.old_link_blocked);
-    if(!account.url&&!account.login&&!account.has_password)continue;
-    const fullName=[account.linkedin_first_name,account.linkedin_last_name].filter(Boolean).join(' ');
-    const notes=[['Ссылка LinkedIn',account.url],['Логин LinkedIn',account.login],['Локация',account.real_location]]
-      .filter(([,value])=>value).map(([label,value])=>`${label}: ${value}`);
-    result.push({...(fullName?{fullName}:{}),legacyText:[`Архивный LinkedIn №${account.id}`,...notes].join('\n')});
+    const card=blockedHistoryCard(account);if(card)result.push(card);
   }
   return result;
 }

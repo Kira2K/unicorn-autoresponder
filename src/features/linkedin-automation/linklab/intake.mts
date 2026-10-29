@@ -16,6 +16,7 @@ export async function syncLinkLabAccount(sql: SqlSession, clientId: number) {
     FROM noco.linklab l LEFT JOIN noco.platform_accounts a ON a.id=l.platform_account_id
     WHERE l.client_id=$1`, [clientId])).rows[0];
   if (existing) return; // Rebinding is exclusively owned by confirmed account-cycle transitions.
+  if((await sql.query("SELECT id FROM noco.platform_accounts WHERE clients_id=$1 AND platforms_id=16 AND NOT coalesce(__nc_deleted,false) AND coalesce((to_jsonb(platform_accounts)->>'linkedin_octo_connection_pending')::boolean,false) LIMIT 1",[clientId])).rows.length)return;
   if((await sql.query("SELECT id FROM noco.linkedin_creation_task WHERE client_id=$1 AND status<>'выполнение подтверждено' LIMIT 1",[clientId])).rows.length)return;
   await sql.query('SELECT id FROM noco.platform_accounts WHERE clients_id=$1 FOR UPDATE', [clientId]);
   const selected = (await sql.query(`SELECT * FROM (${linkLabBaseQuery}) chosen WHERE client_id=$1`, [clientId])).rows[0];

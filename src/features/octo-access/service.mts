@@ -10,6 +10,7 @@ import { profileRules, reserveClientProfiles } from './profile-reservation.mts';
 import { createOnboardingService } from './onboarding-service.mts';
 import { readGrantCandidate } from './acquire-profile.mts';
 import type { OnboardingDependencies } from './onboarding-service.mts';
+import {manualProxyFingerprint} from './manual-proxy-check.mts';
 const { requiredLocalesForMarket } = profileRules;
 export function createOctoService({ store, config, getClient, now = Date.now, password = generateProfilePassword,
   canGrant = () => true, onboarding, readProfileProxy }: {
@@ -67,7 +68,8 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
       const requiredLocales = operation?.source==='direct'&&operation.locales?.length?operation.locales:requiredLocalesForMarket(c.market);
       const missing = requiredLocales.filter(locale => !existing.some(p => p.locale === locale));
       const explicitSetup = operation?.phase === 'provisioning' &&
-        (operation.source === 'direct' || (operation.source === 'manual' && !!operation.input));
+        (operation.source === 'direct' || (operation.source === 'manual' && !!operation.input&&operation.verifiedProxy?.fingerprint===manualProxyFingerprint(operation.input)));
+      if(operation?.source==='manual'&&!explicitSetup&&missing.length)throw new OctoError('octo_proxy_setup_required',409);
       if (missing.includes('en') && !explicitSetup && (!operation || operation.phase !== 'provisioning' || operation.source === 'none' ||
         !operation.input || typeof operation.score !== 'number' ||
         (operation.source !== 'nodemaven' && operation.score < 70 && !operation.acceptLowScore)))
@@ -117,6 +119,12 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
       const operation = (await store.clientState(clientId))?.setup;
       if (operation && !['complete','blocked','unknown'].includes(operation.phase))
         throw new OctoError('octo_setup_busy', 409);
+      if(!isMadeByExpert&&operation?.source==='manual'){
+        const profile=await store.get(profileId);
+        if(!profile||profile.clientId!==clientId)throw new OctoError('not_found',404);
+        if(profile.locale!=='en')throw new OctoError('octo_proxy_setup_required',409);
+        await setup.start(clientId,{source:'manual',proxy:input});return this.status(clientId);
+      }
       await this.queueProxy(clientId, profileId, input,undefined,isMadeByExpert);
       return this.status(clientId,{staff:isMadeByExpert});
     },

@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseIntake, parseLinkedInResult, readBlockedAccounts, normalizeBlockedAccounts } from './contracts.mts';
+
+test('existing LinkedIn credentials can precede Octo, but completion still requires login confirmation',()=>{
+ const account={scenario:'existing',url:'https://linkedin.com/in/test',login:'person@example.com',password:'fixture'};
+ assert.equal(parseIntake({...account,stage:'credentials'}).stage,'credentials');
+ assert.throws(()=>parseIntake({...account,stage:'complete'}),{code:'linkedin_intake_login_confirmation_required'});
+ assert.equal(parseIntake({...account,loggedIn:true}).stage,undefined);
+ assert.throws(()=>parseIntake({...account,stage:'unexpected'}),{code:'linkedin_intake_invalid'});
+ assert.throws(()=>parseIntake({scenario:'new',stage:'credentials'}),{code:'linkedin_intake_invalid'});
+});
 const draft = { scenario: 'new', outlookLogin: 'test@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' };
 
 test('Outlook registration cannot be in the future; a declared blocked account requires every structured field',()=>{

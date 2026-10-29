@@ -22,7 +22,13 @@ export function infrastructureReady(status) {
     !['queued','checking','provisioning','unknown','awaiting_confirmation'].includes(status.onboarding?.phase)
 }
 export async function intakeRequest(method = 'GET', data, signal) {
-  const response = await fetch('/api/client/linkedin-intake', { method, signal, credentials: 'include',
+  return request('/api/client/linkedin-intake',method,data,signal)
+}
+export async function intakeBanRequest(method, data, signal) {
+  return request('/api/client/linkedin-intake/ban',method,data,signal)
+}
+async function request(path,method,data,signal) {
+  const response = await fetch(path, { method, signal, credentials: 'include',
     headers: { 'Content-Type': 'application/json' }, ...(data ? { body: JSON.stringify(data) } : {}) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw Object.assign(new Error(body.error || 'linkedin_intake_unavailable'), { status: response.status,fields:body.fields })

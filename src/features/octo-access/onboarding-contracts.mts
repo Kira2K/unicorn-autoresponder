@@ -8,6 +8,7 @@ export interface ProxySetup {
   input?: ProxyInput;
   location?: { country: string; region?: string; city?: string };
   profileIds?: number[]; acceptLowScore?: boolean; confirmDolphin: boolean;
+  verifiedProxy?:{fingerprint:string;exitIp:string;country?:string;checkedAt:number};
   locales?: Locale[];
 }
 export interface ClientState {

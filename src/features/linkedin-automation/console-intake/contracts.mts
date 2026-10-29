@@ -3,6 +3,7 @@ export const blockedFields = ['fullName', 'country', 'company', 'position', 'blo
 export type BlockedAccount = Partial<Record<typeof blockedFields[number], string>>;
 export interface LinkedInIntake {
   scenario: 'existing' | 'new';
+  stage?: 'credentials' | 'complete';
   url: string; login: string; password: string;
   outlookLogin: string; outlookPassword: string;
   outlookRegisteredAt?: string;
@@ -12,6 +13,7 @@ export interface LinkedInIntake {
   hasBlockedAccounts?:boolean;
 }
 export interface LinkedInIntakeView {
+  octoConnectionPending?:boolean;
   url:string;login:string;hasPassword:boolean;outlookLogin:string;hasOutlookPassword:boolean;
   firstName:string;lastName:string;realLocation:string;blockedAccounts:BlockedAccount[];
   outlookRegisteredAt?:string;task?:CreationTask;editLocked?:boolean;completionConfirmed?:boolean;registrationPending?:boolean;
@@ -79,6 +81,7 @@ export function parseIntake(value: unknown,now=Date.now()): LinkedInIntake {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new IntakeError('linkedin_intake_invalid');
   const raw = value as Record<string, unknown>;
   if (!['existing', 'new'].includes(String(raw.scenario))) throw new IntakeError('linkedin_intake_scenario_required');
+  if(raw.stage!==undefined&&(raw.scenario!=='existing'||!['credentials','complete'].includes(String(raw.stage))))throw new IntakeError('linkedin_intake_invalid');
   if (raw.replacesLinkedInAccountId !== undefined && (raw.scenario !== 'new' || typeof raw.replacesLinkedInAccountId !== 'number' ||
       !Number.isSafeInteger(raw.replacesLinkedInAccountId) || raw.replacesLinkedInAccountId < 1))
     throw new IntakeError('linkedin_intake_replacement_invalid');
@@ -90,7 +93,7 @@ export function parseIntake(value: unknown,now=Date.now()): LinkedInIntake {
   if (password.length > 4096 || outlookPassword.length > 4096) throw new IntakeError('linkedin_intake_invalid');
   if (raw.scenario === 'existing') {
     parseLinkedInResult(raw);
-    if (raw.loggedIn !== true) throw new IntakeError('linkedin_intake_login_confirmation_required');
+    if (raw.stage!=='credentials'&&raw.loggedIn !== true) throw new IntakeError('linkedin_intake_login_confirmation_required');
   } else {
     if (!isOutlookLogin(data.outlookLogin)) throw new IntakeError('linkedin_intake_outlook_required');
     if (![data.firstName, data.lastName].every(isLatinIntakeName) || !data.realLocation)
@@ -102,6 +105,7 @@ export function parseIntake(value: unknown,now=Date.now()): LinkedInIntake {
   if(raw.hasBlockedAccounts===true&&(!blockedAccounts.length||blockedAccounts.some(card=>!completeBlockedAccount(card))))throw new IntakeError('linkedin_intake_blocked_required');
   if(raw.hasBlockedAccounts===false&&blockedAccounts.length)throw new IntakeError('linkedin_intake_blocked_invalid');
   return { ...data, scenario: raw.scenario as LinkedInIntake['scenario'], password, outlookPassword,
+    ...(raw.stage!==undefined?{stage:raw.stage as 'credentials'|'complete'}:{}),
     ...(raw.replacesLinkedInAccountId !== undefined ? {replacesLinkedInAccountId:raw.replacesLinkedInAccountId as number} : {}),
     ...(outlookRegisteredAt ? { outlookRegisteredAt } : {}),
     ...(raw.hasBlockedAccounts!==undefined?{hasBlockedAccounts:raw.hasBlockedAccounts as boolean}:{}),loggedIn: raw.loggedIn === true, blockedAccounts };

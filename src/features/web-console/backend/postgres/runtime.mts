@@ -19,6 +19,7 @@ import { createControlAcquire } from '../../../octo-access/control-client.mts';
 import { controlRoutes } from '../../../octo-access/control-routes.mts';
 import { createCloudApi } from '../../../octo-access/cloud-api.mts';
 import { createProxyChecker } from '../../../octo-access/proxy-checker.mts';
+import { createProxyConnectivityCheck } from '../../../octo-access/proxy-connectivity.mts';
 import { createCheckerDevelopmentHelp } from '../../../octo-access/checker-development-help.mts';
 import { createNodeMavenCatalogue } from '../../../octo-access/nodemaven-locations.mts';
 import { createDolphinProxySource } from '../../../octo-access/dolphin-proxy-source.mts';
@@ -103,6 +104,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig, allowLegacyChecks: false,
         token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
         onboarding: {
+          manualCheck: createProxyConnectivityCheck(),
           developmentHelp: createCheckerDevelopmentHelp(env),
           checker: env.PROXY_CHECKER_BASE_URL && env.UNICORN_PROXY_CHECKER_SECRET_KEY
             ? createProxyChecker({ baseUrl: env.PROXY_CHECKER_BASE_URL, secret: env.UNICORN_PROXY_CHECKER_SECRET_KEY })

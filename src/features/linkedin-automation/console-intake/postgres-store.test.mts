@@ -7,11 +7,11 @@ import { parseIntake } from './contracts.mts';
 import { tableIds } from '../../web-console/backend/postgres/tables.mts';
 const input = () => parseIntake({ scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'mail-secret',
   firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', blockedAccounts: [{ fullName: 'Old Alex' }, { country: 'UK' }] });
-function fixture(creationTasks = false) {
+function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:number)=>Promise<unknown>) {
   const state: { accounts: Record<string, unknown>[]; client?: Record<string, unknown>; profiles: Record<string, unknown>[]; tasks: Record<string,unknown>[] } = { accounts: [], profiles: [], tasks: [], client: undefined };
   const control = { failQueue: false, failTask: false, uncertain: false }, calls: string[] = [];
   let backup = structuredClone(state);
-  let nextId = 1;
+  let nextId = 1, banRevision = 0;
   const pool: SqlPool = { async end() {}, async connect() { return { release() {}, async query(sql, values = []) {
     calls.push(sql);
     if (sql.includes('current_database()')) return { rows: [{ database: 'unicorn_noco_copy_restore', marker: COPY_MARKER }] };
@@ -67,7 +67,11 @@ function fixture(creationTasks = false) {
       state.accounts.push(row); return { rows: [{ id: row.id }] };
     }
     if (sql.startsWith('UPDATE noco.platform_accounts')) {
-      if(sql.includes('SET is_banned=true')){const row=state.accounts.find(row=>Number(row.id)===Number(values[0])&&Number(row.clients_id)===Number(values[1]));if(row){row.is_banned=true;return{rows:[{id:row.id}]};}return{rows:[]};}
+      if(sql.includes('SET is_banned=true')){const row=state.accounts.find(row=>Number(row.id)===Number(values[0])&&Number(row.clients_id)===Number(values[1]));if(row){row.is_banned=true;row.ban_version=`2026-10-30 00:00:00.${String(++banRevision).padStart(6,'0')}+00`;return{rows:[{id:row.id,ban_version:row.ban_version}]};}return{rows:[]};}
+      if(sql.includes('SET is_banned=false')){
+        const row=state.accounts.find(row=>Number(row.id)===Number(values[0])&&Number(row.clients_id)===Number(values[1])&&row.is_banned===true&&row.ban_version===values[2]);
+        if(!row)return{rows:[]};row.is_banned=false;row.ban_version=`cancelled-${++banRevision}`;return{rows:[{id:row.id}]};
+      }
       if(sql.includes('__nc_deleted=true')){
         const rows=state.accounts.filter(row=>row.clients_id===values[0]&&(values[1] as number[]).includes(Number(row.id))&&!row.__nc_deleted);
         for(const row of rows)row.__nc_deleted=true;
@@ -78,6 +82,7 @@ function fixture(creationTasks = false) {
       return { rows: [] };
     }
     if (sql.includes('FROM noco.octo_profiles')) return { rows: state.profiles };
+    if (sql.startsWith("SELECT state->'setup' AS setup FROM noco.octo_clients")) return {rows:state.client?[{setup:(state.client.state as any)?.setup}]:[]};
     if (sql.startsWith('SELECT client_id,password,revision,state FROM noco.octo_clients')) return { rows: state.client ? [state.client] : [] };
     if (sql.startsWith('INSERT INTO noco.octo_clients')) {
       state.client = { client_id: values[0], password: values[1], revision: 1, state: JSON.parse(String(values[2])) };
@@ -90,8 +95,20 @@ function fixture(creationTasks = false) {
     }
     return { rows: [] };
   } }; } };
-  return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore', false, creationTasks) };
+  return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore', false, creationTasks,afterBan) };
 }
+
+test('saving existing credentials before Octo is durable, owner scoped and creates neither profiles nor ready notice',async()=>{
+ const f=fixture(),raw={scenario:'existing',stage:'credentials',url:'https://linkedin.com/in/alex',login:'alex@example.com',password:'fixture'};
+ const first=await f.store.save(7,parseIntake(raw),['ru','en']);
+ const second=await f.store.save(7,parseIntake({...raw,password:''}),['ru','en']);
+ assert.equal(first.linkedinAccountId,second.linkedinAccountId);
+ assert.equal(f.state.accounts.length,1);assert.equal(f.state.accounts[0].linkedin_octo_connection_pending,true);
+ assert.equal(f.state.accounts[0].password,'fixture');assert.equal(f.state.profiles.length,0);assert.equal(f.state.tasks.length,0);
+ assert.ok(!f.calls.some(sql=>sql.startsWith('INSERT INTO noco.linkedin_intake_notifications')));
+ const view=await f.store.load(7);assert.equal(view.octoConnectionPending,true);assert.equal(view.hasPassword,true);assert.equal('password' in view,false);
+ await assert.rejects(f.store.save(7,parseIntake({...raw,stage:'complete',loggedIn:true}),['ru','en']),{code:'linkedin_intake_infrastructure_required'});
+});
 
 test('reporting a ban is owner-scoped and idempotent without creating tasks; both readers include the archived history',async()=>{
  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
@@ -103,6 +120,68 @@ test('reporting a ban is owner-scoped and idempotent without creating tasks; bot
  assert.equal(f.state.accounts[0].is_banned,true);assert.deepEqual([f.state.accounts.length,f.state.tasks.length],counts);
  assert.equal(f.calls.filter(sql=>sql.includes('SET is_banned=true')).length,1);
  assert.equal((await f.store.load(7)).isBanned,true);
+});
+
+test('master CRM hook observes a committed ban once; cancellation does not send an implicit CRM unban',async()=>{
+ const deliveries:unknown[]=[];
+ const f=fixture(true,async(clientId,accountId)=>{
+  assert.equal(f.calls.at(-1),'COMMIT','external CRM work runs after the SQL commit');
+  assert.equal(f.state.accounts[0].is_banned,true);deliveries.push([clientId,accountId]);throw Error('mock CRM failure');
+ });
+ await f.store.save(7,input(),['ru','en']);const id=Number(f.state.accounts[0].id);
+ Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});f.state.tasks[0].status='выполнение подтверждено';
+ const first=await f.store.reportBan(7,id);await f.store.reportBan(7,id);
+ assert.deepEqual(deliveries,[[7,id]]);assert.ok(first.banUndoVersion);
+ await f.store.cancelBan(7,id,first.banUndoVersion!);
+ assert.equal(f.state.accounts[0].is_banned,false);assert.equal(deliveries.length,1);
+});
+
+test('reported current account appears in blocked history immediately; cancellation restores only this ban',async()=>{
+ const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+ const li=f.state.accounts[0],id=Number(li.id);Object.assign(li,{url:'https://linkedin.com/in/old',login:'old@example.test',password:'never-return'});
+ f.state.tasks[0].status='выполнение подтверждено';
+ const original=JSON.stringify(li.old_link_blocked),counts=[f.state.accounts.length,f.state.tasks.length];
+ const report=await f.store.reportBan(7,id);
+ assert.equal(typeof report.banUndoVersion,'string');
+ assert.equal((await f.store.reportBan(7,id)).banUndoVersion,undefined,'an already banned account grants no new undo');
+ const bannedView=await f.store.load(7);
+ assert.equal(bannedView.archivedBlockedAccounts?.length,1);
+ assert.match(bannedView.archivedBlockedAccounts![0].legacyText!,/https:\/\/linkedin.com\/in\/old/);
+ assert.match(bannedView.archivedBlockedAccounts![0].legacyText!,/old@example.test/);
+ assert.ok(!JSON.stringify(bannedView).includes('never-return'));
+ await f.store.cancelBan(7,id,report.banUndoVersion!);
+ await f.store.cancelBan(7,id,report.banUndoVersion!);
+ assert.equal(f.state.accounts[0].is_banned,false);
+ const restored=await f.store.load(7);assert.equal(restored.archivedBlockedAccounts?.length,0);
+ assert.deepEqual(restored.editableBlockedAccounts,input().blockedAccounts);
+ assert.equal(JSON.stringify(f.state.accounts[0].old_link_blocked),original);
+ assert.deepEqual([f.state.accounts.length,f.state.tasks.length],counts);
+});
+
+test('ban cancellation rejects another owner, changed data and a pending/replaced application',async()=>{
+ const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+ const id=Number(f.state.accounts[0].id);Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});
+ f.state.tasks[0].status='выполнение подтверждено';
+ const report=await f.store.reportBan(7,id);
+ await assert.rejects(f.store.cancelBan(8,id,report.banUndoVersion!),{code:'linkedin_intake_replacement_stale'});
+ await assert.rejects(f.store.cancelBan(7,id,'changed-version'),{code:'linkedin_intake_ban_changed'});
+ assert.equal(f.state.accounts[0].is_banned,true);
+ f.state.tasks[0].status='не начата';
+ await assert.rejects(f.store.cancelBan(7,id,report.banUndoVersion!),{code:'linkedin_intake_registration_pending'});
+ f.state.tasks[0].status='выполнение подтверждено';
+ await f.store.save(7,{...input(),replacesLinkedInAccountId:id},['ru','en']);
+ await assert.rejects(f.store.cancelBan(7,id,report.banUndoVersion!),{code:'linkedin_intake_replacement_stale'});
+ assert.equal(f.state.accounts.find(a=>Number(a.id)===id)?.is_banned,true);
+});
+
+test('an uncertain cancellation is read back without repeating the status update',async()=>{
+ const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+ const id=Number(f.state.accounts[0].id);Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});f.state.tasks[0].status='выполнение подтверждено';
+ const report=await f.store.reportBan(7,id);f.control.uncertain=true;
+ await assert.rejects(f.store.cancelBan(7,id,report.banUndoVersion!),{code:'commit_uncertain'});
+ assert.equal((await f.store.load(7)).isBanned,false);
+ await f.store.cancelBan(7,id,report.banUndoVersion!);
+ assert.equal(f.calls.filter(sql=>sql.includes('SET is_banned=false')).length,1);
 });
 
 test('Outlook registration time round-trips on the email account and survives legacy updates and rollback', async () => {
