@@ -138,7 +138,10 @@
         },
         saveConfig: (s) => localStorage.setItem(KEYS.settings, JSON.stringify(s)),
         getProcessedIDs: () => {
-            try { return new Set(JSON.parse(sessionStorage.getItem(KEYS.history) || '[]')); }
+            try { return new Set([
+                ...JSON.parse(localStorage.getItem(KEYS.history) || '[]'),
+                ...JSON.parse(sessionStorage.getItem(KEYS.history) || '[]')
+            ]); }
             catch { return new Set(); }
         },
         addProcessedID: (id) => {
@@ -146,7 +149,10 @@
             s.add(id);
             sessionStorage.setItem(KEYS.history, JSON.stringify([...s]));
         },
-        clearProcessedIDs: () => sessionStorage.removeItem(KEYS.history),
+        clearProcessedIDs: () => {
+            sessionStorage.removeItem(KEYS.history);
+            localStorage.removeItem(KEYS.history);
+        },
         amIRunning: () => sessionStorage.getItem(KEYS.isRunning) === '1',
         setRunning: (state) => state ? sessionStorage.setItem(KEYS.isRunning, '1') : sessionStorage.removeItem(KEYS.isRunning),
         clearStopReason: () => sessionStorage.removeItem(KEYS.stopReason),
@@ -302,7 +308,19 @@
 
             successfulIds.add(responseKey);
             sessionStorage.setItem(KEYS.successfulResponseIds, JSON.stringify([...successfulIds]));
-            return StateManager.incrementSuccessfulResponses();
+            const count = StateManager.incrementSuccessfulResponses();
+            try {
+                const saved = JSON.parse(localStorage.getItem(KEYS.history) || '[]');
+                if (!Array.isArray(saved)) throw new Error('History is not an array');
+                localStorage.setItem(KEYS.history, JSON.stringify([...new Set([...saved, id])]));
+            } catch {
+                // The HH write already succeeded: retain its session count and
+                // stop instead of retrying a business action with uncertain history.
+                stopSignal = true;
+                StateManager.setStopReason('vacancy_processing_error', 'Cannot preserve confirmed vacancy history', true);
+                StateManager.setRunning(false);
+            }
+            return count;
         },
         // Простая кросс-вкладочная блокировка (instance lock)
         acquireInstanceLock: (tabId) => {
@@ -393,7 +411,21 @@
     }
 
     // Утилиты
-    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const captchaRuntime = window.HHCaptchaRuntime?.createCaptchaRuntime({
+        document, isStopped: () => stopSignal,
+        onTimeout: () => {
+            stopSignal = true;
+            StateManager.setStopReason('captcha_detected', 'Captcha was not resolved within 120000ms', true);
+            StateManager.setRunning(false);
+            StateManager.releaseInstanceLock(TAB_ID);
+            setStatus('error', 'Капча: истёк таймаут');
+        }
+    });
+    const operationNow = () => captchaRuntime ? captchaRuntime.now() : Date.now();
+    const wait = async ms => {
+        await new Promise(r => setTimeout(r, ms));
+        await captchaRuntime?.wait();
+    };
     const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
     const actionPause = async () => await wait(randomDelay(config.actionDelayMin, config.actionDelayMax));
     const vacancyPause = async () => await wait(randomDelay(config.delayMin, config.delayMax));
@@ -495,24 +527,17 @@
         } catch (e) { console.warn('fillTextarea error', e); }
     }
 
-    // Ждём появления элемента — MutationObserver помогает при динамическом DOM
+    // Ожидание элемента сохраняет бюджет времени, пока оператор решает капчу.
     async function waitForElement(selector, timeout = config.waitForModalMs) {
-        const el = document.querySelector(selector);
-        if (el) return el;
-        return new Promise((resolve) => {
-            const observer = new MutationObserver(() => {
-                const found = document.querySelector(selector);
-                if (found) {
-                    observer.disconnect();
-                    resolve(found);
-                }
-            });
-            observer.observe(document.documentElement || document, { childList: true, subtree: true });
-            setTimeout(() => {
-                observer.disconnect();
-                resolve(null);
-            }, timeout);
-        });
+        const start = operationNow();
+        do {
+            await captchaRuntime?.wait();
+            if (stopSignal) return null;
+            const found = document.querySelector(selector);
+            if (found) return found;
+            await wait(100);
+        } while (operationNow() - start < timeout);
+        return document.querySelector(selector);
     }
 
     function isElementVisible(element) {
@@ -528,8 +553,8 @@
     }
 
     async function waitForVisibleElement(selector, timeout = config.waitForModalMs) {
-        const start = Date.now();
-        while (Date.now() - start < timeout) {
+        const start = operationNow();
+        while (operationNow() - start < timeout) {
             const el = queryVisible(selector);
             if (el) return el;
             await wait(200);
@@ -539,8 +564,8 @@
     }
 
     async function waitForElementGone(selector, timeout = 5000) {
-        const start = Date.now();
-        while (Date.now() - start < timeout) {
+        const start = operationNow();
+        while (operationNow() - start < timeout) {
             if (!queryVisible(selector)) return true;
             await wait(300);
         }
@@ -778,6 +803,11 @@
     function watchTheURL() {
         setInterval(async () => {
             if (!StateManager.amIRunning()) return;
+            if (captchaRuntime?.visible()) {
+                StateManager.touchInstanceLock(TAB_ID);
+                if (activeVacancyWatch) activeVacancyWatch.lastProgressAt = Date.now();
+                return;
+            }
             StateManager.rememberUrl(location.href, 'watch');
 
             // Обновляем timestamp instance lock только во время активной работы
@@ -1154,18 +1184,10 @@
     }
 
     function isResumeVisibilityRequiredResponse() {
-        const text = getNormalizedPageText();
-
-        return (
-            text.includes('видимост') &&
-            text.includes('резюм') &&
-            (
-                text.includes('headhunter') ||
-                text.includes('компаниям') ||
-                text.includes('клиентам') ||
-                text.includes('откликнуться')
-            )
-        );
+        // HH leaves this warning in innerText even when its container is
+        // collapsed to max-height:0. Parser logs also contain the same words.
+        const warning = queryVisible('[data-qa="hidden-resume-warning"], [data-qa="resume-visibility-warning"]');
+        return Boolean(warning && /видимост|visibility/i.test(warning.innerText || warning.textContent || ''));
     }
 
     function markVacancyProcessedAndReturn(vid, returnUrl, reason) {
@@ -1778,8 +1800,9 @@
 
             // Подождать подтверждение отправки — ищем кнопку "Чат" или текст "Резюме доставлено"
             async function waitForSubmitConfirmation(timeout = 5000) {
-                const start = Date.now();
-                while (Date.now() - start < timeout) {
+                const start = operationNow();
+                while (operationNow() - start < timeout) {
+                    await captchaRuntime?.wait();
                     if (stopSignal) return false;
                     if (isAuthRequiredPage()) return 'AUTH_REQUIRED';
                     if (isManualResponsePage()) return 'MANUAL_RESPONSE_REQUIRED';
@@ -1955,6 +1978,10 @@
     // Основной цикл обработчика
     async function startLoop() {
         if (isLoopActive) return;
+        if (StateManager.hasReachedResponseLimit()) {
+            StateManager.stopForResponseLimit();
+            return;
+        }
         const wasAlreadyRunning = StateManager.amIRunning();
 
         // Жёстко занимаем instance lock: не запускаемся, если работает другая вкладка
@@ -1979,6 +2006,9 @@
         }
         StateManager.setRunning(true);
         setStatus('running');
+
+        await captchaRuntime?.wait();
+        if (stopSignal) { isLoopActive = false; return; }
 
         if (isAuthRequiredPage()) {
             markAuthRequired('HH показал форму входа при старте автооткликов.');
@@ -2010,6 +2040,10 @@
                 StateManager.clearRecoverableVacancyFailureCount();
                 log('Отклик отправлен. Завершаю цикл для корректного возврата.');
                 isLoopActive = false;
+                if (StateManager.hasReachedResponseLimit()) {
+                    StateManager.stopForResponseLimit();
+                    return;
+                }
                 setStatus('running', 'Возврат к списку...');
                 return;
             } else if (res === 'REDIRECT') {

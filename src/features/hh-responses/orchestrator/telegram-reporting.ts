@@ -1,4 +1,4 @@
-const { sendTelegramMessage } = require('../../../integrations/telegram/messenger.ts')
+const { sendTelegramMessage } = require('./send-report.ts')
 const { splitTelegramMessage } = require('./reports.ts')
 const {
   AUTH_CHECK_PARSER_ERROR_CODES,

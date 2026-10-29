@@ -16,6 +16,8 @@ const {
 const { detectHhAuthState } = require('../hh-auth/orchestrator.ts')
 const { runManualVacanciesCleanup } = require('../manual-vacancies-cleanup.ts')
 const { isAutoResponderUrl } = require('../shared/hh-url.ts')
+const { preserveSuccessfulVacancyHistory } = require('../auto-responder/history.ts')
+const { createCaptchaBrowserSource } = require('../captcha/browser-source.ts')
 const { getErrorMessage, withTimeout } = require('./runtime-utils.ts')
 const {
   CONNECT_OVER_CDP_TIMEOUT_MS,
@@ -43,6 +45,8 @@ type ScenarioRunnerDependencies = {
   applyAutoResponderSettings: typeof applyAutoResponderSettings
   closePageQuietly: typeof closePageQuietly
   createCompanyStopListBrowserSource: typeof createCompanyStopListBrowserSource
+  createCaptchaBrowserSource: typeof createCaptchaBrowserSource
+  preserveSuccessfulVacancyHistory: typeof preserveSuccessfulVacancyHistory
   detectHhAuthState: typeof detectHhAuthState
   ensureIndexScript: typeof ensureIndexScript
   installIndexReinjectWatcher: typeof installIndexReinjectWatcher
@@ -57,6 +61,8 @@ const defaultDependencies: ScenarioRunnerDependencies = {
   applyAutoResponderSettings,
   closePageQuietly,
   createCompanyStopListBrowserSource,
+  createCaptchaBrowserSource,
+  preserveSuccessfulVacancyHistory,
   detectHhAuthState,
   ensureIndexScript,
   installIndexReinjectWatcher,
@@ -89,6 +95,8 @@ async function openScenarioAndInjectIndex(
     browserDisconnected = true
   })
   const context = browser.contexts()[0] || (await browser.newContext())
+  const preservedCount = await dependencies.preserveSuccessfulVacancyHistory(context)
+  options.logLifecycleEvent?.('HH confirmation history preserved', `${preservedCount} vacancies`)
   let manualVacanciesCleanup: ManualVacanciesCleanupResult | undefined
 
   if (options.skipManualVacanciesCleanup) {
@@ -218,7 +226,7 @@ async function openScenarioAndInjectIndex(
 
   await page
     .waitForLoadState('load', {
-      timeout: HH_INITIAL_NAVIGATION_TIMEOUT_MS
+      timeout: 10000
     })
     .catch(() => undefined)
 
@@ -231,6 +239,7 @@ async function openScenarioAndInjectIndex(
       ? earlyAuthBeforeStart
       : await dependencies.detectHhAuthState(page)
   const indexScript =
+    dependencies.createCaptchaBrowserSource() + '\n' +
     dependencies.createCompanyStopListBrowserSource() +
     '\n' +
     (await dependencies.readFile(INDEX_SCRIPT_PATH, 'utf8'))
