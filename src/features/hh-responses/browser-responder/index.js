@@ -1,4 +1,8 @@
 (function () {
+  if (window.__hhArV2Runtime) {
+    window.__hhArV2Runtime.restoreUI();
+    return;
+  }
   console.log("start");
   
   // Настройки хранилищ и ключи для local/session storage
@@ -2843,4 +2847,10 @@
     });
     window.addEventListener('unload', () => {
         StateManager.releaseInstanceLock(TAB_ID);
-    });})();
+    });
+    // HH can replace the panel's DOM without replacing this document. A later
+    // injection must restore that UI, not create another loop/lock owner.
+    window.__hhArV2Runtime = {
+        restoreUI: () => { if (document.body) setupUI(); }
+    };
+})();

@@ -45,6 +45,9 @@ Related protections requested for the same run:
   is not changed by the responder.
 - The existing idle deadline also bounds time without any growth in confirmed
   responses, even when URLs and parser logs keep changing.
+- A document keeps one responder runtime. If HH removes its panel, reinjection
+  restores that runtime's UI without adding another loop or lock owner. The
+  existing cross-tab lock still applies; it is never forcibly cleared.
 - HH reports use the existing typed Telegram Bot API facade. API rejections and
   uncertain outcomes are failures, not successful deliveries or resend triggers.
 

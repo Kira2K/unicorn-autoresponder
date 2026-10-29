@@ -51,3 +51,25 @@ test('failed durable history write retains the confirmed count and stops further
   assert.equal(sandbox.state.getStopReason().reason,'vacancy_processing_error');
   assert.equal(sandbox.state.amIRunning(),false);
 });
+
+test('reinjection after HH removes the panel restores UI without another loop or lock owner',()=>{
+  const guard=source.slice(0,source.indexOf('  console.log("start");'));
+  const registration=source.slice(source.lastIndexOf('    window.__hhArV2Runtime ='),source.lastIndexOf('})();'));
+  const program=guard+`
+    window.boots++;
+    window.lockAdmissions++;
+    function setupUI(){if(!window.panel){window.panel=true;window.restores++}}
+  `+registration+'})();';
+  const saved=storage({'hh_ar_v2_successful_responses':'89'});
+  const sandbox={window:{boots:0,lockAdmissions:0,restores:0,panel:true},document:{body:{}},sessionStorage:saved};
+  vm.createContext(sandbox);
+  vm.runInContext(program,sandbox);vm.runInContext(program,sandbox);
+  assert.equal(sandbox.window.boots,1);assert.equal(sandbox.window.lockAdmissions,1);
+  sandbox.window.panel=false;vm.runInContext(program,sandbox);
+  assert.equal(sandbox.window.restores,1);assert.equal(sandbox.window.boots,1);
+  assert.equal(sandbox.window.lockAdmissions,1);
+  assert.equal(saved.getItem('hh_ar_v2_successful_responses'),'89');
+  const other={window:{boots:0,lockAdmissions:0,panel:true},document:{body:{}}};
+  vm.createContext(other);vm.runInContext(program,other);
+  assert.equal(other.window.boots,1);
+});
