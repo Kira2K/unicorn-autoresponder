@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import { createLinkedInIntakeService } from './service.mts';
 import { mockClient } from '../../octo-access/testing.mts';
 
+test('cancel ban accepts only an explicit account/version receipt and derives the student from the session',async()=>{
+ let args:unknown[]=[];
+ const service=createLinkedInIntakeService({allowed:()=>true,hasDolphin:async()=>true,getClient:async id=>mockClient(id),
+  store:{load:async()=>({}) as any,save:async()=>({}) as any,cancelBan:async(...values)=>{args=values;return{cancelled:true,linkedinAccountId:42,isBanned:false};}}});
+ for(const raw of [null,{}, {linkedinAccountId:'42',banUndoVersion:'version'},{linkedinAccountId:42},{linkedinAccountId:42,banUndoVersion:''},{linkedinAccountId:42,banUndoVersion:'v'.repeat(101)}])
+  await assert.rejects(service.cancelBan(7,raw),{code:'linkedin_intake_replacement_invalid'});
+ assert.deepEqual(args,[]);
+ await service.cancelBan(7,{clientId:99,linkedinAccountId:42,banUndoVersion:'original-version'});
+ assert.deepEqual(args,[7,42,'original-version']);
+});
+
 test('omitting blocked-history declaration cannot add partial cards; unchanged legacy history survives',async()=>{
  let writes=0;
  const legacy={fullName:'Old',legacyText:'Original history'};

@@ -2,6 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { syncLinkLabAccount } from '../linklab/intake.mts';
 import type { SqlSession } from '../../../integrations/postgres/contracts.mts';
+
+test('draft credentials cannot enter LinkLab through the generic account-save hook',async()=>{
+ const mutations:string[]=[];
+ await syncLinkLabAccount({release(){},async query(sql){
+  if(sql.includes('linkedin_octo_connection_pending'))return{rows:[{id:11}]};
+  if(/^(INSERT|UPDATE)/.test(sql))mutations.push(sql);
+  return{rows:[]};
+ }},7);
+ assert.deepEqual(mutations,[]);
+});
 test('shared LinkLab handoff retains existing bindings and does not resend their handoff', async () => {
   const calls: string[] = [];
   await syncLinkLabAccount({ release() {}, async query(sql) { calls.push(sql); return { rows: [{ client_id: 7 }] }; } }, 7);

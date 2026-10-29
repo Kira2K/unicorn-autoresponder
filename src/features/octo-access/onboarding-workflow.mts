@@ -4,6 +4,7 @@ import type { ClientState } from './onboarding-contracts.mts';
 import type { OnboardingDependencies } from './onboarding-service.mts';
 import { parseOwnSocksProxy } from './own-proxy-string.mts';
 import { safeCode } from './provision.mts';
+import {checkManualProxy,manualProxyFingerprint} from './manual-proxy-check.mts';
 
 const proxyUrl = (p: ProxyInput) => 'socks5h://' +
   (p.login || p.password ? encodeURIComponent(p.login) + ':' + encodeURIComponent(p.password) + '@' : '') + p.host + ':' + p.port;
@@ -20,13 +21,23 @@ export async function advanceOnboarding(initial: ClientState, deps: OnboardingDe
   const now = deps.now ?? Date.now;
   try {
     if (setup.phase === 'checking') {
-      setup.phase = 'unknown'; setup.error = 'octo_proxy_check_unknown'; await save(); return;
+      setup.phase = setup.source==='manual'?'blocked':'unknown'; setup.error = 'octo_proxy_check_unknown'; await save(); return;
     }
     if (setup.phase === 'queued') {
       if (deps.allowLegacyChecks === false && !['manual','direct','none'].includes(setup.source)) {
         setup.phase = 'blocked'; setup.error = 'octo_legacy_proxy_setup_retired'; await save(); return;
       }
       setup.phase = 'checking'; setup.startedAt = now(); await save(); await deps.check();
+      if(setup.source==='manual'){
+        if(!setup.input)throw new OctoError('octo_proxy_setup_required',409);
+        const checkedInput=JSON.stringify(setup.input);
+        const input=setup.input;
+        const proof=await checkManualProxy(input,uri=>deps.manualCheck?deps.manualCheck(input):deps.checker.check(uri),now);
+        await deps.check();
+        const current=await deps.store.clientState(state.clientId);
+        if(current?.setup?.id!==setup.id||JSON.stringify(current.setup.input)!==checkedInput)throw new OctoError('octo_stale_revision');
+        setup.verifiedProxy=proof;setup.phase='provisioning';await save();
+      }else{
       const result = setup.source === 'nodemaven'
         ? await deps.checker.best(state.nodeMavenKey!, setup.location!)
         : await deps.checker.check(proxyUrl(setup.input!));
@@ -36,8 +47,14 @@ export async function advanceOnboarding(initial: ClientState, deps: OnboardingDe
       setup.phase = setup.source !== 'nodemaven' && result.final_score < 70 ? 'awaiting_confirmation' : 'provisioning';
       await save();
       if (setup.phase === 'awaiting_confirmation') return;
+      }
     }
     if (setup.phase === 'provisioning') {
+      // Resume an in-flight setup written by the previous version through a check,
+      // keeping its profiles and operation identity instead of recreating them.
+      if(setup.source==='manual'&&setup.input&&!setup.verifiedProxy){setup.phase='queued';await save();return;}
+      if(setup.source==='manual'&&(!setup.input||setup.verifiedProxy?.fingerprint!==manualProxyFingerprint(setup.input)))
+        throw new OctoError('octo_proxy_setup_required',409);
       await deps.check();
       const profiles = await deps.reserve(state.clientId);
       if (!setup.profileIds) { setup.profileIds = profiles.map(p => p.id); await save(); }
@@ -46,7 +63,10 @@ export async function advanceOnboarding(initial: ClientState, deps: OnboardingDe
       if (!['none','direct'].includes(setup.source)) {
         const en = profiles.find(p => p.locale === 'en');
         if (!en) throw new OctoError('octo_en_profile_missing', 409);
-        if (!en.proxyChange) {
+        if(en.proxyChange?.phase==='blocked'&&!en.proxyChange.pending&&!en.proxyChange.uuid){
+          delete en.proxyChange;await deps.store.save(en);
+        }
+        if (!en.proxyChange||en.proxyChange.id!==setup.id&&en.proxyChange.phase==='complete') {
           if (!setup.input) throw new OctoError('octo_proxy_setup_required', 409);
           await deps.check(); await deps.saveProxy(state.clientId, en.id, setup.input, setup.id); return;
         }
@@ -60,7 +80,7 @@ export async function advanceOnboarding(initial: ClientState, deps: OnboardingDe
   } catch (error) {
     const code = String((error as {code?: string}).code);
     if (/^(postgres_|octo_stale_revision|commit_|octo_leadership)/.test(code)) throw error;
-    setup!.phase = code === 'octo_proxy_check_unknown' ? 'unknown' : 'blocked';
+    setup!.phase = code === 'octo_proxy_check_unknown'&&setup!.source!=='manual' ? 'unknown' : 'blocked';
     setup!.error = safeCode(error); await save();
   }
 }

@@ -6,7 +6,17 @@ one “Меня забанили” button in the single LinkedIn section, inclu
 and RU students. It records the owner-scoped `is_banned` flag and opens recovery instructions. It does
 not create a replacement application. The student attests that a week of recovery
 attempts has passed before opening the Outlook/identity/history form; no server timer
-is enforced. Cancelling restores the saved form state. The button is hidden while
+is enforced. A newly reported current account immediately appears as a read-only
+blocked-history card with its saved URL/login, without exposing its password or
+inventing missing employment details. It becomes an archived card when the
+replacement application is saved, without copying it into editable history.
+Cancelling restores the saved form and undoes only the ban set by this interaction.
+Owner-scoped `DELETE /api/client/linkedin-intake/ban` requires the exact
+`banUndoVersion` returned by the first successful report; an already-banned account
+returns no undo receipt. PostgreSQL's row version `xmin` provides the concurrency guard,
+without a schema migration. Pending/replaced applications or a changed account
+reject cancellation instead of overwriting later work. A lost commit acknowledgement
+requires a read-back, with no automatic replay. The button is hidden while
 any registration request for the current account is unconfirmed (`не начата`, `блок`,
 `сделана экспертом`), even if Denis already saved its credentials. It becomes available
 after `выполнение подтверждено`, or for an existing account without a registration
@@ -17,6 +27,12 @@ for a new account. The server's registered-account flag (URL, login or password 
 or a saved URL selects the existing scenario, so legacy URL-in-login accounts can
 also report a ban without a data migration. Preparation-only rows remain unregistered.
 The student's stack comes from the existing client record; this form never edits it.
+
+CRM compatibility: master's after-commit ban/replacement hooks are preserved.
+Cancellation restores only Unicorn's local flag. If CRM commands are enabled,
+an already delivered CRM ban is not reversed here; the available CRM `unban`
+starts warmup and is not an exact cancellation. Reconcile that CRM state separately
+instead of silently starting a new CRM cycle from the cancel button.
 
 ## Pending registration in the student Console
 
@@ -59,6 +75,9 @@ Existing LinkedIn requires ready RU/EN infrastructure, an EN proxy, and the user
 self-confirmation after obtaining access through the normal Octo grant workflow.
 The checkbox does not inspect LinkedIn, create Unipile bindings or set verified flags.
 Changing credentials, profile identity or proxy invalidates the UI confirmation.
+The completed existing-account connection displays a success modal only after
+the save response confirms `saved: true` and a valid `linkedinAccountId`. Draft
+credentials or a failed/uncertain response never show that modal.
 The generic platform account editor and automation eligibility rules are unchanged.
 
 ## Banned-account replacement and confirmed access

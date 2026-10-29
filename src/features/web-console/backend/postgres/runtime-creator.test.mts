@@ -33,7 +33,7 @@ test('Octo SQL console always provides expert tasks, including with an obsolete 
       assert.ok(runtime.options.linkedinIntake);
       assert.deepEqual(runtime.options.linkedinCreatorAuth, { login: 'expert-fixture', password: 'fixture-password' });
       assert.deepEqual(await runtime.options.linkedinCreator.list(), []);
-      assert.ok(f.calls.some(sql => sql.includes('proxy_saved_at,source,version FROM noco.linkedin_creation_task LIMIT 0')));
+      assert.ok(f.calls.some(sql => sql.includes('FROM noco.linkedin_creation_task LIMIT 0') && sql.includes('requires_new_proxy')));
       assert.ok(!f.calls.some(sql => /^\s*(CREATE|ALTER|INSERT|UPDATE|DELETE|DROP)\b/.test(sql)));
     } finally { await runtime.close(); }
     assert.equal(f.state.ends, 2);

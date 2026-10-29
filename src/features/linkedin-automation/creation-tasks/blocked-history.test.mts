@@ -1,7 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SqlSession } from '../../../integrations/postgres/contracts.mts';
-import { loadBlockedHistory } from './blocked-history.mts';
+import { blockedHistoryCard,loadBlockedHistory } from './blocked-history.mts';
+
+test('current banned account uses the same identity card without exposing credentials or inventing missing history',()=>{
+ const card=blockedHistoryCard({id:42,url:'https://linkedin.com/in/current',login:'current@example.test',linkedin_first_name:'Alex',linkedin_last_name:'Smith',password:'secret'},false)!;
+ assert.equal(card.fullName,'Alex Smith');assert.match(card.legacyText!,/^Заблокированный LinkedIn №42/);
+ assert.match(card.legacyText!,/current@example.test/);assert.ok(!JSON.stringify(card).includes('secret'));
+ assert.equal(card.company,undefined);assert.equal(card.blockedAt,undefined);
+ assert.equal(blockedHistoryCard({id:43,linkedin_first_name:'Preparation only'},false),undefined);
+});
 
 test('latest request combines entered history with all archived LinkedIn accounts and deduplicates copied history', async () => {
   const entered = {fullName:'Earlier Name',country:'Poland',company:'Example'};

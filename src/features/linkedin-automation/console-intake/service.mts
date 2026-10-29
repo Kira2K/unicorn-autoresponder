@@ -4,7 +4,7 @@ import { IntakeError, parseIntake, safeClientFields, completeBlockedAccount, sam
 import type { createLinkedInIntakeStore } from './postgres-store.mts';
 
 export function createLinkedInIntakeService(deps: {
-  store: Pick<ReturnType<typeof createLinkedInIntakeStore>, 'load' | 'save'> & Partial<Pick<ReturnType<typeof createLinkedInIntakeStore>,'reportBan'>>;
+  store: Pick<ReturnType<typeof createLinkedInIntakeStore>, 'load' | 'save'> & Partial<Pick<ReturnType<typeof createLinkedInIntakeStore>,'reportBan'|'cancelBan'>>;
   allowed(id: number): boolean;
   getClient(id: number): Promise<WebClient>;
   hasDolphin(id: number): Promise<boolean>;
@@ -16,6 +16,14 @@ export function createLinkedInIntakeService(deps: {
       if(typeof accountId!=='number'||!Number.isSafeInteger(accountId)||accountId<1)throw new IntakeError('linkedin_intake_replacement_invalid');
       if(!deps.store.reportBan)throw new IntakeError('linkedin_intake_ban_unavailable',503);
       return deps.store.reportBan(id,accountId);
+    },
+    async cancelBan(id:number,raw:unknown){
+      await deps.getClient(id);
+      const {linkedinAccountId:accountId,banUndoVersion}=raw as {linkedinAccountId?:unknown;banUndoVersion?:unknown}||{};
+      if(typeof accountId!=='number'||!Number.isSafeInteger(accountId)||accountId<1||typeof banUndoVersion!=='string'||!banUndoVersion||banUndoVersion.length>100)
+        throw new IntakeError('linkedin_intake_replacement_invalid');
+      if(!deps.store.cancelBan)throw new IntakeError('linkedin_intake_ban_unavailable',503);
+      return deps.store.cancelBan(id,accountId,banUndoVersion);
     },
     async load(id: number) { const client=await deps.getClient(id),data=await deps.store.load(id);return{...data,realLocation:data.realLocation||client.realLocation||''}; },
     async save(id: number, raw: unknown) {

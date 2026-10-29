@@ -10,7 +10,7 @@ import { isAccountPhoneField, phoneInputValue, updateContactInput } from './cont
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 const form = defineModel('form', { type: Object, required: true })
 const props = defineProps({
-  editing: Boolean, preview: Boolean, saving: Boolean, error: String,
+  editing: Boolean, preview: Boolean, saving: Boolean, error: String,studentView:Boolean,
   secretsLoading: Boolean, secretsReady: { type: Boolean, default: true },
   platforms: Array, policy: Object, displayLabel: String,
   phoneRuSelected: Boolean, phoneRuExists: Boolean, phoneRuValidationMessage: String
@@ -89,7 +89,7 @@ function capturePhone(event) {
     <span>{{ ui('Foreign number') }}</span>
     <InputText :model-value="accountFieldEnabled('foreignNumber') ? phoneInputValue(form.foreignNumber) : form.foreignNumber" inputmode="tel" :disabled="!accountFieldEnabled('foreignNumber')" :required="accountFieldRequired('foreignNumber')" data-testid="account-foreign-number" @input.capture="updateContactInput($event, phoneInputValue)" @update:model-value="form.foreignNumber = $event" />
   </label>
-  <label class="field">
+  <label v-if="!studentView||displayLabel!=='linkedin'" class="field">
     <span>{{ ui('Recovery codes') }}</span>
     <InputText v-model="form.recoveryCodes" :disabled="!accountFieldEnabled('recoveryCodes')" :required="accountFieldRequired('recoveryCodes')" data-testid="account-recovery-codes" />
   </label>
@@ -97,7 +97,7 @@ function capturePhone(event) {
     <span>{{ ui('Password') }}</span>
     <Password v-model="form.password" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('password') || (editing && !secretsReady)" :required="accountFieldRequired('password')" data-testid="account-password-widget" input-class="password-input" />
   </label>
-  <label class="field">
+  <label v-if="!studentView||displayLabel!=='linkedin'" class="field">
     <span>{{ ui('Email password') }}</span>
     <Password v-model="form.emailPassword" :feedback="false" toggle-mask :disabled="!accountFieldEnabled('emailPassword') || (editing && !secretsReady)" :required="accountFieldRequired('emailPassword')" data-testid="account-email-password-widget" input-class="password-input" />
   </label>

@@ -13,7 +13,7 @@ function fixture(market = 'En') {
   const getClient = async (id: number) => ({ ...mockClient(id), market });
   const deps = {
     checker: { check: async (_raw: string) => { checks++; return { index: 1, proxy: 'proxy.example.com:1080', ok: true,
-      final_score: score, proxy_url: 'socks5h://user:secret@proxy.example.com:1080' }; },
+      final_score: score,exit_ip:'1.1.1.1',country:'Georgia', proxy_url: 'socks5h://user:secret@proxy.example.com:1080' }; },
     best: async (_key: string, _location: unknown) => { throw Error('unexpected'); } },
     catalogue: { list: async () => [], validate: async (_key: string, location: any) => location },
     dolphin: { list: async (_id: number):Promise<Array<{id:number;locale:string;hasProxy:boolean}>> => [], proxy: async (_id: number) => input },
@@ -83,12 +83,14 @@ test('Ru setup skips checker and retains an existing client password when adding
   assert.equal(f.checks(), 0); assert.equal((await f.store.list(901))[0].password, '03742');
 });
 
-test('manual structured proxy skips retired checker and direct setup reserves EN without pool proxy', async () => {
+test('manual structured proxy must be checked before reservation; direct Denis setup remains unchanged', async () => {
   const f = fixture();
   const service = createOctoService({ store: f.store, config: testConfig, getClient: f.getClient, onboarding: f.deps });
   await service.startOnboarding(901, { source: 'manual', proxy: { ...input, type: 'http' } });
+  assert.equal((await f.store.list()).length,0);
+  assert.equal((await f.store.clientState(901))!.setup!.phase,'provisioning');
   await service.reserve(901);
-  assert.equal(f.checks(), 0);
+  assert.equal(f.checks(), 1);
   assert.equal((await f.store.clientState(901))!.setup!.input!.type, 'http');
   assert.ok((await f.store.list(901)).every(p => p.ownProxy));
   const direct = fixture();
@@ -99,6 +101,89 @@ test('manual structured proxy skips retired checker and direct setup reserves EN
   await s.reserve(901); await s.reserve(901);
   assert.equal((await direct.store.list()).length, 2);
   assert.ok((await direct.store.list()).every(p => p.ownProxy && p.password === '00321'));
+});
+
+test('manual API checks connectivity before publishing work and never calls the scoring checker',async()=>{
+ const f=fixture();let checks=0;
+ const service=createOnboardingService({store:f.store,getClient:f.getClient,...f.deps,
+  checker:{check:async()=>{assert.fail('manual onboarding must not use reputation');},best:f.deps.checker.best},
+  manualCheck:async proxy=>{checks++;assert.deepEqual(proxy,input);assert.equal((await f.store.clientState(901))?.setup,undefined);return{ok:true,exit_ip:'1.1.1.1'};}});
+ const result=await service.start(901,{source:'manual',proxy:input});
+ assert.equal(result.phase,'provisioning');assert.equal(result.score,undefined);assert.equal(result.check?.country,undefined);
+ assert.equal(result.check?.exitIp,'1.1.1.1');assert.equal(checks,1);assert.equal((await f.store.list()).length,0);
+ assert.ok((await f.store.clientState(901))?.setup?.verifiedProxy);
+});
+
+test('old manual score confirmation can be rechecked with the same setup ID; failed checks preserve it',async()=>{
+ const f=fixture(),state=await f.store.claimClientPassword(901,'03742');
+ state.setup={id:'old-score-64',source:'manual',phase:'awaiting_confirmation',score:64,input,createdAt:1,confirmDolphin:false};await f.store.saveClientState(state);
+ let valid=false;
+ const service=createOnboardingService({store:f.store,getClient:f.getClient,...f.deps,manualCheck:async()=>({ok:valid,exit_ip:'1.1.1.1'})});
+ await assert.rejects(service.start(901,{source:'manual',proxy:input}),{code:'octo_proxy_check_failed'});
+ assert.equal((await f.store.clientState(901))!.setup!.phase,'awaiting_confirmation');
+ valid=true;const result=await service.start(901,{source:'manual',proxy:input});
+ assert.equal(result.id,'old-score-64');assert.equal(result.phase,'provisioning');assert.equal(result.score,undefined);
+ assert.equal((await f.store.list()).length,0);
+});
+
+test('manual API rechecks active profile access after the network call before publishing work',async()=>{
+ const f=fixture();await reserveClientProfiles(f.store,await f.getClient(901),true);
+ const service=createOnboardingService({store:f.store,getClient:f.getClient,...f.deps,manualCheck:async()=>{
+  const en=(await f.store.list(901)).find(p=>p.locale==='en')!;en.grant={id:'new-access',phase:'preparing',alias:'fixture',createdAt:1,eventsAfter:1,original:en.original};await f.store.save(en);
+  return{ok:true,exit_ip:'1.1.1.1'};
+ }});
+ await assert.rejects(service.start(901,{source:'manual',proxy:input}),{code:'octo_profile_not_idle'});
+ assert.equal((await f.store.clientState(901))?.setup,undefined);
+});
+
+test('a rejected manual proxy creates no profiles and can be corrected by the student',async()=>{
+ const f=fixture();f.deps.checker.check=async()=>{throw new Error('unavailable')};
+ await assert.rejects(f.service.start(901,{source:'manual',proxy:input}),/unavailable/);
+ assert.equal((await f.store.list()).length,0);assert.equal((await f.service.status(901)).phase,'idle');
+ f.deps.checker.check=async()=>({ok:true,index:1,proxy:'fixture',proxy_url:'socks5h://corrected.example:1080',exit_ip:'1.1.1.1',country:'Georgia',final_score:1});
+ await f.service.start(901,{source:'manual',proxy:{...input,password:'corrected'}});await f.advance();
+ assert.equal((await f.store.list()).length,2);
+ assert.equal((await f.service.status(901)).check?.country,'Georgia');
+});
+
+test('a stale manual check cannot provision profiles for a newer setup',async()=>{
+ const f=fixture();let resolve!:(value:any)=>void,started=false;
+ f.deps.checker.check=async()=>{started=true;return new Promise(r=>{resolve=r})};
+ const pending=f.service.start(901,{source:'manual',proxy:input});
+ while(!started)await new Promise(r=>setTimeout(r,1));
+ const state=(await f.store.clientState(901))!;state.setup={id:'new-operation',source:'direct',phase:'provisioning',createdAt:1,confirmDolphin:false};await f.store.saveClientState(state);
+ resolve({ok:true,index:1,proxy:'fixture',exit_ip:'1.1.1.1',country:'Georgia'});
+ await assert.rejects(pending,{code:'octo_stale_revision'});
+ assert.equal((await f.store.list()).length,0);assert.equal((await f.store.clientState(901))!.setup!.id,'new-operation');
+});
+
+test('an in-flight legacy manual setup is checked without replacing its operation or profiles',async()=>{
+ const f=fixture();const state=await f.store.claimClientPassword(901,'03742');
+ state.setup={id:'legacy-manual',source:'manual',phase:'provisioning',input,createdAt:1,confirmDolphin:false};await f.store.saveClientState(state);
+ await f.advance();assert.equal((await f.store.clientState(901))!.setup!.phase,'queued');assert.equal((await f.store.list()).length,0);
+ await f.advance();assert.equal(f.checks(),1);assert.equal((await f.store.clientState(901))!.setup!.id,'legacy-manual');assert.equal((await f.store.list()).length,2);
+});
+
+test('manual replacement rechecks the proxy and reuses EN/RU, while unknown external creation remains protected',async()=>{
+ const f=fixture();
+ const service=createOctoService({store:f.store,config:testConfig,getClient:f.getClient,onboarding:f.deps});
+ const advance=async()=>advanceOnboarding((await f.store.clientState(901))!,{store:f.store,...f.deps,check:async()=>{},
+  reserve:id=>service.reserve(id,true),saveProxy:(client,id,proxy,operation)=>service.queueProxy(client,id,proxy,operation)});
+ await service.startOnboarding(901,{source:'manual',proxy:input});await advance();
+ for(const p of await f.store.list()){p.phase='ready';p.uuid='profile-'+p.locale;await f.store.save(p)}
+ await advance();let en=(await f.store.list()).find(p=>p.locale==='en')!;
+ en.proxyChange!.phase='complete';delete en.proxyChange!.input;en.proxy={uuid:'first',title:'first'};await f.store.save(en);await advance();
+ const before=await f.store.list(),ru=before.find(p=>p.locale==='ru'),passwords=before.map(p=>p.password);
+ await service.saveProxy(901,en.id,{...input,password:'new-connection'});
+ assert.equal((await f.store.clientState(901))!.setup!.phase,'provisioning');
+ await advance();assert.equal(f.checks(),2);
+ en=(await f.store.list()).find(p=>p.locale==='en')!;
+ assert.equal(en.proxyChange?.phase,'queued');assert.equal(en.proxyChange?.input?.password,'new-connection');
+ assert.deepEqual((await f.store.list()).find(p=>p.locale==='ru'),ru);assert.deepEqual((await f.store.list()).map(p=>p.password),passwords);
+ en.proxyChange!.phase='blocked';en.proxyChange!.pending='create';await f.store.save(en);
+ const state=(await f.store.clientState(901))!;state.setup!.phase='blocked';await f.store.saveClientState(state);
+ await assert.rejects(service.startOnboarding(901,{source:'manual',proxy:input}),{code:'octo_setup_outcome_unknown'});
+ assert.equal((await f.store.get(en.id))!.proxyChange!.pending,'create');
 });
 
 test('direct workflow completes without attaching a proxy; retired queued checks never restart', async () => {

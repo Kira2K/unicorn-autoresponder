@@ -1,13 +1,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import OctoAccessCard from './OctoAccessCard.vue'
+import ExistingLinkedInSetup from './ExistingLinkedInSetup.vue'
 import Dialog from 'primevue/dialog'
 import { octoApi } from '../octo-api.js'
-import { intakeRequest, intakeScenario, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
+import { intakeRequest, intakeBanRequest, intakeScenario, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
 import { isOutlookLogin, isLatinIntakeName } from '../../../../linkedin-automation/console-intake/contracts.mts'
 const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false } })
 const registrationDate = ref(''), showSavedDialog = ref(false)
 const showBanDialog=ref(false),reportingBan=ref(false),hasBlockedAccounts=ref(false)
+const banUndoVersion=ref(null)
 const archivedHistory=computed(()=>secrets.value.archivedBlockedAccounts||[])
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const emit = defineEmits(['saved', 'state'])
@@ -31,7 +33,7 @@ const previousProfileTransport = {
 }
 const usesOcto = computed(() => !props.hasDolphin || !!task.value || completionConfirmed.value)
 const existingFormEnabled = computed(() => ['en', 'both'].includes(String(props.client.market || '').trim().toLowerCase()) && !props.hasDolphin)
-const canReportBan = computed(() => loaded.value && hasLinkedIn.value && !replacementId.value && !registrationPending.value &&
+const canReportBan = computed(() => loaded.value && hasLinkedIn.value && !secrets.value.octoConnectionPending && !replacementId.value && !registrationPending.value &&
   (!task.value || task.value.status === 'выполнение подтверждено') && (!editLocked.value || completionConfirmed.value))
 const controller = new AbortController()
 const outlookError = ref('')
@@ -39,7 +41,7 @@ const validationError = ref(''), outlookInput = ref(null)
 let confirmationTimer, checkingConfirmation = false
 const ready = computed(() => infrastructureReady(status.value))
 const historyFields = { fullName: 'Какие имя и фамилия стояли?', country: 'Какая страна была указана?', company: 'Какая компания была указана последним местом работы?', position: 'Какая должность была указана?', blockedAt: 'Когда заблокировали аккаунт?' }
-const canSave = computed(() => loaded.value && (!props.hasDolphin || replacementId.value || task.value) && !editLocked.value && !saving.value &&
+const canSave = computed(() => loaded.value && (!props.hasDolphin || replacementId.value || task.value) && !editLocked.value && !saving.value && !reportingBan.value &&
   (scenario.value === 'new' && (!registrationPending.value || ['не начата','блок'].includes(task.value?.status)) || !registrationPending.value && ready.value && opened.value && form.value.loggedIn))
 function updateTaskState(data) {
   task.value = data.task || null
@@ -92,15 +94,29 @@ async function reportBan(){
   reportingBan.value=true;message.value=''
   try{
     if(!secrets.value.isBanned){
-      const response=await fetch('/api/client/linkedin-intake/ban',{method:'POST',credentials:'include',signal:controller.signal,
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({linkedinAccountId:secrets.value.linkedinAccountId})})
-      const result=await response.json().catch(()=>({}))
-      if(!response.ok)throw new Error(result.error||'linkedin_intake_ban_unavailable')
-      updateTaskState({...secrets.value,isBanned:true});emit('saved')
+      const result=await intakeBanRequest('POST',{linkedinAccountId:secrets.value.linkedinAccountId},controller.signal)
+      if(result.banUndoVersion)banUndoVersion.value=result.banUndoVersion
+      await load();emit('saved')
+      if(loadError.value)throw new Error('linkedin_intake_unavailable')
     }
     showBanDialog.value=true
   }catch(error){if(error.name!=='AbortError')message.value=error.message==='commit_uncertain'?'Результат неизвестен. Перечитай данные перед следующим действием.':'Не удалось отметить блокировку. Перечитай данные и попробуй снова.'}
   finally{reportingBan.value=false}
+}
+async function cancelReplacement(){
+  if(saving.value||reportingBan.value)return
+  reportingBan.value=true;message.value=''
+  try{
+    if(banUndoVersion.value){
+      await intakeBanRequest('DELETE',{linkedinAccountId:replacementId.value,banUndoVersion:banUndoVersion.value},controller.signal)
+      banUndoVersion.value=null
+    }
+    await load();emit('saved')
+  }catch(error){
+    if(error.name!=='AbortError')message.value=error.message==='commit_uncertain'
+      ?'Результат отмены неизвестен. Перезагрузи страницу, чтобы проверить статус; повторная отправка не запускается автоматически.'
+      :'Не удалось отменить блокировку: аккаунт или заявка изменились. Перезагрузи страницу, чтобы проверить актуальный статус.'
+  }finally{reportingBan.value=false}
 }
 function beginReplacement() {
   if (!canReportBan.value || !secrets.value.linkedinAccountId || saving.value) return
@@ -155,6 +171,7 @@ async function save() {
       newSaved.value = true; secrets.value.hasOutlookPassword = true
       task.value = result.task || task.value
       replacementId.value = null; hasLinkedIn.value = false
+      banUndoVersion.value=null
       completionConfirmed.value = task.value?.status === 'выполнение подтверждено'
       message.value = result.task ? (result.task.created ? 'Заявка успешно создана' : 'Заявка обновлена') : 'Данные сохранены. Подготавливаем профили Octo.'
       form.value.password = ''; form.value.outlookPassword = ''
@@ -200,7 +217,8 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
 </script>
 <template>
   <section class="linkedin-card" aria-labelledby="linkedin-intake-title" data-testid="linkedin-octo-workflow">
-    <h2 id="linkedin-intake-title">LinkedIn</h2>
+    <details open class="linkedin-section" data-testid="linkedin-section-details">
+    <summary class="linkedin-summary"><h2 id="linkedin-intake-title">LinkedIn</h2></summary>
     <p v-if="loading" role="status">Загружаем данные…</p>
     <div v-if="loadError" role="alert">{{ loadError }} <button type="button" @click="load">Повторить</button></div>
     <button v-if="canReportBan" type="button" :disabled="saving||reportingBan" data-testid="linkedin-report-ban" @click="reportBan">Меня забанили</button>
@@ -215,25 +233,13 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
       :client-id="client.id" :setup-enabled="false" :proxy-editing-enabled="false" :transport="previousProfileTransport" />
     <template v-if="loaded && !editLocked">
       <p v-if="replacementId">Подготовим новый LinkedIn через тот же процесс с Octo. Укажи новую почту Outlook. Старые аккаунты сохранятся в архиве после сохранения формы.</p>
-      <button v-if="replacementId" type="button" :disabled="saving" @click="load">Отмена</button>
+      <button v-if="replacementId" type="button" :disabled="saving||reportingBan" @click="cancelReplacement">{{reportingBan?'Отменяем…':'Отмена'}}</button>
       <div v-if="!registrationPending && !existing && !replacementId && !hasDolphin" class="scenario-buttons" aria-label="Выбери сценарий LinkedIn">
         <button type="button" :aria-pressed="scenario === 'existing'" @click="selectScenario('existing')">У меня есть LinkedIn</button>
         <button type="button" :aria-pressed="scenario === 'new'" @click="selectScenario('new')">Нет LinkedIn / аккаунт заблокирован</button>
       </div>
       <p v-if="scenario === 'existing' && hasDolphin">Открой свой профиль через карточку Dolphin выше. Данные существующего LinkedIn можно сохранить в разделе «Аккаунты платформ».</p>
-      <template v-if="scenario === 'existing' && !hasDolphin">
-        <h3>Сначала настрой Octo и войди в LinkedIn</h3>
-        <p>Используй свой прокси. Готовые профили и сохранённый прокси повторно создавать не нужно. Получи доступ к EN-профилю и войди в свой LinkedIn.</p>
-        <OctoAccessCard :client-id="client.id" @status="status = $event" @access-issued="opened = true" @proxy-changed="resetConfirmation" />
-        <form v-if="ready && existingFormEnabled" @submit.prevent="save" class="intake-form" data-testid="linkedin-existing-form">
-          <label>Ссылка на профиль<input v-model="form.url" required placeholder="https://www.linkedin.com/in/…" autocomplete="off"></label>
-          <label>Логин LinkedIn (email или телефон)<input v-model="form.login" required autocomplete="off"></label>
-          <label>Пароль LinkedIn<input v-model="form.password" type="password" :required="!secrets.hasPassword" :placeholder="secrets.hasPassword ? 'Сохранён. Оставь пустым, чтобы не менять' : ''" autocomplete="new-password"></label>
-          <label class="checkpoint"><input v-model="form.loggedIn" type="checkbox" :disabled="!opened">Я успешно вошёл/вошла в LinkedIn через Octo</label>
-          <p v-if="!opened">Сначала получи доступ к EN-профилю Octo и войди в LinkedIn.</p>
-          <button type="submit" :disabled="!canSave">{{ saving ? 'Сохраняем…' : 'Сохранить' }}</button>
-        </form>
-      </template>
+      <ExistingLinkedInSetup v-if="scenario === 'existing' && !hasDolphin && existingFormEnabled" :client="client" :account="secrets" @saved="load(); emit('saved')" />
       <form v-if="scenario === 'new'" @submit.prevent="save" @invalid.capture="showInvalidField" @input="validationError = ''" class="intake-form" data-testid="linkedin-new-form">
         <section class="intake-details" data-testid="linkedin-outlook-details">
           <h3>Данные Outlook</h3>
@@ -272,7 +278,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
           <button type="button" @click="form.blockedAccounts.push({})">＋ Добавить заблокированный аккаунт</button>
           </template>
           <article v-for="(account,index) in archivedHistory" :key="`archive-${index}`" class="blocked-account" data-testid="student-archived-account">
-            <h4>Архивный аккаунт {{ index+1 }}</h4><template v-for="(label,field) in historyFields" :key="field"><p v-if="account[field]">{{ label }} {{ account[field] }}</p></template><p v-if="account.newFullName">Новое имя: {{ account.newFullName }}</p><p class="archive-text">{{ account.legacyText }}</p>
+            <h4>Заблокированный аккаунт {{ index+1 }}</h4><template v-for="(label,field) in historyFields" :key="field"><p v-if="account[field]">{{ label }} {{ account[field] }}</p></template><p v-if="account.newFullName">Новое имя: {{ account.newFullName }}</p><p class="archive-text">{{ account.legacyText }}</p>
           </article>
         </section>
         <p>После сохранения создадим заявку эксперту на подготовку LinkedIn. Недостающие профили Octo подготовятся автоматически; готовые профили сохраняются.</p>
@@ -282,6 +288,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
       <p v-if="message" role="status">{{ message }}</p>
       <OctoAccessCard v-if="scenario === 'new' && newSaved && usesOcto && !registrationPending" :client-id="client.id" :setup-enabled="false" />
     </template>
+    </details>
     <Dialog v-model:visible="showSavedDialog" modal header="Спасибо, данные сохранены ✅" :closable="false" :draggable="false" :style="{ width: '32rem', maxWidth: 'calc(100vw - 2rem)' }">
       <p>{{ pendingMessage }}</p>
       <p>Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.</p>
@@ -295,6 +302,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
   </section>
 </template>
 <style scoped>
+.linkedin-summary h2{display:inline;margin:0}.linkedin-section[open]>.linkedin-summary{margin-bottom:12px}
 .validation-error{color:#b91c1c;font-weight:600;grid-column:1 / -1}
 input[aria-invalid="true"]{border-color:#b91c1c}
 :global(.linkedin-intake-layout){min-width:0;grid-template-columns:minmax(0,1fr)}

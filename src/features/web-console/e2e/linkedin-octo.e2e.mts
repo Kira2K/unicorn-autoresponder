@@ -7,6 +7,7 @@ import type { BrowserContext } from 'playwright';
 import type { OctoService } from '../../octo-access/service.mts';
 import { createLinkedInIntakeService } from '../../linkedin-automation/console-intake/service.mts';
 import type { LinkedInIntake } from '../../linkedin-automation/console-intake/contracts.mts';
+import {blockedHistoryCard} from '../../linkedin-automation/creation-tasks/blocked-history.mts';
 const require = createRequire(import.meta.url);
 const { createMockNocoClient } = require('../backend/mock-data.ts');
 const { createWebConsoleRepository } = require('../backend/repository.ts');
@@ -25,20 +26,27 @@ const recoveryTasks=new Map<number,any>();
 const previousProfiles=new Map<number,number[]>(),priorLinkedIn=new Set<number>();
 const profiles = new Map<number, any[]>();
 const banned = new Set<number>();
+const banVersions=new Map<number,string>(),archivedAccounts=new Map<number,any[]>();let banVersion=0;
+function historyCard(id:number,data:LinkedInIntake,archived=false){return blockedHistoryCard({id,url:data.url,login:data.login,
+  linkedin_first_name:data.firstName,linkedin_last_name:data.lastName,real_location:data.realLocation,has_password:!!data.password},archived)!;}
 const empty = { url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
   firstName: '', lastName: '', realLocation: '', blockedAccounts: [] };
 const intake = createLinkedInIntakeService({ allowed: () => true, getClient: id => repository.getClientById(id),
   hasDolphin: async id => (await repository.getDolphinProfilesForClient(id)).length > 0, store: {
-    async load(id) { const data = saved.get(id),task=recoveryTasks.get(id); return data ? { ...empty, ...data, linkedinAccountId:id,task,
+    async load(id) { const data = saved.get(id),task=recoveryTasks.get(id),history=[...(archivedAccounts.get(id)||[]),...(data&&banned.has(id)?[historyCard(id,data)]:[])]; return data ? { ...empty, ...data, linkedinAccountId:id,task,
+      editableBlockedAccounts:data.blockedAccounts,archivedBlockedAccounts:history,blockedAccounts:[...data.blockedAccounts,...history],
       isBanned:banned.has(id),registrationPending:!!task&&task.status!=='выполнение подтверждено',completionConfirmed:task?.status==='выполнение подтверждено',
       editLocked:['сделана экспертом','выполнение подтверждено'].includes(task?.status),
       hadLinkedInBeforeTask:priorLinkedIn.has(id),previousOctoProfileIds:previousProfiles.get(id)||[],password: undefined, outlookPassword: undefined,
-      hasPassword: !!data.password, hasOutlookPassword: !!data.outlookPassword } : empty; },
-    async reportBan(id,accountId){assert.equal(id,accountId);banned.add(id);return{reported:true,linkedinAccountId:accountId,isBanned:true};},
+      octoConnectionPending:data.scenario==='existing'&&data.stage==='credentials', hasPassword: !!data.password, hasOutlookPassword: !!data.outlookPassword } : empty; },
+    async reportBan(id,accountId){assert.equal(id,accountId);const wasBanned=banned.has(id);banned.add(id);if(!wasBanned)banVersions.set(id,`ban-version-${++banVersion}`);
+      return{reported:true,linkedinAccountId:accountId,isBanned:true,...(!wasBanned?{banUndoVersion:banVersions.get(id)}:{})};},
+    async cancelBan(id,accountId,version){assert.equal(id,accountId);assert.equal(version,banVersions.get(id));banned.delete(id);return{cancelled:true,linkedinAccountId:accountId,isBanned:false};},
     async save(id, data, _locales, options) {
       const created=data.scenario==='new'&&(!recoveryTasks.has(id)||!!data.replacesLinkedInAccountId);
-      if(data.replacesLinkedInAccountId){priorLinkedIn.add(id);previousProfiles.set(id,(profiles.get(id)||[]).map(p=>p.id));}
-      saved.set(id, structuredClone(data));
+      if(data.replacesLinkedInAccountId){priorLinkedIn.add(id);previousProfiles.set(id,(profiles.get(id)||[]).map(p=>p.id));
+        archivedAccounts.set(id,[...(archivedAccounts.get(id)||[]),historyCard(id,saved.get(id)!,true)]);banned.delete(id);}
+      saved.set(id, { ...structuredClone(data), password:data.password||saved.get(id)?.password||'' });
       if(created&&options?.createOctoProfiles&&!profiles.has(id))profiles.set(id,readyProfiles(false));
       if(created)recoveryTasks.set(id,{id,clientId:id,linkedinAccountId:id,outlookAccountId:id+1,status:'не начата',version:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
       return { saved: true, linkedinAccountId: id,...(recoveryTasks.has(id)?{task:{...recoveryTasks.get(id),created}}:{}) }; }
@@ -146,31 +154,66 @@ try {
   const context = await browser.newContext(), page = await login(903, context);
   const card = page.getByTestId('linkedin-octo-workflow');
   await card.getByRole('button', { name: 'У меня есть LinkedIn', exact: true }).click();
-  assert.equal(await card.getByTestId('linkedin-existing-form').count(), 0);
-  const setup = card.getByTestId('octo-manual-setup');
-  await setup.getByLabel('Адрес прокси', { exact: true }).fill('proxy.example.com');
-  await setup.getByLabel('Порт прокси', { exact: true }).fill('8080');
-  await setup.getByLabel('Логин прокси', { exact: true }).fill('proxy-user');
-  await setup.getByLabel('Пароль прокси', { exact: true }).fill('proxy-secret');
-  await setup.getByRole('button', { name: 'Создать профили Octo' }).click();
+  await card.getByTestId('linkedin-step-1').locator(':scope > summary').click();
   const existing = card.getByTestId('linkedin-existing-form'); await existing.waitFor();
-  assert.equal((requests[0].payload as { source: string }).source, 'manual');
-  assert.equal(await card.getByText('NodeMaven', { exact: false }).count(), 0);
-  await existing.getByLabel('Ссылка на профиль', { exact: true }).fill('https://linkedin.com/in/test');
-  await existing.getByLabel('Логин LinkedIn (email или телефон)', { exact: true }).fill('test@example.com');
-  await existing.getByLabel('Пароль LinkedIn', { exact: true }).fill('li-secret');
-  assert.equal(await existing.getByRole('button', { name: 'Сохранить', exact: true }).isDisabled(), true);
-  assert.equal(await existing.getByRole('checkbox').isDisabled(), true);
-  await card.getByTestId('octo-profile-2').getByRole('button', { name: 'Получить доступ', exact: true }).click();
-  await existing.getByRole('checkbox').check();
-  await existing.getByLabel('Ссылка на профиль', { exact: true }).fill('https://linkedin.com/in/test-new');
-  assert.equal(await existing.getByRole('checkbox').isChecked(), false);
-  await existing.getByRole('checkbox').check(); await existing.getByRole('button', { name: 'Сохранить', exact: true }).click();
-  await card.getByText('Данные LinkedIn сохранены.', { exact: true }).waitFor();
-  assert.equal(await page.getByRole('dialog').count(), 0, 'existing LinkedIn saves do not show the registration notice');
-  assert.equal(saved.get(903)?.url, 'https://linkedin.com/in/test-new');
-  await page.reload(); await card.getByTestId('linkedin-existing-form').waitFor();
-  assert.equal(await card.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).count(), 0);
+  assert.equal(await card.getByTestId('octo-manual-setup').count(),0,'LinkedIn comes before Octo');
+  await existing.getByLabel('Ссылка на профиль',{exact:true}).fill('https://linkedin.com/in/test');
+  await existing.getByLabel('Логин LinkedIn (email или телефон)',{exact:true}).fill('test@example.com');
+  await existing.getByLabel('Пароль LinkedIn',{exact:true}).fill('li-secret');
+  await existing.getByRole('button',{name:'Сохранить и перейти к Octo',exact:true}).click();
+  await card.getByTestId('linkedin-step-2').locator(':scope > summary').click();
+  const setup=card.getByTestId('octo-manual-setup');await setup.waitFor();
+  assert.equal(saved.get(903)?.stage,'credentials');assert.equal(profiles.has(903),false);
+  assert.equal(await page.getByTestId('linkedin-existing-saved-dialog').count(),0,'draft credentials do not confirm the connection');
+  await page.reload();
+  await card.getByTestId('linkedin-step-1').locator(':scope > summary').click();
+  await card.getByTestId('linkedin-step-2').locator(':scope > summary').click();
+  await existing.waitFor();await setup.waitFor();
+  assert.equal(await existing.getByLabel('Логин LinkedIn (email или телефон)',{exact:true}).inputValue(),'test@example.com');
+  await page.route('**/api/octo/profiles/status*',async route=>route.fulfill({json:{...status(903),onboarding:{id:'legacy-manual',source:'manual',phase:'awaiting_confirmation',score:64}}}));
+  await setup.getByText('Предыдущая проверка остановилась на оценке качества.',{exact:false}).waitFor();
+  assert.equal(await setup.getByRole('button',{name:'Проверить и подключить прокси',exact:true}).isEnabled(),true,'a legacy manual score gate must allow connectivity recheck');
+  await setup.getByRole('button',{name:'Проверить и подключить прокси',exact:true}).click();
+  await setup.getByText('Данные не отправлены.',{exact:false}).waitFor();
+  await setup.getByLabel('Адрес прокси',{exact:true}).fill('proxy.example.com');
+  await setup.getByLabel('Порт прокси',{exact:true}).fill('8080');
+  await setup.getByLabel('Логин прокси',{exact:true}).fill('proxy-user');
+  await setup.getByLabel('Пароль прокси',{exact:true}).fill('proxy-secret');
+  await page.setViewportSize({width:393,height:852});
+  await page.route('**/api/octo/onboarding',async route=>route.fulfill({status:422,contentType:'application/json',body:'{"error":"octo_proxy_check_failed"}'}));
+  await setup.getByRole('button',{name:'Проверить и подключить прокси',exact:true}).click();
+  await setup.getByText('Прокси не прошёл проверку.',{exact:false}).waitFor();
+  assert.equal(await setup.getByLabel('Пароль прокси',{exact:true}).inputValue(),'proxy-secret');
+  assert.equal(await setup.getByLabel('Адрес прокси',{exact:true}).inputValue(),'proxy.example.com');
+  assert.ok(await setup.getByLabel('Пароль прокси',{exact:true}).evaluate(el=>el.getBoundingClientRect().width)>=120);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:'tmp/linkedin-octo/existing-iphone15.png',fullPage:true,mask:[page.locator('input[type=password]')]});
+  await page.unroute('**/api/octo/onboarding');
+  await page.unroute('**/api/octo/profiles/status*');
+  await setup.getByRole('button',{name:'Проверить и подключить прокси',exact:true}).click();
+  await card.getByTestId('linkedin-step-3').locator(':scope > summary').click();
+  await card.getByTestId('linkedin-step-4').locator(':scope > summary').click();
+  await card.getByTestId('octo-profile-2').waitFor();
+  assert.equal((requests[0].payload as {source:string}).source,'manual');
+  assert.equal(await card.locator('.octo-proxy-settings').count(),0,'no duplicate editors in profile cards');
+  assert.equal(await card.getByTestId('linkedin-existing-confirm').isDisabled(),true);
+  await card.getByTestId('octo-profile-2').getByRole('button',{name:'Получить доступ',exact:true}).click();
+  await card.getByRole('checkbox',{name:'Я успешно вошёл/вошла в LinkedIn через Octo',exact:true}).check();
+  await page.route('**/api/client/linkedin-intake',async route=>route.request().method()==='PUT'
+    ?route.fulfill({status:409,json:{error:'linkedin_intake_infrastructure_required'}}):route.continue());
+  await card.getByTestId('linkedin-existing-confirm').click();
+  await card.getByText('Сначала дождись настройки Octo и войди в LinkedIn через EN-профиль.',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('linkedin-existing-saved-dialog').count(),0,'a rejected confirmation shows no success modal');
+  await page.unroute('**/api/client/linkedin-intake');
+  await card.getByTestId('linkedin-existing-confirm').click();
+  await page.getByRole('dialog',{name:'LinkedIn успешно подключён ✅'}).waitFor();
+  assert.equal(saved.get(903)?.stage,'complete');
+  assert.equal(saved.get(903)?.password,'li-secret');
+  assert.equal(recoveryTasks.has(903),false,'successful existing connection does not create an expert request');
+  await page.getByRole('dialog',{name:'LinkedIn успешно подключён ✅'}).getByRole('button',{name:'Понятно',exact:true}).click();
+  await page.reload(); await card.getByTestId('linkedin-step-1').locator(':scope > summary').click();
+  await card.getByTestId('linkedin-existing-form').waitFor();
+  assert.equal(await card.getByRole('button',{name:'Нет LinkedIn / аккаунт заблокирован',exact:true}).count(),0);
   await context.close();
   const second = await browser.newContext(), newPage = await login(904, second);
   const newCard = newPage.getByTestId('linkedin-octo-workflow');
@@ -237,6 +280,28 @@ try {
   await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
   const recoveryForm=recovery.getByTestId('linkedin-new-form');await recoveryForm.waitFor();
   assert.equal(profiles.has(906),false,'opening recovery does not provision or mutate anything');
+  const reported=recoveryForm.getByTestId('student-archived-account');
+  await reported.getByText('Ссылка LinkedIn: https://linkedin.com/in/existing-dolphin',{exact:false}).waitFor();
+  assert.equal(await reported.count(),1,'the reported account appears automatically before being archived');
+  await dolphinPage.route('**/api/client/linkedin-intake/ban',async route=>route.request().method()==='DELETE'
+    ?route.fulfill({status:409,json:{error:'linkedin_intake_ban_changed'}}):route.continue());
+  await recovery.getByRole('button',{name:'Отмена',exact:true}).click();
+  await recovery.getByText('Не удалось отменить блокировку:',{exact:false}).waitFor();
+  assert.equal(banned.has(906),true);assert.equal(await recoveryForm.isVisible(),true,'failed cancellation keeps the draft visible');
+  await dolphinPage.unroute('**/api/client/linkedin-intake/ban');
+  await recovery.getByRole('button',{name:'Отмена',exact:true}).click();
+  await recovery.getByTestId('linkedin-report-ban').waitFor();
+  assert.equal(banned.has(906),false,'cancel restores the status changed by the same action');
+  assert.equal(await recoveryForm.count(),0);assert.equal(recoveryTasks.has(906),false);assert.equal(profiles.has(906),false);
+  await dolphinPage.reload();await recovery.getByTestId('linkedin-report-ban').waitFor();assert.equal(banned.has(906),false);
+  banned.add(906);
+  await recovery.getByTestId('linkedin-report-ban').click();
+  await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
+  await recoveryForm.waitFor();await recovery.getByRole('button',{name:'Отмена',exact:true}).click();
+  await recovery.getByTestId('linkedin-report-ban').waitFor();assert.equal(banned.has(906),true,'cancellation cannot undo a ban that already existed');
+  await recovery.getByTestId('linkedin-report-ban').click();
+  await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
+  await recoveryForm.waitFor();
   await recoveryForm.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('replacement@outlook.com');
   await recoveryForm.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('replacement-fixture');
   await recoveryForm.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25T10:30');
@@ -246,6 +311,7 @@ try {
   await recoveryForm.getByRole('button',{name:'Сохранить данные',exact:true}).click();
   await dolphinPage.getByRole('dialog',{name:'Спасибо, данные сохранены ✅'}).waitFor();
   assert.equal(saved.get(906)?.replacesLinkedInAccountId,906);
+  assert.equal(await recoveryForm.getByTestId('student-archived-account').count(),1,'archival retains one history entry for the reported account');
   assert.equal(await dolphinPage.getByTestId('open-dolphin-client-button').count(),1,'pending recovery retains access to the old Dolphin profiles');
   assert.equal(await dolphinPage.locator('.octo-card').count(),0,'new Octo profiles for Dolphin recovery stay hidden');
   assert.equal((await repository.getDolphinProfilesForClient(906)).length,1);

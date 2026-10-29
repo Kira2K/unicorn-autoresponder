@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { OctoError } from './contracts.mts';
-import type { OctoStore, ProxyInput } from './contracts.mts';
+import type { OctoStore, ProxyInput, ManagedProfile } from './contracts.mts';
 import type { WebClient } from '../web-console/backend/types.ts';
 import type { ProxyResult, ProxyLocation } from './proxy-checker.mts';
 import type { LocationOption } from './nodemaven-locations.mts';
@@ -10,8 +10,12 @@ import { ensureClientPassword } from './client-password.mts';
 import { assertClientReady, profileRules } from './profile-reservation.mts';
 import type { ProxySetup } from './onboarding-contracts.mts';
 import type { CheckerDevelopmentHelp } from './checker-development-help.mts';
+import {expertProxy} from './proxy-workflow.mts';
+import {checkManualProxy} from './manual-proxy-check.mts';
+import type {ProxyConnectivityResult} from './manual-proxy-check.mts';
 
 export interface OnboardingDependencies {
+  manualCheck?: (proxy:ProxyInput)=>Promise<ProxyConnectivityResult>;
   developmentHelp?: () => Promise<CheckerDevelopmentHelp | undefined>;
   checker: { check(proxy: string): Promise<ProxyResult>; best(key: string, location: ProxyLocation): Promise<ProxyResult>; cancel?(): void };
   catalogue: { list(key: string, level: 'countries'|'regions'|'cities', country?: string, region?: string): Promise<LocationOption[]>;
@@ -20,6 +24,13 @@ export interface OnboardingDependencies {
     proxy(profileId: number): Promise<ProxyInput | undefined> };
 }
 export const setupBusy = (setup?: ProxySetup) => !!setup && !['complete','blocked','unknown'].includes(setup.phase);
+function assertManualProfiles(profiles:ManagedProfile[]){
+ if(profiles.some(p=>p.deletion))throw new OctoError('octo_profile_deleting',409);
+ if(profiles.some(p=>p.pending||p.proxyChange?.pending))throw new OctoError('octo_setup_outcome_unknown',409);
+ const en=profiles.find(p=>p.locale==='en');
+ if(en&&expertProxy(en))throw new OctoError('octo_proxy_managed_by_expert',403);
+ if(en?.grant&&en.grant.phase!=='complete')throw new OctoError('octo_profile_not_idle',409);
+}
 export function createOnboardingService({ store, getClient, now = Date.now, ...deps }: OnboardingDependencies & {
   store: OctoStore; getClient(id: number): Promise<WebClient>; now?: () => number;
 }) {
@@ -28,6 +39,7 @@ export function createOnboardingService({ store, getClient, now = Date.now, ...d
       const state = await store.clientState(clientId), operation = state?.setup;
       return { phase: operation?.phase ?? 'idle', id: operation?.id, error: operation?.error,
         score: operation?.score, source: operation?.source, hasNodeMavenKey: !!state?.nodeMavenKey,
+        check:operation?.verifiedProxy?{exitIp:operation.verifiedProxy.exitIp,country:operation.verifiedProxy.country,checkedAt:operation.verifiedProxy.checkedAt}:undefined,
         developmentHelp: await deps.developmentHelp?.(),
         dolphinProfiles: await deps.dolphin.list(clientId) };
     },
@@ -54,19 +66,32 @@ export function createOnboardingService({ store, getClient, now = Date.now, ...d
       if (!['none','own','nodemaven','dolphin','manual'].includes(source)) throw new OctoError('octo_setup_input_invalid', 400);
       if (!['none','manual'].includes(source) && await deps.developmentHelp?.()) throw new OctoError('octo_checker_local_unavailable', 503);
       let state = await ensureClientPassword(store, clientId);
-      if (setupBusy(state.setup)) return this.status(clientId);
-      if (state.setup?.phase === 'unknown') throw new OctoError('octo_setup_outcome_unknown', 409);
+      const retryManualConfirmation=source==='manual'&&state.setup?.source==='manual'&&state.setup.phase==='awaiting_confirmation';
+      if (setupBusy(state.setup)&&!retryManualConfirmation) return this.status(clientId);
+      if (state.setup?.phase === 'unknown'&&!(source==='manual'&&state.setup.source==='manual'&&state.setup.error==='octo_proxy_check_unknown')) throw new OctoError('octo_setup_outcome_unknown', 409);
       const existing = await store.list(clientId);
       if (existing.some(p => p.deletion)) throw new OctoError('octo_profile_deleting', 409);
       const missing = profileRules.requiredLocalesForMarket(client.market).filter(locale => !existing.some(p => p.locale === locale));
-      if (!missing.length) return this.status(clientId);
-      if (missing.includes('en') === (source === 'none')) throw new OctoError('octo_proxy_setup_required', 409);
+      if (!missing.length&&source!=='manual') return this.status(clientId);
+      if(source==='manual')assertManualProfiles(existing);
+      if (source!=='manual'&&missing.includes('en') === (source === 'none') || source==='manual'&&!profileRules.requiredLocalesForMarket(client.market).includes('en')) throw new OctoError('octo_proxy_setup_required', 409);
       const dolphinProfiles = await deps.dolphin.list(clientId);
       if (dolphinProfiles.length && value.confirmDolphin !== true) throw new OctoError('octo_dolphin_confirmation_required', 409);
-      const setup: ProxySetup = { id: randomUUID(), source, phase: ['none','manual'].includes(source) ? 'provisioning' : 'queued',
+      const setup: ProxySetup = { id: randomUUID(), source, phase: source==='none' ? 'provisioning' : 'queued',
         createdAt: now(), confirmDolphin: value.confirmDolphin === true };
       if (source === 'own') setup.input = parseOwnSocksProxy(value.proxy as string);
-      if (source === 'manual') setup.input = parseProxyInput(value.proxy);
+      if (source === 'manual') {
+        setup.input = parseProxyInput(value.proxy);
+        // Validate before publishing work, so an older worker cannot apply its score threshold.
+        // No SQL transaction or external Octo mutation is held across this bounded request.
+        const input=setup.input;
+        setup.verifiedProxy=await checkManualProxy(input,uri=>deps.manualCheck?deps.manualCheck(input):deps.checker.check(uri),now);
+        const current=await store.clientState(clientId);
+        if(!current||current.revision!==state.revision)throw new OctoError('octo_stale_revision',409);
+        assertManualProfiles(await store.list(clientId));
+        if(retryManualConfirmation)setup.id=state.setup!.id;
+        setup.phase='provisioning';
+      }
       if (source === 'dolphin') {
         const id = Number(value.profileId);
         if (!Number.isSafeInteger(id) || !dolphinProfiles.some(p => p.id === id && p.hasProxy)) throw new OctoError('not_found', 404);
