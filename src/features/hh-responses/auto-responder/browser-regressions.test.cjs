@@ -25,7 +25,7 @@ function storage(seed = {}) {
 }
 function makeState(local) {
     const prefix='hh_ar_v2_';
-    const names={history:'processed_ids',successfulResponseIds:'successful_response_ids',successfulResponses:'successful_responses',stopReason:'stop_reason',isRunning:'is_active'};
+    const names={history:'processed_ids',successfulResponseIds:'successful_response_ids',successfulResponses:'successful_responses',stopReason:'stop_reason',isRunning:'is_active',manualList:'manual_list'};
     const sandbox={localStorage:local,sessionStorage:storage(),location:{href:'https://hh.ru/vacancy/7'},stopSignal:false,KEYS:Object.fromEntries(Object.entries(names).map(([k,v])=>[k,prefix+v]))};
     vm.createContext(sandbox);
     const begin=source.indexOf('    const StateManager = {');
@@ -41,6 +41,21 @@ test('a fresh tab retains confirmed vacancies but retries failed visibility skip
   before.addProcessedID('v_8');
   assert.deepEqual([...makeState(local).state.getProcessedIDs()],['v_7']);
   assert.equal(local.getItem('hh_ar_v2_manual_list'),'["untouched"]');
+});
+
+test('a restarted session skips pending manual questions without marking them confirmed or losing retry after removal',()=>{
+  const local=storage({'hh_ar_v2_processed_ids':'["v_sent"]','hh_ar_v2_manual_list':'[{"vid":"v_question","url":"https://hh.ru/applicant/vacancy_response?vacancyId=2"}]'});
+  const begin=source.indexOf('        const allBtns = Array.from(document.querySelectorAll(SELECTORS.applyBtn));');
+  const end=source.indexOf('        log(`Найдено вакансий:',begin);
+  assert.ok(begin>0&&end>begin);
+  const select=new Function('StateManager','document','SELECTORS','config','getVacancyID',source.slice(begin,end)+';return targets;');
+  const buttons=['v_sent','v_question','v_new'].map(id=>({id,offsetParent:{}}));
+  const read=()=>select(makeState(local).state,{querySelectorAll:()=>buttons},{applyBtn:'button'},{skipHidden:true},b=>b.id).map(b=>b.id);
+  assert.deepEqual(read(),['v_new']);
+  assert.deepEqual([...makeState(local).state.getProcessedIDs()],['v_sent']);
+  assert.equal(JSON.parse(local.getItem('hh_ar_v2_manual_list')).length,1);
+  local.setItem('hh_ar_v2_manual_list','[]'); // Existing cleanup/operator removal.
+  assert.deepEqual(read(),['v_question','v_new']);
 });
 test('failed durable history write retains the confirmed count and stops further actions',()=>{
   const local=storage();local.setItem=()=>{throw Error('storage quota')};

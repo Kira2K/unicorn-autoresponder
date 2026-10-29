@@ -2110,10 +2110,14 @@
 
         const allBtns = Array.from(document.querySelectorAll(SELECTORS.applyBtn));
         const processed = StateManager.getProcessedIDs();
+        // Pending questions already belong to the existing manual queue. A
+        // restarted Dolphin session must not reopen them before other targets.
+        const manual = new Set(StateManager.getManualList().map(entry => entry?.vid).filter(Boolean));
 
         const targets = allBtns.filter(b => {
             if (config.skipHidden && b.offsetParent === null) return false;
-            return !processed.has(getVacancyID(b));
+            const vid = getVacancyID(b);
+            return !processed.has(vid) && !manual.has(vid);
         });
 
         log(`Найдено вакансий: ${allBtns.length}. Новых к обработке: ${targets.length}.`);

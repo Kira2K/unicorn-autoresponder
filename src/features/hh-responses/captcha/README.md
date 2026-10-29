@@ -52,6 +52,9 @@ Related protections requested for the same run:
   Session-only skips, including a real visibility rejection, remain retryable.
   Other origins and tabs are never inspected. Existing history/manual lists
   are not cleared automatically.
+  Search targets exclude entries still present in that manual queue, including
+  after a Dolphin restart. Removing an entry through the existing workflow makes
+  it eligible again; pending questions are never written as confirmed history.
 - A collapsed HH `hidden-resume-warning` with height 0 does not block an
   application. Only an actually visible warning is acted upon. Resume privacy
   is not changed by the responder.
