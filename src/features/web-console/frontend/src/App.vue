@@ -8,6 +8,7 @@ import StudentWorkPlaces from './StudentWorkPlaces.vue'
 import OctoAccessCard from './components/OctoAccessCard.vue'
 import LinkedInOctoWorkflow from './components/LinkedInOctoWorkflow.vue'
 import LinkedInCreatorConsole from './components/LinkedInCreatorConsole.vue'
+import LinkedInAdminConfirmations from './components/LinkedInAdminConfirmations.vue'
 import BrowserWelcomeDialog from './components/BrowserWelcomeDialog.vue'
 import { platformDisplayLabel as previewPlatformLabel } from './platform-display-label.js'
 import { usernamePayload } from './username-input.js'
@@ -184,7 +185,13 @@ const isClient = computed(() => session.value?.role === 'client')
 const validatedProfileEnabled = computed(() => isClient.value && dashboard.value?.client?.studentProfileEnabled === true)
 const ui = text => studentPreviewLabel(text, validatedProfileEnabled.value)
 const platformDisplayLabel = text => validatedProfileEnabled.value ? previewPlatformLabel(text) : text
-const accountRows = computed(() => dashboard.value?.platformAccounts || [])
+const linkedInAccountState=ref({})
+const accountRows = computed(() => (dashboard.value?.platformAccounts || []).map(account=>({...account,
+  relatedBanned:linkedInAccountState.value.clientId===dashboard.value?.client?.id&&linkedInAccountState.value.isBanned&&account.id===linkedInAccountState.value.outlookAccountId})))
+function updateLinkedInState(state){
+  linkedInOctoClientId.value=state.preferOcto?dashboard.value.client.id:null
+  linkedInAccountState.value={...state,clientId:dashboard.value.client.id}
+}
 function platformKey(account) {
   return String(account?.platform || account?.accountLabel || '').trim().replace(/\s+/g, '_').toLowerCase()
 }
@@ -2352,7 +2359,10 @@ onUnmounted(() => {
         </template>
       </Dialog>
 
-      <LinkedInAuthTab v-if="isAdmin && adminSection === 'linkedin'" />
+      <section v-if="isAdmin && adminSection === 'linkedin'">
+        <LinkedInAdminConfirmations />
+        <LinkedInAuthTab />
+      </section>
 
       <Card v-if="isAdmin && adminSection === 'overview'" class="admin-dialogs-card" data-testid="admin-dialogs-card">
         <template #title>
@@ -3002,7 +3012,7 @@ onUnmounted(() => {
         <template v-if="isClient && !pageLoading && dashboard?.client?.id && dolphinProfileStatus">
           <OctoAccessCard v-if="String(dashboard.client.market || '').trim().toLowerCase() === 'ru' && !dolphinProfileStatus.existingProfiles?.length && !accountRows.some(account => platformKey(account) === 'linkedin')" :key="dashboard.client.id" :client-id="dashboard.client.id" />
           <LinkedInOctoWorkflow v-if="accountRows.some(account => platformKey(account) === 'linkedin') || !dolphinProfileStatus.existingProfiles?.length && ['en', 'both'].includes(String(dashboard.client.market || '').trim().toLowerCase())"
-            :key="`linkedin-${dashboard.client.id}`" :client="dashboard.client" :has-dolphin="!!dolphinProfileStatus.existingProfiles?.length" @state="linkedInOctoClientId = $event.preferOcto ? dashboard.client.id : null" @saved="refreshLinkedInAccounts" />
+            :key="`linkedin-${dashboard.client.id}`" :client="dashboard.client" :has-dolphin="!!dolphinProfileStatus.existingProfiles?.length" @state="updateLinkedInState" @saved="refreshLinkedInAccounts" />
         </template>
         <Card v-if="adminCanOpenDolphinProfiles" class="action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>
@@ -3105,6 +3115,9 @@ onUnmounted(() => {
                 <template #body="{ data }"><span>{{ platformDisplayLabel(data.platform) }}</span><small v-if="validatedProfileEnabled && platformKey(data) === 'phone_ru'" class="phone-ru-hint">📞 Используется для HH на ру рынке</small></template>
               </Column>
               <Column v-if="!validatedProfileEnabled" field="accountLabel" header="Label" />
+              <Column header="Статус">
+                <template #body="{data}"><Tag v-if="data.isBanned" value="Заблокирован" severity="danger" /><Tag v-else-if="data.relatedBanned" value="Почта заблокированного LinkedIn" severity="warn" /><span v-else>Активен</span></template>
+              </Column>
               <Column field="login" :header="ui('Login')" />
               <Column field="phone" :header="ui('Phone')" />
               <Column field="email" :header="ui('Email')" />

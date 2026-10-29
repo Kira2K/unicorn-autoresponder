@@ -59,7 +59,7 @@ test('Octo access: failed request survives polling, retry displays credentials, 
     assert.equal(await page.getByText('Не удалось запросить доступ.', { exact: false }).isVisible(), true,
       'a successful status poll must not erase a failed access request')
     const error = profile.getByRole('alert')
-    assert.match(await error.textContent(), /Обратитесь в поддержку/)
+    assert.match(await error.textContent(), /Обратись в поддержку/)
     assert.equal(await error.getByRole('link', { name: 'Поддержка' }).getAttribute('href'), 'https://t.me/veu_support_bot')
     assert.equal(await page.getByTestId('octo-profile-332').getByRole('alert').count(), 0)
     allowGrant = true

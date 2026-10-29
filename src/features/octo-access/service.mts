@@ -4,7 +4,7 @@ import { OctoError } from './contracts.mts';
 import type { CloudApi, Locale, ManagedProfile, OctoConfig, OctoStore, ProxyInput } from './contracts.mts';
 import { generateProfilePassword } from './password.mts';
 import { parseProxyInput } from './proxy-input.mts';
-import { canEditProxy, proxyBusy } from './proxy-workflow.mts';
+import { canEditProxy, proxyBusy, expertProxy } from './proxy-workflow.mts';
 import { octoClientAllowed } from './access-policy.mts';
 import { profileRules, reserveClientProfiles } from './profile-reservation.mts';
 import { createOnboardingService } from './onboarding-service.mts';
@@ -27,22 +27,23 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
     checker: { check: unavailable, best: unavailable }, catalogue: { list: unavailable, validate: unavailable },
     dolphin: { list: async () => [], proxy: unavailable }
   }) });
-  const snapshot = (p: ManagedProfile, connection?: ProxyInput, credentialsError?: string) => ({ id: p.id, locale: p.locale, title: p.original.title,
+  const snapshot = (p: ManagedProfile, connection?: ProxyInput, credentialsError?: string,staff=false) => ({ id: p.id, locale: p.locale, title: p.original.title,
     phase: p.deletion ? (p.deletion.phase === 'blocked' ? 'deletion_blocked' : 'deleting') : p.grant && p.grant.phase !== 'complete' ? p.grant.phase : p.phase,
     grantId: p.deletion ? undefined : p.grant?.id, error: p.deletion?.error ?? p.grant?.error ?? p.error,
-    canEditProxy: canEditProxy(p), proxy: { configured: !!p.proxy && !proxyBusy(p),
-      phase: p.proxyChange?.phase, error: p.proxyChange?.error, type: p.proxy?.type, host: p.proxy?.host, port: p.proxy?.port,
+    canEditProxy: canEditProxy(p)&&(!expertProxy(p)||staff), proxy: { configured: !!p.proxy && !proxyBusy(p),
+      isMadeByExpert:expertProxy(p),canViewCredentials:!expertProxy(p)||staff,
+      phase: p.proxyChange?.phase, error: p.proxyChange?.error,...(!expertProxy(p)||staff?{type:p.proxy?.type,host:p.proxy?.host,port:p.proxy?.port}:{}),
       ...(connection ? { ...connection, credentialsLoaded: true } : {}), ...(credentialsError ? { credentialsError } : {}) } });
   return {
     allowed: (id: number) => octoClientAllowed(config, id),
-    async status(clientId: number, options: { proxyCredentials?: boolean; locales?: readonly Locale[] } = {}) {
+    async status(clientId: number, options: { proxyCredentials?: boolean; locales?: readonly Locale[];staff?:boolean } = {}) {
       const c = await client(clientId), profiles = await store.list(clientId);
       const selected = options.locales ? profiles.filter(p => options.locales!.includes(p.locale)) : profiles;
       const snapshots = await Promise.all(selected.map(async p => {
         let canAcquire=false;
         try{await readGrantCandidate(store,clientId,p.id,now);canAcquire=true;}catch{/* Owner-scoped read; acquire repeats the authoritative checks. */}
-        const view=(connection?:ProxyInput,credentialsError?:string)=>({...snapshot(p,connection,credentialsError),canAcquire});
-        if (!options.proxyCredentials || !p.uuid || !p.proxy || p.deletion || proxyBusy(p)) return view();
+        const view=(connection?:ProxyInput,credentialsError?:string)=>({...snapshot(p,connection,credentialsError,options.staff),canAcquire});
+        if (!options.proxyCredentials || expertProxy(p)&&!options.staff || !p.uuid || !p.proxy || p.deletion || proxyBusy(p)) return view();
         try {
           if (!readProfileProxy) throw new Error('proxy_reader_unavailable');
           const actual = await readProfileProxy(p.uuid);
@@ -98,25 +99,26 @@ export function createOctoService({ store, config, getClient, now = Date.now, pa
       }
       throw new OctoError('octo_busy', 409);
     },
-    async queueProxy(clientId: number, profileId: number, input: unknown, operationId: string = randomUUID()) {
+    async queueProxy(clientId: number, profileId: number, input: unknown, operationId: string = randomUUID(),isMadeByExpert=false) {
       allow(clientId);
       if (!Number.isSafeInteger(profileId) || profileId < 1) throw new OctoError('invalid_profile_id', 400);
       const p = await store.get(profileId);
       if (!p || p.clientId !== clientId) throw new OctoError('not_found', 404);
       if (p.deletion) throw new OctoError('octo_profile_deleting', 409);
+      if(expertProxy(p)&&!isMadeByExpert)throw new OctoError('octo_proxy_managed_by_expert',403);
       const connection = parseProxyInput(input);
       if (proxyBusy(p) && JSON.stringify(p.proxyChange?.input) === JSON.stringify(connection)) return;
       if (!canEditProxy(p) || !p.uuid) throw new OctoError('octo_profile_not_idle', 409);
-      p.proxyChange = { id: operationId, phase: 'queued', input: connection,
+      p.proxyChange = { id: operationId, phase: 'queued', input: connection,isMadeByExpert,
         title: `${p.original.title} | ${p.uuid}`.slice(0, 255) };
       await store.save(p);
     },
-    async saveProxy(clientId: number, profileId: number, input: unknown) {
+    async saveProxy(clientId: number, profileId: number, input: unknown,isMadeByExpert=false) {
       const operation = (await store.clientState(clientId))?.setup;
       if (operation && !['complete','blocked','unknown'].includes(operation.phase))
         throw new OctoError('octo_setup_busy', 409);
-      await this.queueProxy(clientId, profileId, input);
-      return this.status(clientId);
+      await this.queueProxy(clientId, profileId, input,undefined,isMadeByExpert);
+      return this.status(clientId,{staff:isMadeByExpert});
     },
     async grant(clientId: number, grantId: string) {
       allow(clientId);

@@ -29,6 +29,7 @@ debug.log
 /src/features/linkedin-automation/comment-monitor/tests/relevance-eval.test.ts
 
 .DS_Store
+/output/pdf/
 Thumbs.db
 project-f5183b61-c5a8-4384-bc9-10f265644c86.json
 dolphin-profiles.json

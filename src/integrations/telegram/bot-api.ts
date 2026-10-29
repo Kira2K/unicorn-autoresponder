@@ -19,6 +19,7 @@ type SendMessageInput = {
   replyMarkup?: unknown
   parseMode?: import('./types.ts').SendOneInput['parseMode']
   linkPreviewOptions?: unknown
+  attachment?: import('./types.ts').SendOneInput['attachment']
 }
 
 export function botError(
@@ -49,7 +50,7 @@ export function createTelegramBotApi(options: {
 } = {}) {
   const baseUrl = String(options.baseUrl ?? 'https://api.telegram.org').replace(/\/+$/, '')
 
-  async function requestResponse(method: string, body: Record<string, unknown> = {}): Promise<unknown> {
+  async function requestResponse(method: string, body: Record<string, unknown> | FormData = {}): Promise<unknown> {
     const token = resolveBotToken(options.token)
     const requester = options.requester ?? globalThis.fetch
     if (typeof requester !== 'function' || typeof AbortController !== 'function') {
@@ -59,7 +60,7 @@ export function createTelegramBotApi(options: {
       )
     }
 
-    const longPollTimeoutMs = (Number(body.timeout) + 90) * 1000
+    const longPollTimeoutMs = (Number(body instanceof FormData ? undefined : body.timeout) + 90) * 1000
     const requestTimeoutMs = Number(
       options.requestTimeoutMs ?? Math.max(15000, longPollTimeoutMs || 0)
     )
@@ -75,8 +76,8 @@ export function createTelegramBotApi(options: {
     try {
       const requestOptions = {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        ...(body instanceof FormData ? {} : { headers: { 'Content-Type': 'application/json' } }),
+        body: body instanceof FormData ? body : JSON.stringify(body),
         signal: controller.signal
       }
       let response: BotApiHttpResponse
@@ -133,6 +134,15 @@ export function createTelegramBotApi(options: {
   }
 
   async function sendResponse(input: SendMessageInput): Promise<unknown> {
+    if (input.attachment) {
+      const form = new FormData()
+      form.set('chat_id', input.chatId)
+      form.set('caption', input.text)
+      form.set('document', new Blob([new Uint8Array(input.attachment.data)], { type: input.attachment.mimeType }), input.attachment.fileName)
+      if (input.messageThreadId !== undefined) form.set('message_thread_id', String(input.messageThreadId))
+      if (input.replyMarkup !== undefined) form.set('reply_markup', JSON.stringify(input.replyMarkup))
+      return requestResponse('sendDocument', form)
+    }
     const richMessage = prepareTelegramRichMessage(input)
     if (!richMessage) return await requestResponse('sendMessage', sendMessageBody(input))
     return await requestResponse('sendRichMessage', {
@@ -185,6 +195,10 @@ export function createTelegramBotApi(options: {
       })
     },
     async sendMessageResponse(input: SendMessageInput): Promise<unknown> {
+      return await sendResponse(input)
+    },
+    async sendDocumentResponse(input: SendMessageInput): Promise<unknown> {
+      if (!input.attachment) throw botError('telegram_document_invalid', 'A PDF attachment is required.')
       return await sendResponse(input)
     },
     async sendMessage(input: SendMessageInput): Promise<unknown> {

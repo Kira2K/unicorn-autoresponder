@@ -6,9 +6,9 @@ import { createTaskStatusReporter } from './status-report.mts';
 const sent = { kind:'telegram-response', response:{ ok:true, result:{ message_id:77, date:1,
   chat:{ id:-1003187558078,type:'supergroup',title:'Managers' },text:'sent' } } } satisfies SendOneResult;
 const change = { taskId:14,clientId:270,from:'не начата',to:'блок' } as const;
-function fixture(result:SendOneResult = sent) {
+function fixture(result:SendOneResult = sent, mention?:string) {
   const calls:SendOneInput[] = [];
-  const report = createTaskStatusReporter({ chatId:'-1003187558078',mention:'@juliafeels',
+  const report = createTaskStatusReporter({ chatId:'-1003187558078',...(mention===undefined?{}:{mention}),
     client:async id => { assert.equal(id,270); return {firstName:'Nikolai',lastName:'Sokolov',fio:'',clientName:'Synthetic fixture',primaryStack:'JAVA'}; },
     sendOne:async input => { calls.push(input); return result; } });
   return {report,calls};
@@ -21,6 +21,14 @@ test('status report uses the manager chat, exact task/client data and plain Russ
   assert.equal(f.calls[0].text,'Заявка на создание LinkedIn №14\nКлиент: Nikolai Sokolov\nСтек: JAVA\nДенис изменил статус: «не начата» → «блок».\n\n@juliafeels fyi');
   assert.equal(f.calls[0].parseMode,undefined);
   assert.equal(f.calls[0].reportContext?.clientId,270);
+});
+
+test('status report accepts a recipient override without mentioning the default recipient',async()=>{
+  const f=fixture(sent,'@KiraSamsonova');
+  assert.deepEqual(await f.report(change),{outcome:'sent',messageId:77});
+  assert.equal(f.calls.length,1);
+  assert.match(f.calls[0].text,/@KiraSamsonova fyi$/);
+  assert.doesNotMatch(f.calls[0].text,/@juliafeels/);
 });
 test('missing stack is stated explicitly without losing the status notification',async()=>{
   for(const primaryStack of [undefined,'','   ']) {

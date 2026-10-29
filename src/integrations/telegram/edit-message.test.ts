@@ -27,7 +27,7 @@ test('invalid edits never call the requester; legacy adapters cannot accidentall
     const result = await api.sendOne({ chatId: '-123', text: 'replacement', editMessageId } as any)
     assert.equal(result.kind, 'client-failure')
   }
-  for (const extra of [{ attachment: { file: new Blob(['x']), filename: 'file.txt' } },
+  for (const extra of [{ attachment: { fileName: 'file.pdf', mimeType: 'application/pdf' as const, data: new Uint8Array([1]) } },
     { messageThreadId: 2 }, { replyMarkup: { remove_keyboard: true as const } }]) {
     const result = await api.sendOne({ chatId: '-123', text: 'replacement', editMessageId: 7, ...extra })
     assert.equal(result.kind, 'client-failure')

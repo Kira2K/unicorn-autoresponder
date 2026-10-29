@@ -24,5 +24,7 @@ test('owner-scoped intake ignores supplied client ID, denies other roles, never 
     assert.deepEqual(await (await put()).json(), { error: 'linkedin_intake_unavailable' });
     error = Object.assign(new Error('unknown'), { code: 'commit_uncertain' });
     assert.deepEqual(await (await put()).json(), { error: 'commit_uncertain' });
+    error=Object.assign(Error('private upstream'),{code:'octo_client_data_required',fields:[{field:'calendarEmail',label:'private value'},{field:'password',label:'private value'}]});
+    assert.deepEqual(await(await put()).json(),{error:'octo_client_data_required',fields:[{field:'calendarEmail',label:'Личный email'}]});
   } finally { await new Promise<void>(done => server.close(() => done())); }
 });

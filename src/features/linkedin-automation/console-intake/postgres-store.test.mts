@@ -53,7 +53,8 @@ function fixture(creationTasks = false) {
       return {rows:[{...row,created}]};
     }
     if (sql.includes('FROM noco.clients')) return { rows: [{ id: values[0] }] };
-    if (sql.includes('FROM noco.platform_accounts a JOIN')) return { rows: structuredClone(state.accounts.filter(row=>!row.__nc_deleted&&Number(row.clients_id)===Number(values[0]))) };
+    if (sql.includes('FROM noco.platform_accounts a JOIN')) return { rows: structuredClone(state.accounts.filter(row=>Number(row.clients_id)===Number(values[0])&&
+      (sql.includes('AND coalesce(a.__nc_deleted,false)')?row.__nc_deleted&&row.platform==='linkedin'&&Number(row.id)!==Number(values[1]):!row.__nc_deleted))) };
     if (sql.startsWith('SELECT id FROM noco.platforms')) return { rows: [{ id: values[0] === 'linkedin' ? 16 : 31 }] };
     if (sql.startsWith('INSERT INTO noco.platform_accounts')) {
       const columns = sql.match(/platform_accounts\(([^)]+)\)/)![1].split(',');
@@ -66,6 +67,7 @@ function fixture(creationTasks = false) {
       state.accounts.push(row); return { rows: [{ id: row.id }] };
     }
     if (sql.startsWith('UPDATE noco.platform_accounts')) {
+      if(sql.includes('SET is_banned=true')){const row=state.accounts.find(row=>Number(row.id)===Number(values[0])&&Number(row.clients_id)===Number(values[1]));if(row){row.is_banned=true;return{rows:[{id:row.id}]};}return{rows:[]};}
       if(sql.includes('__nc_deleted=true')){
         const rows=state.accounts.filter(row=>row.clients_id===values[0]&&(values[1] as number[]).includes(Number(row.id))&&!row.__nc_deleted);
         for(const row of rows)row.__nc_deleted=true;
@@ -90,6 +92,18 @@ function fixture(creationTasks = false) {
   } }; } };
   return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore', false, creationTasks) };
 }
+
+test('reporting a ban is owner-scoped and idempotent without creating tasks; both readers include the archived history',async()=>{
+ const f=fixture(true);await f.store.save(7,input(),['ru','en']);
+ Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});
+ f.state.tasks[0].status='выполнение подтверждено';
+ const counts=[f.state.accounts.length,f.state.tasks.length];
+ await assert.rejects(f.store.reportBan(7,999),{code:'linkedin_intake_replacement_stale'});
+ await f.store.reportBan(7,Number(f.state.accounts[0].id));await f.store.reportBan(7,Number(f.state.accounts[0].id));
+ assert.equal(f.state.accounts[0].is_banned,true);assert.deepEqual([f.state.accounts.length,f.state.tasks.length],counts);
+ assert.equal(f.calls.filter(sql=>sql.includes('SET is_banned=true')).length,1);
+ assert.equal((await f.store.load(7)).isBanned,true);
+});
 
 test('Outlook registration time round-trips on the email account and survives legacy updates and rollback', async () => {
   const f = fixture();

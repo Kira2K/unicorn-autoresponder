@@ -30,6 +30,7 @@ type TelegramLogger = (event: Readonly<Record<string, unknown>>) => void
 
 type RawBotApi = {
   sendMessageResponse(input: SendOneInput): Promise<unknown>
+  sendDocumentResponse?(input: SendOneInput): Promise<unknown>
   editMessageTextResponse?(input: SendOneInput): Promise<unknown>
 }
 
@@ -115,6 +116,16 @@ function validateSendOneInput(input: unknown):
       )
     }
   }
+  if (input.attachment !== undefined) {
+    const file = input.attachment
+    if (!isObject(file) || typeof file.fileName !== 'string' || !file.fileName.endsWith('.pdf') ||
+      file.fileName.length > 160 || /[\\/\r\n\0]/.test(file.fileName) || file.mimeType !== 'application/pdf' ||
+      !(file.data instanceof Uint8Array) || file.data.byteLength < 1 || file.data.byteLength > 5 * 1024 * 1024 ||
+      new TextDecoder().decode(file.data.subarray(0, 5)) !== '%PDF-' ||
+      Array.from(input.text).length > 1024 || input.parseMode !== undefined || input.linkPreviewOptions !== undefined) {
+      return { ok: false, error: namedError('TelegramSendValidationError', 'Invalid PDF attachment or caption.', 'telegram_document_invalid') }
+    }
+  }
   if (input.editMessageId !== undefined && (
     !Number.isSafeInteger(input.editMessageId) || Number(input.editMessageId) <= 0 ||
     input.attachment !== undefined || input.messageThreadId !== undefined ||
@@ -188,6 +199,7 @@ function validateSendOneInput(input: unknown):
     input: {
       chatId: input.chatId.trim(),
       text: input.text,
+      ...(input.attachment !== undefined ? { attachment: input.attachment as SendOneInput['attachment'] } : {}),
       ...(input.editMessageId !== undefined ? { editMessageId: Number(input.editMessageId) } : {}),
       ...(input.messageThreadId !== undefined
         ? { messageThreadId: Number(input.messageThreadId) }
@@ -218,7 +230,7 @@ function validTelegramResponse(
     isObject(result.chat) &&
     typeof result.chat.id === 'number' &&
     typeof result.chat.type === 'string' &&
-    (typeof result.text === 'string' || (
+    (typeof result.text === 'string' || (isObject(result.document) && typeof result.document.file_id === 'string' && typeof result.document.file_unique_id === 'string') || (
       isObject(result.rich_message) &&
       Array.isArray(result.rich_message.blocks) &&
       result.rich_message.blocks.length > 0 &&
@@ -459,11 +471,17 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
           if (!rawBotApi.editMessageTextResponse)
             throw namedError('TelegramConfigurationError', 'The configured bot adapter does not support editing.', 'telegram_bot_runtime_unavailable')
           rawResponse = await rawBotApi.editMessageTextResponse(validated.input)
+        } else if (validated.input.attachment) {
+          if (!rawBotApi.sendDocumentResponse)
+            throw namedError('TelegramConfigurationError', 'The configured bot adapter does not support documents.', 'telegram_bot_runtime_unavailable')
+          rawResponse = await rawBotApi.sendDocumentResponse(validated.input)
         } else {
           rawResponse = await rawBotApi.sendMessageResponse(validated.input)
         }
       } catch (error) {
-        const result = clientFailureResult(classifyFailure(error), error)
+        const safeError = validated.input.attachment
+          ? namedError('TelegramDocumentError', 'Could not confirm document delivery.', 'telegram_document_delivery_unconfirmed') : error
+        const result = clientFailureResult(classifyFailure(error), safeError)
         log({
           level: 'error',
           event: 'telegram_send_one_client_failure',
@@ -471,18 +489,19 @@ export function createTelegramIntegration(options: TelegramIntegrationOptions = 
           textLength: validated.input.text.length,
           durationMs: Date.now() - startedAt,
           failure: result.failure,
-          internalError: sanitizeTelegramValue(error, { secrets })
+          internalError: validated.input.attachment ? { documentRequest: true } : sanitizeTelegramValue(error, { secrets })
         })
         if (reportFailures) await reportResult(result, 'sendOne', input)
         return result
       }
 
-      if (!validTelegramResponse(rawResponse)) {
+      if (!validTelegramResponse(rawResponse) || (validated.input.attachment && isObject(rawResponse) && rawResponse.ok === true &&
+        (!isObject(rawResponse.result) || !isObject(rawResponse.result.document)))) {
         const invalidResponseError = namedError(
           'TelegramResponseValidationError',
           'Telegram Bot API response did not match the minimum required structure.',
           'telegram_bot_response_invalid',
-          { response: sanitizeTelegramValue(rawResponse, { secrets }) as Record<string, unknown> }
+          validated.input.attachment ? { documentResponse: true } : { response: sanitizeTelegramValue(rawResponse, { secrets }) as Record<string, unknown> }
         )
         const result = clientFailureResult('response', invalidResponseError)
         log({

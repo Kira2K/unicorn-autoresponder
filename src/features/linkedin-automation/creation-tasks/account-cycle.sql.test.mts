@@ -140,5 +140,29 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    await q('UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id=31');
    await error(()=>q('UPDATE noco.linklab SET platform_account_id=31 WHERE client_id=101'),/binding_immutable/);
   });
+  await t.test('a second confirmed account reuses the profile, archives history and starts exactly one more cycle',async()=>{
+   await q("UPDATE noco.linkedin_creation_task SET source='manual' WHERE client_id=101");
+   await q("UPDATE noco.linklab SET profile_filled_count=9,profile_revision=4,status='Блок' WHERE client_id=101");
+   await q(`UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id IN(21,22);
+    INSERT INTO noco.platform_accounts(id,clients_id,platforms_id,url,login,password) VALUES
+     (51,101,16,'https://linkedin.com/in/second','second','fixture-two'),(52,101,31,'','second@outlook.com','fixture-two');
+    INSERT INTO noco.linkedin_creation_task(client_id,linkedin_account_id,outlook_account_id,source) VALUES(101,51,52,'student_intake');`);
+   const second=(await q("SELECT id FROM noco.linkedin_creation_task WHERE client_id=101 AND source='student_intake'")).rows[0].id;
+   assert.equal((await q('SELECT baseline_uuid FROM noco.linkedin_creation_proxy WHERE task_id=$1',[second])).rows[0].baseline_uuid,'new');
+   assert.equal((await q('SELECT platform_account_id FROM noco.linklab WHERE client_id=101')).rows[0].platform_account_id,'21');
+   const operation='20000000-0000-4000-8000-000000000002';
+   await q("UPDATE noco.octo_profiles SET state=jsonb_set(jsonb_set(state,'{proxy,uuid}','\"second-proxy\"'),'{proxyChange,id}',to_jsonb($1::text)) WHERE profile_id=1",[operation]);
+   await q("UPDATE noco.linkedin_creation_proxy SET profile_id=1,operation_id=$2,fingerprint='second-fingerprint',baseline_fingerprint=$3,baseline_ip='1.1.1.1',exit_ip='4.4.4.4',comparison='different' WHERE task_id=$1",[second,operation,proof.fingerprint]);
+   await q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=1,proxy_uuid='second-proxy',proxy_saved_at=clock_timestamp(),status='сделана экспертом' WHERE id=$1",[second]);
+   await q("SET ROLE cycle_test_app;UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено' WHERE client_id=101 AND source='student_intake';RESET ROLE;");
+   const row=(await q('SELECT * FROM noco.linklab WHERE client_id=101')).rows[0];
+   assert.equal(row.platform_account_id,'51');assert.equal(row.status,'Новый');assert.equal(row.profile_filled_count,0);assert.equal(row.profile_revision,'-1');assert.equal(row.blocked_at,null);
+   assert.equal(row.crm_student_id,before.crm_student_id);assert.equal(row.proxy_cycle_id,before.proxy_cycle_id);assert.deepEqual(row.proxy_ends_at,before.proxy_ends_at);
+   await q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено' WHERE id=$1",[second]);
+   assert.equal((await q('SELECT count(*) FROM noco.linkedin_account_cycles WHERE client_id=101')).rows[0].count,'2');
+   assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications WHERE client_id=101')).rows[0].count,'2');
+   assert.equal((await q("SELECT count(*) FROM noco.octo_profiles WHERE client_id=101 AND locale='en'")).rows[0].count,'1');
+   assert.equal((await q('SELECT password FROM noco.platform_accounts WHERE id=21')).rows[0].password,'fixture');
+  });
  }finally{await pool.end();await q('RESET ROLE');if(owned){await q('DROP SCHEMA noco CASCADE');await q('DROP OWNED BY cycle_test_app').catch(()=>{});await q('DROP ROLE IF EXISTS cycle_test_app');}await db.end();}
 });

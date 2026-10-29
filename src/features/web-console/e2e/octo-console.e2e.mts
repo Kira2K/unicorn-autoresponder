@@ -144,7 +144,7 @@ export async function runConsoleFlow(options: {
       await card(page).waitFor();
       progress('ensure', name);
       if (!resumed) {
-        await card(page).getByRole('button', { name: 'Создать профили', exact: true }).click();
+        await card(page).getByRole('button', { name: 'Создать профили Octo', exact: true }).click();
       }
       await until(async () => {
         const status = await jsonGet(context, `${url}/api/octo/profiles/status`);

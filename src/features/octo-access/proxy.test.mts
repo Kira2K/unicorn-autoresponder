@@ -9,6 +9,21 @@ import { createCloudApi } from './cloud-api.mts';
 import { OctoError } from './contracts.mts';
 import type { SavedProxy } from './contracts.mts';
 const input = { type: 'socks5' as const, host: 'proxy.example.com', port: 12345, login: 'test-user', password: 'test-secret' };
+
+test('expert-created proxy is persisted, redacted for students even on credential requests, and editable only by staff',async()=>{
+ const f=await fixture();
+ await f.service.saveProxy(901,f.id,input,true);await f.advance();
+ assert.equal((await f.store.get(f.id))!.proxy!.isMadeByExpert,true);
+ let reads=0;
+ const service=createOctoService({store:f.store,config:testConfig,getClient:async id=>mockClient(id),
+  readProfileProxy:async()=>{reads++;return{saved:f.proxies[0]};}});
+ const student=(await service.status(901,{proxyCredentials:true})).profiles[0];
+ assert.equal(student.proxy.isMadeByExpert,true);assert.equal(student.canEditProxy,false);assert.equal(reads,0);
+ for(const value of [input.login,input.password,input.host])assert.ok(!JSON.stringify(student).includes(value));
+ await assert.rejects(service.saveProxy(901,f.id,{...input,isMadeByExpert:false}),{code:'octo_proxy_managed_by_expert'});
+ const staff=(await service.status(901,{proxyCredentials:true,staff:true})).profiles[0];
+ assert.equal(reads,1);assert.equal(staff.proxy.login,input.login);assert.equal(staff.proxy.password,input.password);assert.equal(staff.canEditProxy,true);
+});
 async function fixture() {
   const store = createMemoryStore(), cloud = createMockCloud(store), proxies: SavedProxy[] = [];
   const service = createOctoService({ store, config: testConfig, getClient: async id => mockClient(id) });

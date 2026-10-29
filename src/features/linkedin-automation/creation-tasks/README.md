@@ -5,7 +5,8 @@ blocked accounts, credentials and Octo bindings are read from their original sto
 optimistic version and a verified EN proxy receipt, not copies of student data or secrets.
 
 Statuses: `не начата` → `блок` / `сделана экспертом` → `выполнение подтверждено`. The contractor can choose the first
-three; confirmation is a staff SQL/admin-database operation. Confirmed tasks disappear from contractor reads.
+three. Main admins confirm through the LinkedIn section using «Подтвердить выполнение»;
+the contractor cannot call the admin routes. Confirmed tasks disappear from contractor reads.
 Multiple manual tasks for a client are allowed. The student form owns one `source='student_intake'` task per client;
 repeated/concurrent saves update that row. Existing-account saves never create a registration task.
 
@@ -30,10 +31,14 @@ Failed requests show a retry hint instead of an empty-list message. Only the new
 
 The SQL Console composes a post-commit status reporter using the shared Telegram Bot API facade and
 the existing `VEU_SUPPORT_BOT` preset. Every real status change through the contractor's status endpoint
-reports the application number, current client first/last name, primary stack, previous/new status and `@juliafeels`
+reports the application number, current client first/last name, primary stack, previous/new status and the configured mention
 to the agreed manager group `-1003187558078`. This includes returning to `не начата`; initial task creation,
 result/proxy saves, SQL/admin changes and saving the same status do not send a status message.
 The destination is independent of each client's own group. No TDLib/personal Telegram account is used.
+Both the status reporter and new-cycle notification accept an optional `mention`, defaulting to `@juliafeels`.
+The current Console composition passes `@KiraSamsonova` through one `notificationMention` value
+to status, confirmed-cycle and existing-account notifications. Restore Julia by changing
+that composition value, without changing the module defaults.
 The stack is read from the client's `primaryStack`; a missing value is shown explicitly as `Стек: не указан`.
 
 Status saves retain their optimistic version checks. Re-saving the same status is a locked no-op that
@@ -270,3 +275,31 @@ endpoints; protected backend requests and the user's guest API keep their origin
 The runner checks both identities, opens/closes only in the guest Desktop, and runs the
 unchanged one-shot bridge protocol through the owner Desktop. No account switching or owner
 password is needed. This is not the independent fresh-owner archive acceptance test.
+
+## Main-admin confirmation and Denis follow-up
+
+`/api/admin/linkedin-creation/tasks` lists tasks for main admins only; `/:id` reads
+current detail and delivery state, `/:id/octo/status?proxyCredentials=1` reads the
+staff proxy view, and `POST /:id/confirm` accepts the current task `version`.
+The UI permits only «сделана экспертом» with a saved result and current idle EN proxy.
+Confirmation revalidates the live connection and transactionally checks the receipt,
+account ownership and grant state. Same confirmed task is an idempotent no-op even
+with the previous version. A lost commit response requires read-back, never a blind
+retry. The durable cycle outbox delivers separately; only `sent` plus a positive
+Telegram message ID proves delivery. Confirmation alone is not delivery evidence.
+Experts retain access/editing until main-admin confirmation; student result editing
+locks at expert completion. Both staff panels show Outlook registration time and full
+proxy data; students receive no expert-managed proxy credentials, even on opt-in reads.
+
+Apply `migrate-denis.mts` separately before this release. Its default is rollback;
+`--apply` adds `is_banned`, `proxy_is_made_by_expert`, the provenance projection trigger
+and the existing-account notification outbox. Backfill trusts only a receipt whose
+client, profile and current proxy UUID all match. Unknown proxies remain false.
+The trigger projects the durable Octo JSON provenance into the Boolean SQL column;
+it does not infer ownership from provider titles. It makes no LinkLab repairs.
+
+The full-cycle runner now clicks the real main-admin button and waits for Telegram
+delivery through the UI/API; it has no SQL-confirmation helper. Preflight refuses the
+old deployment unless schema and the expected notification mention are both verified.
+The portable admin skill is `outputs/skills/linkedin-admin-confirm.zip`; the admin
+already needs their normal Console and Octo access. The skill never confirms by SQL.

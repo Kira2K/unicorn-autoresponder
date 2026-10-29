@@ -766,6 +766,7 @@ function toPlatformAccount(record: NocoRecord, fullAccess: boolean, telegramIds:
   const platform = platformAccountRecordLabel(record)
   return {
     id: Number(record.Id),
+    ...(record.is_banned===true?{isBanned:true}:{}),
     clientId: accountClientId(record) || undefined,
     platform,
     platformId: accountPlatformId(record) || undefined,

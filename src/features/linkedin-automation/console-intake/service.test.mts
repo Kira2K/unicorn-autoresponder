@@ -3,6 +3,28 @@ import assert from 'node:assert/strict';
 import { createLinkedInIntakeService } from './service.mts';
 import { mockClient } from '../../octo-access/testing.mts';
 
+test('omitting blocked-history declaration cannot add partial cards; unchanged legacy history survives',async()=>{
+ let writes=0;
+ const legacy={fullName:'Old',legacyText:'Original history'};
+ const service=createLinkedInIntakeService({allowed:()=>true,hasDolphin:async()=>false,getClient:async id=>({...mockClient(id),market:'En'}),
+  store:{load:async()=>({blockedAccounts:[legacy],editableBlockedAccounts:[legacy]}) as any,save:async()=>{writes++;return{saved:true,linkedinAccountId:1};}}});
+ const data={scenario:'new',outlookLogin:'test@outlook.com',outlookPassword:'secret',firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
+ for(const blockedAccounts of [[{fullName:'New'}],[{...legacy,company:'Changed'}],[legacy,legacy]])
+  await assert.rejects(service.save(7,{...data,blockedAccounts}),{code:'linkedin_intake_blocked_required'});
+ assert.equal(writes,0);
+ await service.save(7,{...data,blockedAccounts:[legacy]});
+ assert.equal(writes,1);
+});
+
+test('missing Octo client data exposes safe field labels and does not write the intake',async()=>{
+ let writes=0;
+ const store={load:async()=>({realLocation:''}),save:async()=>{writes++;}} as any;
+ const service=createLinkedInIntakeService({store,allowed:()=>true,hasDolphin:async()=>false,getClient:async id=>({...mockClient(id),market:'En',calendarEmail:''})});
+ await assert.rejects(service.save(7,{scenario:'new',outlookLogin:'test@outlook.com',outlookPassword:'secret',firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'}),
+  (e:any)=>{assert.equal(e.code,'octo_client_data_required');assert.deepEqual(e.fields,[{field:'calendarEmail',label:'Личный email'}]);return true;});
+ assert.equal(writes,0);
+});
+
 test('registration time is required and round-trips for every eligible client', async () => {
   let calendarEmail = 'first@example.invalid', saves = 0;
   let saved: { outlookRegisteredAt?: string } = {};

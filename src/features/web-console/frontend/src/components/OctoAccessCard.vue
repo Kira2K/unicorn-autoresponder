@@ -3,11 +3,13 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { octoApi, octoGrantForDisplay, octoProxyDraft } from '../octo-api.js'
 import OctoManualSetup from './OctoManualSetup.vue'
 import OctoProxyFields from './OctoProxyFields.vue'
+import Dialog from 'primevue/dialog'
 import { octoOnboardingBusy } from '../octo-onboarding.js'
 
 const props = defineProps({ clientId: { type: [Number, String], required: true }, setupEnabled: { type: Boolean, default: true },
   transport: { type: Object, default: () => octoApi }, proxyEditingEnabled: { type: Boolean, default: true },
-  proxyExpanded: { type: Boolean, default: false } })
+  proxyExpanded: { type: Boolean, default: false },warmupUntil:{type:String,default:''} })
+const accessWarning=ref(null)
 const emit = defineEmits(['status', 'access-issued', 'proxy-changed'])
 const visible = ref(false)
 const status = ref({ profiles: [], requiredLocales: [] })
@@ -33,7 +35,7 @@ function phaseLabel(profile) {
   return phaseLabels[grant?.phase || profile.phase] || (profile.phase === 'ready' ? 'Профиль готов' : 'Профиль подготавливается…')
 }
 const proxyPhaseLabels = { queued: 'Прокси ожидает сохранения…', creating: 'Создаём прокси…',
-  attaching: 'Подключаем прокси к профилю…', complete: 'Прокси сохранён', blocked: 'Не удалось сохранить прокси. Обратитесь к команде поддержки.' }
+  attaching: 'Подключаем прокси к профилю…', complete: 'Прокси сохранён', blocked: 'Не удалось сохранить прокси. Обратись к команде поддержки.' }
 function proxyPending(profile) {
   return ['queued', 'creating', 'attaching'].includes(profile.proxy?.phase)
 }
@@ -45,8 +47,8 @@ function failureMessage(profile) {
   const code = grants.value[profile.id]?.error || profile.error
   if (code === 'octo_proxy_unavailable') return 'Для английского профиля пока нет свободного прокси.'
   if (['octo_event_history_gap', 'octo_force_stop_observed'].includes(code))
-    return 'Профиль скрыт и остаётся защищённым. Для завершения доступа обратитесь к команде поддержки.'
-  return 'Не удалось завершить операцию. Обратитесь к команде поддержки.'
+    return 'Профиль скрыт и остаётся защищённым. Для завершения доступа обратись к команде поддержки.'
+  return 'Не удалось завершить операцию. Обратись к команде поддержки.'
 }
 let generation = 0
 let mounted = false
@@ -60,6 +62,7 @@ function active(version) {
 }
 
 function stop() {
+  accessWarning.value=null
   generation += 1
   clearTimeout(pollTimer)
   clearInterval(clockTimer)
@@ -109,7 +112,7 @@ async function refresh(version) {
     message.value = ''
     const profileIds = new Set(nextStatus.profiles.map(profile => String(profile.id)))
     proxyDrafts.value = Object.fromEntries(nextStatus.profiles.map(profile => [profile.id,
-      !proxyDrafts.value[profile.id] || profile.proxy?.credentialsLoaded && !proxyDirty.value[profile.id]
+      profile.proxy?.canViewCredentials===false?octoProxyDraft({}):!proxyDrafts.value[profile.id] || profile.proxy?.credentialsLoaded && !proxyDirty.value[profile.id]
         ? octoProxyDraft(profile.proxy) : proxyDrafts.value[profile.id]]))
     proxyDirty.value = Object.fromEntries(Object.entries(proxyDirty.value).filter(([id]) => profileIds.has(id)))
     proxyMessages.value = Object.fromEntries(Object.entries(proxyMessages.value).filter(([id]) => profileIds.has(id)))
@@ -189,16 +192,16 @@ async function saveProxy(profile) {
       loadProxyCredentials = true
       status.value = { ...status.value, profiles: status.value.profiles.map(item => item.id === profile.id
         ? { ...item, canEditProxy: false, proxy: { ...item.proxy, phase: 'queued' } } : item) }
-      proxyMessages.value[profile.id] = 'Прокси отправлен на сохранение.'
+      proxyMessages.value[profile.id] = ''
     }
   } catch (error) {
     if (active(version) && error.name !== 'AbortError' && !denied(error)) {
       proxyMessages.value[profile.id] = error.message === 'invalid_proxy_fields'
-        ? 'Проверьте тип, адрес, порт и URL смены IP.'
+        ? 'Проверь тип, адрес, порт и URL смены IP.'
         : error.message === 'linkedin_task_proxy_reused' ? 'Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.'
-        : error.message === 'linkedin_task_proxy_ip_reused' ? 'Внешний IP совпадает с прежним. Укажите другое подключение.'
-        : error.message === 'linkedin_task_proxy_check_failed' ? 'Не удалось проверить новое подключение. Проверьте реквизиты прокси.'
-        : error.message === 'linkedin_task_close_profile_first' ? 'Закройте профиль и дождитесь завершения доступа перед заменой прокси.'
+        : error.message === 'linkedin_task_proxy_ip_reused' ? 'Внешний IP совпадает с прежним. Укажи другое подключение.'
+        : error.message === 'linkedin_task_proxy_check_failed' ? 'Не удалось проверить новое подключение. Проверь реквизиты прокси.'
+        : error.message === 'linkedin_task_close_profile_first' ? 'Закрой профиль и дождись завершения доступа перед заменой прокси.'
         : error.message === 'commit_uncertain' ? 'Результат сохранения неизвестен. Обновите страницу для проверки, не отправляйте повторно вслепую.'
         : 'Не удалось сохранить прокси. Попробуйте ещё раз.'
     }
@@ -207,8 +210,9 @@ async function saveProxy(profile) {
   }
 }
 
-async function requestAccess(profile) {
+async function requestAccess(profile,acknowledged=false) {
   if (!canRequest(profile) || !visible.value || document.hidden) return
+  if(!acknowledged&&Date.parse(props.warmupUntil)>Date.now()){accessWarning.value=profile;return}
   const version = generation
   requesting.value[profile.id] = true
   delete requestErrors.value[profile.id]
@@ -218,7 +222,7 @@ async function requestAccess(profile) {
     if (active(version)) grants.value = { ...grants.value, [profile.id]: octoGrantForDisplay(grant) }
   } catch (error) {
     if (active(version) && error.name !== 'AbortError' && !denied(error))
-      requestErrors.value[profile.id] = 'Не удалось запросить доступ. Обратитесь в поддержку.'
+      requestErrors.value[profile.id] = 'Не удалось запросить доступ. Обратись в поддержку.'
   } finally {
     if (active(version)) requesting.value[profile.id] = false
   }
@@ -240,7 +244,7 @@ async function copy(profileId, field) {
     await navigator.clipboard.writeText(value)
     if (active(version)) copied.value = `${profileId}:${field}`
   } catch {
-    if (active(version)) message.value = 'Не удалось скопировать. Выделите поле и скопируйте вручную.'
+    if (active(version)) message.value = 'Не удалось скопировать. Выдели поле и скопируй вручную.'
   }
 }
 
@@ -311,20 +315,21 @@ onUnmounted(() => {
             <button type="button" @click="copy(profile.id, 'password')">{{ copied === `${profile.id}:password` ? 'Скопировано' : 'Копировать' }}</button></span>
         </label>
       </div>
-      <p v-else-if="grants[profile.id]?.phase === 'granted'">Данные входа скрыты. Если срок доступа истёк, дождитесь завершения доступа.</p>
+      <p v-else-if="grants[profile.id]?.phase === 'granted'">Данные входа скрыты. Если срок доступа истёк, дождись завершения доступа.</p>
       <p v-if="grants[profile.id]?.phase === 'blocked' || ['blocked', 'deletion_blocked'].includes(profile.phase)" role="alert">{{ failureMessage(profile) }}</p>
       <div class="octo-proxy" :data-testid="`octo-proxy-status-${profile.id}`">
         <h4>Прокси профиля</h4>
-        <p v-if="profile.proxy?.configured">Текущий прокси: {{ profile.proxy.type }} · {{ profile.proxy.host }}:{{ profile.proxy.port }}</p>
+        <p v-if="profile.proxy?.configured && profile.proxy?.canViewCredentials===false">Прокси настроен командой.</p>
+        <p v-else-if="profile.proxy?.configured">Текущий прокси: {{ profile.proxy.type }} · {{ profile.proxy.host }}:{{ profile.proxy.port }}</p>
         <p v-else>Прокси пока не настроен.</p>
-        <p v-if="profile.proxy?.phase" :role="profile.proxy.phase === 'blocked' ? 'alert' : 'status'">{{ proxyPhaseLabels[profile.proxy.phase] || 'Проверяем состояние прокси…' }}</p>
-        <p v-else-if="profile.proxy?.error" role="alert">Не удалось обновить прокси. Обратитесь к команде поддержки.</p>
-        <p v-if="profile.proxy?.credentialsError" role="alert">Не удалось загрузить реквизиты прокси из Octo. Повторяем загрузку…</p>
         <p v-if="proxyMessages[profile.id]" role="status">{{ proxyMessages[profile.id] }}</p>
+        <p v-else-if="profile.proxy?.phase" :role="profile.proxy.phase === 'blocked' ? 'alert' : 'status'">{{ proxyPhaseLabels[profile.proxy.phase] || 'Проверяем состояние прокси…' }}</p>
+        <p v-else-if="profile.proxy?.error" role="alert">Не удалось обновить прокси. Обратись к команде поддержки.</p>
+        <p v-if="profile.proxy?.credentialsError" role="alert">Не удалось загрузить реквизиты прокси из Octo. Повторяем загрузку…</p>
       </div>
-      <details v-if="proxyEditingEnabled" :open="proxyExpanded" class="octo-proxy-settings">
-        <summary>Свой прокси — дополнительные настройки</summary>
-        <p>Этот раздел нужен только для пользователей со своей настройкой прокси.</p>
+      <details v-if="proxyEditingEnabled && profile.proxy?.canViewCredentials!==false" :open="proxyExpanded" class="octo-proxy-settings">
+        <summary>Настройки прокси</summary>
+        <p>Введи реквизиты подключения в этой форме и дождись завершения сохранения.</p>
         <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :data-testid="`octo-proxy-form-${profile.id}`" @input="proxyDirty[profile.id] = true" @change="proxyDirty[profile.id] = true" @submit.prevent="saveProxy(profile)">
           <fieldset :disabled="!canEditProxy(profile)">
             <legend>Настроить прокси</legend>
@@ -334,8 +339,12 @@ onUnmounted(() => {
         </form>
       </details>
     </article>
-    <p class="octo-note">После окончания срока доступа уже открытый браузер можно продолжать использовать. Для завершения работы закройте его.</p>
+    <p class="octo-note">После окончания срока доступа уже открытый браузер можно продолжать использовать. Для завершения работы закрой его.</p>
   </section>
+  <Dialog :visible="!!accessWarning" modal header="Доступ к Octo готов" :draggable="false" :style="{width:'32rem',maxWidth:'calc(100vw - 2rem)'}" @update:visible="accessWarning=null">
+    <p>Твой доступ к Octo готов. Первый месяц не заходи в LinkedIn: аккаунт прогревает команда. Дальше заходи только через Octo.</p>
+    <template #footer><button type="button" @click="accessWarning=null">Пока не открывать</button><button type="button" @click="requestAccess(accessWarning,true);accessWarning=null">Понятно, получить доступ</button></template>
+  </Dialog>
 </template>
 
 <style scoped>

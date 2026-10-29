@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import { parseIntake, parseLinkedInResult, readBlockedAccounts, normalizeBlockedAccounts } from './contracts.mts';
 const draft = { scenario: 'new', outlookLogin: 'test@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' };
 
+test('Outlook registration cannot be in the future; a declared blocked account requires every structured field',()=>{
+ const now=Date.parse('2026-10-29T00:00:00.000Z');
+ assert.throws(()=>parseIntake({...draft,outlookRegisteredAt:'2026-10-29T00:01:00.000Z'},now),{code:'linkedin_intake_outlook_registration_future'});
+ assert.equal(parseIntake({...draft,outlookRegisteredAt:'2026-10-29T00:00:00.000Z'},now).outlookRegisteredAt,'2026-10-29T00:00:00.000Z');
+ assert.throws(()=>parseIntake({...draft,hasBlockedAccounts:true,blockedAccounts:[]}),{code:'linkedin_intake_blocked_required'});
+ assert.throws(()=>parseIntake({...draft,hasBlockedAccounts:true,blockedAccounts:[{fullName:'Old name'}]}),{code:'linkedin_intake_blocked_required'});
+ const blocked={fullName:'Old Name',country:'Georgia',company:'Company',position:'Developer',blockedAt:'2026-10-01'};
+ assert.deepEqual(parseIntake({...draft,hasBlockedAccounts:true,blockedAccounts:[blocked]}).blockedAccounts,[blocked]);
+});
+
 test('banned-account replacement is explicit, new-scenario only and bound to a positive account ID', () => {
   assert.equal(parseIntake({...draft,replacesLinkedInAccountId:42}).replacesLinkedInAccountId,42);
   for(const replacesLinkedInAccountId of [0,-1,1.5,'42',null])

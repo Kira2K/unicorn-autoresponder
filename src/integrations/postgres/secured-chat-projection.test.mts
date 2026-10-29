@@ -4,6 +4,12 @@ import { projection, fields } from './working-records.mts';
 import { sourceFields } from './local-columns.mts';
 import type { WorkingTable } from './working-catalog.mts';
 
+test('ban metadata is projected read-only for platform accounts and never makes generic writes possible',()=>{
+ const table:WorkingTable={id:'m8zej2vsv4iypl8',title:'Accounts',table_name:'accounts',columns:[{id:'id',title:'Id',dataKey:'Id',sqlName:'id',sqlType:'bigint',pk:true}]};
+ assert.match(projection(table),/'is_banned',to_jsonb\(t\)->'is_banned'/);
+ assert.throws(()=>fields(table,{is_banned:false}),{code:'field_not_writable'});
+});
+
 const clients: WorkingTable = { id: 'mxza381054ldlza', title: 'clients', table_name: 'clients', columns: [
   { id: 'id', title: 'Id', dataKey: 'Id', sqlName: 'id', sqlType: 'bigint', pk: true },
   { id: 'chat', title: 'telegram_general_chat_id', dataKey: 'telegram_general_chat_id', sqlName: 'old_chat', sqlType: 'text' }
