@@ -1,5 +1,6 @@
 const { sendTelegramMessage } = require('./send-report.ts')
 const { splitTelegramMessage } = require('./reports.ts')
+const { truncateTelegramHtml: truncateText } = require('./telegram-html.ts')
 const {
   AUTH_CHECK_PARSER_ERROR_CODES,
   LOGS_CHANNEL_ID,
@@ -48,14 +49,6 @@ type PrelaunchReadinessReport = {
   responseLimitsByProfileId?: Readonly<Record<string, number>>
   readyTargets: PrelaunchReadinessTarget[]
   blockedTargets: PrelaunchReadinessTarget[]
-}
-
-function truncateText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value
-  }
-
-  return `${value.slice(0, maxLength - 20)}\n...truncated`
 }
 
 function formatStatusFlag(label: string, value: unknown): string {

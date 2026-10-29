@@ -62,6 +62,8 @@ Related protections requested for the same run:
   existing cross-tab lock still applies; it is never forcibly cleared.
 - HH reports use the existing typed Telegram Bot API facade. API rejections and
   uncertain outcomes are failures, not successful deliveries or resend triggers.
+  Long HTML reports retain complete tags/entities when truncated, including
+  links and multiline lifecycle quotations, to avoid Bot API parse rejections.
 
 ## Validation
 
