@@ -1,4 +1,8 @@
 export function intakeScenario(data) { return data?.hasLinkedIn === true || String(data?.url || '').trim() ? 'existing' : '' }
+export function linkedInCreationPending(account, state, clientId) {
+  return state?.clientId === clientId && state?.registrationPending === true &&
+    state?.linkedinAccountId != null && account.id === state.linkedinAccountId
+}
 export function registrationTimeInput(value) {
   if (!value) return ''
   const date = new Date(value)

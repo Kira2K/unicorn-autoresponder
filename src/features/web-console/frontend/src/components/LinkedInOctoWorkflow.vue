@@ -50,7 +50,8 @@ function updateTaskState(data) {
   secrets.value = { ...secrets.value, ...data }
   editLocked.value = data.editLocked === true || ['сделана экспертом','выполнение подтверждено'].includes(task.value?.status)
   emit('state', { preferOcto: props.hasDolphin && (!!task.value || completionConfirmed.value) && !(registrationPending.value && hadLinkedInBeforeTask.value),
-    isBanned:data.isBanned===true,linkedinAccountId:data.linkedinAccountId,outlookAccountId:data.outlookAccountId })
+    isBanned:data.isBanned===true,linkedinAccountId:data.linkedinAccountId,outlookAccountId:data.outlookAccountId,
+    registrationPending:data.registrationPending === true || !!task.value && task.value.status !== 'выполнение подтверждено' })
 }
 async function load() {
   if (loading.value) return

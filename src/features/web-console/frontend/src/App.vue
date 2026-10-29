@@ -7,6 +7,7 @@ import StudentProfile from './StudentProfile.vue'
 import StudentWorkPlaces from './StudentWorkPlaces.vue'
 import OctoAccessCard from './components/OctoAccessCard.vue'
 import LinkedInOctoWorkflow from './components/LinkedInOctoWorkflow.vue'
+import { linkedInCreationPending } from './linkedin-intake.js'
 import LinkedInCreatorConsole from './components/LinkedInCreatorConsole.vue'
 import LinkedInAdminConfirmations from './components/LinkedInAdminConfirmations.vue'
 import BrowserWelcomeDialog from './components/BrowserWelcomeDialog.vue'
@@ -187,6 +188,7 @@ const ui = text => studentPreviewLabel(text, validatedProfileEnabled.value)
 const platformDisplayLabel = text => validatedProfileEnabled.value ? previewPlatformLabel(text) : text
 const linkedInAccountState=ref({})
 const accountRows = computed(() => (dashboard.value?.platformAccounts || []).map(account=>({...account,
+  creationPending:linkedInCreationPending(account,linkedInAccountState.value,dashboard.value?.client?.id),
   relatedBanned:linkedInAccountState.value.clientId===dashboard.value?.client?.id&&linkedInAccountState.value.isBanned&&account.id===linkedInAccountState.value.outlookAccountId})))
 function updateLinkedInState(state){
   linkedInOctoClientId.value=state.preferOcto?dashboard.value.client.id:null
@@ -3116,7 +3118,7 @@ onUnmounted(() => {
               </Column>
               <Column v-if="!validatedProfileEnabled" field="accountLabel" header="Label" />
               <Column header="Статус">
-                <template #body="{data}"><Tag v-if="data.isBanned" value="Заблокирован" severity="danger" /><Tag v-else-if="data.relatedBanned" value="Почта заблокированного LinkedIn" severity="warn" /><span v-else>Активен</span></template>
+                <template #body="{data}"><Tag v-if="data.isBanned" value="Заблокирован" severity="danger" /><Tag v-else-if="data.relatedBanned" value="Почта заблокированного LinkedIn" severity="warn" /><Tag v-else-if="data.creationPending" value="В процессе создания" severity="info" /><span v-else>Активен</span></template>
               </Column>
               <Column field="login" :header="ui('Login')" />
               <Column field="phone" :header="ui('Phone')" />
