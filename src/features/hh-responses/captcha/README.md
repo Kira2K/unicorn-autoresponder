@@ -17,6 +17,11 @@ business action. `playwright-adapter.ts` supplies the HH DOM operations through
 the profile's CDP connection. Its English selection comes from branch
 `hh-captha-solver`, commit `61ee360f873009b907dc9e41ab72adb612dcbd69`;
 Russian modal text is not treated as proof that the image stayed Russian.
+The adapter reads pixels from the already-loaded image through an off-DOM
+canvas: an occluded headful Dolphin window can give an unrelated compositor
+crop for an element screenshot. A cross-origin canvas restriction keeps the
+bounded screenshot fallback. Capture does not request the image URL again,
+which could change the server challenge, and unloaded images fail explicitly.
 The current HH `captcha-language` button names the target language; the adapter
 waits for the replacement image before taking the recognition screenshot.
 

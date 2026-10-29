@@ -43,7 +43,33 @@ function createPlaywrightCaptchaAdapters(page: any, dependencies: {
       }
     },
     capture: async ({timeoutMs}: any = {}) => {
-      const bytes = await picture().screenshot({ timeout: Math.min(timeoutMs ?? 5000, 5000) })
+      const timeout = Math.min(timeoutMs ?? 5000, 5000)
+      let bytes: Buffer
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        // Read the already-loaded pixels. An occluded headful Dolphin window
+        // can return a compositor crop of the page instead of this image.
+        const data = await Promise.race([picture().evaluate((element: any) => {
+          if (element.tagName === 'CANVAS') return element.toDataURL('image/png')
+          if (!element.complete || !element.naturalWidth || !element.naturalHeight) throw Error('captcha_image_not_loaded')
+          const canvas = document.createElement('canvas')
+          canvas.width = element.naturalWidth; canvas.height = element.naturalHeight
+          const context = canvas.getContext('2d')
+          if (!context) throw Error('captcha_pixels_unavailable')
+          context.drawImage(element, 0, 0)
+          return canvas.toDataURL('image/png')
+        }), new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(Error('captcha_capture_timeout')), timeout)
+        })])
+        if (!/^data:image\/png;base64,/.test(String(data))) throw Error('captcha_pixels_invalid')
+        bytes = Buffer.from(String(data).split(',')[1], 'base64')
+        if (!bytes.length) throw Error('captcha_pixels_empty')
+      } catch (error: any) {
+        // Some cross-origin images prohibit canvas reads. No new image HTTP
+        // request is made: it could change the server-side challenge.
+        if (!/SecurityError|tainted canvas|tainted by cross-origin/i.test(error.message)) throw error
+        bytes = await picture().screenshot({ timeout })
+      } finally { if (timer) clearTimeout(timer) }
       return { id: createHash('sha256').update(bytes).digest('hex'), bytes }
     },
     save: dependencies.save,
