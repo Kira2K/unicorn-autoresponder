@@ -75,7 +75,7 @@ export function createCreationTaskService(deps: {
       const d = await detail(id), s = await deps.octo.status(d.task.clientId, { proxyCredentials, locales: ['en'],staff:true });
       let newProxyReady=!d.task.requiresNewProxy;
       if(d.task.requiresNewProxy&&deps.newProxy){const p=(await deps.profiles.list(d.task.clientId)).find(p=>p.locale==='en');newProxyReady=!!p&&await deps.newProxy.ready(d.task,p);}
-      return { ...s,newProxyRequired:!!d.task.requiresNewProxy,newProxyReady,
+      return { ...s,task:(await detail(id)).task,newProxyRequired:!!d.task.requiresNewProxy,newProxyReady,
         profiles: s.profiles.filter(p => p.locale === 'en').map(p=>({...p,canAcquire:newProxyReady&&p.canAcquire})), requiredLocales: ['en'] };
     },
     async acquire(id: unknown, profileId: unknown) {

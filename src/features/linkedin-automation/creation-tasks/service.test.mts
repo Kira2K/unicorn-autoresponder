@@ -65,6 +65,16 @@ test('new applications cannot acquire/capture/finish using their previous proxy,
  await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}),{code:'linkedin_task_new_proxy_required'});
 });
 
+test('profile polling returns the latest task version after a background proxy update without recapturing or exposing secrets',async()=>{
+ const f=await fixture();
+ const status=f.service.profileStatus.bind(f.service);
+ const before=await status(1);assert.equal(before.task.version,1);
+ f.task.version=2;
+ const after=await status(1);assert.equal(after.task.version,2);
+ assert.equal(f.received(),undefined);
+ assert.ok(!JSON.stringify(after.task).includes('secret'));
+});
+
 test('only a committed real status change reports; same values, stale versions and uncertain commits never send',async()=>{
   const reports:unknown[]=[];
   const f=await fixture(async event=>{reports.push(event);return{outcome:'sent',messageId:99};});

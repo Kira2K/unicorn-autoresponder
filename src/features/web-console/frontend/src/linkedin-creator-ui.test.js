@@ -33,22 +33,31 @@ test('creator completion checklist explains missing saved data and restores prox
     let savedResult
     let captures = 0, statusWrites = 0
     let notification = { outcome: 'sent', messageId: 77 }
-    let newProxyRequired=false,newProxyReady=false,proxyWrites=0
+    let newProxyRequired=false,newProxyReady=false,proxyWrites=0,assignmentPolls=0
+    let rejectProxy
+    const proxyRejection = new Promise(resolve => { rejectProxy = resolve })
     await page.route('**/api/linkedin-creator/**', async route => {
       const request = route.request(), path = new URL(request.url()).pathname
       if(path.endsWith('/profiles/349/proxy')){
         proxyWrites++
         if(request.postDataJSON().login==='same')return route.fulfill({status:409,json:{error:'linkedin_task_proxy_reused'}})
-        task={...task,version:task.version+1,proxySavedAt:undefined};newProxyReady=true
+        if(request.postDataJSON().login==='offline'){
+          await proxyRejection
+          return route.fulfill({status:502,json:{error:'linkedin_task_proxy_check_failed'}})
+        }
+        task={...task,version:task.version+1,proxySavedAt:undefined};assignmentPolls=2;newProxyReady=false
         return route.fulfill({json:{queued:true,task}})
       }
-      if (path.endsWith('/octo/status')) return route.fulfill({ json: {
+      if (path.endsWith('/octo/status')) {
+        if(assignmentPolls && --assignmentPolls===0){task={...task,version:task.version+1};newProxyReady=true}
+        return route.fulfill({ json: {task,
         ...(newProxyRequired?{newProxyRequired,newProxyReady}:{}),
         profiles: [{ id: 349, locale: 'en', title: 'Fixture EN', phase: 'ready', canEditProxy: true,canAcquire:!newProxyRequired||newProxyReady,
           proxy: { configured: true, credentialsLoaded: true, type: 'socks5', host: 'example.test', port: 1080, ...(newProxyRequired&&newProxyReady?{phase:'complete'}:{}) } }],
         requiredLocales: ['en'], onboarding: { phase: 'complete' }
-      } })
+      } }) }
       if (path.endsWith('/capture-proxy')) {
+        if(request.postDataJSON().version!==task.version)return route.fulfill({status:409,json:{error:'linkedin_task_stale_version'}})
         captures++
         task = { ...task, version: task.version + 1, proxySavedAt: new Date().toISOString() }
         return route.fulfill({ json: task })
@@ -149,13 +158,27 @@ test('creator completion checklist explains missing saved data and restores prox
     assert.equal(await page.getByLabel('Пароль прокси',{exact:true}).getAttribute('type'),'text')
     await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click()
     await page.getByText('Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.',{exact:true}).waitFor()
+    await page.getByLabel('Логин прокси',{exact:true}).fill('offline')
+    await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click()
+    const proxyForm=page.getByTestId('octo-proxy-form-349')
+    await proxyForm.getByText('Проверяем прокси, это может занять до минуты.',{exact:true}).waitFor()
+    assert.equal(await proxyForm.getAttribute('aria-busy'),'true')
+    assert.equal(await proxyForm.locator('.pi-spin').count()>0,true)
+    rejectProxy()
+    const failure=proxyForm.getByRole('alert')
+    await failure.filter({hasText:'Прокси не прошёл проверку подключения.'}).waitFor()
+    await page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/octo/status'))
+    assert.match(await failure.innerText(),/Проверь адрес, порт, логин и пароль/,'failure survives the next status poll')
+    assert.equal(await page.getByLabel('Логин прокси',{exact:true}).inputValue(),'offline','failed submission retains the entered fields')
     await page.getByLabel('Логин прокси',{exact:true}).fill('new')
     await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click()
     await page.waitForFunction(()=>!document.querySelector('[data-testid="octo-profile-349"] button').disabled)
     await page.getByText('Прокси сохранён',{exact:true}).waitFor()
-    assert.equal(await capture.isEnabled(),true)
+    await page.waitForFunction(()=>!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Сохранить настройки прокси').disabled)
+    assert.equal(await failure.count(),0)
+    assert.equal(await page.getByText('Открывать профиль Octo для этого не требуется.',{exact:false}).count(),1)
     await capture.click()
     await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor()
-    assert.equal(captures,2);assert.equal(proxyWrites,2)
+    assert.equal(captures,2);assert.equal(proxyWrites,3)
   } finally { await browser?.close(); await server.close() }
 })
