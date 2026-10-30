@@ -11,7 +11,9 @@ export async function submitCycleIntake(page:Page,journal:RunJournal,cycle:numbe
  await form.getByRole('button',{name:cycle===1?'Сохранить и подготовить Octo':'Сохранить и подготовить Octo',exact:true}).click();
  await form.getByTestId('linkedin-validation-error').waitFor();
  await form.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill(`SYNTHETIC-${journal.data.runId}-${cycle}`);
- await form.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25T10:30');
+ await form.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');
+ await form.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');
+ await form.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
  await form.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).fill('Pavel');
  await form.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true}).fill('Testov');
  await form.getByLabel('Город и страна проживания',{exact:true}).fill('Tbilisi, Georgia');

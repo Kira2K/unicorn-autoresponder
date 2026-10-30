@@ -119,7 +119,15 @@ try {
     await outlook.fill('test@outlook.com');
     await submit.click();
     assert.equal(saved.has(id), false, 'missing registration time prevents submission');
-    await registration.fill('2026-10-25T10:30');
+    assert.equal(await registration.getAttribute('type'), 'date');
+    await form.getByText('Дата не может быть в будущем', { exact: true }).waitFor();
+    await registration.fill('2099-01-01');
+    await form.getByLabel('Часы регистрации Outlook-почты', { exact: true }).selectOption('10');
+    await form.getByLabel('Минуты регистрации Outlook-почты', { exact: true }).selectOption('30');
+    assert.equal(await registration.evaluate(input => (input as HTMLInputElement).checkValidity()), false);
+    await submit.click();
+    assert.equal(saved.has(id), false, 'future registration date prevents submission');
+    await registration.fill('2026-10-25');
     await outlook.fill('test@gmail.com');
     await registration.focus();
     await form.getByRole('alert').waitFor();
@@ -149,7 +157,9 @@ try {
     await instructionPage.reload();
     await instructionCard.getByTestId('linkedin-new-form').waitFor();
     assert.equal(await instructionCard.locator('.scenario-buttons').count(),0);
-    assert.equal(await registration.inputValue(), '2026-10-25T10:30');
+    assert.equal(await registration.inputValue(), '2026-10-25');
+    assert.equal(await instructionCard.getByLabel('Часы регистрации Outlook-почты', { exact: true }).inputValue(), '10');
+    assert.equal(await instructionCard.getByLabel('Минуты регистрации Outlook-почты', { exact: true }).inputValue(), '30');
     assert.equal(await instructionPage.getByRole('dialog').count(), 0, 'reload does not reopen confirmation');
     const accountRow=instructionPage.getByTestId('accounts-table').locator('tbody tr').filter({has:instructionPage.getByRole('cell',{name:/^linkedin$/i})});
     await accountRow.getByText('В процессе создания',{exact:true}).waitFor();
@@ -242,7 +252,9 @@ try {
   await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
   await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
   assert.equal(await form.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi', 'the saved intake location is restored on reopening');
-  await form.getByLabel('Дата и время регистрации Outlook-почты', { exact: true }).fill('2026-10-25T10:30');
+  await form.getByLabel('Дата и время регистрации Outlook-почты', { exact: true }).fill('2026-10-25');
+  await form.getByLabel('Часы регистрации Outlook-почты', { exact: true }).selectOption('10');
+  await form.getByLabel('Минуты регистрации Outlook-почты', { exact: true }).selectOption('30');
   await form.getByRole('checkbox',{name:'У меня есть заблокированные аккаунты',exact:true}).check();
   for (let i = 0; i < 2; i++) await form.getByRole('button', { name: '＋ Добавить заблокированный аккаунт', exact: true }).click();
   const histories=[{fullName:'First',country:'UK',company:'One',position:'Developer',blockedAt:'2025-01-01'},
@@ -321,7 +333,9 @@ try {
   await recoveryForm.waitFor();
   await recoveryForm.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('replacement@outlook.com');
   await recoveryForm.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('replacement-fixture');
-  await recoveryForm.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25T10:30');
+  await recoveryForm.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');
+  await recoveryForm.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');
+  await recoveryForm.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
   await recoveryForm.getByLabel('Город и страна проживания',{exact:true}).fill('Tbilisi');
   await recoveryForm.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).fill('Alex');
   await recoveryForm.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true}).fill('Test');

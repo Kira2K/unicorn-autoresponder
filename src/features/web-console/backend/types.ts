@@ -52,6 +52,7 @@ export type WebClient = {
 }
 
 export type WebPlatformAccount = {
+  githubEmpty?: boolean
   isBanned?:boolean
   id: number
   clientId?: number
@@ -101,6 +102,7 @@ export type ClientProfilePatch = {
 }
 
 export type PlatformAccountInput = {
+  githubEmpty?: boolean
   platformId?: number | null
   platform?: string
   accountLabel?: string

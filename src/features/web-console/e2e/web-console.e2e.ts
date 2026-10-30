@@ -18,7 +18,7 @@ const MOCK_PLATFORM_FIELDS: Record<string, string[]> = {
   github: ['linkedInUrl'],
   hh_en: ['login', 'phone', 'password'],
   hh_ru: ['login', 'phone', 'password'],
-  linkedin: ['login', 'password', 'linkedInUrl', 'recoveryCodes'],
+  linkedin: ['login', 'password', 'linkedInUrl'],
   phone_en: ['phone'],
   telegram_en: ['login', 'nickname'],
   telegram_ru: ['login', 'nickname']
@@ -286,13 +286,12 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByTestId('account-email').isDisabled(), true)
     assert.equal(await page.getByTestId('account-nickname').isDisabled(), true)
     assert.equal(await page.getByTestId('account-foreign-number').isDisabled(), true)
-    assert.equal(await page.getByTestId('account-recovery-codes').isDisabled(), false)
+    assert.equal(await page.getByTestId('account-recovery-codes').count(), 0)
     assert.equal(await page.getByTestId('account-email-password-widget').locator('input').isDisabled(), true)
     await page.getByTestId('save-account-button').click()
     await page.getByTestId('account-error').getByText('Login, Password, URL', { exact: false }).waitFor()
     await page.getByTestId('account-login').fill('test.linkedin@example.com')
     await page.getByTestId('account-linkedin-url').fill('https://linkedin.com/in/test')
-    await page.getByTestId('account-recovery-codes').fill('recovery-one')
     await page.getByTestId('account-password-widget').locator('input').fill('secret-one')
     await page.getByTestId('save-account-button').click()
     await page.getByTestId('account-save-message').getByText('Account added', { exact: false }).waitFor()
@@ -314,10 +313,9 @@ async function runTests(): Promise<void> {
     assert.equal(await accountPasswordInput.getAttribute('type'), 'password')
     assert.equal(await page.getByTestId('account-platform-locked').isDisabled(), true)
     assert.equal(await page.getByTestId('account-label').isDisabled(), true)
-    assert.equal(await page.getByTestId('account-recovery-codes').inputValue(), 'recovery-one')
+    assert.equal(await page.getByTestId('account-recovery-codes').count(), 0)
     await page.getByTestId('account-login').fill('edited.linkedin@example.com')
     await page.getByTestId('account-linkedin-url').fill('https://linkedin.com/in/edited')
-    await page.getByTestId('account-recovery-codes').fill('recovery-two')
     await page.getByTestId('save-account-button').click()
     await page.getByTestId('account-save-message').getByText('Account updated', { exact: false }).waitFor()
     await assertText(page, 'edited.linkedin@example.com')
@@ -439,6 +437,12 @@ async function runTests(): Promise<void> {
         }
       }
       await page.getByTestId('account-platform').selectOption({ label: platformLabel })
+      const githubEmpty = page.getByTestId('account-github-empty')
+      assert.equal(await githubEmpty.count(), platformLabel === 'github' ? 1 : 0)
+      if (platformLabel === 'github') {
+        assert.equal(await githubEmpty.isChecked(), false)
+        await githubEmpty.check()
+      }
       assert.equal(await page.getByTestId('account-label').isDisabled(), true)
       assert.equal(await page.getByTestId('account-label').inputValue(), platformLabel)
 
@@ -449,7 +453,6 @@ async function runTests(): Promise<void> {
         nickname: page.getByTestId('account-nickname'),
         linkedInUrl: page.getByTestId('account-linkedin-url'),
         foreignNumber: page.getByTestId('account-foreign-number'),
-        recoveryCodes: page.getByTestId('account-recovery-codes'),
         password: page.getByTestId('account-password-widget').locator('input'),
         emailPassword: page.getByTestId('account-email-password-widget').locator('input')
       }
@@ -465,7 +468,6 @@ async function runTests(): Promise<void> {
         linkedInUrl: platformLabel === 'github'
           ? 'https://github.com/all-platforms'
           : `https://linkedin.com/in/all-${platformLabel}`,
-        recoveryCodes: `recovery-${platformLabel}`,
         password: `secret-${platformLabel}`
       }
       for (const field of activeFields) await fieldLocators[field].fill(values[field])
