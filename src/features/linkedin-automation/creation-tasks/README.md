@@ -94,7 +94,8 @@ intake/expert changes. Other platform types are unaffected.
 
 ## Proxy and completion
 
-Close Octo normally and wait for the grant's cleanup to complete before capturing. The capture adapter verifies
+Opening Octo is not required to confirm a saved proxy. If access is already active, close Octo normally and
+wait for the grant's cleanup to complete before capturing. The capture adapter verifies
 the cloud profile is closed/private, reads its actual proxy, persists its existing saved-proxy reference through
 the Octo store, then writes a task receipt after revision/read-back checks. Inline connections use the existing
 durable proxy creation/attachment workflow; pending or uncertain results cannot produce a success receipt.
@@ -103,8 +104,14 @@ No input password is copied into a task. Concurrent profile edits invalidate the
 Every new LinkedIn application requires a new connection, entered manually by Denis. Only EN is changed;
 RU and the profile set/password remain intact. The baseline UUID is recorded when the task is created.
 The server compares a hash of protocol/host/port/login/password, ignoring the Octo UUID/title and rotation URL.
-The existing proxy checker must return a valid `exit_ip` for the proposed connection before it is queued.
-Its existing `PROXY_CHECKER_BASE_URL` and `UNICORN_PROXY_CHECKER_SECRET_KEY` must be configured on the backend.
+A simple HTTPS connectivity probe must return a valid `exit_ip` for the proposed connection before it is queued.
+It uses the same local, 10-second bounded adapter as student manual proxy setup; no remote quality/geography
+checker or checker ENV is needed for Denis's new-proxy validation. A necessary old-IP probe has its own bound.
+The UI shows a spinner and «Проверяем прокси, это может занять до минуты» through checking and assignment.
+Rejected checks show an inline alert beside the submit button and retain the entered fields.
+The existing profile poll includes the current task version, so asynchronous assignment invalidation updates
+the open task without discarding result drafts or requiring it to be reopened. Older responses cannot reduce
+the locally known task version; optimistic checks still reject genuinely concurrent changes.
 The same provider gateway is allowed; identical credentials or a known identical exit IP are refused.
 If the old IP is unknown or its connection is unavailable, comparison is explicitly recorded as `skipped`.
 This is successful validation of the new connection, not proof that the old and new IP differ.

@@ -99,12 +99,11 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       if (clients.some(c => !c.id || !c.calendarEmail))
         throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
       const api = createCloudApi(env.OCTO_API_TOKEN!);
-      const proxyChecker=env.PROXY_CHECKER_BASE_URL&&env.UNICORN_PROXY_CHECKER_SECRET_KEY
-        ?createProxyChecker({baseUrl:env.PROXY_CHECKER_BASE_URL,secret:env.UNICORN_PROXY_CHECKER_SECRET_KEY}):undefined;
+      const proxyConnectivity = createProxyConnectivityCheck();
       octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig, allowLegacyChecks: false,
         token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
         onboarding: {
-          manualCheck: createProxyConnectivityCheck(),
+          manualCheck: proxyConnectivity,
           developmentHelp: createCheckerDevelopmentHelp(env),
           checker: env.PROXY_CHECKER_BASE_URL && env.UNICORN_PROXY_CHECKER_SECRET_KEY
             ? createProxyChecker({ baseUrl: env.PROXY_CHECKER_BASE_URL, secret: env.UNICORN_PROXY_CHECKER_SECRET_KEY })
@@ -150,10 +149,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         secrets: (id,account) => options.repository.getPlatformAccountSecrets(id,account),
         capture: createTaskProxyCapture({store:octoStore,api,config:octoConfig,octo:octo.service}),
         newProxy:createNewTaskProxy({store:taskProxyStore(pool,config.database),api,check:async p=>{
-          if(!proxyChecker)throw new OctoError('octo_checker_configuration_required',503);
-          const host=p.host.includes(':')&&!p.host.startsWith('[')?`[${p.host}]`:p.host;
-          const auth=p.login||p.password?`${encodeURIComponent(p.login)}:${encodeURIComponent(p.password)}@`:'';
-          const checked=await proxyChecker.check(`${p.type==='socks5'?'socks5h':p.type}://${auth}${host}:${p.port}`);
+          const checked=await proxyConnectivity(p);
           return checked.exit_ip||'';
         }}),
         nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange,notificationMention });

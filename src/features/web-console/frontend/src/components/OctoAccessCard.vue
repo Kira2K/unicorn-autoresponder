@@ -8,6 +8,7 @@ import { octoOnboardingBusy } from '../octo-onboarding.js'
 
 const props = defineProps({ clientId: { type: [Number, String], required: true }, setupEnabled: { type: Boolean, default: true },
   transport: { type: Object, default: () => octoApi }, proxyEditingEnabled: { type: Boolean, default: true },
+  proxyChecking: { type: Boolean, default: false },
   proxyExpanded: { type: Boolean, default: false },warmupUntil:{type:String,default:''},friendlyErrors:{type:Boolean,default:false} })
 const accessWarning=ref(null)
 const emit = defineEmits(['status', 'access-issued', 'proxy-changed'])
@@ -75,7 +76,6 @@ function stop() {
   controller = undefined
   requesting.value = {}
   proxySaving.value = {}
-  proxyMessages.value = {}
   copied.value = ''
   // Retain public IDs to resume polling, discard credentials immediately.
   grants.value = Object.fromEntries(Object.entries(grants.value).map(([id, grant]) => {
@@ -205,7 +205,7 @@ async function saveProxy(profile) {
         ? 'Проверь тип, адрес, порт и URL смены IP.'
         : error.message === 'linkedin_task_proxy_reused' ? 'Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.'
         : error.message === 'linkedin_task_proxy_ip_reused' ? 'Внешний IP совпадает с прежним. Укажи другое подключение.'
-        : error.message === 'linkedin_task_proxy_check_failed' ? 'Не удалось проверить новое подключение. Проверь реквизиты прокси.'
+        : ['linkedin_task_proxy_check_failed','octo_proxy_check_failed'].includes(error.message) ? 'Прокси не прошёл проверку подключения. Проверь адрес, порт, логин и пароль и попробуй снова.'
         : error.message === 'linkedin_task_close_profile_first' ? 'Закрой профиль и дождись завершения доступа перед заменой прокси.'
         : error.message === 'commit_uncertain' ? 'Результат сохранения неизвестен. Обновите страницу для проверки, не отправляйте повторно вслепую.'
         : 'Не удалось сохранить прокси. Попробуйте ещё раз.'
@@ -260,6 +260,7 @@ function visibilityChanged() {
 
 watch(() => props.clientId, () => {
   stop()
+  proxyMessages.value = {}
   proxyDrafts.value = {}
   proxyDirty.value = {}
   visible.value = false
@@ -329,20 +330,21 @@ onUnmounted(() => {
         <p v-if="profile.proxy?.configured && profile.proxy?.canViewCredentials===false">Прокси настроен командой.</p>
         <p v-else-if="profile.proxy?.configured">Текущий прокси: {{ profile.proxy.type }} · {{ profile.proxy.host }}:{{ profile.proxy.port }}</p>
         <p v-else>Прокси пока не настроен.</p>
-        <p v-if="proxyMessages[profile.id]" role="status">{{ proxyMessages[profile.id] }}</p>
-        <p v-else-if="profile.proxy?.phase" class="octo-progress" :role="profile.proxy.phase === 'blocked' ? 'alert' : 'status'"><i v-if="proxyPending(profile) && !profile.proxy.error" class="pi pi-spin pi-spinner" aria-hidden="true" /><span>{{ proxyPhaseLabels[profile.proxy.phase] || 'Проверяем состояние прокси…' }}</span></p>
+        <p v-if="profile.proxy?.phase" class="octo-progress" :role="profile.proxy.phase === 'blocked' ? 'alert' : 'status'"><i v-if="proxyPending(profile) && !profile.proxy.error" class="pi pi-spin pi-spinner" aria-hidden="true" /><span>{{ proxyPhaseLabels[profile.proxy.phase] || 'Проверяем состояние прокси…' }}</span></p>
         <p v-else-if="profile.proxy?.error" role="alert">Не удалось обновить прокси. Обратись к команде поддержки.</p>
         <p v-if="profile.proxy?.credentialsError" role="alert">Не удалось загрузить реквизиты прокси из Octo. Повторяем загрузку…</p>
       </div>
       <details v-if="proxyEditingEnabled && profile.proxy?.canViewCredentials!==false" :open="proxyExpanded" class="octo-proxy-settings">
         <summary>Настройки прокси</summary>
         <p>Введи реквизиты подключения в этой форме и дождись завершения сохранения.</p>
-        <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :data-testid="`octo-proxy-form-${profile.id}`" @input="proxyDirty[profile.id] = true" @change="proxyDirty[profile.id] = true" @submit.prevent="saveProxy(profile)">
+        <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :aria-busy="proxySaving[profile.id] || proxyPending(profile)" :data-testid="`octo-proxy-form-${profile.id}`" @input="proxyDirty[profile.id] = true" @change="proxyDirty[profile.id] = true" @submit.prevent="saveProxy(profile)">
           <fieldset :disabled="!canEditProxy(profile)">
             <legend>Настроить прокси</legend>
             <OctoProxyFields v-model="proxyDrafts[profile.id]" :prefix="`octo-proxy-${profile.id}`" />
-            <button type="submit" :data-testid="`octo-proxy-save-${profile.id}`"><i v-if="proxySaving[profile.id]" class="pi pi-spin pi-spinner" aria-hidden="true" />{{ proxySaving[profile.id] ? 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
+            <button type="submit" :data-testid="`octo-proxy-save-${profile.id}`"><i v-if="proxySaving[profile.id]" class="pi pi-spin pi-spinner" aria-hidden="true" />{{ proxySaving[profile.id] ? proxyChecking ? 'Проверяем прокси…' : 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
           </fieldset>
+          <p v-if="proxyChecking && (proxySaving[profile.id] || proxyPending(profile))" class="octo-progress" role="status" aria-live="polite"><i class="pi pi-spin pi-spinner" aria-hidden="true" /><span>Проверяем прокси, это может занять до минуты.</span></p>
+          <p v-if="proxyMessages[profile.id]" role="alert" :data-testid="`octo-proxy-error-${profile.id}`">{{ proxyMessages[profile.id] }}</p>
         </form>
       </details>
     </article>
