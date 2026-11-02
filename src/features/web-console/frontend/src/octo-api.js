@@ -86,3 +86,13 @@ export function octoGrantForDisplay(grant, now = Date.now()) {
       typeof password !== 'string' || !/^\d{5}$/.test(password)) return publicFields
   return { ...publicFields, password, ...(guest ? { guest: { email: guest.email, password: guest.password } } : {}) }
 }
+
+// Profile phase already includes the server grant phase. Do not poll old terminal grants.
+export function octoGrantPoll(profile,current) {
+  const active=['preparing','granted','awaiting_close']
+  // An acquire response can arrive before an older status request finishes.
+  if(current&&active.includes(current.phase)&&current.id!==profile.grantId)
+    return {id:current.id,clear:false}
+  if(!active.includes(profile.phase))return {id:null,clear:!!current}
+  return {id:profile.grantId||current?.id||null,clear:false}
+}

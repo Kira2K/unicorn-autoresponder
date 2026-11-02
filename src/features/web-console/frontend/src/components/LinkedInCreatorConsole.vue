@@ -186,7 +186,8 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
           <dl><template v-for="(value,key) in account" :key="key"><dt>{{ labels[key] }}</dt><dd class="blocked-account-value">{{ value }}</dd></template></dl>
         </section>
         <p><strong>Для нового LinkedIn введи новые реквизиты прокси в форме ниже и нажми «Сохранить прокси».</strong> Старое подключение повторно использовать нельзя. Дождись статуса «Прокси сохранён». В приложении Octo Browser прокси вводить или менять не нужно.</p>
-        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :transport="transport" @status="updateProfileStatus" @access-issued="captureConfirmed = false" @proxy-changed="captureConfirmed = false" />
+        <p v-if="profileState?.newProxyRequired && profileState.newProxyReady === false" role="status" data-testid="creation-new-proxy-required">Доступ к Octo появится после сохранения и проверки нового прокси для этой заявки.</p>
+        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @access-issued="captureConfirmed = false" @proxy-changed="captureConfirmed = false" />
         <p>Дождись статуса «Прокси сохранён» и нажми «Сохранить настройки прокси» ниже: кнопка проверит фактические настройки профиля и подтвердит их для заявки. Открывать профиль Octo для этого не требуется. Если доступ к профилю уже выдан, сначала закрой его и дождись завершения доступа.</p>
         <button type="button" :disabled="busy || !canCaptureProxy" @click="save('capture-proxy', {})">Сохранить настройки прокси</button>
         <p v-if="captureConfirmed">Прокси сохранён и проверен.</p>

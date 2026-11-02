@@ -27,12 +27,25 @@ export function createCreationTaskService(deps: {
   async function requireNewProxy(d:Awaited<ReturnType<typeof en>>){
     if(d.task.requiresNewProxy){if(!deps.newProxy)throw new IntakeError('linkedin_task_new_proxy_required',503);await deps.newProxy.assert(d.task,d.profile);}
   }
+  async function namedTasks(tasks:Awaited<ReturnType<CreationTaskStore['list']>>){
+    const clients=new Map<number,WebClient>();
+    const ids=[...new Set(tasks.map(task=>task.clientId))];
+    if(deps.store.clientSummaries){
+      const summaries=new Map((await deps.store.clientSummaries(ids)).map(c=>[c.id,c]));
+      return tasks.map(task=>{
+        const c=summaries.get(task.clientId);
+        if(!c)throw new IntakeError('linkedin_task_unavailable',503);
+        return{...task,fio:c.fio,stack:c.stack};
+      });
+    }
+    // The application pool has two connections. Avoid flooding it with one read per task.
+    for(let i=0;i<ids.length;i+=2)await Promise.all(ids.slice(i,i+2).map(async id=>{clients.set(id,await deps.client(id));}));
+    return tasks.map(task=>{const c=clients.get(task.clientId)!;return{...task,fio:c.fio||c.clientName,stack:c.primaryStack};});
+  }
   return {
     notificationConfig(){return{notificationMention:deps.notificationMention??DEFAULT_NOTIFICATION_MENTION};},
     async adminList() {
-      return Promise.all((await deps.store.list(true)).map(async task=>{
-        const c=await deps.client(task.clientId);return{...task,fio:c.fio||c.clientName,stack:c.primaryStack};
-      }));
+      return namedTasks(await deps.store.list(true));
     },
     async adminDetail(id:unknown) {
       const d=await deps.store.detail(taskId(id),true),c=await deps.client(d.task.clientId);
@@ -57,10 +70,7 @@ export function createCreationTaskService(deps: {
       return this.adminDetail(id);
     },
     async list() {
-      return Promise.all((await deps.store.list()).map(async task => {
-        const c = await deps.client(task.clientId);
-        return { ...task, fio: c.fio || c.clientName, stack: c.primaryStack };
-      }));
+      return namedTasks(await deps.store.list());
     },
     async detail(id: unknown) {
       const d = await detail(id), c = await deps.client(d.task.clientId);

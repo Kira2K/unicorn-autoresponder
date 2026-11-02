@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { octoApi, octoGrantForDisplay, octoProxyDraft, octoProxyPayload } from './octo-api.js'
+import { octoApi, octoGrantForDisplay, octoProxyDraft, octoProxyPayload, octoGrantPoll } from './octo-api.js'
+
+test('terminal server grants are not polled; a newly issued grant survives an older status response',()=>{
+ assert.deepEqual(octoGrantPoll({phase:'ready',grantId:'old'}),{id:null,clear:false})
+ assert.deepEqual(octoGrantPoll({phase:'ready',grantId:'old'},{id:'old',phase:'granted',password:'fixture'}),{id:null,clear:true})
+ assert.deepEqual(octoGrantPoll({phase:'ready',grantId:'old'},{id:'old',phase:'complete'}),{id:null,clear:true})
+ assert.deepEqual(octoGrantPoll({phase:'ready',grantId:'old'},{id:'new',phase:'preparing'}),{id:'new',clear:false})
+ for(const phase of ['preparing','granted','awaiting_close'])
+  assert.deepEqual(octoGrantPoll({phase,grantId:'active'}),{id:'active',clear:false})
+ assert.deepEqual(octoGrantPoll({phase:'blocked',grantId:'old'}),{id:null,clear:false})
+})
 
 test('Octo credentials are kept only during a valid granted window, preserving leading zeros', () => {
   const grant = { id: 'g1', profileId: 1, phase: 'granted', expiresAt: 2000, password: '00123', guest: { email: 'guest@example.test', password: 'guest-secret' } }

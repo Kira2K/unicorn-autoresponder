@@ -26,6 +26,16 @@ Archived account names, URLs, logins and locations are shown without passwords. 
 shows its total count. This is a read-only view: opening a task does not rewrite history or migrate data.
 Initial list loading shows a spinner and skeletons; refresh keeps the current list and selected card visible.
 Failed requests show a retry hint instead of an empty-list message. Only the newest list response is applied.
+List labels use a single read of client names and stacks, avoiding full client hydration for every task.
+
+The expert proxy form shows a SOCKS5 one-line input immediately. It accepts `host:port:login:password`
+or a `socks5://` / `socks5h://` URL and fills the existing fields locally; parsing never saves or checks a proxy.
+Passwords containing colons are preserved, and invalid input leaves the existing fields unchanged.
+Saved credentials hydrate the same fields, including the password show/hide control; background status
+polling preserves unsaved edits. «Сохранить прокси» below the Octo card submits that form and retains its
+validation, connectivity check and existing profile assignment. Initial Octo loading has a spinner and
+failed loading shows a retry message. Completed grant IDs are not polled again; when a new proxy is
+required, the card explains why access remains unavailable while the proxy form stays editable.
 
 ## Denis status notifications
 

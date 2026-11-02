@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { octoApi, octoGrantForDisplay, octoProxyDraft } from '../octo-api.js'
+import { octoApi, octoGrantForDisplay, octoProxyDraft, octoGrantPoll } from '../octo-api.js'
 import OctoManualSetup from './OctoManualSetup.vue'
 import OctoProxyFields from './OctoProxyFields.vue'
 import Dialog from 'primevue/dialog'
@@ -8,11 +8,12 @@ import { octoOnboardingBusy } from '../octo-onboarding.js'
 
 const props = defineProps({ clientId: { type: [Number, String], required: true }, setupEnabled: { type: Boolean, default: true },
   transport: { type: Object, default: () => octoApi }, proxyEditingEnabled: { type: Boolean, default: true },
-  proxyChecking: { type: Boolean, default: false },
+  proxyChecking: { type: Boolean, default: false },proxySingleLine:{type:Boolean,default:false},proxySaveBelowCard:{type:Boolean,default:false},
   proxyExpanded: { type: Boolean, default: false },warmupUntil:{type:String,default:''},friendlyErrors:{type:Boolean,default:false} })
 const accessWarning=ref(null)
 const emit = defineEmits(['status', 'access-issued', 'proxy-changed'])
 const visible = ref(false)
+const initialLoading = ref(false), initialLoadError = ref('')
 const status = ref({ profiles: [], requiredLocales: [] })
 const grants = ref({})
 const requesting = ref({})
@@ -68,6 +69,7 @@ function active(version) {
 }
 
 function stop() {
+  initialLoading.value = false
   accessWarning.value=null
   generation += 1
   clearTimeout(pollTimer)
@@ -87,6 +89,7 @@ function stop() {
 function denied(error) {
   if (![401, 403].includes(error.status)) return false
   stop()
+  initialLoadError.value = ''
   proxyDrafts.value = {}
   proxyDirty.value = {}
   visible.value = false
@@ -114,6 +117,7 @@ async function refresh(version) {
     status.value = nextStatus
     emit('status', nextStatus)
     visible.value = true
+    initialLoadError.value = ''
     message.value = ''
     const profileIds = new Set(nextStatus.profiles.map(profile => String(profile.id)))
     proxyDrafts.value = Object.fromEntries(nextStatus.profiles.map(profile => [profile.id,
@@ -131,7 +135,12 @@ async function refresh(version) {
         return
       }
       const current = grants.value[profile.id]
-      const grantId = (current && !['complete', 'blocked'].includes(current.phase) ? current.id : profile.grantId) || current?.id
+      const poll=octoGrantPoll(profile,current)
+      if(poll.clear){
+        const {password,guest,...publicFields}=current
+        grants.value[profile.id]={...publicFields,phase:profile.phase==='blocked'?'blocked':'complete',error:profile.error}
+      }
+      const grantId = poll.id
       if (!grantId) return
       try {
         const grant = await props.transport.grant(grantId, { signal: controller.signal })
@@ -148,22 +157,30 @@ async function refresh(version) {
             const { password, guest, ...publicFields } = previous
             grants.value[profile.id] = publicFields
           }
-          message.value = 'Не удалось обновить доступ. Повторяем проверку…'
+          message.value = error.message==='linkedin_task_new_proxy_required'
+            ? 'Для этой заявки сначала сохрани и проверь новый прокси.'
+            : 'Не удалось обновить доступ. Повторяем проверку…'
         }
       }
     }))
   } catch (error) {
-    if (active(version) && error.name !== 'AbortError' && !denied(error) && visible.value) {
-      message.value = 'Не удалось обновить состояние. Повторяем проверку…'
+    if (active(version) && error.name !== 'AbortError' && !denied(error)) {
+      if (visible.value) message.value = 'Не удалось обновить состояние. Повторяем проверку…'
+      else initialLoadError.value = 'Не удалось загрузить карточку Octo. Повторяем загрузку…'
     }
   } finally {
-    if (active(version)) pollTimer = setTimeout(() => refresh(version), 2000)
+    if (active(version)) {
+      initialLoading.value = false
+      pollTimer = setTimeout(() => refresh(version), 2000)
+    }
   }
 }
 
 function start() {
   stop()
   if (!mounted || document.hidden || !props.clientId) return
+  initialLoading.value = !visible.value
+  initialLoadError.value = ''
   controller = new AbortController()
   loadProxyCredentials = true
   const version = generation
@@ -227,7 +244,9 @@ async function requestAccess(profile,acknowledged=false) {
     if (active(version)) grants.value = { ...grants.value, [profile.id]: octoGrantForDisplay(grant) }
   } catch (error) {
     if (active(version) && error.name !== 'AbortError' && !denied(error))
-      requestErrors.value[profile.id] = 'Не удалось запросить доступ. Обратись в поддержку.'
+      requestErrors.value[profile.id] = error.message==='linkedin_task_new_proxy_required'
+        ? 'Для этой заявки сначала сохрани и проверь новый прокси.'
+        : 'Не удалось запросить доступ. Обратись в поддержку.'
   } finally {
     if (active(version)) requesting.value[profile.id] = false
   }
@@ -284,6 +303,11 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <section v-if="!visible && (initialLoading || initialLoadError)" class="octo-card" :aria-busy="initialLoading" data-testid="octo-card-loader">
+    <h2>Профиль Octo — бета</h2>
+    <p v-if="initialLoadError" role="alert">{{ initialLoadError }}</p>
+    <p v-else class="octo-progress" role="status" aria-live="polite"><i class="pi pi-spin pi-spinner" aria-hidden="true" /><span>Загружаем карточку Octo…</span></p>
+  </section>
   <section v-if="visible" class="octo-card" aria-labelledby="octo-title">
     <h2 id="octo-title">Профиль Octo — бета</h2>
     <p>{{ setupEnabled ? 'Создай профили Octo Browser и получи временный доступ отдельно для каждого рынка.' : 'Получи временный доступ к выбранному профилю Octo Browser.' }}</p>
@@ -337,11 +361,11 @@ onUnmounted(() => {
       <details v-if="proxyEditingEnabled && profile.proxy?.canViewCredentials!==false" :open="proxyExpanded" class="octo-proxy-settings">
         <summary>Настройки прокси</summary>
         <p>Введи реквизиты подключения в этой форме и дождись завершения сохранения.</p>
-        <form v-if="proxyDrafts[profile.id]" class="octo-proxy-form" :aria-busy="proxySaving[profile.id] || proxyPending(profile)" :data-testid="`octo-proxy-form-${profile.id}`" @input="proxyDirty[profile.id] = true" @change="proxyDirty[profile.id] = true" @submit.prevent="saveProxy(profile)">
+        <form v-if="proxyDrafts[profile.id]" :id="`octo-proxy-form-${profile.id}`" class="octo-proxy-form" :aria-busy="proxySaving[profile.id] || proxyPending(profile)" :data-testid="`octo-proxy-form-${profile.id}`" @input="proxyDirty[profile.id] = true" @change="proxyDirty[profile.id] = true" @submit.prevent="saveProxy(profile)">
           <fieldset :disabled="!canEditProxy(profile)">
             <legend>Настроить прокси</legend>
-            <OctoProxyFields v-model="proxyDrafts[profile.id]" :prefix="`octo-proxy-${profile.id}`" />
-            <button type="submit" :data-testid="`octo-proxy-save-${profile.id}`"><i v-if="proxySaving[profile.id]" class="pi pi-spin pi-spinner" aria-hidden="true" />{{ proxySaving[profile.id] ? proxyChecking ? 'Проверяем прокси…' : 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
+            <OctoProxyFields v-model="proxyDrafts[profile.id]" :prefix="`octo-proxy-${profile.id}`" :single-line="proxySingleLine" />
+            <button v-if="!proxySaveBelowCard" type="submit" :data-testid="`octo-proxy-save-${profile.id}`"><i v-if="proxySaving[profile.id]" class="pi pi-spin pi-spinner" aria-hidden="true" />{{ proxySaving[profile.id] ? proxyChecking ? 'Проверяем прокси…' : 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
           </fieldset>
           <p v-if="proxyChecking && (proxySaving[profile.id] || proxyPending(profile))" class="octo-progress" role="status" aria-live="polite"><i class="pi pi-spin pi-spinner" aria-hidden="true" /><span>Проверяем прокси, это может занять до минуты.</span></p>
           <p v-if="proxyMessages[profile.id]" role="alert" :data-testid="`octo-proxy-error-${profile.id}`">{{ proxyMessages[profile.id] }}</p>
@@ -350,6 +374,11 @@ onUnmounted(() => {
     </article>
     <p class="octo-note">После окончания срока доступа уже открытый браузер можно продолжать использовать. Для завершения работы закрой его.</p>
   </section>
+  <div v-if="visible && proxySaveBelowCard && proxyEditingEnabled" class="octo-proxy-actions">
+    <template v-for="profile in status.profiles" :key="profile.id">
+      <button v-if="profile.proxy?.canViewCredentials!==false && proxyDrafts[profile.id]" type="submit" :form="`octo-proxy-form-${profile.id}`" :disabled="!canEditProxy(profile)" :data-testid="`octo-proxy-save-${profile.id}`"><i v-if="proxySaving[profile.id]" class="pi pi-spin pi-spinner" aria-hidden="true" />{{ proxySaving[profile.id] ? proxyChecking ? 'Проверяем прокси…' : 'Сохраняем прокси…' : 'Сохранить прокси' }}</button>
+    </template>
+  </div>
   <Dialog :visible="!!accessWarning" modal header="Доступ к Octo готов" :draggable="false" :style="{width:'32rem',maxWidth:'calc(100vw - 2rem)'}" @update:visible="accessWarning=null">
     <p>Твой доступ к Octo готов. Первый месяц не заходи в LinkedIn: аккаунт прогревает команда. Дальше заходи только через Octo.</p>
     <template #footer><button type="button" @click="accessWarning=null">Пока не открывать</button><button type="button" @click="requestAccess(accessWarning,true);accessWarning=null">Понятно, получить доступ</button></template>
@@ -361,7 +390,8 @@ onUnmounted(() => {
 .octo-card h2 { margin: 0 0 12px; font-size: 20px; }
 .octo-card h3 { margin: 0; font-size: 17px; }
 .octo-card p { line-height: 1.5; }
-.octo-progress{display:flex;align-items:center;gap:10px}.octo-progress>.pi{flex-shrink:0}.octo-card button>.pi{margin-right:8px}
+.octo-progress{display:flex;align-items:center;gap:10px}.octo-progress>.pi{flex-shrink:0}.octo-card button>.pi,.octo-proxy-actions button>.pi{margin-right:8px}
+.octo-proxy-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}
 .octo-create, .octo-credentials { display: grid; gap: 12px; }
 .octo-profile { margin-top: 20px; padding-top: 20px; border-top: 1px solid #dbe3ee; }
 .octo-field { display: grid; gap: 6px; font-weight: 600; }
@@ -373,8 +403,8 @@ onUnmounted(() => {
 .octo-proxy-form legend { font-weight: 600; padding: 0 6px; }
 .octo-field select { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; background: #fff; }
 @media (max-width: 600px) { .octo-proxy-form fieldset { grid-template-columns: 1fr; } }
-.octo-card button { justify-self: start; padding: 10px 14px; border: 1px solid #2563eb; border-radius: 6px; background: #2563eb; color: #fff; font: inherit; cursor: pointer; }
-.octo-card button:disabled { opacity: .55; cursor: default; }
-.octo-card button:focus-visible, .octo-field input:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.octo-card button,.octo-proxy-actions button { justify-self: start; padding: 10px 14px; border: 1px solid #2563eb; border-radius: 6px; background: #2563eb; color: #fff; font: inherit; cursor: pointer; }
+.octo-card button:disabled,.octo-proxy-actions button:disabled { opacity: .55; cursor: default; }
+.octo-card button:focus-visible,.octo-proxy-actions button:focus-visible, .octo-field input:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
 .octo-note { color: #526176; font-size: 14px; margin-bottom: 0; }
 </style>

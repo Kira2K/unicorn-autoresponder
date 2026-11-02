@@ -35,6 +35,25 @@ test('statuses use expert wording; contractor cannot choose confirmation',()=>{
   assert.throws(()=>providerStatus('сделана исполнителем'));
   assert.equal(studentLocked('сделана экспертом'),true);assert.equal(studentLocked('блок'),false);
 });
+test('task lists bound client reads to two connections and reuse repeated client summaries',async()=>{
+ const f=await fixture();const rows=Array.from({length:13},(_,i)=>({...f.task,id:i+1,clientId:901+i}));rows.push({...f.task,id:14});
+ const scopes:boolean[]=[];f.store.list=async(admin=false)=>{scopes.push(admin);return rows;};
+ let active=0,max=0;const calls:number[]=[];
+ const service=createCreationTaskService({store:f.store,profiles:f.profiles,octo:{} as ReturnType<typeof createOctoService>,capture:f.capture,
+  client:async id=>{calls.push(id);active++;max=Math.max(max,active);if(active>2)throw new PostgresReadError('postgres_read_unavailable');
+   await new Promise<void>(resolve=>setImmediate(resolve));active--;return{...mockClient(id),fio:'Test '+id};},
+  secrets:async()=>undefined,nodeMavenKey:()=>''});
+ for(const list of [await service.list(),await service.adminList()]){
+  assert.deepEqual(list.map(t=>t.id),rows.map(t=>t.id));assert.equal(list[0].fio,'Test 901');assert.equal(list[13].fio,'Test 901');
+ }
+ assert.equal(max,2);assert.equal(calls.length,26);assert.deepEqual(scopes,[false,true]);
+});
+test('SQL task lists use one bounded summary read rather than hydrating full client records',async()=>{
+ const f=await fixture();let reads=0;f.store.clientSummaries=async ids=>{reads++;assert.deepEqual(ids,[901]);return[{id:901,fio:'Тест Ученик',stack:'JAVA'}];};
+ const service=createCreationTaskService({store:f.store,profiles:f.profiles,octo:{} as ReturnType<typeof createOctoService>,capture:f.capture,
+  client:async()=>{throw Error('Full client reads must not be used for list labels');},secrets:async()=>undefined,nodeMavenKey:()=>''});
+ assert.equal((await service.list())[0].fio,'Тест Ученик');assert.equal((await service.adminList())[0].stack,'JAVA');assert.equal(reads,2);
+});
 
 test('admin confirmation rechecks actual cloud closure for both new and legacy proxies; confirmed read-back makes no new write',async()=>{
  for(const requiresNewProxy of [false,true]){

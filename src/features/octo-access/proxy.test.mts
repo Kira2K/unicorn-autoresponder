@@ -73,6 +73,17 @@ test('proxy ownership and blocked phase protect other users and running/shared p
   await f.advance(); assert.deepEqual(f.counts(), { creates: 0, attaches: 0 });
   assert.equal((await f.store.get(f.id))!.proxyChange!.phase, 'blocked');
 });
+test('saving edited credentials replaces a working connection on the same profile without creating new profiles',async()=>{
+ const f=await fixture();await f.service.saveProxy(901,f.id,input);await f.advance();
+ const before=(await f.store.get(f.id))!,count=(await f.store.list()).length;
+ await f.service.saveProxy(901,f.id,{...input,host:'replacement.example.com',login:'replacement-user',password:'replacement-secret'});
+ assert.equal(f.cloud.profiles.get(before.uuid!)!.proxy!.uuid,before.proxy!.uuid);
+ await f.advance();const after=(await f.store.get(f.id))!;
+ assert.equal(after.id,before.id);assert.equal(after.uuid,before.uuid);assert.notEqual(after.proxy!.uuid,before.proxy!.uuid);
+ assert.equal(f.cloud.profiles.get(before.uuid!)!.proxy!.uuid,after.proxy!.uuid);
+ assert.equal(after.proxy!.host,'replacement.example.com');assert.equal(after.proxyChange!.phase,'complete');
+ assert.equal((await f.store.list()).length,count);assert.deepEqual(f.counts(),{creates:2,attaches:2});
+});
 
 test('status retrieves whitelisted proxy credentials only on request, after client authorization, without persisting them', async () => {
   const f = await fixture(); await f.service.saveProxy(901, f.id, input); await f.advance();
