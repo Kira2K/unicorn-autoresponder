@@ -590,3 +590,38 @@ unless the run is explicitly meant to exercise those accounts.
   `CV processing`.
 - Bot does not answer: confirm the bot has access to group messages and the bot
   worker is running.
+
+## CRM account-issue callbacks (explicit opt-in)
+
+The existing support-bot polling process also forwards **only** `ci:` callback
+updates to CRM. Existing resume callbacks, polling offset, allowed updates and
+workflow state ownership are unchanged. There must be one polling consumer;
+never configure a competing CRM webhook or another getUpdates loop.
+
+Configuration of this existing worker:
+
+```env
+CRM_ISSUE_CALLBACK_ENABLED=false
+CRM_ISSUE_CALLBACK_URL=https://CRM_HOST/integrations/telegram/account-issues/
+CRM_ISSUE_CALLBACK_SECRET=
+```
+
+Enable only after the actual owner, pinned source and deployment are verified.
+Use a dedicated 32–256-character random shared callback secret, also configured
+as CRM `CRM_ISSUE_WEBHOOK_SECRET`. This is not the Telegram bot token and not a
+manager API key. Never print the secret or original callback body to logs.
+
+The adapter forwards the original update, preserving sender/chat/data, using TLS
+and `X-Telegram-Bot-Api-Secret-Token`. Request maximum16384 bytes, response4096
+bytes, one HTTP attempt, deadline5seconds. Redirects are rejected. Only a valid
+`answerCallbackQuery` response for the original callback ID is relayed through
+the current bot transport. No extra chat message is sent by this adapter.
+CRM validates the student capability, issue episode/version and current Clients
+chat. A timeout does not trigger an automatic retry or a manager override;
+the student can press the same button again and canonical CRM replay is safe.
+
+When disabled or temporarily unavailable the callback is answered with a safe
+popup and stays outside the generic resume branch. Other callback prefixes are
+passed through unchanged. Initial delivery/one-issue resolution/replay/wrongchat
+acceptance is separate from mock tests and must be performed on owned test data
+before production issue notifications are enabled.

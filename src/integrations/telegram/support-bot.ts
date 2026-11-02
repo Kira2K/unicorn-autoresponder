@@ -12,6 +12,7 @@ const { createTelegramIntegration } = require('./integration.ts') as
 const { serializeTelegramError } = require('./sanitize.ts') as
   typeof import('./sanitize.ts')
 const { kiraRejectPromptMessage } = require('./resume-kira-message-templates.ts')
+const { createCrmIssueCallbackForwarder } = require('./crm-issue-callback.ts')
 
 type TelegramIntegration = import('./integration.ts').TelegramIntegration
 type SendOneInput = import('./types.ts').SendOneInput
@@ -968,10 +969,12 @@ async function runSupportBot(options: {
   stopSignal?: AbortSignal
   idleDelayMs?: number
   pollErrorDelayMs?: number
+  crmIssueForwarder?: (update: any, botApi: any) => Promise<{ handled: boolean }>
   telegramIntegration?: TelegramIntegration
 } = {}) {
   const botApi = options.botApi ?? createTelegramBotApi()
   const apiClient = options.apiClient ?? createSupportBotApiClient()
+  const crmIssueForwarder = options.crmIssueForwarder ?? createCrmIssueCallbackForwarder()
   const telegramIntegration = options.telegramIntegration ?? (
     options.botApi ? createInjectedBotSendIntegration(botApi) : createTelegramIntegration()
   )
@@ -1005,6 +1008,8 @@ async function runSupportBot(options: {
           if (response) await sendBotResponse(telegramIntegration, String(chatMemberUpdate.chat.id), response)
           continue
         }
+
+        if (callbackQuery?.id && (await crmIssueForwarder(update, botApi)).handled) continue
 
         if (callbackQuery?.id) {
           const response = await handleSupportBotCallback(callbackQuery, apiClient)
