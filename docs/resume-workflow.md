@@ -74,9 +74,9 @@ Commands:
   separate from the resume workflow source-data field.
 - Platform accounts required before leaving `collection student's data`:
   GitHub platform `github` and `telegram_ru` for every market. Non-RU clients
-  also require a LinkedIn platform account and `telegram_en`. RU-only clients
-  do not need LinkedIn or Telegram EN accounts or placeholder values.
-  GitHub/LinkedIn validation checks account existence; URL fields are
+  also require `telegram_en`. LinkedIn is optional for every market; RU-only
+  clients do not need Telegram EN accounts or placeholder values.
+  GitHub validation checks account existence; URL fields are
   used for display when present. Other required profile fields are unchanged.
 - Yulia's initial draft card always shows the platform fields Email EN from
   `email_en.login`, Telegram EN strictly from `telegram_en.nickname`, Phone EN
@@ -297,8 +297,8 @@ student Telegram account and lets the support bot reply in the common chat.
 
 Before leaving `collection student's data`, the workflow validates education,
 real age, English level, real/desired location, GitHub, Telegram RU, root Google
-folder, and student source folder. LinkedIn and Telegram EN are additionally
-required for non-RU clients. If a profile field
+folder, and student source folder. Telegram EN is additionally required for
+non-RU clients. LinkedIn is optional. If a profile field
 is missing, the bot asks the user to add it in the Console and appends the
 clickable `Ссылка на ЛК` link to `https://very-evil-unicorn.onrender.com/` after
 the missing-field list. The Telegram bot only accepts the student source-folder
@@ -516,7 +516,7 @@ default where `@veu_support` owns both provider lanes.
 5. Send `/resume` in chat `-5216637594`.
 6. If the bot asks for required profile data, fill education rows, real age,
    English level, real/desired location, GitHub, and Telegram RU in the Console
-   and retry. Non-RU clients also need LinkedIn and Telegram EN.
+   and retry. Non-RU clients also need Telegram EN. LinkedIn is optional.
 7. Use the Kira account for Kira-owned statuses. Add `kiras_comments` before
    advancing the comments step. On approval steps, use `Согласовать` or
    `Вернуть с комментарием`.

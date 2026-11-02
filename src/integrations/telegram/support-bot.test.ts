@@ -1998,7 +1998,7 @@ async function runTests() {
     }))
     assert.deepEqual(
       requiredClientDataIssues(missingRequiredClientDataRepository.workflowRecord),
-      ['Education', 'English level', 'Real age', 'Real location', 'Desired location', 'Github', 'LinkedIn', 'Telegram RU', 'Telegram EN']
+      ['Education', 'English level', 'Real age', 'Real location', 'Desired location', 'Github', 'Telegram RU', 'Telegram EN']
     )
     const missingRequiredStatusResult = await getResumeStatus(
       '-5216637594',
@@ -2012,7 +2012,7 @@ async function runTests() {
     assert.match(missingRequiredStatusResult.message, /реальная локация/)
     assert.match(missingRequiredStatusResult.message, /желаемая локация/)
     assert.match(missingRequiredStatusResult.message, /аккаунт GitHub/)
-    assert.match(missingRequiredStatusResult.message, /аккаунт LinkedIn/)
+    assert.doesNotMatch(missingRequiredStatusResult.message, /аккаунт LinkedIn/)
     assert.match(missingRequiredStatusResult.message, /Telegram RU/)
     assert.match(missingRequiredStatusResult.message, /Telegram EN/)
     assert.match(
@@ -2038,6 +2038,26 @@ async function runTests() {
     })
     assert.equal(requiredClientDataIssues(emptyUrlsExistingAccountsWorkflow).includes('Github'), false)
     assert.equal(requiredClientDataIssues(emptyUrlsExistingAccountsWorkflow).includes('LinkedIn'), false)
+
+    for (const clientMarket of ['EN', 'both']) {
+      const noLinkedInRepository = makeWorkflowRepository(makeWorkflow({
+        clientMarket,
+        clientGoogleFolder: 'https://drive.google.com/drive/folders/noco-root',
+        clientLinkedInUrl: '',
+        clientLinkedInAccountExists: false
+      }))
+      const status = await getResumeStatus('-5216637594', noLinkedInRepository, { actor: studentActor })
+      assert.match(status.message, /отправь \/resume </)
+      assert.doesNotMatch(status.message, /аккаунт LinkedIn/)
+      const sourceUrl = 'https://drive.google.com/drive/folders/student-source'
+      const result = await resumeWorkflow('-5216637594', noLinkedInRepository, {
+        actor: studentActor,
+        studentDataFolderUrl: sourceUrl
+      })
+      assert.equal(noLinkedInRepository.workflowRecord.studentDataFolderUrl, sourceUrl)
+      assert.equal(result.workflow.status, "collection Kira's comments")
+      assert.deepEqual(result.transitions, ["collection student's data -> collection Kira's comments"])
+    }
 
     const missingSourceRepository = makeWorkflowRepository()
     const missingSourceStatusResult = await getResumeStatus('-5216637594', missingSourceRepository, { actor: studentActor })

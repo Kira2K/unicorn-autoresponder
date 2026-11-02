@@ -938,7 +938,6 @@ function requiredClientDataIssues(record: ResumeWorkflowRecord): string[] {
   if (!normalizeText(record.realLocation)) issues.push('Real location')
   if (!normalizeText(record.desiredLocation)) issues.push('Desired location')
   if (!accountExists(record.clientGithubAccountExists)) issues.push('Github')
-  if (!isRuOnlyWorkflow(record) && !accountExists(record.clientLinkedInAccountExists)) issues.push('LinkedIn')
   if (!normalizeText(record.clientTelegramRu)) issues.push('Telegram RU')
   if (!isRuOnlyWorkflow(record) && !normalizeText(record.clientTelegramEn)) issues.push('Telegram EN')
   return issues
