@@ -1,5 +1,37 @@
 # LinkedIn intake in Console
 
+## Account-level CRM synchronization flag
+
+`noco.platform_accounts."isUnsyncedWithCRM"` is a server-owned boolean, independent of
+LinkLab's `crm_integration_required`. The migration gives every existing row `false`,
+including archived/banned LinkedIn rows, without changing bindings, credentials or status.
+New LinkedIn rows created by Console receive `true`: existing-account connection, first
+registration, replacement after a ban and generic platform-account creation. Other platforms
+and ordinary imports retain `DEFAULT false`. An account's edits, archival, expert result and
+task confirmation preserve its flag. A new replacement account has a new flag; the old row
+keeps its value.
+
+The backend exposes `isUnsyncedWithCRM` on LinkedIn account DTOs. Student input cannot set
+or clear it. There is no new UI, endpoint, automatic CRM call or automatic reset. A trusted
+backend/CRM operation may explicitly update this column after actual synchronization.
+
+Console marks the account-creation transaction locally; an INSERT-only trigger applies
+the LinkedIn rule atomically. The marker disappears after COMMIT/ROLLBACK. It is not a
+connection/session-wide setting or an imported Noco metadata/UI field.
+
+Release order: explicitly run migration `003-crm-sync-flag.up.sql` before deploying the
+backend. Startup checks the column and trigger, and performs no automatic migration.
+The migration is idempotent and preserves flags on rerun. Existing schema prerequisites
+and migrations 001/002 remain unchanged.
+
+```powershell
+node --env-file=.env src/features/linkedin-automation/console-intake/migrate.mts --crm-sync-flag
+node --env-file=.env src/features/linkedin-automation/console-intake/migrate.mts --crm-sync-flag --apply
+```
+
+The first command rolls back its dry-run. Both live commands require the operator's
+separate authorization. The PR prepares the migration; it does not apply it to production.
+
 Students with Dolphin profiles keep access to their previous Dolphin profiles during
 a replacement LinkedIn registration. Every student with a registered LinkedIn has
 one “Меня забанили” button in the single LinkedIn section, including Dolphin, Octo

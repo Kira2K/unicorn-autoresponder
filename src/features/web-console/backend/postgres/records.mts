@@ -3,7 +3,7 @@ import { PostgresReadError } from '../../../../integrations/postgres/contracts.m
 import type { CopyRecord } from '../../../../integrations/postgres/contracts.mts';
 import { readPages } from '../../../../platform/db/postgres/pages.mts';
 import { nocoRecordOrder } from '../../../../platform/db/postgres/record-order.mts';
-import type { ConsoleRow, ConsoleSql } from './contracts.mts';
+import type { ConsoleRow, ConsoleSql, ConsoleWrites } from './contracts.mts';
 import { readable, relations, tableIds } from './tables.mts';
 import { filterRows, consoleClauses } from './query.mts';
 const { selectTelegramGroupChatId } = createRequire(import.meta.url)('../../../../../shared/telegram-group-chat.ts') as {
@@ -15,7 +15,7 @@ export function consoleRow(record: CopyRecord): ConsoleRow {
     throw new PostgresReadError('sql_console_id_mismatch');
   return { ...record.data, Id: id };
 }
-export function consoleRecords(db: ConsoleSql) {
+export function consoleRecords(db: ConsoleSql,readLinkedInCrmFlags?:ConsoleWrites['readLinkedInCrmFlags']) {
   const tables = db.listTables();
   function table(id: string) {
     const found = tables.find(t => t.id === id);
@@ -47,6 +47,10 @@ export function consoleRecords(db: ConsoleSql) {
       }
       const filtered = filterRows(raw.map(consoleRow).filter(row=>id!==tableIds.accounts||row.__nc_deleted!==true), query?.where);
       const rows = query?.sort === 'Id' ? filtered.sort((a, b) => a.Id - b.Id) : nocoRecordOrder(filtered);
+      if(id===tableIds.accounts&&readLinkedInCrmFlags&&rows.length&&(!selected||selected.has('isUnsyncedWithCRM'))){
+        const flags=new Map((await readLinkedInCrmFlags(rows.map(row=>row.Id))).map(row=>[row.id,row.isUnsyncedWithCRM]));
+        for(const row of rows)if(flags.has(row.Id))row.isUnsyncedWithCRM=flags.get(row.Id);
+      }
       for (const [title, targetId] of Object.entries(relations[id] ?? {})) {
         if (selected && !selected.has(title)) continue;
         const fields = definition.columns.filter(c => c.title === title), field = fields[0], o = field?.colOptions;

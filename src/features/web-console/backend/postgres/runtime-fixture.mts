@@ -17,6 +17,7 @@ export function runtimeFixture() {
       if (text.includes('current_database()')) return { rows: [{ database: 'unicorn_noco_copy_restore', marker: COPY_MARKER }] };
       if (text.includes('copy_meta.inventory')) return { rows: definitions.map(definition => ({ definition })) };
       if (text.includes('has_sequence_privilege')) return { rows: [{ ready: state.ready }] };
+      if (text.includes("tgname='linkedin_console_crm_unsynced'")) return { rows: [{ ready:true }] };
       return { rows: [] };
     } };
   } };

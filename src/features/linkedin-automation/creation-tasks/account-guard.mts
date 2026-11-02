@@ -1,5 +1,6 @@
 import type { SqlSession } from '../../../integrations/postgres/contracts.mts';
 import { assertStudentEditable } from './student-task.mts';
+import { markConsoleAccountCreation } from '../console-intake/crm-sync.mts';
 
 /** Invoked inside generic console account mutations, not expert result transactions. */
 export async function guardAccount(s: SqlSession, key?: readonly string[], input?: Readonly<Record<string, unknown>>) {
@@ -9,4 +10,5 @@ export async function guardAccount(s: SqlSession, key?: readonly string[], input
   if (!['linkedin','email_outlook'].includes(String(platform))) return;
   await s.query('SELECT id FROM noco.clients WHERE id=$1 FOR UPDATE', [row.clients_id]);
   await assertStudentEditable(s, Number(row.clients_id));
+  if(!key&&platform==='linkedin')await markConsoleAccountCreation(s);
 }

@@ -768,6 +768,7 @@ function toPlatformAccount(record: NocoRecord, fullAccess: boolean, telegramIds:
   return {
     id: Number(record.Id),
     ...(record.is_banned===true?{isBanned:true}:{}),
+    ...(platform==='linkedin'?{isUnsyncedWithCRM:record.isUnsyncedWithCRM===true}:{}),
     clientId: accountClientId(record) || undefined,
     platform,
     platformId: accountPlatformId(record) || undefined,

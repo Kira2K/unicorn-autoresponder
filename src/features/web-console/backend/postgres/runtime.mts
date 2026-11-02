@@ -9,6 +9,7 @@ import { openLinkLabIntake } from '../../../linkedin-automation/linklab/intake-r
 import { tableIds } from './tables.mts';
 import { studentProfileStore } from './student-profile-store.mts';
 import { withStudentProfile } from './student-profile-repository.mts';
+import { linkedInCrmSyncStore } from '../../../linkedin-automation/console-intake/crm-sync.mts';
 import { createSecuredGroupReader } from './secured-group.mts';
 import { readOctoConfig } from '../../../octo-access/config.mts';
 import { createOctoPostgresStore } from '../../../octo-access/postgres-store.mts';
@@ -70,9 +71,10 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const db = await createPostgresClient(pool, config.database, { writable: true,
       beforeWrite: async (s,table,key,data) => { if(table===tableIds.accounts) await guardAccount(s,key,data); } });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
+    const crmSync=linkedInCrmSyncStore(pool,config.database);await crmSync.checkSchema();
     const create = (tx: PostgresTransaction, table: string, data: Readonly<Record<string, unknown>>) => tx.createRecord(table, data);
     const linklab = env.LINKLAB_ENABLED === '1' ? await openLinkLabIntake(pool, config.database, tableIds.cv) : undefined;
-    const options = sqlAppOptions(db, { clientIds: new Set(), allClients: true, create, linklab },
+    const options = sqlAppOptions(db, { clientIds: new Set(), allClients: true, create, linklab,readLinkedInCrmFlags:crmSync.readFlags },
       { accountIds: new Set(), allAccounts: true, create });
     const store = studentProfileStore(pool, config.database);
     await store.checkSchema();

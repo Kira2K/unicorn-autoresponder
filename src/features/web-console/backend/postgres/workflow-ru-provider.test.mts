@@ -51,18 +51,35 @@ for (const mode of ['legacy', 'sql'] as const) {
     } finally { restore(); }
   });
 
-  for (const market of ['En', 'both']) test(`${mode}/${market}: intake still requires LinkedIn and Telegram EN`, async () => {
+  for (const market of ['En', 'both']) test(`${mode}/${market}: intake still requires Telegram EN without LinkedIn`, async () => {
     const restore = workflowEnv([7]), f = workflowFixture(market), repo = f[mode];
     try {
       f.rows.get(t.accounts)!.delete('21');
       f.rows.get(t.accounts)!.delete('23');
       const initial = await repo.getResumeWorkflowByTelegramChatId('-7007', { ensure: true });
-      await repo.patchResumeWorkflow(initial!.id, { studentDataFolderUrl: 'https://example.invalid/source' });
-      assert.deepEqual(bot.requiredClientDataIssues(await repo.getResumeWorkflowById(initial!.id)), ['LinkedIn', 'Telegram EN']);
-      const result = await bot.resumeWorkflowById(initial!.id, repo, { actor: student });
+      assert.deepEqual(bot.requiredClientDataIssues(await repo.getResumeWorkflowById(initial!.id)), ['Telegram EN']);
+      const result = await bot.resumeWorkflowById(initial!.id, repo, {
+        actor: student, studentDataFolderUrl: 'https://example.invalid/source' });
       assert.equal(result.workflow.status, "collection student's data");
+      assert.equal((await repo.getResumeWorkflowById(initial!.id))!.studentDataFolderUrl, '');
       assert.deepEqual(result.transitions, []);
       assert.deepEqual(result.notifications, []);
+    } finally { restore(); }
+  });
+
+  for (const market of ['En', 'both']) test(`${mode}/${market}: student submits source folder without LinkedIn`, async () => {
+    const restore = workflowEnv([7]), f = workflowFixture(market), repo = f[mode];
+    try {
+      f.rows.get(t.accounts)!.delete('21');
+      const initial = await repo.getResumeWorkflowByTelegramChatId('-7007', { ensure: true });
+      assert.equal(initial!.clientLinkedInAccountExists, false);
+      assert.equal(initial!.clientLinkedInUrl ?? '', '');
+      assert.deepEqual(bot.requiredClientDataIssues(initial), []);
+      const sourceUrl = 'https://example.invalid/source';
+      const result = await bot.resumeWorkflowById(initial!.id, repo, { actor: student, studentDataFolderUrl: sourceUrl });
+      assert.equal((await repo.getResumeWorkflowById(initial!.id))!.studentDataFolderUrl, sourceUrl);
+      assert.equal(result.workflow.status, "collection Kira's comments");
+      assert.deepEqual(result.transitions, ["collection student's data -> collection Kira's comments"]);
     } finally { restore(); }
   });
 

@@ -3,6 +3,20 @@ import assert from 'node:assert/strict';
 import { COPY_MARKER } from '../../../integrations/postgres/contracts.mts';
 import type { SqlPool } from '../../../integrations/postgres/contracts.mts';
 import { createCreationTaskStore } from './postgres-store.mts';
+test('client list summaries use one read-only query and return only names and stacks',async()=>{
+ const calls:{sql:string,values:unknown[]}[]=[];
+ const pool={end:async()=>{},connect:async()=>({release(){},async query(sql:string,values:unknown[]=[]){
+  calls.push({sql,values});
+  return{rows:sql.includes('current_database()')?[{database:'unicorn_noco_copy_restore',marker:COPY_MARKER}]:
+   sql.includes('FROM noco.clients c')?[{id:'901',fio:'Тест Ученик',stack:'JAVA',password:'must-not-leak'},{id:'902',fio:'Второй Ученик',stack:null}]:[]};
+ }})}as SqlPool;
+ const store=createCreationTaskStore(pool,'unicorn_noco_copy_restore');
+ assert.deepEqual(await store.clientSummaries([]),[]);assert.equal(calls.length,0);
+ assert.deepEqual(await store.clientSummaries([901,902]),[{id:901,fio:'Тест Ученик',stack:'JAVA'},{id:902,fio:'Второй Ученик',stack:undefined}]);
+ const summaries=calls.filter(c=>c.sql.includes('FROM noco.clients c'));
+ assert.equal(summaries.length,1);assert.deepEqual(summaries[0].values,[[901,902]]);
+ assert.ok(!calls.some(c=>/^\s*(UPDATE|INSERT|DELETE)\b/i.test(c.sql)));
+});
 function fixture() {
   const initial={task:{id:1,client_id:901,linkedin_account_id:11,outlook_account_id:12,source:'student_intake',status:'не начата',version:1,
     created_at:new Date(),updated_at:new Date(),proxy_profile_id:2 as number|null,proxy_uuid:'proxy' as string|null,proxy_saved_at:new Date() as Date|null},
