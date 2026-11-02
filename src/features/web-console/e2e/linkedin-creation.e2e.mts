@@ -13,16 +13,19 @@ const intake={firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlook
   blockedAccounts:[{fullName:'Blocked Test',country:'France'},{company:'Old Company'}],url:'',login:'',hasPassword:false};
 let acquired=0,grants=0,proxySaved=0;
 let missingSecondProfile=true;
+let oldGrantRequests=0;
+let savedProxy={type:'socks5',host:'saved-proxy.example.test',port:1080,login:'saved-fixture-login',password:'saved-fixture-password',changeIpUrl:'https://example.test/saved-rotate'};
 const service={
   async list(){return task.status==='выполнение подтверждено'?[]:[{...completedTask},{...task},{...secondTask}];},
   async detail(id:unknown){if(task.status==='выполнение подтверждено')throw Object.assign(Error(),{code:'linkedin_task_not_found'});
     const selected=Number(id)===3?completedTask:Number(id)===2?secondTask:task;
     return {task:{...selected},intake:{...intake},client:{id:selected.clientId,fio:selected.fio,stack:selected.stack}};},
   key(){return{key:'mock-key-copy-only'};},async secrets(){return{password:'mock-mail-secret'};},
-  async profileStatus(id:unknown){return{profiles:Number(id)===2&&missingSecondProfile?[]:[{id:2,locale:'en',title:'EN Test',phase:'ready',canEditProxy:true,proxy:{configured:true,phase:proxySaved?'complete':undefined}}],requiredLocales:['en'],onboarding:{phase:'idle'}};},
-  async saveProxy(id:unknown,profileId:unknown,input:any){assert.equal(Number(id),1);assert.equal(Number(profileId),2);assert.equal(input.host,'demo-proxy.example.test');assert.equal(input.type,'socks5');proxySaved++;return{queued:true};},
+  async profileStatus(id:unknown,credentials=false){return{newProxyRequired:Number(id)===2,newProxyReady:Number(id)!==2,profiles:Number(id)===2&&missingSecondProfile?[]:[{id:2,locale:'en',title:'EN Test',phase:'ready',canEditProxy:true,...(Number(id)===2?{grantId:'completed-old-grant',canAcquire:false}:{}),proxy:{configured:true,canViewCredentials:true,type:savedProxy.type,host:savedProxy.host,port:savedProxy.port,...(credentials?{...savedProxy,credentialsLoaded:true}:{}),phase:proxySaved?'complete':undefined}}],requiredLocales:['en'],onboarding:{phase:'idle'}};},
+  async saveProxy(id:unknown,profileId:unknown,input:any){assert.equal(Number(id),1);assert.equal(Number(profileId),2);
+    assert.deepEqual(input,{host:'demo-proxy.example.test',type:'socks5',port:1080,login:'fixture',password:'mock-proxy-secret',changeIpUrl:'https://example.test/rotate'});savedProxy={...input};proxySaved++;return{queued:true};},
   async acquire(_id:unknown,profileId:unknown){assert.equal(profileId,2);acquired++;return{id:'grant-1',phase:'preparing'};},
-  async grant(){grants++;return{id:'grant-1',phase:'complete'};},
+  async grant(_task:unknown,id:string){if(id==='completed-old-grant'){oldGrantRequests++;throw Object.assign(Error(),{code:'linkedin_task_new_proxy_required',status:409});}grants++;return{id:'grant-1',phase:'complete'};},
   async capture(){task.version++;task.proxySavedAt=new Date().toISOString();return{...task};},
   async result(_id:unknown,body:any){intake.url=body.url;intake.login=body.login;intake.hasPassword=!!body.password;task.version++;return{...task};},
   async status(_id:unknown,body:any){assert.ok(task.proxySavedAt&&intake.url&&intake.hasPassword);task.status=body.status;task.version++;return{...task};}
@@ -81,13 +84,50 @@ try{
   const rowWidth=await page.locator('.key-row').evaluate(el=>el.getBoundingClientRect().width);
   assert.ok(Math.abs(copyWidth-rowWidth)<1,'NodeMaven copy spans the console width');
   await mkdir('tmp/linkedin-creation',{recursive:true});await page.screenshot({path:'tmp/linkedin-creation/card-loader-mock.png',fullPage:true});
+  await page.route('**/api/linkedin-creator/tasks/2/octo/status*',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'octo_unavailable'})}),{times:1});
   await page.getByTestId('creation-task-2').click();await page.getByRole('heading',{name:'Second Student',exact:true}).waitFor();
+  await page.getByText('Не удалось загрузить карточку Octo. Повторяем загрузку…',{exact:true}).waitFor();
   await page.getByText('Профиль Octo пока не создан. После подготовки он появится здесь.',{exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).isDisabled(),true);
   releaseDetail();
+  missingSecondProfile=false;
+  await page.locator('.octo-profile').waitFor();
+  await page.getByTestId('creation-new-proxy-required').waitFor();
+  await page.waitForResponse(r=>new URL(r.url()).pathname==='/api/linkedin-creator/tasks/2/octo/status');
+  assert.equal(oldGrantRequests,0,'a completed grant is not polled or turned into a repeated 409');
+  assert.equal(await page.getByRole('button',{name:'Получить доступ',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByRole('button',{name:'Сохранить прокси',exact:true}).isEnabled(),true,'proxy editing remains available');
+  assert.equal(await page.getByText('Не удалось обновить доступ. Повторяем проверку…',{exact:true}).count(),0);
+  releaseDetail();
   assert.equal(await page.getByTestId('creation-task-2').getAttribute('aria-pressed'),'true');
   assert.equal(await page.getByTestId('creation-task-1').getAttribute('aria-pressed'),'false');
+  let releaseOcto!:()=>void;
+  const heldOcto=new Promise<void>(resolve=>{releaseOcto=resolve;});
+  await page.route('**/api/linkedin-creator/tasks/1/octo/status*',async route=>{await heldOcto;await route.continue().catch(()=>{});},{times:1});
   await page.getByTestId('creation-task-1').click();await page.getByRole('heading',{name:'Test Student',exact:true}).waitFor();
+  const octoLoader=page.getByTestId('octo-card-loader');await octoLoader.waitFor();
+  assert.equal(await octoLoader.getAttribute('aria-busy'),'true');
+  releaseOcto();await octoLoader.waitFor({state:'hidden'});
+  const proxyForm=page.getByTestId('octo-proxy-form-2');
+  await proxyForm.waitFor();
+  assert.equal(await proxyForm.getByLabel('Логин прокси',{exact:true}).inputValue(),'saved-fixture-login');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'saved-fixture-password');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).getAttribute('type'),'password');
+  await proxyForm.getByRole('button',{name:'Показать пароль прокси',exact:true}).click();
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).getAttribute('type'),'text');
+  await proxyForm.getByRole('button',{name:'Скрыть пароль прокси',exact:true}).click();
+  await page.waitForResponse(r=>new URL(r.url()).pathname==='/api/linkedin-creator/tasks/1/octo/status'&&!new URL(r.url()).search);
+  assert.equal(await proxyForm.getByLabel('Логин прокси',{exact:true}).inputValue(),'saved-fixture-login');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'saved-fixture-password','metadata-only polling preserves untouched saved credentials');
+  await proxyForm.getByLabel('Логин прокси',{exact:true}).fill('unsaved-fixture-login');
+  await page.waitForResponse(r=>new URL(r.url()).pathname==='/api/linkedin-creator/tasks/1/octo/status'&&!new URL(r.url()).search);
+  assert.equal(await proxyForm.getByLabel('Логин прокси',{exact:true}).inputValue(),'unsaved-fixture-login','background status does not overwrite manual edits');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'saved-fixture-password','metadata-only polling preserves saved credentials');
+  const proxySave=page.getByTestId('octo-proxy-save-2');
+  assert.equal(await proxyForm.getByRole('button',{name:'Сохранить прокси',exact:true}).count(),0);
+  assert.equal(await proxySave.evaluate((button:HTMLButtonElement)=>button.form?.dataset.testid),'octo-proxy-form-2');
+  assert.equal(await proxySave.evaluate(button=>!button.closest('.octo-card')),true,'save sits below the Octo card');
+  assert.ok((await proxySave.boundingBox())!.y>=(await page.locator('.octo-card').boundingBox())!.y+(await page.locator('.octo-card').boundingBox())!.height);
   const done=page.getByLabel('Статус заявки').locator('option').filter({hasText:'сделана экспертом'});
   assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),true);
   await page.getByText('Blocked Test',{exact:true}).waitFor();await page.getByText('Old Company',{exact:true}).waitFor();
@@ -97,18 +137,42 @@ try{
   await page.getByRole('button',{name:'Получить доступ',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.octo-profile p')?.textContent?.includes('Доступ завершён'));
   assert.equal(acquired,1);assert.ok(grants>0);
-  const proxyForm=page.getByTestId('octo-proxy-form-2');
   assert.equal(await proxyForm.isVisible(),true,'expert proxy form is expanded without entering student account');
-  await proxyForm.getByTestId('octo-proxy-2-type').selectOption('socks5');
-  await proxyForm.getByLabel('Адрес прокси',{exact:true}).fill('demo-proxy.example.test');
-  await proxyForm.getByLabel('Порт прокси',{exact:true}).fill('1080');
-  await proxyForm.getByLabel('Логин прокси',{exact:true}).fill('fixture');
-  await proxyForm.getByLabel('Пароль прокси',{exact:true}).fill('mock-proxy-secret');
-  await proxyForm.getByRole('button',{name:'Сохранить прокси',exact:true}).click();
-  await page.getByText('Прокси отправлен на сохранение.',{exact:true}).waitFor();
+  const proxyLine=proxyForm.getByTestId('octo-proxy-2-line');
+  assert.equal(await proxyLine.isVisible(),true,'one-line input is immediately visible without opening an accordion');
+  assert.equal(await proxyLine.evaluate(el=>!!el.closest('details.proxy-single-line')),false);
+  assert.equal(await proxyLine.getAttribute('type'),'password');
+  await proxyForm.getByText('Только SOCKS5.',{exact:false}).waitFor();
+  await proxyForm.getByTestId('octo-proxy-2-type').selectOption('http');
+  await proxyForm.getByLabel('URL смены IP (необязательно)',{exact:true}).fill('https://example.test/rotate');
+  await proxyLine.fill('gate.nodemaven.com:8080:fixture-country-us-region-california-sid-test-filter-medium:mock:pass%3A@#');
+  assert.equal(await proxyForm.getByTestId('octo-proxy-2-type').inputValue(),'socks5','one-line entry explicitly sets SOCKS5');
+  assert.equal(await proxyForm.getByLabel('Адрес прокси',{exact:true}).inputValue(),'gate.nodemaven.com');
+  assert.equal(await proxyForm.getByLabel('Порт прокси',{exact:true}).inputValue(),'8080');
+  assert.equal(await proxyForm.getByLabel('Логин прокси',{exact:true}).inputValue(),'fixture-country-us-region-california-sid-test-filter-medium');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'mock:pass%3A@#');
+  await proxyLine.press('Enter');assert.equal(proxySaved,0,'parsing and Enter do not save');
+  await proxyForm.getByRole('button',{name:'Показать пароль прокси',exact:true}).click();
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).getAttribute('type'),'text');
+  await proxyForm.getByRole('button',{name:'Скрыть пароль прокси',exact:true}).click();
+  await proxyLine.fill('http://fixture:mock-private@proxy.example:8080');
+  await proxyForm.getByText('Для ввода одной строкой поддерживается только SOCKS5.',{exact:true}).waitFor();
+  assert.equal(await proxyForm.getByLabel('Адрес прокси',{exact:true}).inputValue(),'gate.nodemaven.com','invalid input leaves previous fields intact');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'mock:pass%3A@#');
+  assert.ok(!(await proxyForm.innerText()).includes('mock-private'));
+  await proxyLine.fill('socks5://fixture:mock-proxy-secret@demo-proxy.example.test:1080');
+  assert.equal(await proxyForm.getByLabel('URL смены IP (необязательно)',{exact:true}).inputValue(),'https://example.test/rotate');
+  assert.equal(await proxyForm.getByTestId('octo-proxy-2-line-error').count(),0);assert.equal(proxySaved,0);
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'one-line proxy input fits mobile');
+  await page.setViewportSize({width:1280,height:900});
+  await mkdir('tmp/linkedin-creation',{recursive:true});await page.screenshot({path:'tmp/linkedin-creation/proxy-single-line-mock.png',fullPage:true});
+  await proxySave.click();
+  await page.getByText('Прокси сохранён',{exact:true}).waitFor();
   assert.equal(proxySaved,1);
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Сохранить настройки прокси'&&!b.disabled));
-  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).getAttribute('type'),'password');
+  assert.equal(await proxyLine.inputValue(),'','the pasted credential string is cleared after leaving the input');
   await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor();
   assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),true,'proxy alone cannot complete missing result');
   await page.getByLabel('Ссылка LinkedIn',{exact:true}).fill('https://linkedin.com/in/test-created');
@@ -119,7 +183,10 @@ try{
   await page.reload();await page.getByTestId('creation-task-1').click();await page.getByTestId('creation-task-detail').waitFor();
   assert.equal(await page.getByLabel('Ссылка LinkedIn',{exact:true}).inputValue(),'https://linkedin.com/in/test-created');
   assert.equal(await page.getByLabel('Логин LinkedIn',{exact:true}).inputValue(),'created@outlook.com');
-  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),true,'completion requires a fresh successful proxy button after reopening');
+  await page.getByText('Прокси сохранён',{exact:true}).waitFor();
+  assert.equal(await proxyForm.getByLabel('Логин прокси',{exact:true}).inputValue(),'fixture');
+  assert.equal(await proxyForm.getByLabel('Пароль прокси',{exact:true}).inputValue(),'mock-proxy-secret','reopening hydrates the new stored credentials');
+  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false,'saved proxy confirmation survives reopening while the actual profile remains ready');
   await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor();
   assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false);
   let releaseOlderList!:()=>void;

@@ -36,6 +36,16 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
     if(!li.password)return fail('linkedin_task_result_required');
   }
   return {
+    async clientSummaries(ids:number[]) {
+      if(!ids.length)return [];
+      return read(async s=>(await s.query(`SELECT c.id,
+        coalesce(nullif(btrim(to_jsonb(c)->>'fio'),''),btrim(c.client_name),'') AS fio,
+        nullif(btrim(st.name),'') AS stack
+        FROM noco.clients c LEFT JOIN noco.stacks st ON st.id=c."01_stacks_id"
+        WHERE c.id=ANY($1::bigint[]) AND NOT coalesce(c.__nc_deleted,false)`,[ids])).rows.map(row=>({
+          id:Number(row.id),fio:String(row.fio??''),stack:row.stack==null?undefined:String(row.stack)
+        })));
+    },
     async checkSchema() { await read(async s => {
       await s.query('SELECT proxy_saved_at,source,version,requires_new_proxy FROM noco.linkedin_creation_task LIMIT 0');
       await s.query('SELECT baseline_uuid FROM noco.linkedin_creation_proxy LIMIT 0');
