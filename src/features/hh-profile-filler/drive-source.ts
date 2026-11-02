@@ -125,7 +125,8 @@ export function createDriveSourceLoader(options: {
   }
 
   async function loadExperienceDescriptions(folderUrl?: string): Promise<SourceDocument[]> {
-    if (!folderUrl) return []
+    // Optional repository links use a dash when no additional materials exist.
+    if (!folderUrl?.trim() || folderUrl.trim() === '-') return []
     async function listChildren(folder: DriveReference, parents: DriveReference[] = []) {
       let metadata: any
       // A search by parent may succeed with [] even when the parent itself is inaccessible.
