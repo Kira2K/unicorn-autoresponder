@@ -52,6 +52,8 @@ export type WebClient = {
 }
 
 export type WebPlatformAccount = {
+  /** LinkedIn-only, server-owned; the student cannot set this flag. */
+  isUnsyncedWithCRM?:boolean
   isBanned?:boolean
   id: number
   clientId?: number

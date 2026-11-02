@@ -31,6 +31,8 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
     (31,102,16,'https://linkedin.com/in/other','legacy','fixture');`);owned=true;
   for(const name of ['001-status','002-crm-results','003-intake','004-proxy-status','005-credentials-refresh'])await q(sql(`../linklab/sql/${name}.up.sql`));
   await q(sql('./sql/001.up.sql'));await q(sql('./sql/002-new-proxy.up.sql'));await q(sql('../linklab/sql/006-account-cycle.up.sql'));
+  await q(sql('../console-intake/sql/003-crm-sync-flag.up.sql'));
+  await q('UPDATE noco.platform_accounts SET "isUnsyncedWithCRM"=true WHERE id=21');
   const profile={id:1,clientId:101,locale:'en' as const,revision:1,operationId:'fixture',password:'fixture',createdAt:1,phase:'ready' as const,ownProxy:true,uuid:'a'.repeat(32),original:{title:'Fixture',description:'fixture',tags:[],start_pages:[]},proxy:{uuid:'old',title:'old'}};
   await q('INSERT INTO noco.octo_profiles VALUES(1,101,\'en\',1,$1::jsonb)',[JSON.stringify(profile)]);
   await q(`INSERT INTO noco.linklab(client_id,platform_account_id,status,blocked_at,profile_revision,profile_filled_count,profile_first_completed_at)
@@ -91,9 +93,13 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    const row=(await q('SELECT * FROM noco.linklab WHERE client_id=101')).rows[0];
    assert.equal(row.platform_account_id,'21');assert.equal(row.status,'Новый');assert.equal(row.profile_filled_count,0);assert.equal(row.profile_revision,'-1');
    assert.equal(row.blocked_at,null);assert.equal(row.profile_first_completed_at,null);assert.equal(row.crm_integration_required,true);
+   assert.equal((await q('SELECT "isUnsyncedWithCRM" AS flag FROM noco.platform_accounts WHERE id=21')).rows[0].flag,true,'confirmation does not declare CRM synchronization');
    assert.equal(row.crm_student_id,before.crm_student_id);assert.deepEqual(row.en_approved_at,before.en_approved_at);
    assert.equal(row.proxy_cycle_id,before.proxy_cycle_id);assert.deepEqual(row.proxy_ends_at,before.proxy_ends_at);assert.equal(row.proxy_state,'Активна');
    await q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено'");
+   await q('UPDATE noco.platform_accounts SET "isUnsyncedWithCRM"=false WHERE id=21');
+   await q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено'");
+   assert.equal((await q('SELECT "isUnsyncedWithCRM" AS flag FROM noco.platform_accounts WHERE id=21')).rows[0].flag,false,'repeated confirmation preserves an explicit backend reset');
    assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications')).rows[0].count,'1');
    assert.equal((await q('SELECT count(*) FROM noco.linkedin_account_cycles')).rows[0].count,'1');
    const snapshot=(await q('SELECT previous_state FROM noco.linkedin_account_cycles')).rows[0].previous_state;assert.equal(snapshot.filled_count,21);

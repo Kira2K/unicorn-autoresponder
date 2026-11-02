@@ -29,6 +29,13 @@ test('normal configured entrypoint fails closed on SQL errors; mock never opens 
   await mock.closeStorage(); assert.equal(calls, 1);
 });
 
+test('missing CRM flag trigger blocks Console startup without migrations or historical writes',async()=>{
+ const f=runtimeFixture(),connect=f.pool.connect;
+ f.pool.connect=async()=>{const s=await connect(),query=s.query;s.query=async(sql,values)=>sql.includes("tgname='linkedin_console_crm_unsynced'")?{rows:[{ready:false}]}:query(sql,values);return s;};
+ await assert.rejects(openSqlConsole(f.env,()=>f.pool),{code:'linkedin_crm_sync_schema_required'});
+ assert.equal(f.state.ends,1);assert.ok(!f.calls.some(sql=>/^\s*(ALTER|CREATE|UPDATE|INSERT)/.test(sql)));
+});
+
 test('Clients notifications are disabled by default and startup never activates them', async () => {
   const f = runtimeFixture(), runtime = await openSqlConsole(f.env, () => f.pool);
   await runtime.startBackground(); await runtime.close();

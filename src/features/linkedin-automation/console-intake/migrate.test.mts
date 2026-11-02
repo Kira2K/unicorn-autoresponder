@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { migrateOutlookRegistration,migrateExistingConnection } from './migrate.mts';
+import { migrateOutlookRegistration,migrateExistingConnection,migrateCrmSyncFlag } from './migrate.mts';
 import { COPY_MARKER } from '../../../integrations/postgres/contracts.mts';
 import type { SqlPool } from '../../../integrations/postgres/contracts.mts';
 
@@ -19,7 +19,7 @@ function fixture(marker = COPY_MARKER, failDdl = false) {
   return { pool, calls, released: () => released };
 }
 test('migration defaults to rollback and applies only when requested', async () => {
- for(const migrate of [migrateOutlookRegistration,migrateExistingConnection]){
+ for(const migrate of [migrateOutlookRegistration,migrateExistingConnection,migrateCrmSyncFlag]){
   for (const apply of [false, true]) {
     const f = fixture();
     const result = await migrate(f.pool, 'unicorn_noco_copy_restore', apply);

@@ -12,7 +12,7 @@ const { createWebConsoleRepository, buildResumeWorkflowPatch } = createRequire(i
 };
 // Reuse the established DTO/ownership/validation rules; no Noco transport is constructed.
 export function createSqlConsoleRepository(db: ConsoleSql, writes?: ConsoleWrites): WebConsoleRepository {
-  const raw = { ...consoleRecords(db), ...consoleWrites(db, writes) };
+  const raw = { ...consoleRecords(db,writes?.readLinkedInCrmFlags), ...consoleWrites(db, writes) };
   const port = Object.fromEntries(Object.entries(raw).map(([name, method]) => [name, async (...args: unknown[]) => {
     try { return await (method as (...a: unknown[]) => Promise<unknown>)(...args); }
     catch (error) {
