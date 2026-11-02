@@ -4,6 +4,7 @@ import type { LinkLabIntake } from '../../../linkedin-automation/linklab/intake.
 export type ConsoleSql = Awaited<ReturnType<typeof createPostgresClient>>;
 export type ConsoleRow = Record<string, unknown> & { Id: number };
 export interface ConsoleWrites {
+  readLinkedInCrmFlags?(ids:number[]):Promise<Array<{id:number;isUnsyncedWithCRM:boolean}>>;
   linklab?: LinkLabIntake;
   clientIds: ReadonlySet<number>;
   // Only application composition can opt out of the artificial-student test scope.

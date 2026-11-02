@@ -17,6 +17,7 @@ import { previousProfileAccess } from './previous-profile-access.mts';
 import { archiveBannedAccounts } from './archive-banned-accounts.mts';
 import {blockedHistoryCard,loadBlockedHistory} from '../creation-tasks/blocked-history.mts';
 import type { Locale } from '../../octo-access/contracts.mts';
+import { markConsoleAccountCreation } from './crm-sync.mts';
 
 const accountQuery = `SELECT a.id,a.platforms_id,a.url,a.login,a.password,a.linkedin_first_name,
   a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,to_jsonb(a)->'is_banned' AS is_banned,a.linkedin_octo_connection_pending,lower(p.name) AS platform
@@ -143,6 +144,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
           await assignGeneratedId(s, table, identity);
           const id = String(identity[generatedIdColumn(table).dataKey]);
           const source = JSON.stringify({ Id: Number(id), clients_id: clientId, platforms_id: Number(platforms[0].id), ...patch });
+          if(platform==='linkedin')await markConsoleAccountCreation(s);
           const saved = await s.query(`INSERT INTO noco.platform_accounts(id,_copy_id,_copy_source,clients_id,platforms_id,${keys.join(',')},created_at,updated_at)
             VALUES($1,$2,$3::jsonb,$4,$5,${keys.map((_, i) => '$' + (i + 6)).join(',')},statement_timestamp(),statement_timestamp()) RETURNING id`,
           [id, encodeKey(table, [id]), source, clientId, platforms[0].id, ...values]);

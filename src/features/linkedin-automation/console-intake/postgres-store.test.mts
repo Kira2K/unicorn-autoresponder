@@ -110,6 +110,14 @@ test('saving existing credentials before Octo is durable, owner scoped and creat
  await assert.rejects(f.store.save(7,parseIntake({...raw,stage:'complete',loggedIn:true}),['ru','en']),{code:'linkedin_intake_infrastructure_required'});
 });
 
+test('both intake creation paths mark the INSERT transaction, while existing-account edits do not',async()=>{
+ for(const data of [input(),parseIntake({scenario:'existing',stage:'credentials',url:'https://linkedin.com/in/a',login:'a@example.test',password:'fixture'})]){
+  const f=fixture();await f.store.save(7,data,['ru','en']);
+  const markers=()=>f.calls.filter(sql=>sql.includes("set_config('unicorn.console_account_creation'"));
+  assert.equal(markers().length,1);await f.store.save(7,data,['ru','en']);assert.equal(markers().length,1);
+ }
+});
+
 test('reporting a ban is owner-scoped and idempotent without creating tasks; both readers include the archived history',async()=>{
  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});

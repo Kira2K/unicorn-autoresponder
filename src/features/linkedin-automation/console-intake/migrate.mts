@@ -26,13 +26,14 @@ async function migrateColumn(pool: SqlPool, database: CopyDatabase, apply:boolea
 }
 export const migrateOutlookRegistration=(pool:SqlPool,database:CopyDatabase,apply=false)=>migrateColumn(pool,database,apply,'./sql/001-outlook-registration.up.sql','noco.platform_accounts.outlook_registered_at');
 export const migrateExistingConnection=(pool:SqlPool,database:CopyDatabase,apply=false)=>migrateColumn(pool,database,apply,'./sql/002-existing-connection.up.sql','noco.platform_accounts.linkedin_octo_connection_pending');
+export const migrateCrmSyncFlag=(pool:SqlPool,database:CopyDatabase,apply=false)=>migrateColumn(pool,database,apply,'./sql/003-crm-sync-flag.up.sql','noco.platform_accounts.isUnsyncedWithCRM');
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   let pool: SqlPool | undefined;
   try {
     const config = readPostgresAppDbConfig(process.env);
     pool = createPostgresPool(config);
-    const migrate=process.argv.includes('--existing-connection')?migrateExistingConnection:migrateOutlookRegistration;
+    const migrate=process.argv.includes('--crm-sync-flag')?migrateCrmSyncFlag:process.argv.includes('--existing-connection')?migrateExistingConnection:migrateOutlookRegistration;
     console.log(JSON.stringify(await migrate(pool, config.database, process.argv.includes('--apply'))));
   } catch {
     console.error(JSON.stringify({ error: 'outlook_registration_migration_failed' }));
