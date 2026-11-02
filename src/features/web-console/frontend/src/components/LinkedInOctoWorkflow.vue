@@ -3,15 +3,15 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import OctoAccessCard from './OctoAccessCard.vue'
 import ExistingLinkedInSetup from './ExistingLinkedInSetup.vue'
 import Dialog from 'primevue/dialog'
+import OutlookRegistrationTime from './OutlookRegistrationTime.vue'
 import { octoApi } from '../octo-api.js'
 import { intakeRequest, intakeBanRequest, intakeScenario, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
-import { isOutlookLogin, isLatinIntakeName } from '../../../../linkedin-automation/console-intake/contracts.mts'
+import { isOutlookLogin, isLatinIntakeName, outlookLoginError } from '../../../../linkedin-automation/console-intake/contracts.mts'
 const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false } })
 const registrationDate = ref(''), showSavedDialog = ref(false)
 const showBanDialog=ref(false),reportingBan=ref(false),hasBlockedAccounts=ref(false)
 const banUndoVersion=ref(null)
 const archivedHistory=computed(()=>secrets.value.archivedBlockedAccounts||[])
-const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const emit = defineEmits(['saved', 'state'])
 const loaded = ref(false), loading = ref(false), loadError = ref(''), message = ref(''), saving = ref(false)
 const scenario = ref(''), existing = ref(false), newSaved = ref(false), opened = ref(false), status = ref(null)
@@ -129,9 +129,8 @@ function beginReplacement() {
   editLocked.value = false; existing.value = false; newSaved.value = false; scenario.value = 'new'; message.value = ''
   showBanDialog.value=false
 }
-function validateRegistrationDate(event){const input=event.target;input.setCustomValidity(input.value&&new Date(input.value).getTime()>Date.now()?'Дата не может быть в будущем':'')}
 function validateOutlook() {
-  outlookError.value = isOutlookLogin(form.value.outlookLogin) ? '' : 'Укажи почту с окончанием @outlook.com, например name@outlook.com.'
+  outlookError.value = isOutlookLogin(form.value.outlookLogin) ? '' : outlookLoginError
 }
 function revealInput(input) {
   for (let parent = input?.parentElement; parent; parent = parent.parentElement)
@@ -252,17 +251,15 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
           <li>Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.</li>
           <li>Двухфакторку не ставь.</li>
         </ol></details>
-        <label>Логин от новой почты Outlook<input ref="outlookInput" v-model="form.outlookLogin" type="email" required autocomplete="off" aria-label="Логин от новой почты Outlook" placeholder="name@outlook.com" :aria-invalid="!!outlookError" :aria-describedby="outlookError ? 'outlook-error' : undefined" @input="outlookError = ''" @blur="validateOutlook">
+        <label class="intake-field"><span>Логин от новой почты Outlook</span><input ref="outlookInput" v-model="form.outlookLogin" type="email" required autocomplete="off" aria-label="Логин от новой почты Outlook" placeholder="name@outlook.com" :aria-invalid="!!outlookError" :aria-describedby="outlookError ? 'outlook-error' : 'outlook-hint'" @input="outlookError && validateOutlook()" @blur="validateOutlook">
           <span v-if="outlookError" id="outlook-error" class="validation-error" role="alert">{{ outlookError }}</span>
+          <small v-else id="outlook-hint">Только почта @outlook.com</small>
         </label>
-        <label>Пароль от новой почты Outlook<input v-model="form.outlookPassword" type="password" :required="!secrets.hasOutlookPassword" :placeholder="secrets.hasOutlookPassword ? 'Сохранён. Оставь пустым, чтобы не менять' : ''" autocomplete="new-password"></label>
-        <label>Дата и время регистрации Outlook-почты
-          <input v-model="registrationDate" type="datetime-local" required :max="registrationTimeInput(new Date())" @input="validateRegistrationDate" @blur="validateRegistrationDate" aria-label="Дата и время регистрации Outlook-почты" aria-describedby="outlook-registration-timezone">
-          <small id="outlook-registration-timezone">Часовой пояс устройства: {{ timeZone }}</small>
-        </label>
-        <label>Имя латиницей (как в иностранных документах)<input v-model="form.firstName" required></label>
-        <label>Фамилия латиницей (как в иностранных документах)<input v-model="form.lastName" required></label>
-        <label>Город и страна проживания<input v-model="form.realLocation" required></label>
+        <label class="intake-field"><span>Пароль от новой почты Outlook</span><input v-model="form.outlookPassword" type="password" :required="!secrets.hasOutlookPassword" :placeholder="secrets.hasOutlookPassword ? 'Сохранён. Оставь пустым, чтобы не менять' : ''" autocomplete="new-password"></label>
+        <OutlookRegistrationTime v-model="registrationDate" class="intake-field" />
+        <label class="intake-field"><span>Имя латиницей (как в иностранных документах)</span><input v-model="form.firstName" required></label>
+        <label class="intake-field"><span>Фамилия латиницей (как в иностранных документах)</span><input v-model="form.lastName" required></label>
+        <label class="intake-field"><span>Город и страна проживания</span><input v-model="form.realLocation" required></label>
           </div>
         </section>
         <section class="blocked-history intake-details" aria-labelledby="blocked-title" data-testid="linkedin-blocked-details">
@@ -319,4 +316,7 @@ label{display:grid;gap:6px;font-weight:600}input,textarea{min-width:0;width:100%
 .checkpoint{display:flex;align-items:center;gap:10px}.checkpoint input{width:auto}.blocked-account{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:16px;border:1px solid var(--p-content-border-color,#dbe3ee);border-radius:8px;margin:12px 0}h4{margin:0}.blocked-account>h4,.blocked-account>button{grid-column:1 / -1}
 summary{cursor:pointer;font-weight:600}button{justify-self:start;padding:10px 14px;border:1px solid var(--p-primary-color,#2563eb);border-radius:6px;font:inherit;cursor:pointer}button[aria-pressed=true],button[type=submit]{background:var(--p-primary-color,#2563eb);color:var(--p-primary-contrast-color,#fff)}button:disabled{opacity:.55;cursor:default}
 @media(max-width:640px){.intake-form,.intake-fields,.blocked-account{grid-template-columns:minmax(0,1fr)}.linkedin-card{padding:18px}}
+.intake-field{display:grid;grid-row:span 3;grid-template-rows:subgrid;gap:6px;min-width:0;align-content:start}
+.intake-field>input{height:44px;align-self:start}.intake-field>span:first-child{line-height:1.4}.intake-field>small{font-weight:400}.intake-field .validation-error{font-size:14px;font-weight:400}
+@media(max-width:640px){.intake-field{grid-row:auto;grid-template-rows:none}}
 </style>

@@ -759,7 +759,90 @@ async function testStudentEmailLookup(): Promise<void> {
   assert.equal(await lookup('client@example.com'), null, 'a removed student cannot sign in')
 }
 
+async function testGithubEmptyCheckbox(): Promise<void> {
+  const { createMockNocoClient } = require('./mock-data.ts')
+  const { TABLES } = require('../../../integrations/noco/core/schema.ts')
+  const noco = createMockNocoClient()
+  const clients = await noco.fetchRecords(TABLES.clients.id)
+  clients.push({ ...structuredClone(clients[0]), Id: 204 })
+  const repository = createWebConsoleRepository({ nocoClient: noco })
+  const url = 'https://github.com/mock-student'
+  const created = await repository.createPlatformAccount(204, {
+    platformId: 29, linkedInUrl: url, githubEmpty: true
+  })
+  const account = created.platformAccounts.find((row: any) => row.platform === 'github')
+  assert.equal(account.githubEmpty, true)
+  assert.equal(account.linkedInUrl, url)
+  const savedAccount = async () => (await repository.getClientDashboard(204))
+    .platformAccounts.find((row: any) => row.id === account.id)
+  assert.equal((await savedAccount()).githubEmpty, true)
+  await repository.updatePlatformAccount(204, account.id, { linkedInUrl: url })
+  assert.equal((await savedAccount()).githubEmpty, true, 'Omission preserves the checkbox')
+  await repository.updatePlatformAccount(204, account.id, { linkedInUrl: url, githubEmpty: false })
+  assert.equal((await savedAccount()).githubEmpty, false)
+  assert.equal((await savedAccount()).linkedInUrl, url)
+
+  const otherClient = await repository.createPlatformAccount(1, { platformId: 29, linkedInUrl: url, githubEmpty: true })
+  const otherAccount = otherClient.platformAccounts.find((row: any) => row.platform === 'github' && row.githubEmpty === true)
+  assert.ok(otherAccount, 'The checkbox is available outside the pilot client')
+  await repository.updatePlatformAccount(1, otherAccount.id, { linkedInUrl: url, githubEmpty: false })
+  const otherReload = await repository.getClientDashboard(1)
+  assert.equal(otherReload.platformAccounts.find((row: any) => row.id === otherAccount.id).githubEmpty, false)
+
+  const accounts = await noco.fetchRecords(TABLES.platformAccounts.id)
+  const stored = accounts.find((row: any) => row.Id === account.id)
+  stored.github_empty = true
+  assert.equal((await savedAccount()).githubEmpty, true, 'Database changes are read by the cabinet')
+  for (const [raw, expected] of [['yes', true], ['no', false]] as const) {
+    stored.github_empty = raw
+    assert.equal((await savedAccount()).githubEmpty, expected, 'Legacy values remain readable')
+  }
+  stored.github_empty = false
+  const before = structuredClone(accounts)
+  for (const input of [
+    { platformId: 29, linkedInUrl: '', githubEmpty: true },
+    { platformId: 29, linkedInUrl: url, githubEmpty: 'true' },
+    { platformId: 29, linkedInUrl: url, githubEmpty: null },
+    { platformId: 27, login: 'mock@example.com', password: 'mock', githubEmpty: true }
+  ]) await assert.rejects(repository.createPlatformAccount(204, input))
+  await assert.rejects(repository.updatePlatformAccount(204, account.id, { linkedInUrl: '', githubEmpty: true }))
+  await assert.rejects(repository.updatePlatformAccount(204, account.id, { linkedInUrl: url, githubEmpty: 'false' }))
+  assert.deepEqual(accounts, before, 'Rejected writes do not change stored accounts')
+}
+
+async function testOutlookAccountValidation(): Promise<void> {
+  const { createMockNocoClient } = require('./mock-data.ts')
+  const { TABLES } = require('../../../integrations/noco/core/schema.ts')
+  const noco = createMockNocoClient()
+  const clients = await noco.fetchRecords(TABLES.clients.id)
+  clients.push({ ...structuredClone(clients[0]), Id: 204 })
+  const accounts = await noco.fetchRecords(TABLES.platformAccounts.id)
+  ;(await noco.fetchRecords(TABLES.platforms.id)).push({ Id: 31, name: 'email_outlook' })
+  const repository = createWebConsoleRepository({ nocoClient: noco })
+  for (const clientId of [1, 204]) {
+    const before = structuredClone(accounts)
+    for (const login of ['user@gmail.com', 'user@hotmail.com', 'user@outlook.com.evil.com', 'user@sub.outlook.com', 'user@@outlook.com']) {
+      await assert.rejects(repository.createPlatformAccount(clientId, { platformId: 31, login, password: 'mock' }),
+        { code: 'platform_account_outlook_required' })
+    }
+    assert.deepEqual(accounts, before)
+    const created = await repository.createPlatformAccount(clientId, { platformId: 31, login: 'user@OUTLOOK.COM', password: 'mock' })
+    const account = created.platformAccounts.find((row: any) => row.platform === 'email_outlook')
+    assert.ok(account)
+    const stored = accounts.find((row: any) => row.Id === account.id)
+    stored.recovery_codes = 'existing-codes'
+    const saved = structuredClone(accounts)
+    await assert.rejects(repository.updatePlatformAccount(clientId, account.id, { login: 'user@gmail.com', password: 'mock' }),
+      { code: 'platform_account_outlook_required' })
+    assert.deepEqual(accounts, saved)
+    await repository.updatePlatformAccount(clientId, account.id, { login: 'updated@outlook.com', password: 'mock' })
+    assert.equal(stored.recovery_codes, 'existing-codes', 'Hidden recovery codes are preserved')
+  }
+}
+
 async function runTests(): Promise<void> {
+  await testGithubEmptyCheckbox()
+  await testOutlookAccountValidation()
   await testStudentEmailLookup()
   const normalizedCredential = resolveClientDolphinCredentials({ id: 28, calendarEmail: 'NPotokin@gmail.com' })
   assert.deepEqual(normalizedCredential, {

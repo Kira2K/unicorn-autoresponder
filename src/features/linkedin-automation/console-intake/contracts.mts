@@ -32,6 +32,7 @@ const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 export const completeBlockedAccount = (card:BlockedAccount) => (['fullName','country','company','position','blockedAt'] as const).every(field=>!!text(card[field]));
 export const sameBlockedAccount = (left:BlockedAccount,right:BlockedAccount) => blockedFields.every(field=>text(left[field])===text(right[field]));
 export const isOutlookLogin = (value: unknown) => /^[^@\s]+@outlook\.com$/i.test(text(value));
+export const outlookLoginError = 'Укажите почту с окончанием @outlook.com, например name@outlook.com.';
 export const isLatinIntakeName = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z][A-Za-z '\-]*$/.test(value);
 function registrationTime(value: unknown,now:number): string | undefined {
   if (value === undefined || value === '') return undefined;

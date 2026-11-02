@@ -52,6 +52,7 @@ export type WebClient = {
 }
 
 export type WebPlatformAccount = {
+  githubEmpty?: boolean
   /** LinkedIn-only, server-owned; the student cannot set this flag. */
   isUnsyncedWithCRM?:boolean
   isBanned?:boolean
@@ -103,6 +104,7 @@ export type ClientProfilePatch = {
 }
 
 export type PlatformAccountInput = {
+  githubEmpty?: boolean
   platformId?: number | null
   platform?: string
   accountLabel?: string

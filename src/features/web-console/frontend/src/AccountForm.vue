@@ -1,5 +1,6 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { isOutlookLogin, outlookLoginError } from '../../../linkedin-automation/console-intake/contracts.mts'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
@@ -21,6 +22,15 @@ const platformDisplayLabel = text => props.preview ? previewPlatformLabel(text) 
 const accountFieldEnabled = field => props.policy?.fields.includes(field) ?? false
 const accountFieldRequired = field => props.policy?.requiredFields.includes(field) ?? false
 const urlInfoVisible = computed(() => ['github', 'linkedin'].includes(props.displayLabel))
+const githubSelected = computed(() => props.displayLabel === 'github')
+const outlookSelected = computed(() => props.displayLabel === 'email_outlook')
+const loginTouched = ref(false)
+const outlookInvalid = computed(() => outlookSelected.value && loginTouched.value && !isOutlookLogin(form.value.login))
+watch(() => props.displayLabel, () => { loginTouched.value = false })
+function submit() {
+  loginTouched.value = true
+  if (!props.saving && !outlookInvalid.value) emit('save')
+}
 const loginHint = computed(() => {
   if (!props.preview) return ''
   if (['telegram_ru', 'telegram_en'].includes(props.displayLabel)) return 'Номер телефона'
@@ -34,7 +44,7 @@ function capturePhone(event) {
 }
 </script>
 <template>
-<form class="account-form" data-testid="account-form" novalidate @submit.prevent="!saving && emit('save')">
+<form class="account-form" data-testid="account-form" novalidate @submit.prevent="submit">
 <p v-if="error" class="error-text wide-field" role="alert" data-testid="account-form-error">{{ ui(error) }}</p>
 <fieldset class="account-form-fields" :disabled="saving">
   <label v-if="!editing" class="field">
@@ -57,7 +67,8 @@ function capturePhone(event) {
   <label class="field">
     <span>{{ ui('Login') }}<small v-if="loginHint" class="account-login-hint"> — {{ loginHint }}</small></span>
     <InputText v-if="phoneLogin" :model-value="formatPhone(form.login)" inputmode="tel" placeholder="+кодномер" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" data-testid="account-login" @input.capture="capturePhone" @update:model-value="form.login = $event" />
-    <InputText v-else v-model="form.login" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" data-testid="account-login" />
+    <InputText v-else v-model="form.login" :disabled="!accountFieldEnabled('login')" :required="accountFieldRequired('login')" :placeholder="outlookSelected ? 'name@outlook.com' : undefined" :invalid="outlookInvalid" :aria-invalid="outlookInvalid" :aria-describedby="outlookSelected ? 'account-outlook-hint' : undefined" data-testid="account-login" @blur="loginTouched = true" />
+    <small v-if="outlookSelected" id="account-outlook-hint" :class="{ 'error-text': outlookInvalid }" :role="outlookInvalid ? 'alert' : undefined">{{ outlookInvalid ? outlookLoginError : 'Только почта @outlook.com' }}</small>
     <small v-if="phoneLogin">Формат: +кодномер, без пробелов и скобок.</small>
   </label>
   <label class="field">
@@ -77,7 +88,7 @@ function capturePhone(event) {
     <InputText v-else v-model="form.nickname" :disabled="!accountFieldEnabled('nickname')" :required="accountFieldRequired('nickname')" data-testid="account-nickname" />
     <small v-if="preview && accountFieldEnabled('nickname')">Латинские буквы A–Z, a–z, цифры 0–9 и «_». Знак @ добавляется автоматически.</small>
   </label>
-  <label class="field wide-field">
+  <label class="field" :class="{ 'wide-field': !githubSelected }">
     <span>
       <template v-if="preview && urlInfoVisible">URL <small class="account-login-hint">— ссылка без https://</small></template>
       <FieldInfoLabel v-else-if="editing && displayLabel === 'github'" label="URL" tooltip="ссылка без https://" test-id="account-url-info" />
@@ -85,13 +96,13 @@ function capturePhone(event) {
     </span>
     <InputText v-model="form.linkedInUrl" :disabled="!accountFieldEnabled('linkedInUrl')" :required="accountFieldRequired('linkedInUrl')" data-testid="account-linkedin-url" />
   </label>
+  <label v-if="githubSelected" class="github-empty-field">
+    <input v-model="form.githubEmpty" type="checkbox" data-testid="account-github-empty" />
+    <span>GitHub пустой</span>
+  </label>
   <label class="field">
     <span>{{ ui('Foreign number') }}</span>
     <InputText :model-value="accountFieldEnabled('foreignNumber') ? phoneInputValue(form.foreignNumber) : form.foreignNumber" inputmode="tel" :disabled="!accountFieldEnabled('foreignNumber')" :required="accountFieldRequired('foreignNumber')" data-testid="account-foreign-number" @input.capture="updateContactInput($event, phoneInputValue)" @update:model-value="form.foreignNumber = $event" />
-  </label>
-  <label v-if="!studentView||displayLabel!=='linkedin'" class="field">
-    <span>{{ ui('Recovery codes') }}</span>
-    <InputText v-model="form.recoveryCodes" :disabled="!accountFieldEnabled('recoveryCodes')" :required="accountFieldRequired('recoveryCodes')" data-testid="account-recovery-codes" />
   </label>
   <label class="field">
     <span>{{ ui('Password') }}</span>
@@ -110,5 +121,7 @@ function capturePhone(event) {
 </template>
 <style scoped>
 .account-login-hint { color: #64748b; font-weight: 400; }
+.github-empty-field { display: flex; align-items: center; gap: 10px; align-self: end; min-height: 44px; cursor: pointer; }
+.github-empty-field input { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; accent-color: var(--p-primary-color, #0ea5e9); }
 .account-form-fields { display: grid; grid-template-columns: inherit; gap: 16px; grid-column: 1 / -1; margin: 0; padding: 0; border: 0; min-width: 0; }
 </style>

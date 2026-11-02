@@ -51,6 +51,7 @@ const emptyProfileForm = {
   calendarEmail: ''
 }
 const emptyAccountForm = {
+  githubEmpty: false,
   id: null,
   platformId: '',
   platform: '',
@@ -1794,6 +1795,7 @@ async function editAccount(account) {
     email: account.email || '',
     nickname: account.nickname || '',
     linkedInUrl: accountUrl(account),
+    githubEmpty: account.githubEmpty === true,
     foreignNumber: account.foreignNumber || '',
     recoveryCodes: account.recoveryCodes || '',
     password: '',
@@ -1827,11 +1829,12 @@ function accountPayload() {
   const selectedPlatform = selectPlatformLabel(accountForm.value.platformId)
   const policy = selectedAccountPolicy.value
   const fields = Object.fromEntries(
-    (policy?.fields || []).map(field => [field, isAccountPhoneField(field, selectedAccountPlatform.value)
+    (policy?.fields || []).filter(field => field !== 'recoveryCodes').map(field => [field, isAccountPhoneField(field, selectedAccountPlatform.value)
       ? phonePayload(accountForm.value[field], field === 'foreignNumber' ? undefined : selectedAccountPlatform.value)
       : accountForm.value[field]])
   )
   if (validatedProfileEnabled.value && policy?.fields.includes('nickname')) fields.nickname = usernamePayload(fields.nickname)
+  if (selectedAccountPlatform.value === 'github') fields.githubEmpty = accountForm.value.githubEmpty === true
   if (editingAccount.value) return fields
   return {
     platformId: accountForm.value.platformId ? Number(accountForm.value.platformId) : null,

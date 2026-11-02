@@ -1,3 +1,4 @@
+const { isOutlookLogin, outlookLoginError } = require('../../linkedin-automation/console-intake/contracts.mts') as typeof import('../../linkedin-automation/console-intake/contracts.mts')
 const { selectTelegramGroupChatId } = require('../../../../shared/telegram-group-chat.ts')
 const { createNocoClient } = require('../../../integrations/noco/core/client.ts') as {
   createNocoClient(options?: any): any
@@ -778,6 +779,8 @@ function toPlatformAccount(record: NocoRecord, fullAccess: boolean, telegramIds:
     email: normalizeText(record.email),
     nickname: normalizeText(record.nickname) || undefined,
     linkedInUrl: (platform === 'github' ? githubUrlFromAccount(record) : platformAccountUrl(record)) || undefined,
+    ...(platform === 'github' && (typeof record.github_empty === 'boolean' || record.github_empty === 'yes' || record.github_empty === 'no')
+      ? { githubEmpty: record.github_empty === true || record.github_empty === 'yes' } : {}),
     foreignNumber: normalizeText(record.foreign_number) || undefined,
     recoveryCodes: normalizeText(record.recovery_codes) || undefined,
     password: maskSecret(record.password, fullAccess),
@@ -953,6 +956,7 @@ function buildChangedClientPatch(current: WebClient, input: ClientProfilePatch):
 
 function buildAccountPatch(input: PlatformAccountInput, options: { includeBlankSecrets: boolean }): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
+  if (typeof input.githubEmpty === 'boolean') patch.github_empty = input.githubEmpty
   const textFields: Array<[keyof PlatformAccountInput, string]> = [
     ['platform', 'platform'],
     ['accountLabel', 'account_label'],
@@ -1020,6 +1024,7 @@ function validatePlatformAccountFields(
 
   const identityFields = options.allowPlatformIdentity ? ['platformId', 'platform'] : []
   const allowedFields = new Set<string>([...identityFields, ...policy.fields])
+  if (platform === 'github') allowedFields.add('githubEmpty')
   const disallowedFields = Object.keys(input).filter(field => !allowedFields.has(field))
   if (disallowedFields.length) {
     throw platformAccountInputError(
@@ -1029,6 +1034,12 @@ function validatePlatformAccountFields(
     )
   }
 
+  if (Object.hasOwn(input, 'githubEmpty') && typeof input.githubEmpty !== 'boolean') {
+    throw platformAccountInputError('platform_account_invalid_field', 'githubEmpty must be a boolean.', ['githubEmpty'])
+  }
+  if (platform === 'email_outlook' && !isOutlookLogin(input.login)) {
+    throw platformAccountInputError('platform_account_outlook_required', outlookLoginError, ['login'])
+  }
   const missingFields = policy.requiredFields.filter(field => !normalizeText(input[field]))
   if (missingFields.length) {
     throw platformAccountInputError(
