@@ -8,20 +8,20 @@ import { taskRow, providerStatus } from './contracts.mts';
 
 const fail = (code: string): never => { throw new PostgresReadError(code); };
 export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, linklab = false,
-  afterConfirm?: (taskId:number)=>Promise<unknown>) {
+  afterComplete?: (taskId:number)=>Promise<unknown>) {
   const read = createReadSession(pool, database);
-  async function lock(s: SqlSession, id: number, version: number, allowConfirmed = false) {
+  async function lock(s: SqlSession, id: number, version: number, allowCompleted = false) {
     const hint = (await s.query('SELECT client_id FROM noco.linkedin_creation_task WHERE id=$1', [id])).rows[0];
     if (!hint) return fail('linkedin_task_not_found');
     // Shared lock order with the student intake, so a completion cannot race its save.
     await s.query('SELECT pg_advisory_xact_lock(730644,$1::integer)', [hint.client_id]);
     await s.query('SELECT id FROM noco.clients WHERE id=$1 FOR UPDATE', [hint.client_id]);
     const row = (await s.query(`SELECT t.* FROM noco.linkedin_creation_task t WHERE t.id=$1
-      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.linkedin_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
-      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.outlook_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
-      FOR UPDATE OF t`, [id])).rows[0];
-    if (!row || row.status === 'выполнение подтверждено' && !allowConfirmed) return fail('linkedin_task_not_found');
-    if (allowConfirmed && row.status === 'выполнение подтверждено') return taskRow(row);
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.linkedin_account_id AND a.clients_id=t.client_id AND (NOT coalesce(a.__nc_deleted,false) OR $2::boolean AND t.status='сделана экспертом'))
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.outlook_account_id AND a.clients_id=t.client_id AND (NOT coalesce(a.__nc_deleted,false) OR $2::boolean AND t.status='сделана экспертом'))
+      FOR UPDATE OF t`, [id,allowCompleted])).rows[0];
+    if (!row || row.status === 'сделана экспертом' && !allowCompleted) return fail('linkedin_task_not_found');
+    if (allowCompleted && row.status === 'сделана экспертом') return taskRow(row);
     if (Number(row.version) !== version) return fail('linkedin_task_stale_version');
     return taskRow(row);
   }
@@ -49,20 +49,20 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
     async checkSchema() { await read(async s => {
       await s.query('SELECT proxy_saved_at,source,version,requires_new_proxy FROM noco.linkedin_creation_task LIMIT 0');
       await s.query('SELECT baseline_uuid FROM noco.linkedin_creation_proxy LIMIT 0');
-      await s.query('SELECT state FROM noco.linkedin_cycle_notifications LIMIT 0');
+      await s.query('SELECT recipient,chat_id,state FROM noco.linkedin_cycle_notifications LIMIT 0');
     }); },
-    async list(admin = false) { return read(async s => (await s.query(`SELECT t.* FROM noco.linkedin_creation_task t WHERE ${admin?'true':"t.status<>'выполнение подтверждено'"}
-      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.linkedin_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
-      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.outlook_account_id AND a.clients_id=t.client_id AND NOT coalesce(a.__nc_deleted,false))
-      ORDER BY t.id`)).rows.map(taskRow)); },
+    async list(admin = false) { return read(async s => (await s.query(`SELECT t.* FROM noco.linkedin_creation_task t WHERE ${admin?'true':"t.status<>'сделана экспертом'"}
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.linkedin_account_id AND a.clients_id=t.client_id AND (NOT coalesce(a.__nc_deleted,false) OR $1::boolean AND t.status='сделана экспертом'))
+      AND EXISTS(SELECT 1 FROM noco.platform_accounts a WHERE a.id=t.outlook_account_id AND a.clients_id=t.client_id AND (NOT coalesce(a.__nc_deleted,false) OR $1::boolean AND t.status='сделана экспертом'))
+      ORDER BY t.id`,[admin])).rows.map(taskRow)); },
     async detail(id: number, admin = false) {
       return read(async s => {
-        const row = (await s.query("SELECT * FROM noco.linkedin_creation_task WHERE id=$1"+(admin?'':" AND status<>'выполнение подтверждено'"), [id])).rows[0];
+        const row = (await s.query("SELECT * FROM noco.linkedin_creation_task WHERE id=$1"+(admin?'':" AND status<>'сделана экспертом'"), [id])).rows[0];
         if (!row) return fail('linkedin_task_not_found');
         const task = taskRow(row);
         const rows = (await s.query(`SELECT id,url,login,password,linkedin_first_name,linkedin_last_name,real_location,old_link_blocked,outlook_registered_at
-          FROM noco.platform_accounts WHERE clients_id=$1 AND id=ANY($2::bigint[]) AND NOT coalesce(__nc_deleted,false)`,
-        [task.clientId, [task.linkedinAccountId, task.outlookAccountId]])).rows;
+          FROM noco.platform_accounts WHERE clients_id=$1 AND id=ANY($2::bigint[]) AND (NOT coalesce(__nc_deleted,false) OR $3::boolean)`,
+        [task.clientId, [task.linkedinAccountId, task.outlookAccountId],admin&&task.status==='сделана экспертом'])).rows;
         const li = rows.find(r => Number(r.id) === task.linkedinAccountId), mail = rows.find(r => Number(r.id) === task.outlookAccountId);
         if (!li || !mail) return fail('linkedin_task_account_binding_invalid');
         return { task, intake: { url: String(li.url ?? ''), login: String(li.login ?? ''), hasPassword: !!li.password,
@@ -81,35 +81,30 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
         if (!data.password && !previous?.password) return fail('linkedin_intake_password_required');
         await s.query(`UPDATE noco.platform_accounts SET url=$2,login=$3,password=CASE WHEN $4='' THEN password ELSE $4 END,
           updated_at=statement_timestamp() WHERE id=$1`, [task.linkedinAccountId, data.url, data.login, data.password]);
-        // Application handoff is owned by the confirmation trigger, never by a draft result save.
+        // Application handoff is owned by the completion trigger, never by a draft result save.
         return taskRow((await s.query('UPDATE noco.linkedin_creation_task SET updated_at=clock_timestamp() WHERE id=$1 RETURNING *', [id])).rows[0]);
       });
     },
     async status(id: number, version: number, value: unknown) {
       const status = providerStatus(value);
-      return writeTransaction(pool, database, async s => {
-        const task = await lock(s, id, version);
-        if (task.status === status) return task;
+      const {task,completed} = await writeTransaction(pool, database, async s => {
+        const task = await lock(s, id, version, true);
+        if(task.status==='сделана экспертом') {
+          if(status!==task.status)return fail('linkedin_task_completed');
+          return {task,completed:false};
+        }
+        if (task.status === status) return {task,completed:false};
         if (status === 'сделана экспертом') await requireResult(s,task);
-        return taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *', [id, status])).rows[0]);
+        return {task:taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *', [id, status])).rows[0]),completed:status==='сделана экспертом'};
       });
-    },
-    async confirm(id:number,version:number) {
-      const {task,changed}=await writeTransaction(pool,database,async s=>{
-        const task=await lock(s,id,version,true);
-        if(task.status==='выполнение подтверждено')return{task,changed:false};
-        if(task.status!=='сделана экспертом')return fail('linkedin_task_not_confirmable');
-        await requireResult(s,task);
-        return{task:taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *',
-          [id,'выполнение подтверждено'])).rows[0]),changed:true};
-      });
-      if(changed&&afterConfirm)try{await afterConfirm(task.id);}catch{/* Delivery owner reports failures. */}
+      if(completed&&afterComplete)try{await afterComplete(task.id);}catch{/* Existing CRM command owner reports failures. */}
       return task;
     },
     async notification(id:number) {
       return read(async s=>{
-        const row=(await s.query('SELECT state,message_id,error_code FROM noco.linkedin_cycle_notifications WHERE task_id=$1',[id])).rows[0];
-        return row?{state:String(row.state),...(row.message_id?{messageId:Number(row.message_id)}:{}),...(row.error_code?{errorCode:String(row.error_code)}:{})}:{state:'missing'};
+        const rows=(await s.query('SELECT recipient,chat_id,state,message_id,error_code FROM noco.linkedin_cycle_notifications WHERE task_id=$1 ORDER BY recipient',[id])).rows;
+        return {deliveries:rows.map(row=>({recipient:String(row.recipient),chatId:row.chat_id?String(row.chat_id):undefined,
+          state:String(row.state),...(row.message_id?{messageId:Number(row.message_id)}:{}),...(row.error_code?{errorCode:String(row.error_code)}:{})}))};
       });
     },
     async receipt(id: number, version: number, profileId: number, proxyUuid: string, revision: number) {

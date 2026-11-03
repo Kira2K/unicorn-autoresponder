@@ -5,7 +5,7 @@ import {createServer} from 'vite'
 import vue from '@vitejs/plugin-vue'
 import {chromium} from 'playwright'
 import {mkdir} from 'node:fs/promises'
-test('admin confirms through UI, distinguishes pending delivery, and reconciles a lost reply without another POST',{timeout:45000},async()=>{
+test('admin history shows two independent deliveries and only performs reads',{timeout:45000},async()=>{
  const root=fileURLToPath(new URL('..',import.meta.url))
  const fixture=`import {createApp} from 'vue';import Confirm from '/src/components/LinkedInAdminConfirmations.vue';createApp(Confirm).mount('#app')`
  const server=await createServer({configFile:false,root,plugins:[vue(),{name:'admin-confirm-fixture',resolveId:id=>id==='virtual:admin-confirm'?'\0admin-confirm':null,
@@ -14,29 +14,27 @@ test('admin confirms through UI, distinguishes pending delivery, and reconciles 
  let browser
  try{
   await server.listen();browser=await chromium.launch();const page=await browser.newPage();page.setDefaultTimeout(10000)
-  let status='сделана экспертом',notice='pending',posts=0,unknown=false
-  const task=()=>({id:12,clientId:7,version:2,status,fio:'Test Admin Student',proxyProfileId:21,proxySavedAt:'2026-10-25T12:00:00Z'})
+  let notice='pending',reads=0
+  const task=()=>({id:12,clientId:7,version:2,status:'сделана экспертом',fio:'Test Admin Student'})
   await page.route('**/api/admin/linkedin-creation/tasks**',async route=>{
+   assert.equal(route.request().method(),'GET','history never sends a completion command')
    const path=new URL(route.request().url()).pathname
-   if(path.endsWith('/confirm')){posts++;assert.equal(route.request().postDataJSON().version,2);status='выполнение подтверждено';
-    if(unknown)return route.fulfill({status:503,json:{error:'commit_uncertain'}})
-   }
-   if(path.endsWith('/octo/status'))return route.fulfill({json:{profiles:[{id:21,phase:'ready',canEditProxy:true,proxy:{configured:true,credentialsLoaded:true,type:'socks5',host:'proxy.example',port:1080,login:'fixture',password:'fixture'}}]}})
    if(path.endsWith('/tasks'))return route.fulfill({json:[task()]})
-   return route.fulfill({json:{task:task(),client:{id:7,fio:'Test Admin Student'},intake:{url:'https://linkedin.com/in/test',login:'test@example.invalid',hasPassword:true,outlookRegisteredAt:'2026-10-25T10:30:00.000Z'},notification:{state:notice,...(notice==='sent'?{messageId:77}:{})}}})
+   reads++
+   return route.fulfill({json:{task:task(),client:{id:7,fio:'Test Admin Student'},intake:{url:'https://linkedin.com/in/test',login:'test@example.invalid',hasPassword:true},notification:{deliveries:[
+    {recipient:'reports',state:'sent',messageId:77},{recipient:'student',state:notice,...(notice==='sent'?{messageId:78}:{})}
+   ]}}})
   })
-  const open=async()=>{await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/admin-confirm-test`);await page.getByTestId('admin-creation-task-12').click()}
-  await open();await page.getByTestId('admin-confirm-creation').waitFor()
-  await mkdir('tmp/denis-local-qa',{recursive:true})
-  await page.screenshot({path:'tmp/denis-local-qa/admin-confirmation.png',fullPage:true,mask:[page.locator('input')]})
-  await page.getByTestId('admin-confirm-creation').click()
-  await page.getByTestId('admin-creation-status').filter({hasText:'выполнение подтверждено'}).waitFor()
-  assert.match(await page.getByTestId('admin-confirmation-notification').innerText(),/Ожидаем отправки/)
-  notice='sent';await page.getByText('Уведомление отправлено. Сообщение №77.',{exact:true}).waitFor();assert.equal(posts,1)
-  status='сделана экспертом';notice='pending';unknown=true;await open();await page.getByTestId('admin-confirm-creation').click()
-  await page.getByRole('alert').filter({hasText:'Результат подтверждения неизвестен'}).waitFor()
-  assert.equal(await page.getByTestId('admin-confirm-creation').isDisabled(),true)
-  await page.getByRole('button',{name:'Перечитать результат',exact:true}).click()
-  await page.getByTestId('admin-creation-status').filter({hasText:'выполнение подтверждено'}).waitFor();assert.equal(posts,2)
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/admin-confirm-test`)
+  await page.getByTestId('admin-creation-task-12').click()
+  await page.getByTestId('admin-creation-status').filter({hasText:'сделана экспертом'}).waitFor()
+  assert.equal(await page.getByTestId('admin-confirm-creation').count(),0)
+  const deliveries=page.getByTestId('admin-completion-deliveries')
+  await deliveries.getByText('Ботоотчёты: Отправлено. Сообщение №77.',{exact:true}).waitFor()
+  await deliveries.getByText('Ученику: Ожидает отправки.',{exact:true}).waitFor()
+  notice='sent';await deliveries.getByText('Ученику: Отправлено. Сообщение №78.',{exact:true}).waitFor()
+  notice='uncertain';await page.getByRole('button',{name:'Перечитать результат',exact:true}).click()
+  await deliveries.getByText('Ученику: Доставка не подтверждена; автоматического повтора нет.',{exact:true}).waitFor()
+  assert.ok(reads>=3)
  }finally{await browser?.close();await server.close()}
 })

@@ -6,8 +6,7 @@ const base = '/api/linkedin-creator'
 const tasks = ref([]), selected = ref(null), result = ref({ url: '', login: '', password: '' })
 const tasksLoading = ref(false), tasksLoaded = ref(false), tasksLoadError = ref('')
 const expertDoneStatus = 'сделана экспертом'
-const orderedTasks = computed(() => [...tasks.value].sort((a, b) =>
-  Number(a.status === expertDoneStatus) - Number(b.status === expertDoneStatus)))
+const orderedTasks = computed(() => tasks.value.filter(task => task.status !== expertDoneStatus))
 const expertCompleted = computed(() => selected.value?.task.status === expertDoneStatus)
 const message = ref(''), busy = ref(false), selectedStatus = ref('не начата'), copied = ref('')
 const captureConfirmed = ref(false)
@@ -117,7 +116,9 @@ async function save(action, body) {
     }
     if (action === 'status') {
       selectedStatus.value = task.status
-      message.value = task.notification?.outcome === 'failed'
+      message.value = task.status === expertDoneStatus
+        ? 'Заявка завершена. LinkedIn и доступ к Octo доступны ученику. Уведомления поставлены в очередь.'
+        : task.notification?.outcome === 'failed'
         ? 'Статус сохранён. Не удалось отправить уведомление в менеджерский Telegram-чат.'
         : task.notification?.outcome === 'uncertain'
           ? 'Статус сохранён. Подтверждение отправки уведомления в Telegram не получено.'
@@ -161,7 +162,7 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
           <div v-if="!tasksLoaded" class="task-list-skeleton" aria-hidden="true"><span v-for="i in 3" :key="i" class="skeleton-box"></span></div>
         </div>
         <p v-if="tasksLoadError" role="alert" data-testid="creation-task-list-error">{{ tasksLoadError }}</p>
-        <p v-if="tasksLoaded && !tasksLoading && !tasksLoadError && !tasks.length">Нет открытых заявок.</p>
+        <p v-if="tasksLoaded && !tasksLoading && !tasksLoadError && !orderedTasks.length">Нет открытых заявок.</p>
         <button v-for="task in orderedTasks" :key="task.id" type="button" class="task-button" :class="{ 'task-button--selected': requestedTaskId === task.id, 'task-button--completed': task.status === expertDoneStatus }" :aria-pressed="requestedTaskId === task.id" aria-controls="creation-task-panel" :data-testid="`creation-task-${task.id}`" :disabled="busy" @click="open(task.id)">
           <span class="task-button__title">#{{ task.id }} · {{ task.fio }}</span>
           <span class="task-button__meta">{{ task.stack }} · {{ task.status }}</span>
@@ -209,7 +210,7 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
           <p v-if="!canComplete">Статус «сделана экспертом» станет доступен после выполнения всех пунктов.</p>
         </section>
         <label>Статус заявки<select v-model="selectedStatus" aria-label="Статус заявки" aria-describedby="completion-checklist-title"><option>не начата</option><option>блок</option><option :disabled="!canComplete">{{ expertDoneStatus }}</option></select></label>
-        <p v-if="expertCompleted" class="task-completion-note" role="status">Заявка сделана экспертом и ожидает подтверждения.</p>
+        <p v-if="expertCompleted" class="task-completion-note" role="status">Заявка завершена.</p>
         <button type="button" :disabled="busy || selectedStatus === expertDoneStatus && !canComplete" @click="save('status', { status: selectedStatus })">Сохранить статус</button>
       </article>
       <div v-else class="task-placeholder"><p>Выберите заявку, чтобы открыть карточку ученика.</p></div>

@@ -17,7 +17,7 @@ test('client list summaries use one read-only query and return only names and st
  assert.equal(summaries.length,1);assert.deepEqual(summaries[0].values,[[901,902]]);
  assert.ok(!calls.some(c=>/^\s*(UPDATE|INSERT|DELETE)\b/i.test(c.sql)));
 });
-function fixture() {
+function fixture(afterComplete?:(taskId:number)=>Promise<unknown>) {
   const initial={task:{id:1,client_id:901,linkedin_account_id:11,outlook_account_id:12,source:'student_intake',status:'не начата',version:1,
     created_at:new Date(),updated_at:new Date(),proxy_profile_id:2 as number|null,proxy_uuid:'proxy' as string|null,proxy_saved_at:new Date() as Date|null},
     li:{id:11,url:'https://linkedin.com/in/test',login:'test',password:'secret'},
@@ -33,7 +33,7 @@ function fixture() {
     if(sql==='ROLLBACK'){state=structuredClone(backup);return{rows:[]};}
     if(sql==='COMMIT'){backup=structuredClone(state);if(uncertain){uncertain=false;throw Error('ack lost');}return{rows:[]};}
     if(sql.startsWith('SELECT client_id FROM'))return{rows:[{client_id:901}]};
-    if(sql.includes('FROM noco.linkedin_creation_task'))return{rows:state.task.status==='выполнение подтверждено'&&sql.includes("status<>")?[]:[structuredClone(state.task)]};
+    if(sql.includes('FROM noco.linkedin_creation_task'))return{rows:state.task.status==='сделана экспертом'&&sql.includes("status<>")?[]:[structuredClone(state.task)]};
     if(sql.includes('FROM noco.octo_profiles'))return{rows:[structuredClone(state.profile)]};
     if(sql.includes('FROM noco.platform_accounts a JOIN noco.platforms'))return{rows:structuredClone(state.archived)};
     if(sql.includes('FROM noco.platform_accounts'))return{rows:sql.includes('ANY')?[structuredClone(state.li),structuredClone(state.mail)]:[structuredClone(state.li)]};
@@ -46,34 +46,38 @@ function fixture() {
     }
     return{rows:[]};
   }})} as SqlPool;
-  return{store:createCreationTaskStore(pool,'unicorn_noco_copy_restore'),get state(){return state;},calls,uncertain(){uncertain=true;}};
+  return{store:createCreationTaskStore(pool,'unicorn_noco_copy_restore',false,afterComplete),get state(){return state;},calls,uncertain(){uncertain=true;}};
 }
 
-test('admin confirmation requires expert completion and a current idle proxy, and is idempotent after confirmation',async()=>{
-  const f=fixture();
-  await assert.rejects(f.store.confirm(1,1),{code:'linkedin_task_not_confirmable'});
-  const done=await f.store.status(1,1,'сделана экспертом');
-  await assert.rejects(f.store.confirm(1,1),{code:'linkedin_task_stale_version'});
-  f.state.profile.state.grant={phase:'granted'};
-  await assert.rejects(f.store.confirm(1,done.version),{code:'linkedin_task_proxy_required'});
-  f.state.profile.state.grant=undefined;
-  const confirmed=await f.store.confirm(1,done.version);
-  assert.equal(confirmed.status,'выполнение подтверждено');
-  const updates=f.calls.filter(sql=>sql.includes('SET status=')).length;
-  assert.deepEqual(await f.store.confirm(1,done.version),confirmed);
-  assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,updates);
-  await assert.rejects(f.store.detail(1),{code:'linkedin_task_not_found'});
-  assert.equal((await f.store.detail(1,true)).task.status,'выполнение подтверждено');
+test('the existing CRM completion hook runs only after the first known commit, never on a replay or unknown commit',async()=>{
+ let hooks=0;const f=fixture(async id=>{assert.equal(id,1);assert.equal(f.state.task.status,'сделана экспертом');hooks++;});
+ await f.store.status(1,1,'сделана экспертом');await f.store.status(1,1,'сделана экспертом');assert.equal(hooks,1);
+ const uncertain=fixture(async()=>{hooks++;});uncertain.uncertain();
+ await assert.rejects(uncertain.store.status(1,1,'сделана экспертом'),{code:'commit_uncertain'});
+ await uncertain.store.status(1,1,'сделана экспертом');assert.equal(hooks,1);
 });
 
-test('admin confirmation preserves a committed unknown outcome for read-back instead of starting another cycle',async()=>{
-  const f=fixture(),done=await f.store.status(1,1,'сделана экспертом');
-  f.uncertain();
-  await assert.rejects(f.store.confirm(1,done.version),{code:'commit_uncertain'});
-  assert.equal(f.state.task.status,'выполнение подтверждено');
-  const updates=f.calls.filter(sql=>sql.includes('SET status=')).length;
-  assert.equal((await f.store.confirm(1,done.version)).status,'выполнение подтверждено');
-  assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,updates);
+test('completion is final, hidden from Denis and idempotent even with an old version or a later active grant',async()=>{
+ const f=fixture();f.state.profile.state.grant={phase:'granted'};
+ await assert.rejects(f.store.status(1,1,'сделана экспертом'),{code:'linkedin_task_proxy_required'});
+ f.state.profile.state.grant=undefined;
+ const done=await f.store.status(1,1,'сделана экспертом');
+ const writes=f.calls.filter(sql=>sql.includes('SET status=')).length;
+ f.state.profile.state.grant={phase:'granted'};
+ assert.deepEqual(await f.store.status(1,1,'сделана экспертом'),done);
+ assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,writes);
+ await assert.rejects(f.store.status(1,done.version,'блок'),{code:'linkedin_task_completed'});
+ await assert.rejects(f.store.detail(1),{code:'linkedin_task_not_found'});
+ assert.equal((await f.store.detail(1,true)).task.status,'сделана экспертом');
+});
+
+test('a committed unknown completion is read back without starting another cycle',async()=>{
+ const f=fixture();f.uncertain();
+ await assert.rejects(f.store.status(1,1,'сделана экспертом'),{code:'commit_uncertain'});
+ assert.equal(f.state.task.status,'сделана экспертом');
+ const writes=f.calls.filter(sql=>sql.includes('SET status=')).length;
+ assert.equal((await f.store.status(1,1,'сделана экспертом')).status,'сделана экспертом');
+ assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,writes);
 });
 
 test('expert and admin detail return Outlook creation time without account passwords',async()=>{
@@ -114,8 +118,7 @@ test('completion requires result and matching saved proxy; active grants and sta
   const f=fixture();await assert.rejects(f.store.status(1,2,'блок'),{code:'linkedin_task_stale_version'});
   await assert.rejects(f.store.status(1,1,'выполнение подтверждено'),{code:'linkedin_task_invalid_status'});
   const done=await f.store.status(1,1,'сделана экспертом');assert.equal(done.status,'сделана экспертом');
-  assert.equal((await f.store.list()).length,1,'expert completion remains in queue');
-  f.state.task.status='выполнение подтверждено';assert.equal((await f.store.list()).length,0);
+  assert.equal((await f.store.list()).length,0,'expert completion leaves the queue');
   await assert.rejects(f.store.detail(1),{code:'linkedin_task_not_found'});
   await assert.rejects(f.store.result(1,2,{url:'https://linkedin.com/in/a',login:'a'}),{code:'linkedin_task_not_found'});
 });
@@ -148,5 +151,5 @@ test('saving the same status is a version-checked no-op, including after reopeni
   f.state.profile.state.grant={phase:'granted'};
   assert.deepEqual(await f.store.status(1,done.version,'сделана экспертом'),done);
   assert.equal(f.calls.filter(sql=>sql.includes('SET status=')).length,1);
-  await assert.rejects(f.store.status(1,1,'сделана экспертом'),{code:'linkedin_task_stale_version'});
+  assert.deepEqual(await f.store.status(1,1,'сделана экспертом'),done);
 });

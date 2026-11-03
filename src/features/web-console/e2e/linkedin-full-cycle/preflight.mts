@@ -31,10 +31,11 @@ export async function cyclePreflight(c:CycleContext){
  }));
  await check('denis-schema','Схема блокировок, экспертных прокси и уведомлений существующего LinkedIn установлена',()=>c.read(async s=>{
   await s.query('SELECT is_banned FROM noco.platform_accounts LIMIT 0');
+    await s.query('SELECT recipient,chat_id FROM noco.linkedin_cycle_notifications LIMIT 0');
   await s.query('SELECT proxy_is_made_by_expert FROM noco.octo_profiles LIMIT 0');
   await s.query('SELECT account_id,state FROM noco.linkedin_intake_notifications LIMIT 0');return{ready:true};
  }));
- await check('notification-recipient','Опубликованный кабинет направляет уведомления Кире, не Юлии',async()=>{
+ await check('notification-recipient','Отчёты об открытых статусах сохраняют согласованный тег; завершение использует отдельный журнал',async()=>{
   const {ADMIN_EMAIL,ADMIN_PASSWORD}=createRequire(import.meta.url)('../../backend/app.ts');
   return verifyNotificationRecipient({url:consoleUrl,email:ADMIN_EMAIL,password:ADMIN_PASSWORD,
     expectedMention:c.env.LINKEDIN_E2E_NOTIFY_MENTION||'@KiraSamsonova'});

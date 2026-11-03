@@ -18,7 +18,7 @@ export function taskProxyStore(pool:SqlPool,database:CopyDatabase){
     await s.query('SELECT pg_advisory_xact_lock(730644,$1::integer)',[task.clientId]);
     await s.query('SELECT id FROM noco.clients WHERE id=$1 FOR UPDATE',[task.clientId]);
     const t=(await s.query('SELECT * FROM noco.linkedin_creation_task WHERE id=$1 AND client_id=$2 FOR UPDATE',[task.id,task.clientId])).rows[0];
-    if(!t||Number(t.version)!==task.version||!['не начата','блок','сделана экспертом'].includes(String(t.status)))throw new PostgresReadError('linkedin_task_stale_version');
+    if(!t||Number(t.version)!==task.version||!['не начата','блок'].includes(String(t.status)))throw new PostgresReadError('linkedin_task_stale_version');
     const row=(await s.query("SELECT revision,state FROM noco.octo_profiles WHERE profile_id=$1 AND client_id=$2 AND locale='en' FOR UPDATE",[profile.id,task.clientId])).rows[0];
     const p=row?.state as ManagedProfile;
     if(!p||Number(row.revision)!==profile.revision||p.uuid!==profile.uuid||!canEditProxy(p))throw new PostgresReadError('linkedin_task_close_profile_first');

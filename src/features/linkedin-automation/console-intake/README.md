@@ -51,7 +51,7 @@ reject cancellation instead of overwriting later work. A lost commit acknowledge
 requires a read-back, with no automatic replay. The button is hidden while
 any registration request for the current account is unconfirmed (`не начата`, `блок`,
 `сделана экспертом`), even if Denis already saved its credentials. It becomes available
-after `выполнение подтверждено`, or for an existing account without a registration
+after `сделана экспертом`, or for an existing account without a registration
 request. The backend rejects replacement attempts during an unfinished registration too.
 Without Dolphin, RU-only
 students use Octo directly; EN/Both students choose existing LinkedIn or preparation
@@ -70,9 +70,9 @@ instead of silently starting a new CRM cycle from the cancel button.
 
 An existing unconfirmed request always opens its preparation form, even if Denis already
 saved a draft LinkedIn URL/login. Scenario selection and repeat-registration/ban actions
-are hidden until confirmation. The existing three-day preparation message remains visible.
+are hidden until final completion. The existing three-day preparation message remains visible.
 `не начата` and `блок` allow editing the current Outlook/identity/history data with
-“Сохранить изменения”; `сделана экспертом` and `выполнение подтверждено` lock editing.
+“Сохранить изменения”; `сделана экспертом` locks editing.
 Status polling updates this lock in both directions without replacing unsaved drafts.
 Outlook fields stay visible; only the instructions are collapsible. A blocked-history
 checkbox reveals required cards. Archived history is read-only and shared with Denis
@@ -86,7 +86,7 @@ remain visible during preparation, with access controls but without setup/proxy 
 previous Dolphin access remains visible too. Freshly prepared Octo profiles stay hidden.
 Every pending registration, including a replacement, warns against opening Octo
 while the expert works. Existing access remains available. During the first 30 days
-after confirmation, each access request requires acknowledgment of the warmup warning.
+after final completion, each access request requires acknowledgment of the warmup warning.
 
 Editing updates the same bound LinkedIn/Outlook rows and task (including a bound manual
 request), preserves the expert's URL/login/password, and does not queue profile setup again.
@@ -127,7 +127,7 @@ accounts, task source and Octo intent together. No schema/data migration is run.
 Archived accounts are excluded from the Console/LinkedIn record feed. Historical
 tasks referring to them are hidden from the Denis queue and cannot be edited there.
 The read-only SQL projection exposes the existing archive flag without adding it to
-the writable catalog. Only the transition to `выполнение подтверждено` can rebind LinkLab
+the writable catalog. Only the transition to `сделана экспертом` can rebind LinkLab
 from this student's archived account and reset the local cycle. Draft result saves do not
 switch it; the explicit cycle migration and CRM fence are described in
 [creation tasks](../creation-tasks/README.md#new-local-cycle-and-release-order-pr-100).
@@ -138,14 +138,12 @@ queued through the existing direct workflow. A recovery request also includes EN
 RU clients so Denis can work in the same EN flow; only the internal intent carries
 these locales and the client's market is unchanged. Dolphin bindings are retained.
 During a Dolphin replacement, the cabinet shows the Octo request while retaining access
-to previous Dolphin profiles. After confirmation it uses the completed Octo profiles.
+to previous Dolphin profiles. After final completion it uses the completed Octo profiles.
 Ordinary Dolphin users do not enter this path silently.
 
-`сделана экспертом` locks student editing while awaiting confirmation; access to previous
-profiles is retained for students who had LinkedIn before the request.
-`выполнение подтверждено` keeps account editing locked but restores access to the
+`сделана экспертом` keeps account editing locked but restores access to the
 existing Octo profiles, with setup/proxy editing hidden. Pending request state is
-checked while the page is visible; confirmation restores access without a page reload
+checked while the page is visible; completion restores access without a page reload
 or recreating profiles. “Меня забанили” remains available for another registration.
 
 Preparation saves LinkedIn metadata in existing `platform_accounts` text columns:

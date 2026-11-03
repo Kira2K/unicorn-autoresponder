@@ -14,6 +14,5 @@ export function registerAdminCreationTaskRoutes(app:Express,requireAuth:RequestH
   app.get('/api/admin/linkedin-creation/config',requireAuth,handle(s=>s.notificationConfig()));
   app.get(base,requireAuth,handle(s=>s.adminList()));
   app.get(base+'/:id',requireAuth,handle((s,r)=>s.adminDetail(r.params.id)));
-  app.post(base+'/:id/confirm',requireAuth,handle((s,r)=>s.confirm(r.params.id,r.body??{})));
   app.get(base+'/:id/octo/status',requireAuth,handle((s,r)=>s.adminProfileStatus(r.params.id,r.query.proxyCredentials==='1')));
 }

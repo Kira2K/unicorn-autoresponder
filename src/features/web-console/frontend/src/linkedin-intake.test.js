@@ -6,9 +6,9 @@ const { linkedInCreationPending } = require('./linkedin-intake.js')
 
 test('creation label follows the current application, not draft credentials or another account/student', () => {
   const account = { id: 19, url: 'https://linkedin.com/in/draft', login: 'draft@outlook.com' }
-  for (const status of ['не начата', 'блок', 'сделана экспертом', 'выполнение подтверждено']) {
-    const state = { clientId: 7, linkedinAccountId: 19, registrationPending: status !== 'выполнение подтверждено' }
-    assert.equal(linkedInCreationPending(account, state, 7), status !== 'выполнение подтверждено')
+  for (const status of ['не начата', 'блок', 'сделана экспертом']) {
+    const state = { clientId: 7, linkedinAccountId: 19, registrationPending: status !== 'сделана экспертом' }
+    assert.equal(linkedInCreationPending(account, state, 7), status !== 'сделана экспертом')
     assert.equal(linkedInCreationPending({ id: 18 }, state, 7), false)
     assert.equal(linkedInCreationPending(account, state, 8), false)
   }

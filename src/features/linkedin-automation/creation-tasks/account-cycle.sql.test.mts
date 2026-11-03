@@ -31,6 +31,9 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
     (31,102,16,'https://linkedin.com/in/other','legacy','fixture');`);owned=true;
   for(const name of ['001-status','002-crm-results','003-intake','004-proxy-status','005-credentials-refresh'])await q(sql(`../linklab/sql/${name}.up.sql`));
   await q(sql('./sql/001.up.sql'));await q(sql('./sql/002-new-proxy.up.sql'));await q(sql('../linklab/sql/006-account-cycle.up.sql'));
+  await q('ALTER TABLE noco.clients ADD COLUMN telegram_general_chat_id text,ADD COLUMN secured_general_chat_id text');
+  await q("UPDATE noco.clients SET telegram_general_chat_id='-7101',secured_general_chat_id='-8101' WHERE id=101");
+  await q(sql('./sql/004-three-statuses.up.sql'));
   await q(sql('../console-intake/sql/003-crm-sync-flag.up.sql'));
   await q('UPDATE noco.platform_accounts SET "isUnsyncedWithCRM"=true WHERE id=21');
   const profile={id:1,clientId:101,locale:'en' as const,revision:1,operationId:'fixture',password:'fixture',createdAt:1,phase:'ready' as const,ownProxy:true,uuid:'a'.repeat(32),original:{title:'Fixture',description:'fixture',tags:[],start_pages:[]},proxy:{uuid:'old',title:'old'}};
@@ -66,17 +69,17 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    await q('UPDATE noco.linkedin_creation_proxy SET fingerprint=baseline_fingerprint');
    await error(()=>q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=1,proxy_uuid='new',proxy_saved_at=clock_timestamp(),status='сделана экспертом'"),/new_proxy_required/);
    await q('UPDATE noco.linkedin_creation_proxy SET fingerprint=$1',[proof.fingerprint]);
-   await q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=1,proxy_uuid='new',proxy_saved_at=clock_timestamp(),status='сделана экспертом'");
-   await error(()=>q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено'"),/active_binding/);
+   await error(()=>q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=1,proxy_uuid='new',proxy_saved_at=clock_timestamp(),status='сделана экспертом'"),/active_binding/);
+   await q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=1,proxy_uuid='new',proxy_saved_at=clock_timestamp()");
    assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications')).rows[0].count,'0');
-   assert.equal((await q('SELECT status FROM noco.linkedin_creation_task')).rows[0].status,'сделана экспертом');
+   assert.equal((await q('SELECT status FROM noco.linkedin_creation_task')).rows[0].status,'не начата');
   });
   await t.test('restricted application role confirms atomically; only the owned archived binding may change',async()=>{
    await q('CREATE ROLE cycle_test_app');
    await q(`GRANT USAGE ON SCHEMA noco TO cycle_test_app;GRANT SELECT ON ALL TABLES IN SCHEMA noco TO cycle_test_app;
-    GRANT UPDATE ON noco.linkedin_creation_task,noco.linkedin_creation_proxy,noco.linkedin_cycle_notifications TO cycle_test_app;
+    GRANT UPDATE ON noco.linkedin_creation_task,noco.linkedin_creation_proxy,noco.linkedin_cycle_notifications,noco.octo_profiles TO cycle_test_app;
     UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id IN(11,12);`);
-   await q("BEGIN;SET ROLE cycle_test_app;UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено';RESET ROLE;");
+   await q("BEGIN;SET ROLE cycle_test_app;UPDATE noco.linkedin_creation_task SET status='сделана экспертом';RESET ROLE;");
    const racingClient=await pool.connect();
    try{
     await racingClient.query("SET lock_timeout='3s'");
@@ -96,11 +99,11 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    assert.equal((await q('SELECT "isUnsyncedWithCRM" AS flag FROM noco.platform_accounts WHERE id=21')).rows[0].flag,true,'confirmation does not declare CRM synchronization');
    assert.equal(row.crm_student_id,before.crm_student_id);assert.deepEqual(row.en_approved_at,before.en_approved_at);
    assert.equal(row.proxy_cycle_id,before.proxy_cycle_id);assert.deepEqual(row.proxy_ends_at,before.proxy_ends_at);assert.equal(row.proxy_state,'Активна');
-   await q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено'");
+   await q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом'");
    await q('UPDATE noco.platform_accounts SET "isUnsyncedWithCRM"=false WHERE id=21');
-   await q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено'");
+   await q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом'");
    assert.equal((await q('SELECT "isUnsyncedWithCRM" AS flag FROM noco.platform_accounts WHERE id=21')).rows[0].flag,false,'repeated confirmation preserves an explicit backend reset');
-   assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications')).rows[0].count,'1');
+   assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications')).rows[0].count,'2');
    assert.equal((await q('SELECT count(*) FROM noco.linkedin_account_cycles')).rows[0].count,'1');
    const snapshot=(await q('SELECT previous_state FROM noco.linkedin_account_cycles')).rows[0].previous_state;assert.equal(snapshot.filled_count,21);
    await error(()=>q('UPDATE noco.linklab SET platform_account_id=31 WHERE client_id=101'),/binding_immutable/);
@@ -121,13 +124,13 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
   });
   await t.test('concurrent workers claim once; delivered/uncertain events never silently replay',async()=>{
    const notices=cycleNotificationStore(pool,'unicorn_noco_copy_restore');const claims=await Promise.all([notices.claim(),notices.claim()]);
-   assert.equal(claims.filter(Boolean).length,1);const event=claims.find(Boolean)!;
-   await notices.finish(event,'sent',123);assert.equal(await notices.claim(),undefined);
+   assert.equal(claims.filter(Boolean).length,2);assert.deepEqual(claims.map(v=>v?.chatId).sort(),['-1003187558078','-8101']);
+   for(const event of claims)await notices.finish(event!,'sent',123);assert.equal(await notices.claim(),undefined);
    await q("UPDATE noco.linkedin_cycle_notifications SET state='attempting',claimed_at=clock_timestamp()-interval '11 minutes'");
    assert.equal(await notices.claim(),undefined);assert.equal((await q('SELECT state FROM noco.linkedin_cycle_notifications')).rows[0].state,'uncertain');
   });
   await t.test('first confirmed account creates LinkLab, repeated transitions preserve progress, and archived ownership stays protected',async()=>{
-   await q(`INSERT INTO noco.clients VALUES(103,'First');
+   await q(`INSERT INTO noco.clients(id,client_name) VALUES(103,'First');
     INSERT INTO noco.platform_accounts(id,clients_id,platforms_id,url,login,password) VALUES
      (41,103,16,'https://linkedin.com/in/first','first','fixture'),(42,103,31,'','first@outlook.com','fixture');
     INSERT INTO noco.linkedin_creation_task(client_id,linkedin_account_id,outlook_account_id) VALUES(103,41,42);`);
@@ -136,13 +139,15 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    p.id=3;p.clientId=103;p.proxy.uuid='first-proxy';
    await q("INSERT INTO noco.octo_profiles VALUES(3,103,'en',1,$1::jsonb)",[JSON.stringify(p)]);
    await q(`UPDATE noco.linkedin_creation_proxy SET profile_id=3,fingerprint='fresh',exit_ip='3.3.3.3',comparison='skipped',operation_id=$2 WHERE task_id=$1`,[first,p.proxyChange.id]);
-   await q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=3,proxy_uuid='first-proxy',proxy_saved_at=clock_timestamp(),status='выполнение подтверждено' WHERE id=$1",[first]);
+   await q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=3,proxy_uuid='first-proxy',proxy_saved_at=clock_timestamp(),status='сделана экспертом' WHERE id=$1",[first]);
    assert.equal((await q('SELECT platform_account_id FROM noco.linklab WHERE client_id=103')).rows[0].platform_account_id,'41');
+   assert.deepEqual((await q("SELECT state,error_code,chat_id FROM noco.linkedin_cycle_notifications WHERE task_id=$1 AND recipient='student'",[first])).rows[0],
+    {state:'failed',error_code:'recipient_missing',chat_id:null},'missing student group fails separately; the reports event remains pending');
    await q('UPDATE noco.linklab SET profile_filled_count=5 WHERE client_id=103');
-   await q("UPDATE noco.linkedin_creation_task SET status='блок' WHERE id=$1",[first]);
-   await q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено' WHERE id=$1",[first]);
+   await error(()=>q("UPDATE noco.linkedin_creation_task SET status='блок' WHERE id=$1",[first]),/linkedin_task_completed/);
+   await q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом' WHERE id=$1",[first]);
    assert.equal((await q('SELECT profile_filled_count FROM noco.linklab WHERE client_id=103')).rows[0].profile_filled_count,5);
-   assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications WHERE task_id=$1',[first])).rows[0].count,'1');
+   assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications WHERE task_id=$1',[first])).rows[0].count,'2');
    await q('UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id=31');
    await error(()=>q('UPDATE noco.linklab SET platform_account_id=31 WHERE client_id=101'),/binding_immutable/);
   });
@@ -160,15 +165,15 @@ test('actual PostgreSQL: new-proxy CAS, confirmed cycle, restricted roles and no
    await q("UPDATE noco.octo_profiles SET state=jsonb_set(jsonb_set(state,'{proxy,uuid}','\"second-proxy\"'),'{proxyChange,id}',to_jsonb($1::text)) WHERE profile_id=1",[operation]);
    await q("UPDATE noco.linkedin_creation_proxy SET profile_id=1,operation_id=$2,fingerprint='second-fingerprint',baseline_fingerprint=$3,baseline_ip='1.1.1.1',exit_ip='4.4.4.4',comparison='different' WHERE task_id=$1",[second,operation,proof.fingerprint]);
    await q("UPDATE noco.linkedin_creation_task SET proxy_profile_id=1,proxy_uuid='second-proxy',proxy_saved_at=clock_timestamp(),status='сделана экспертом' WHERE id=$1",[second]);
-   await q("SET ROLE cycle_test_app;UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено' WHERE client_id=101 AND source='student_intake';RESET ROLE;");
+   await q("SET ROLE cycle_test_app;UPDATE noco.linkedin_creation_task SET status='сделана экспертом' WHERE client_id=101 AND source='student_intake';RESET ROLE;");
    const row=(await q('SELECT * FROM noco.linklab WHERE client_id=101')).rows[0];
    assert.equal(row.platform_account_id,'51');assert.equal(row.status,'Новый');assert.equal(row.profile_filled_count,0);assert.equal(row.profile_revision,'-1');assert.equal(row.blocked_at,null);
    assert.equal(row.crm_student_id,before.crm_student_id);assert.equal(row.proxy_cycle_id,before.proxy_cycle_id);assert.deepEqual(row.proxy_ends_at,before.proxy_ends_at);
-   await q("UPDATE noco.linkedin_creation_task SET status='выполнение подтверждено' WHERE id=$1",[second]);
+   await q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом' WHERE id=$1",[second]);
    assert.equal((await q('SELECT count(*) FROM noco.linkedin_account_cycles WHERE client_id=101')).rows[0].count,'2');
-   assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications WHERE client_id=101')).rows[0].count,'2');
+   assert.equal((await q('SELECT count(*) FROM noco.linkedin_cycle_notifications WHERE client_id=101')).rows[0].count,'4');
    assert.equal((await q("SELECT count(*) FROM noco.octo_profiles WHERE client_id=101 AND locale='en'")).rows[0].count,'1');
    assert.equal((await q('SELECT password FROM noco.platform_accounts WHERE id=21')).rows[0].password,'fixture');
   });
- }finally{await pool.end();await q('RESET ROLE');if(owned){await q('DROP SCHEMA noco CASCADE');await q('DROP OWNED BY cycle_test_app').catch(()=>{});await q('DROP ROLE IF EXISTS cycle_test_app');}await db.end();}
+ }finally{await q('ROLLBACK');await pool.end();await q('RESET ROLE');if(owned){await q('DROP SCHEMA noco CASCADE');await q('DROP OWNED BY cycle_test_app').catch(()=>{});await q('DROP ROLE IF EXISTS cycle_test_app');}await db.end();}
 });

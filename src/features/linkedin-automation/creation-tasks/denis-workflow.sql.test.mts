@@ -46,9 +46,8 @@ test('actual PostgreSQL: Denis migration rolls back, backfills exact receipts, a
   await q(sql('./sql/003-denis-workflow.up.sql'));
   assert.equal((await q('SELECT revision FROM noco.octo_profiles WHERE profile_id=1')).rows[0].revision,revision);
   const store=createCreationTaskStore(pool,'unicorn_noco_copy_restore');
-  const done=await store.status(1,1,'сделана экспертом');
-  const confirmed=await Promise.all([store.confirm(1,done.version),store.confirm(1,done.version)]);
-  assert.ok(confirmed.every(task=>task.status==='выполнение подтверждено'));assert.equal(confirmed[0].version,done.version+1);assert.deepEqual(confirmed[0],confirmed[1]);
+  const confirmed=await Promise.all([store.status(1,1,'сделана экспертом'),store.status(1,1,'сделана экспертом')]);
+  assert.ok(confirmed.every(task=>task.status==='сделана экспертом'));assert.equal(confirmed[0].version,2);assert.deepEqual(confirmed[0],confirmed[1]);
   await q(`DELETE FROM noco.linkedin_creation_task WHERE id=2;
    ALTER TABLE noco.platform_accounts ADD COLUMN linkedin_first_name text,ADD COLUMN linkedin_last_name text,
    ADD COLUMN real_location text,ADD COLUMN old_link_blocked text,ADD COLUMN outlook_registered_at timestamptz,ADD COLUMN updated_at timestamptz;`);

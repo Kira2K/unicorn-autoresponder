@@ -137,7 +137,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       const notificationMention='@KiraSamsonova';
       existingNotices=cycleNotificationRuntime(()=>deliverExistingNotification({store:existingNotificationStore(pool,config.database),mention:notificationMention,
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
-      cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database),mention:notificationMention,
+      cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database),
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
       const reportStatusChange = createTaskStatusReporter({chatId:'-1003187558078',mention:notificationMention,
         client:id=>options.repository.getClientById(id),

@@ -74,7 +74,7 @@ try {
   check(targets.length === 2 && Number(targets[0].client_id) === 261 && String(targets[0].calendar_email).trim().toLowerCase() === 'octoguide@julian.com' &&
     Number(targets[1].client_id) === 266 && targets[1].legend_info === 'linkedin-creation-demo:v1:denis' &&
     targets[1].client_status === 'paused', 'denis_e2e_fixture_mismatch');
-  check(targets.every(t => t.status !== 'выполнение подтверждено'), 'denis_e2e_fixture_confirmed');
+  check(targets.every(t => t.status !== 'сделана экспертом'), 'denis_e2e_fixture_confirmed');
   const before = await profiles.list(), first = before.find(p => p.clientId === 261 && p.locale === 'en');
   check(first?.uuid && first.phase === 'ready', 'denis_e2e_original_en_missing');
   check(before.filter(p => p.clientId === 261 && p.locale === 'en').length === 1, 'denis_e2e_ambiguous_profile');

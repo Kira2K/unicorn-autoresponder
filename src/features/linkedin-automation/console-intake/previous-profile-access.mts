@@ -12,7 +12,7 @@ export async function previousProfileAccess(sql:Pick<SqlSession,'query'>,clientI
       AND (coalesce(btrim(a.url),'')<>'' OR coalesce(btrim(a.login),'')<>'' OR coalesce(a.password,'')<>'')
   ) OR EXISTS(
     SELECT 1 FROM noco.linkedin_creation_task WHERE client_id=$1 AND id<>$3
-      AND status='выполнение подтверждено' AND created_at<$4::timestamptz
+      AND status='сделана экспертом' AND created_at<$4::timestamptz
   ) AS had_linkedin`,[clientId,task.linkedinAccountId,task.id,task.createdAt])).rows[0];
   if(prior?.had_linkedin!==true)return empty;
   const profiles=(await sql.query(`SELECT profile_id FROM noco.octo_profiles WHERE client_id=$1
