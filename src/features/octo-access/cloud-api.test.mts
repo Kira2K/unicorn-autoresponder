@@ -28,6 +28,13 @@ test('cloud adapter never sends local requests and preserves numeric password st
   assert.equal(calls.length,3); assert.ok(calls.every(c=>c.body.password==='03742'));
   assert.ok(!('startProfile' in api)); assert.ok(!('activeProfiles' in api));
 });
+
+test('cloud creation omits profile protection when no password is supplied',async()=>{
+ let body:any;
+ const api=createCloudApi('owner-secret',async(_url,options)=>{body=JSON.parse(String(options?.body));return Response.json({success:true,data:{uuid:'a'.repeat(32)}});});
+ await api.createProfile({title:'owner profile',description:'marker',folder:'home',start_pages:[],tags:[]});
+ assert.equal(Object.hasOwn(body,'password'),false);assert.equal(body.folder,'home');
+});
 test('Guest validation rejects broadened rights, extra folders, tags and unknown true flags',async()=>{
   const folder='a'.repeat(32),permissions={visible_folders:[folder],visible_tags:[],create_profiles:false};
   let guest:any={email:'guest@example.com',master:false,permissions};

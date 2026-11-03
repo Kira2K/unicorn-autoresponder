@@ -36,12 +36,14 @@ export async function provisionProfile(initial: ManagedProfile, deps: { store: O
         p.proxy = { uuid: selected.uuid, title: selected.title }; await save();
       }
       p.phase = 'creating'; p.pending = 'create'; await save(); await check();
-      p.uuid = await api.createProfile({ ...p.original, folder: config.homeFolder, password: p.password,
+      p.uuid = await api.createProfile({ ...p.original, folder: config.homeFolder,
         ...(p.proxy ? { proxy: p.proxy.uuid } : {}) });
       delete p.pending; await save();
     }
     const live = await api.getProfile(p.uuid);
-    if (!inFolder(live, config.homeFolder) || live.status !== 0 || !live.has_user_password
+    // Legacy interrupted creations may still be protected. Adopt them without
+    // rewriting their data; only guest publication applies a new protection step.
+    if (!inFolder(live, config.homeFolder) || live.status !== 0
       || live.title !== p.original.title || live.description !== p.original.description
       || (p.proxy && normalizeUuid(live.proxy?.uuid ?? '') !== normalizeUuid(p.proxy.uuid)))
       throw new OctoError('octo_created_profile_changed');
