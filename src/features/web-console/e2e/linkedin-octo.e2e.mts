@@ -7,6 +7,10 @@ import type { BrowserContext } from 'playwright';
 import type { OctoService } from '../../octo-access/service.mts';
 import { createLinkedInIntakeService } from '../../linkedin-automation/console-intake/service.mts';
 import type { LinkedInIntake } from '../../linkedin-automation/console-intake/contracts.mts';
+import {createCreationTaskService} from '../../linkedin-automation/creation-tasks/service.mts';
+import type {CreationTaskStore} from '../../linkedin-automation/creation-tasks/postgres-store.mts';
+import {deliverCycleNotification,type CycleNotice} from '../../linkedin-automation/creation-tasks/cycle-notifications.mts';
+import type {SendOneInput} from '../../../integrations/telegram/types.ts';
 import {blockedHistoryCard} from '../../linkedin-automation/creation-tasks/blocked-history.mts';
 const require = createRequire(import.meta.url);
 const { createMockNocoClient } = require('../backend/mock-data.ts');
@@ -23,6 +27,7 @@ const { TABLES } = require('../../../integrations/noco/core/schema.ts');
 const repository = createWebConsoleRepository({ nocoClient: noco });
 const saved = new Map<number, LinkedInIntake>(), requests: Array<{ id: number; payload: unknown }> = [];
 const recoveryTasks=new Map<number,any>();
+const activeAccountIds=new Map<number,number>();
 const previousProfiles=new Map<number,number[]>(),priorLinkedIn=new Set<number>();
 const profiles = new Map<number, any[]>();
 const banned = new Set<number>();
@@ -33,36 +38,64 @@ const empty = { url: '', login: '', hasPassword: false, outlookLogin: '', hasOut
   firstName: '', lastName: '', realLocation: '', blockedAccounts: [] };
 const intake = createLinkedInIntakeService({ allowed: () => true, getClient: id => repository.getClientById(id),
   hasDolphin: async id => (await repository.getDolphinProfilesForClient(id)).length > 0, store: {
-    async load(id) { const data = saved.get(id),task=recoveryTasks.get(id),history=[...(archivedAccounts.get(id)||[]),...(data&&banned.has(id)?[historyCard(id,data)]:[])]; return data ? { ...empty, ...data, linkedinAccountId:id,task,
+    async load(id) { const data = saved.get(id),task=recoveryTasks.get(id),history=[...(archivedAccounts.get(id)||[]),...(data&&banned.has(id)?[historyCard(id,data)]:[])]; return data ? { ...empty, ...data, linkedinAccountId:activeAccountIds.get(id)||id,task,
       editableBlockedAccounts:data.blockedAccounts,archivedBlockedAccounts:history,blockedAccounts:[...data.blockedAccounts,...history],
-      isBanned:banned.has(id),registrationPending:!!task&&task.status!=='выполнение подтверждено',completionConfirmed:task?.status==='выполнение подтверждено',
-      editLocked:['сделана экспертом','выполнение подтверждено'].includes(task?.status),
+      isBanned:banned.has(id),registrationPending:!!task&&task.status!=='сделана экспертом',completionConfirmed:task?.status==='сделана экспертом',
+      editLocked:['сделана экспертом'].includes(task?.status),
       hadLinkedInBeforeTask:priorLinkedIn.has(id),previousOctoProfileIds:previousProfiles.get(id)||[],password: undefined, outlookPassword: undefined,
       octoConnectionPending:data.scenario==='existing'&&data.stage==='credentials', hasPassword: !!data.password, hasOutlookPassword: !!data.outlookPassword } : empty; },
-    async reportBan(id,accountId){assert.equal(id,accountId);const wasBanned=banned.has(id);banned.add(id);if(!wasBanned)banVersions.set(id,`ban-version-${++banVersion}`);
+    async reportBan(id,accountId){assert.equal(activeAccountIds.get(id)||id,accountId);const wasBanned=banned.has(id);banned.add(id);if(!wasBanned)banVersions.set(id,`ban-version-${++banVersion}`);
       return{reported:true,linkedinAccountId:accountId,isBanned:true,...(!wasBanned?{banUndoVersion:banVersions.get(id)}:{})};},
-    async cancelBan(id,accountId,version){assert.equal(id,accountId);assert.equal(version,banVersions.get(id));banned.delete(id);return{cancelled:true,linkedinAccountId:accountId,isBanned:false};},
+    async cancelBan(id,accountId,version){assert.equal(activeAccountIds.get(id)||id,accountId);assert.equal(version,banVersions.get(id));banned.delete(id);return{cancelled:true,linkedinAccountId:accountId,isBanned:false};},
     async save(id, data, _locales, options) {
       const created=data.scenario==='new'&&(!recoveryTasks.has(id)||!!data.replacesLinkedInAccountId);
       if(data.replacesLinkedInAccountId){priorLinkedIn.add(id);previousProfiles.set(id,(profiles.get(id)||[]).map(p=>p.id));
         archivedAccounts.set(id,[...(archivedAccounts.get(id)||[]),historyCard(id,saved.get(id)!,true)]);banned.delete(id);}
+      const accountId=data.replacesLinkedInAccountId?(activeAccountIds.get(id)||id)+10000:(activeAccountIds.get(id)||id);
+      activeAccountIds.set(id,accountId);
+      if(created&&data.replacesLinkedInAccountId){const accounts=await noco.fetchRecords(TABLES.platformAccounts.id),at=accounts.findIndex((a:any)=>a.Id===data.replacesLinkedInAccountId);if(at>=0)accounts.splice(at,1);}
       saved.set(id, { ...structuredClone(data), password:data.password||saved.get(id)?.password||'' });
       if(created&&options?.createOctoProfiles&&!profiles.has(id))profiles.set(id,readyProfiles(false));
-      if(created)recoveryTasks.set(id,{id,clientId:id,linkedinAccountId:id,outlookAccountId:id+1,status:'не начата',version:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
-      if(created)(await noco.fetchRecords(TABLES.platformAccounts.id)).push({Id:id,clients_id:id,platforms_id:16,
+      if(created)recoveryTasks.set(id,{id:data.replacesLinkedInAccountId?id+1000:id,clientId:id,linkedinAccountId:accountId,outlookAccountId:accountId+1,status:'не начата',version:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+      if(created)(await noco.fetchRecords(TABLES.platformAccounts.id)).push({Id:accountId,clients_id:id,platforms_id:16,
         rel_platformAccounts_platform:{Id:16,name:'linkedin'},url:'',login:''});
-      return { saved: true, linkedinAccountId: id,...(recoveryTasks.has(id)?{task:{...recoveryTasks.get(id),created}}:{}) }; }
+      return { saved: true, linkedinAccountId: accountId,...(recoveryTasks.has(id)?{task:{...recoveryTasks.get(id),created}}:{}) }; }
   } });
 function readyProfiles(proxy: boolean) { return [ { id: 1, locale: 'ru', title: 'RU test', phase: 'ready', canEditProxy: true, proxy: { configured: false } },
   { id: 2, locale: 'en', title: 'EN test', phase: 'ready', canEditProxy: true, proxy: { configured: proxy, ...(proxy ? { host: 'proxy.example.com', type: 'http', port: 8080 } : {}) } } ]; }
+let proxyWrites=0;
 const status = (id: number) => ({ profiles: profiles.get(id) || [], requiredLocales: id === 905 ? ['ru'] : ['ru','en'], onboarding: { phase: 'idle' }, provisioning: { phase: 'ready' } });
 const octo = {
   allowed: () => true, status: async (id: number) => status(id),
   async startOnboarding(id: number, payload: unknown) { requests.push({ id, payload }); profiles.set(id, readyProfiles(true)); return status(id); },
+  async saveProxy(id:number,profileId:number,input:any) {const profile=profiles.get(id)!.find(p=>p.id===profileId);profile.proxy={...input,configured:true,uuid:'proxy-'+id+'-'+(++proxyWrites),credentialsLoaded:true};return{queued:true};},
   async acquire() { return { id: 'grant-test', phase: 'preparing' }; },
   async grant() { return { id: 'grant-test', phase: 'granted', expiresAt: Date.now() + 120000, password: '01234' }; }
 } as unknown as OctoService;
-const app = createWebConsoleApp({ useMockData: true, repository, octoService: octo, linkedinIntake: intake });
+const completionMessages:SendOneInput[]=[],completionCycles:number[]=[],pendingNotices:CycleNotice[]=[];
+const taskById=(id:number)=>[...recoveryTasks.values()].find(t=>t.id===id);
+const creationStore={
+ async list(){return [...recoveryTasks.values()].filter(t=>t.status!=='сделана экспертом').map(t=>({...t}));},
+ async detail(id:number,admin=false){const t=taskById(id);if(!t||t.status==='сделана экспертом'&&!admin)throw Object.assign(Error(),{code:'linkedin_task_not_found'});
+  const data=saved.get(t.clientId)!;return{task:{...t},intake:{...data,hasPassword:!!data.password,outlookLogin:data.outlookLogin,hasOutlookPassword:true}};},
+ async result(id:number,_version:number,data:any){const t=taskById(id),account=saved.get(t.clientId)!;Object.assign(account,data);t.version++;return{...t};},
+ async receipt(id:number,_version:number,profileId:number,proxyUuid:string){const t=taskById(id);Object.assign(t,{proxySavedAt:new Date().toISOString(),proxyProfileId:profileId,proxyUuid,version:t.version+1});return{...t};},
+ async status(id:number,version:number,next:string){const t=taskById(id);if(t.status==='сделана экспертом'){assert.equal(next,t.status);return{...t};}
+  assert.equal(version,t.version);Object.assign(t,{status:next,version:t.version+1});
+  if(next==='сделана экспертом'){
+   const data=saved.get(t.clientId)!;assert.ok(data.url&&data.login&&data.password&&t.proxySavedAt);completionCycles.push(t.id);
+   for(const recipient of ['reports','student'] as const)pendingNotices.push({taskId:t.id,clientId:t.clientId,url:data.url,recipient,
+    chatId:recipient==='reports'?'-1003187558078':'-700'+t.clientId,token:recipient});
+   while(pendingNotices.length)await deliverCycleNotification({store:{claim:async()=>pendingNotices.shift(),finish:async()=>({rows:[]})},
+    client:id=>repository.getClientById(id),sendOne:async input=>{completionMessages.push(input);return{kind:'telegram-response',response:{ok:true,result:{message_id:completionMessages.length,date:1,chat:{id:Number(input.chatId),type:'supergroup',title:'mock'},text:input.text}}}}});
+  }
+  return{...t};
+ }
+} as unknown as CreationTaskStore;
+const creator=createCreationTaskService({store:creationStore,profiles:{list:async (id?:number)=>(profiles.get(id!)||[]).map(p=>({...p,clientId:id,revision:1})),get:async()=>undefined} as any,
+ octo,capture:async p=>p,client:id=>repository.getClientById(id),secrets:async()=>({}),nodeMavenKey:()=>''});
+const app = createWebConsoleApp({ useMockData: true, repository, octoService: octo, linkedinIntake: intake,
+ linkedinCreator:creator,linkedinCreatorAuth:{login:'mock-denis',password:'mock-denis-password'} });
 app.use(express.static(resolve('dist/web-console')));
 app.use((_req: unknown, res: import('express').Response) => res.sendFile(resolve('dist/web-console/index.html')));
 const preview = process.argv.includes('--preview');
@@ -81,6 +114,25 @@ async function login(id: number, context: BrowserContext) {
   await page.goto(url); await page.getByTestId('email-input').fill(loginEmail(id));
   await page.locator('#password').fill('1234'); await page.getByTestId('login-button').click();
   return page;
+}
+async function completeViaDenis(taskId:number){
+ const context=await browser.newContext(),page=await context.newPage();page.setDefaultTimeout(15000);
+ try{
+  await page.goto(url);await page.getByTestId('email-input').fill('mock-denis');await page.locator('#password').fill('mock-denis-password');await page.getByTestId('login-button').click();
+  await page.getByTestId(`creation-task-${taskId}`).click();
+  const form=page.locator('.octo-proxy-form');await form.getByLabel('Адрес прокси',{exact:true}).fill('proxy.example.test');
+  await form.getByLabel('Порт прокси',{exact:true}).fill('1080');await form.getByLabel('Логин прокси',{exact:true}).fill('new-fixture-'+taskId);
+  await form.getByLabel('Пароль прокси',{exact:true}).fill('fixture-secret');await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click();
+  await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor();
+  await page.getByLabel('Ссылка LinkedIn',{exact:true}).fill('https://www.linkedin.com/in/mock-cycle-'+taskId);
+  await page.getByLabel('Пароль LinkedIn',{exact:true}).fill('synthetic-password');await page.getByRole('button',{name:'Сохранить данные LinkedIn',exact:true}).click();
+  await page.getByText('Данные LinkedIn сохранены.',{exact:true}).waitFor();await page.getByLabel('Статус заявки').selectOption('сделана экспертом');
+  await page.getByRole('button',{name:'Сохранить статус',exact:true}).click();await page.getByText('Заявка завершена. LinkedIn и доступ к Octo доступны ученику. Уведомления поставлены в очередь.',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId(`creation-task-${taskId}`).count(),0);
+  const before=completionMessages.length,r=await context.request.put(url+`/api/linkedin-creator/tasks/${taskId}/status`,{data:{version:1,status:'сделана экспертом'}});
+  assert.equal(r.status(),200);assert.equal(completionMessages.length,before,'repeated completion does not send again');
+  await page.reload();await page.getByTestId('linkedin-creator-console').waitFor();assert.equal(await page.getByTestId(`creation-task-${taskId}`).count(),0);
+ }finally{await context.close();}
 }
 try {
   for (const id of [907, 904]) {
@@ -165,13 +217,31 @@ try {
     await accountRow.getByText('В процессе создания',{exact:true}).waitFor();
     if(id===907){
       saved.set(id,{...saved.get(id)!,url:'https://linkedin.com/in/expert-draft',login:'draft@outlook.com'});
-      for(const nextStatus of ['блок','сделана экспертом','выполнение подтверждено','блок']){
-        recoveryTasks.get(id).status=nextStatus;
-        await accountRow.getByText(nextStatus==='выполнение подтверждено'?'Активен':'В процессе создания',{exact:true}).waitFor({timeout:20000});
-        assert.equal(await accountRow.getByText(nextStatus==='выполнение подтверждено'?'В процессе создания':'Активен',{exact:true}).count(),0);
+      for(const nextStatus of ['блок','не начата','блок','сделана экспертом']){
+        if(nextStatus==='сделана экспертом')await completeViaDenis(recoveryTasks.get(id).id);else recoveryTasks.get(id).status=nextStatus;
+        await accountRow.getByText(nextStatus==='сделана экспертом'?'Активен':'В процессе создания',{exact:true}).waitFor({timeout:20000});
+        assert.equal(await accountRow.getByText(nextStatus==='сделана экспертом'?'В процессе создания':'Активен',{exact:true}).count(),0);
       }
-      await instructionPage.reload();await accountRow.getByText('В процессе создания',{exact:true}).waitFor();
-      const record=(await noco.fetchRecords(TABLES.platformAccounts.id)).find((row:any)=>row.Id===id)!;
+      await instructionPage.reload();await accountRow.getByText('Активен',{exact:true}).waitFor();
+      await instructionCard.getByTestId('linkedin-report-ban').click();
+      await instructionPage.getByRole('dialog').getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
+      const replacement=instructionCard.getByTestId('linkedin-new-form');
+      await replacement.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('second-cycle@outlook.com');
+      await replacement.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('synthetic-outlook');
+      await replacement.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');
+      await replacement.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');
+      await replacement.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
+      await replacement.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click();
+      const created=instructionPage.getByRole('dialog',{name:'Спасибо, данные сохранены ✅',exact:true});await created.waitFor();
+      await created.getByRole('button',{name:'Понятно',exact:true}).click();
+      assert.equal(profiles.get(id)!.length,2,'replacement reuses the same mock profiles');
+      await completeViaDenis(recoveryTasks.get(id).id);
+      await instructionCard.getByTestId('linkedin-report-ban').waitFor();await accountRow.getByText('Активен',{exact:true}).waitFor();
+      assert.equal(completionCycles.length,2);assert.equal(completionMessages.length,4);
+      assert.ok(completionMessages.filter(m=>m.chatId==='-1003187558078').every(m=>!/@|fyi/.test(m.text)));
+      assert.equal(completionMessages.filter(m=>m.chatId==='-700907'&&m.text.startsWith('Привет! Твой LinkedIn готов!')).length,2);
+      await instructionPage.reload();await accountRow.getByText('Активен',{exact:true}).waitFor();
+      const record=(await noco.fetchRecords(TABLES.platformAccounts.id)).find((row:any)=>row.Id===(activeAccountIds.get(id)||id))!;
       record.is_banned=true;await instructionPage.reload();await accountRow.getByText('Заблокирован',{exact:true}).waitFor();
       assert.equal(await accountRow.getByText('В процессе создания',{exact:true}).count(),0,'ban status takes precedence');
       record.is_banned=false;
@@ -347,5 +417,5 @@ try {
   assert.equal(await dolphinPage.locator('.octo-card').count(),0,'new Octo profiles for Dolphin recovery stay hidden');
   assert.equal((await repository.getDolphinProfilesForClient(906)).length,1);
   await dolphin.close();
-  console.log('LinkedIn/Octo mock browser flow passed: setup, checkpoint, two scenarios, blocked arrays, reload, RU/Dolphin routing, desktop/mobile.');
+  console.log('LinkedIn/Octo mock browser flow passed: first intake -> Denis completion -> ban -> replacement -> Denis completion; four independent mock deliveries without duplicates, final polling/reload, setup, checkpoint, blocked arrays, RU/Dolphin routing, desktop/mobile.');
 } finally { await browser.close(); await new Promise<void>(done => server.close(() => done())); }

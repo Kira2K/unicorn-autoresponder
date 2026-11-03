@@ -56,7 +56,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         if(reported)blockedAccounts.push(reported);
         const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
         const archivedBlockedAccounts=blockedAccounts.filter(card=>!editableBlockedAccounts.some(entered=>same(card,entered)));
-        const confirmedAt=task?.status==='выполнение подтверждено'?(await s.query('SELECT applied_at FROM noco.linkedin_account_cycles WHERE task_id=$1',[task.id])).rows[0]?.applied_at:undefined;
+        const confirmedAt=task?.status==='сделана экспертом'?(await s.query('SELECT applied_at FROM noco.linkedin_account_cycles WHERE task_id=$1',[task.id])).rows[0]?.applied_at:undefined;
         return { ...(creationTasks ? { task, ...await studentAccountAccess(s,clientId,li?Number(li.id):undefined),
           ...await previousProfileAccess(s,clientId,task) } : {}),
           linkedinAccountId:li?Number(li.id):undefined,hasLinkedIn:!!li&&(!!li.url||!!li.login||!!li.password),

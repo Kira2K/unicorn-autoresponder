@@ -12,7 +12,7 @@ import {createAccountCommandActions,readAccountCommandConfig} from './crm-accoun
 import {sendAccountCommand} from './crm-account-command.mts';
 const require=createRequire(import.meta.url),{Client,Pool}=require('pg'),express=require('express');
 const {registerLinkedInIntakeRoutes}=require('../../web-console/backend/linkedin-intake-routes.ts');
-const {registerAdminCreationTaskRoutes}=require('../../web-console/backend/linkedin-admin-creation-routes.ts');
+const {registerCreationTaskRoutes}=require('../../web-console/backend/linkedin-creation-routes.ts');
 const file=process.env.CRM_ACCOUNT_ACTIONS_TEST_CONFIG;
 
 test('disabled actions perform no SQL/HTTP; enabled configuration must be complete',()=>{
@@ -57,13 +57,15 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
         old_link_blocked text,outlook_registered_at timestamptz,updated_at timestamptz DEFAULT clock_timestamp());
       CREATE TABLE noco.octo_profiles(profile_id bigint PRIMARY KEY,client_id bigint REFERENCES noco.clients(id),locale text,revision bigint,state jsonb);
       CREATE TABLE noco.dolphin_profiles(id bigint PRIMARY KEY,browser text,octo_profile_id text);
-      INSERT INTO noco.clients VALUES(101,'Synthetic');INSERT INTO noco.platforms VALUES(16,'LinkedIn'),(31,'email_outlook');
+      INSERT INTO noco.clients(id,client_name) VALUES(101,'Synthetic');INSERT INTO noco.platforms VALUES(16,'LinkedIn'),(31,'email_outlook');
       INSERT INTO noco.platform_accounts(id,clients_id,platforms_id,url,login,password) VALUES
         (11,101,16,'https://linkedin.com/in/old','old','fixture'),(12,101,31,'','old@outlook.com','fixture');`);owned=true;
     const migration=(path:string)=>q(readFileSync(new URL(path,import.meta.url),'utf8'));
     for(const name of ['001-status','002-crm-results','003-intake','004-proxy-status','005-credentials-refresh'])await migration('./sql/'+name+'.up.sql');
     await migration('../creation-tasks/sql/001.up.sql');await migration('../creation-tasks/sql/002-new-proxy.up.sql');
     await migration('./sql/006-account-cycle.up.sql');await migration('../creation-tasks/sql/003-denis-workflow.up.sql');
+    await q('ALTER TABLE noco.clients ADD COLUMN telegram_general_chat_id text');
+    await migration('../creation-tasks/sql/004-three-statuses.up.sql');
     await q("INSERT INTO noco.linklab(client_id,platform_account_id,status) VALUES(101,11,'Раскачка')");
     await q('UPDATE noco.linklab SET crm_student_id=$1,confirmed_version=version WHERE client_id=101',[student]);
     const before=await control('fixture',{student_id:student,account_id:'11',version:'1'});
@@ -71,13 +73,13 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
       allowed:()=>true,getClient:async id=>mockClient(id),hasDolphin:async()=>false});
     const profiles:any={list:async(id:number)=>(await q('SELECT profile_id,state FROM noco.octo_profiles WHERE client_id=$1',[id])).rows.map((p:any)=>({id:Number(p.profile_id),locale:'en',proxy:p.state.proxy})),get:async()=>undefined};
     const creator=createCreationTaskService({store:createCreationTaskStore(pool,'unicorn_noco_copy_restore',false,actions.replacement),profiles,
-      octo:{} as any,client:async id=>mockClient(id),secrets:async()=>({}),capture:async(p)=>({proxy:p.proxy} as any),nodeMavenKey:()=>''});
+      octo:{} as any,client:async id=>mockClient(id),secrets:async()=>({}),capture:async(p)=>p,nodeMavenKey:()=>''});
     const app=express();app.use(express.json());
     const auth=(req:any,_res:any,next:any)=>{req.webSession={role:req.headers['x-test-role'],clientId:Number(req.headers['x-test-client']||101)};next();};
-    registerLinkedInIntakeRoutes(app,auth,intake);registerAdminCreationTaskRoutes(app,auth,creator);
+    registerLinkedInIntakeRoutes(app,auth,intake);registerCreationTaskRoutes(app,auth,creator);
     server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
     const click=(path:string,body:unknown,role='client',client=101)=>fetch('http://127.0.0.1:'+server.address().port+path,
-      {method:'POST',headers:{'content-type':'application/json','x-test-role':role,'x-test-client':String(client)},body:JSON.stringify(body)});
+      {method:path.endsWith('/status')?'PUT':'POST',headers:{'content-type':'application/json','x-test-role':role,'x-test-client':String(client)},body:JSON.stringify(body)});
     const banPath='/api/client/linkedin-intake/ban';
     const lossy={end:async()=>{},connect:async()=>{
       const s=await pool.connect();return{release:(destroy?:boolean)=>s.release(destroy),query:async(sql:string,v?:unknown[])=>{
@@ -102,10 +104,10 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
       (21,101,16,'https://www.linkedin.com/IN/студент/?trk=profile#details','new','fixture'),(22,101,31,'','new@outlook.com','fixture');
       INSERT INTO noco.octo_profiles VALUES(1,101,'en',1,'{"phase":"ready","proxy":{"uuid":"fixture-proxy"}}');
       INSERT INTO noco.linkedin_creation_task(client_id,linkedin_account_id,outlook_account_id,status,requires_new_proxy,proxy_profile_id,proxy_uuid,proxy_saved_at)
-      VALUES(101,21,22,'сделана экспертом',false,1,'fixture-proxy',clock_timestamp());`);
-    const task=(await q('SELECT id,version FROM noco.linkedin_creation_task')).rows[0],confirmPath='/api/admin/linkedin-creation/tasks/'+task.id+'/confirm';
+      VALUES(101,21,22,'не начата',false,1,'fixture-proxy',clock_timestamp());`);
+    const task=(await q('SELECT id,version FROM noco.linkedin_creation_task')).rows[0],confirmPath='/api/linkedin-creator/tasks/'+task.id+'/status';
     const count=captures.length;
-    const confirmations=await Promise.all([click(confirmPath,{version:Number(task.version)},'admin'),click(confirmPath,{version:Number(task.version)},'admin')]);
+    const confirmations=await Promise.all([click(confirmPath,{version:Number(task.version),status:'сделана экспертом'},'linkedin_creator'),click(confirmPath,{version:Number(task.version),status:'сделана экспертом'},'linkedin_creator')]);
     assert.ok(confirmations.every(r=>r.status===200));assert.equal(captures.length,count+1);assert.equal(captures.at(-1)!.status,201);
     const recovered=await control('probe');assert.equal(recovered.student_id,student);assert.equal(recovered.account_id,'21');
     assert.equal(recovered.status,'warmup');assert.equal(recovered.profile_filled,0);assert.equal(recovered.ssi_current,0);assert.equal(recovered.ssi_history,before.ssi_history);
@@ -116,7 +118,7 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
     await assert.rejects(sendAccountCommand({body:captures[0].body,expectedStudentId:student},options),/receipt/);
     verifyCommitted=true;
     assert.equal((await control('probe')).account_id,'21');
-    const beforeRetry=captures.length;await click(confirmPath,{version:Number(task.version)},'admin');assert.equal(captures.length,beforeRetry);
+    const beforeRetry=captures.length;await click(confirmPath,{version:Number(task.version),status:'сделана экспертом'},'linkedin_creator');assert.equal(captures.length,beforeRetry);
     const recoveryBody=captures.find(c=>JSON.parse(c.body.toString()).command==='replacement')!.body;
     await assert.rejects(sendAccountCommand({body:recoveryBody,expectedStudentId:student},{...options,secret:cfg.secret+'bad'}),/http_401/);
     const altered=Buffer.from(JSON.stringify({...JSON.parse(recoveryBody.toString()),account_url:'https://www.linkedin.com/in/changed'}));
@@ -127,18 +129,18 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
       await control('link-state',{missing:false,active:true});
     }
     const afterReplays=captures.length;
-    await q(`INSERT INTO noco.clients VALUES(102,'First');
+    await q(`INSERT INTO noco.clients(id,client_name) VALUES(102,'First');
       INSERT INTO noco.platform_accounts(id,clients_id,platforms_id,url,login,password) VALUES
       (31,102,16,'https://linkedin.com/in/first','first','fixture'),(32,102,31,'','first@outlook.com','fixture');
       INSERT INTO noco.octo_profiles(profile_id,client_id,locale,revision,state) VALUES(2,102,'en',1,'{"phase":"ready","proxy":{"uuid":"first-proxy"}}');
       INSERT INTO noco.linkedin_creation_task(client_id,linkedin_account_id,outlook_account_id,status,requires_new_proxy,proxy_profile_id,proxy_uuid,proxy_saved_at)
-      VALUES(102,31,32,'сделана экспертом',false,2,'first-proxy',clock_timestamp());`);
+      VALUES(102,31,32,'не начата',false,2,'first-proxy',clock_timestamp());`);
     const first=(await q('SELECT id,version FROM noco.linkedin_creation_task WHERE client_id=102')).rows[0];
-    assert.equal((await click('/api/admin/linkedin-creation/tasks/'+first.id+'/confirm',{version:Number(first.version)},'admin')).status,200);
+    assert.equal((await click('/api/linkedin-creator/tasks/'+first.id+'/status',{version:Number(first.version),status:'сделана экспертом'},'linkedin_creator')).status,200);
     assert.equal(captures.length,afterReplays,'first account is not a replacement');
     assert.equal(warnings.length,0);
     const lagStudent='10000000-0000-4000-8000-000000000004';
-    await q(`INSERT INTO noco.clients VALUES(104,'Pending');
+    await q(`INSERT INTO noco.clients(id,client_name) VALUES(104,'Pending');
       INSERT INTO noco.platform_accounts(id,clients_id,platforms_id,url,login,password) VALUES
       (111,104,16,'https://linkedin.com/in/pending','pending','fixture'),(112,104,31,'','pending@outlook.com','fixture');
       INSERT INTO noco.linklab(client_id,platform_account_id,status) VALUES(104,111,'Раскачка');`);

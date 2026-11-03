@@ -3,7 +3,7 @@ import type { OctoStore, ManagedProfile } from '../../octo-access/contracts.mts'
 import type { OctoService } from '../../octo-access/service.mts';
 import type { WebClient } from '../../web-console/backend/types.ts';
 import { IntakeError } from '../console-intake/contracts.mts';
-import { taskId } from './contracts.mts';
+import { taskId,providerStatus } from './contracts.mts';
 import type { StatusNotification, TaskStatusChange } from './status-report.mts';
 import type {createNewTaskProxy} from './new-proxy-service.mts';
 import {DEFAULT_NOTIFICATION_MENTION} from './status-report.mts';
@@ -55,20 +55,6 @@ export function createCreationTaskService(deps: {
       const d=await deps.store.detail(taskId(id),true);
       return deps.octo.status(d.task.clientId,{proxyCredentials,locales:['en'],staff:true});
     },
-    async confirm(id:unknown,body:Record<string,unknown>) {
-      const d=await deps.store.detail(taskId(id),true);
-      if(d.task.status!=='выполнение подтверждено'){
-        if(d.task.status!=='сделана экспертом')throw new IntakeError('linkedin_task_not_confirmable',409);
-        if(d.task.version!==taskId(body.version))throw new IntakeError('linkedin_task_stale_version',409);
-        const p=(await deps.profiles.list(d.task.clientId)).find(p=>p.id===d.task.proxyProfileId&&p.locale==='en'&&!p.deletion);
-        if(!p)throw new IntakeError('linkedin_task_en_profile_required',409);
-        await requireNewProxy({...d,profile:p});
-        const actual=await deps.capture(p);
-        if(actual.proxy?.uuid!==d.task.proxyUuid)throw new IntakeError('linkedin_task_proxy_changed',409);
-      }
-      await deps.store.confirm(taskId(id),taskId(body.version));
-      return this.adminDetail(id);
-    },
     async list() {
       return namedTasks(await deps.store.list());
     },
@@ -111,8 +97,9 @@ export function createCreationTaskService(deps: {
     },
     async result(id: unknown, body: Record<string, unknown>) { return deps.store.result(taskId(id), taskId(body.version), body); },
     async status(id: unknown, body: Record<string, unknown>) {
-      const before = await detail(id), previousStatus = before.task.status;
-      if (body.status === 'сделана экспертом' && previousStatus !== body.status) {
+      const requestedStatus=providerStatus(body.status);
+      const before = await deps.store.detail(taskId(id),true), previousStatus = before.task.status;
+      if (requestedStatus === 'сделана экспертом' && previousStatus !== requestedStatus) {
         const d = await en(id);
         if (d.task.version !== taskId(body.version)) throw new IntakeError('linkedin_task_stale_version',409);
         await requireNewProxy(d);
@@ -122,8 +109,8 @@ export function createCreationTaskService(deps: {
         if (!d.task.proxySavedAt || p.proxy?.uuid !== d.task.proxyUuid || p.id !== d.task.proxyProfileId)
           throw new IntakeError('linkedin_task_proxy_required',409);
       }
-      const task = await deps.store.status(taskId(id), taskId(body.version), body.status);
-      if (task.status === previousStatus || !deps.reportStatusChange) return task;
+      const task = await deps.store.status(taskId(id), taskId(body.version), requestedStatus);
+      if (task.status === 'сделана экспертом' || task.status === previousStatus || !deps.reportStatusChange) return task;
       let notification: StatusNotification;
       try {
         notification = await deps.reportStatusChange({ taskId:task.id,clientId:task.clientId,from:previousStatus,to:task.status });

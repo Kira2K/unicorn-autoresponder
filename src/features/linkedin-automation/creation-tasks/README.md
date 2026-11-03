@@ -4,14 +4,13 @@
 blocked accounts, credentials and Octo bindings are read from their original stores. The table contains task state,
 optimistic version and a verified EN proxy receipt, not copies of student data or secrets.
 
-Statuses: `не начата` → `блок` / `сделана экспертом` → `выполнение подтверждено`. The contractor can choose the first
-three. Main admins confirm through the LinkedIn section using «Подтвердить выполнение»;
-the contractor cannot call the admin routes. Confirmed tasks disappear from contractor reads.
-Multiple manual tasks for a client are allowed. The student form owns one `source='student_intake'` task per client;
-repeated/concurrent saves update that row. Existing-account saves never create a registration task.
+Statuses: `не начата` → `блок` / **`сделана экспертом` (final)**.
+Denis completes through the existing status endpoint; there is no separate approval command.
+Completion immediately hides the task from the contractor, restores student LinkedIn/Octo access,
+starts the local LinkLab cycle and records two deliveries. Completed tasks cannot reopen.
+Repeated completion, including an old version after a lost response, does not replay effects.
+The admin LinkedIn tab is a read-only history with independent delivery outcomes.
 
-The expert task picker shows unfinished tasks first; tasks already done by the expert remain available below
-them as compact, muted buttons. A completed task shows that it awaits confirmation, including after reloading.
 The completion checklist lists saved LinkedIn URL, login, password and the task's proxy confirmation, with
 instructions for each missing item. Reopening a task restores its saved proxy confirmation when the EN
 profile is idle; a new access session or proxy edit requires confirmation again in the current view.
@@ -37,28 +36,23 @@ validation, connectivity check and existing profile assignment. Initial Octo loa
 failed loading shows a retry message. Completed grant IDs are not polled again; when a new proxy is
 required, the card explains why access remains unavailable while the proxy form stays editable.
 
-## Denis status notifications
+## Notifications
 
-The SQL Console composes a post-commit status reporter using the shared Telegram Bot API facade and
-the existing `VEU_SUPPORT_BOT` preset. Every real status change through the contractor's status endpoint
-reports the application number, current client first/last name, primary stack, previous/new status and the configured mention
-to the agreed manager group `-1003187558078`. This includes returning to `не начата`; initial task creation,
-result/proxy saves, SQL/admin changes and saving the same status do not send a status message.
-The destination is independent of each client's own group. No TDLib/personal Telegram account is used.
-Both the status reporter and new-cycle notification accept an optional `mention`, defaulting to `@juliafeels`.
-The current Console composition passes `@KiraSamsonova` through one `notificationMention` value
-to status, confirmed-cycle and existing-account notifications. Restore Julia by changing
-that composition value, without changing the module defaults.
-The stack is read from the client's `primaryStack`; a missing value is shown explicitly as `Стек: не указан`.
+Real transitions between open statuses through the contractor endpoint retain the existing post-commit
+reporter, manager destination and configured mention (currently `@KiraSamsonova`). Same-status saves,
+draft/proxy saves, initial creation and direct SQL changes do not invoke this reporter.
 
-Status saves retain their optimistic version checks. Re-saving the same status is a locked no-op that
-keeps the task version. Notification attempts start only after a successful status commit; a stale save,
-rejected completion or uncertain SQL commit cannot trigger a send. A Telegram failure leaves the saved
-status intact. The response adds `notification` (`sent`, `failed` or `uncertain`) and the Console displays
-the separate delivery result. Failed/uncertain sends are not retried, and opening/refreshing a task does
-not replay its previous notifications. There is no durable notification queue: a process interruption
-between commit and send can leave that transition unreported. No schema migration or new ENV is required.
-Standalone test compositions without the injected reporter do not send notifications.
+Completion does **not** invoke that reporter. Its transaction creates two independently claimable rows
+in `linkedin_cycle_notifications`, keyed by `(task_id,recipient)`: `reports` to `-1003187558078`
+with no mention, and `student` to the student's effective group. Destination selection is nonblank
+`secured_general_chat_id`, otherwise `telegram_general_chat_id`, frozen when the event is created.
+No private Telegram account or username is used. Missing student group records a failed delivery with
+`recipient_missing`; it never falls back to the reports group. No credentials appear in either message.
+
+The worker sends through shared Bot API `sendOne` after commit. Delivery receipts are independent;
+failure of one cannot cancel completion or suppress the other. Sent/failed/uncertain events are never
+automatically retried; expired in-flight claims become uncertain. Opening/reloading a task only reads.
+The older open-status reporter has no durable queue; its failure still leaves the saved status intact.
 
 ## Composition and authorization
 
@@ -147,7 +141,7 @@ An uncertain commit requires reloading the task, never automatic retry.
 
 **CRM СЕЙЧАС НЕ ПОДКЛЮЧАЕМ. ДЛЯ БУДУЩЕГО ПОДКЛЮЧЕНИЯ НУЖНО ИЗМЕНИТЬ ЕЁ ЛОГИКУ: ПЕРЕДАВАТЬ НОВЫЙ ЦИКЛ И ПРИВЯЗЫВАТЬ РЕЗУЛЬТАТЫ К КОНКРЕТНОМУ LINKEDIN-АККАУНТУ.**
 
-The SQL transition to `выполнение подтверждено`, including a direct staff SQL update, atomically rebinds
+The SQL transition to final `сделана экспертом`, including a direct staff SQL update, atomically rebinds
 LinkLab to the new owned account and resets status to `Новый`, progress to 0 and revision to -1. It clears
 the block/completion dates and next-account URL, preserving the CRM student ID, EN CV approval, history
 and active physical proxy pause. A missing LinkLab row is created. A different previous binding must refer
@@ -159,12 +153,11 @@ Reset rows have `crm_integration_required=true`: the legacy queue excludes them 
 reject/ignore delayed CRM writes, acknowledgements and errors. Other students retain their existing behavior.
 Do not clear the flag to reconnect the old worker; the future CRM protocol must identify the cycle/account.
 
-In the same confirmation transaction, an event is inserted into `linkedin_cycle_notifications`. After commit,
-the Console background dispatcher sends one `VEU_SUPPORT_BOT` message to `-1003187558078`, with headline
-`🚨 НОВЫЙ LINKEDIN — ЗАПУЩЕН НОВЫЙ ЦИКЛ`, name, stack, task number, new URL and `@juliafeels fyi`.
-Delivery is persisted as `sent`, `failed` or `uncertain`. An expired in-flight claim becomes `uncertain`;
-failed/uncertain events are never automatically resent. Telegram failure cannot roll back confirmation.
-This confirmation journal is separate from the older non-durable Denis status reporter described above.
+In the same completion transaction, two delivery rows are inserted into `linkedin_cycle_notifications`.
+The manager message announces the ready LinkedIn and new cycle, with name, stack, task number and URL,
+without a tag. The student message explains that login/password and Octo are in the cabinet, asks for no
+LinkedIn login during the first month, then Octo-only access, no 2FA and no password changes.
+Its HTML paragraphs/bullets are covered by the notification contract tests.
 
 Install with the Console/Octo writers stopped and an owner-authorized connection. Keep the existing
 application role's Octo/profile/task rights; never give it ownership or write access to the cycle ledger.
@@ -293,30 +286,22 @@ The runner checks both identities, opens/closes only in the guest Desktop, and r
 unchanged one-shot bridge protocol through the owner Desktop. No account switching or owner
 password is needed. This is not the independent fresh-owner archive acceptance test.
 
-## Main-admin confirmation and Denis follow-up
+## Completion release and admin history
 
-`/api/admin/linkedin-creation/tasks` lists tasks for main admins only; `/:id` reads
-current detail and delivery state, `/:id/octo/status?proxyCredentials=1` reads the
-staff proxy view, and `POST /:id/confirm` accepts the current task `version`.
-The UI permits only «сделана экспертом» with a saved result and current idle EN proxy.
-Confirmation revalidates the live connection and transactionally checks the receipt,
-account ownership and grant state. Same confirmed task is an idempotent no-op even
-with the previous version. A lost commit response requires read-back, never a blind
-retry. The durable cycle outbox delivers separately; only `sent` plus a positive
-Telegram message ID proves delivery. Confirmation alone is not delivery evidence.
-Experts retain access/editing until main-admin confirmation; student result editing
-locks at expert completion. Both staff panels show Outlook registration time and full
-proxy data; students receive no expert-managed proxy credentials, even on opt-in reads.
+The previous confirmation API `POST /api/admin/linkedin-creation/tasks/:id/confirm` is removed.
+Admin GET list/detail and the protected profile read remain; detail exposes
+`notification.deliveries[]` with recipient, destination, state, message ID or error code.
+The UI has no mutation button. Denis' `PUT /api/linkedin-creator/tasks/:id/status` is the sole completion API.
 
-Apply `migrate-denis.mts` separately before this release. Its default is rollback;
-`--apply` adds `is_banned`, `proxy_is_made_by_expert`, the provenance projection trigger
-and the existing-account notification outbox. Backfill trusts only a receipt whose
-client, profile and current proxy UUID all match. Unknown proxies remain false.
-The trigger projects the durable Octo JSON provenance into the Boolean SQL column;
-it does not infer ownership from provider titles. It makes no LinkLab repairs.
+Install creation-tasks `004-three-statuses.up.sql` after the prior cycle/Denis migrations.
+Use the explicit `migrate-completion.mts` command (default dry-run), not the old schema installer.
+Stop all Console writers/dispatchers, including local backends using the same database, before installation.
+The new backend checks the delivery schema and never applies DDL on startup.
+Historical confirmed statuses are renamed with their versions/dates/cycles/delivery outcomes unchanged;
+there is no student backfill. Unconfirmed expert-completed tasks block installation with their IDs.
+The migration is transactional and rerunnable. Application table privileges are preserved.
 
-The full-cycle runner now clicks the real main-admin button and waits for Telegram
-delivery through the UI/API; it has no SQL-confirmation helper. Preflight refuses the
-old deployment unless schema and the expected notification mention are both verified.
-The portable admin skill is `outputs/skills/linkedin-admin-confirm.zip`; the admin
-already needs their normal Console and Octo access. The skill never confirms by SQL.
+See [release and verification guide](../../../../docs/qa/linkedin-three-statuses.md) for commands and checks.
+The live runner now verifies final completion and both deliveries by GET after Denis finishes;
+it never invokes an admin confirmation or SQL-confirmation helper. Running it live still needs authorization.
+The old portable confirmation skill/archive is obsolete and must not be used for this release.

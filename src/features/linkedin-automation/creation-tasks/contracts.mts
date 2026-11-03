@@ -1,8 +1,8 @@
 import { IntakeError } from '../console-intake/contracts.mts';
-export const taskStatuses = ['не начата', 'блок', 'сделана экспертом', 'выполнение подтверждено'] as const;
+export const taskStatuses = ['не начата', 'блок', 'сделана экспертом'] as const;
 export type TaskStatus = typeof taskStatuses[number];
-export const studentLocked = (status: unknown) => status === taskStatuses[2] || status === taskStatuses[3];
-export const providerStatuses = taskStatuses.slice(0, 3);
+export const studentLocked = (status: unknown) => status === taskStatuses[2];
+export const providerStatuses = taskStatuses;
 export function taskId(value: unknown): number {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id < 1) throw new IntakeError('linkedin_task_invalid_id');

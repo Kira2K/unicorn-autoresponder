@@ -8,8 +8,8 @@ export async function auditCompletedCycles(context: CycleContext, journal: RunJo
   if (!journal.data.clientId) throw Error('e2e_fixture_missing');
   const data = await cycleDatabase(context, journal.data.runId, journal.data.clientId).snapshot();
   assert.equal(data.tasks.length, 2); assert.equal(data.accounts.length, 4);
-  assert.equal(data.profiles.length, 2); assert.equal(data.cycles.length, 2); assert.equal(data.notices.length, 2);
-  assert.ok(data.tasks.every(t => t.status === 'выполнение подтверждено'));
+  assert.equal(data.profiles.length, 2); assert.equal(data.cycles.length, 2); assert.equal(data.notices.length, 4);
+  assert.ok(data.tasks.every(t => t.status === 'сделана экспертом'));
   assert.ok(data.notices.every(n => n.state === 'sent' && Number(n.message_id) > 0));
   const [first, second] = data.tasks;
   for (const key of ['linkedin_account_id', 'outlook_account_id']) {
@@ -36,8 +36,8 @@ export async function auditCompletedCycles(context: CycleContext, journal: RunJo
   }
   assert.deepEqual(await context.local('/api/profiles/active'), []);
   await journal.record({ step: 'final-readback', expected: 'Два цикла без дублей; оба профиля закрыты и названы кириллицей',
-    actual: 'Четыре аккаунта, два архивных; две подтверждённые заявки и две доставки. Новые реквизиты и IP отличаются; EN/RU сверены с облаком.',
-    state: 'passed', db: { accounts: 4, archivedAccounts: 2, tasks: 2, cycles: 2, notifications: 2, profiles: 2 } });
+    actual: 'Четыре аккаунта, два архивных; две подтверждённые заявки и четыре доставки. Новые реквизиты и IP отличаются; EN/RU сверены с облаком.',
+    state: 'passed', db: { accounts: 4, archivedAccounts: 2, tasks: 2, cycles: 2, notifications: 4, profiles: 2 } });
 }
 
 /** Telegram getChat is read-only. Never send a probe or fall back to a group. */

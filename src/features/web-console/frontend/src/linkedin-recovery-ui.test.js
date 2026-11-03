@@ -44,10 +44,10 @@ test('registration keeps current edits and prior access, locks completed data, a
         firstName:'',lastName:'',realLocation:'',blockedAccounts:[]
       }})
       if(new URL(route.request().url()).pathname==='/api/client/linkedin-intake')return route.fulfill({json:{
-        task:status?{id:newTask?15:14,status}:undefined,linkedinAccountId:11,hasLinkedIn:!newTask,isBanned,
+        task:status?{id:newTask?15:14,status}:undefined,linkedinAccountId:11,hasLinkedIn:!newTask||status==='сделана экспертом',isBanned,
         hadLinkedInBeforeTask:prior,previousOctoProfileIds:prior?[1]:[],
-        registrationPending:!!status&&status!=='выполнение подтверждено',
-        editLocked:['сделана экспертом','выполнение подтверждено'].includes(status),completionConfirmed:status==='выполнение подтверждено',
+        registrationPending:!!status&&status!=='сделана экспертом',
+        editLocked:['сделана экспертом'].includes(status),completionConfirmed:status==='сделана экспертом',
         url:'https://linkedin.com/in/fixture',login:'old@example.test',hasPassword:true,outlookLogin:'old@outlook.com',hasOutlookPassword:true,
         firstName:missingLatin?'Николай':'Alex',lastName:missingLatin?'Соколов':'Smith',realLocation:'Tbilisi',blockedAccounts:[{fullName:'Earlier account',country:'Georgia',company:'Previous Company',position:'Developer',blockedAt:'2026-10-01'}]
       }})
@@ -75,16 +75,13 @@ test('registration keeps current edits and prior access, locks completed data, a
       assert.equal(await page.getByRole('button',{name:'Сохранить изменения',exact:true}).isEnabled(),true)
       assert.equal(await page.getByRole('button',{name:'Получить доступ',exact:true}).count(),0,'first registration never reveals freshly prepared profiles')
     }
-    status='сделана экспертом';await visit(false,'En',false)
-    await page.getByText('Заявка обработана экспертом. Для изменения данных обратись в поддержку.',{exact:true}).waitFor()
-    assert.equal(await page.getByRole('button',{name:'Получить доступ',exact:true}).count(),0)
-    status='выполнение подтверждено'
+    status='сделана экспертом'
     await page.getByTestId('octo-profile-1').getByRole('button',{name:'Получить доступ',exact:true}).waitFor()
     await page.getByTestId('linkedin-report-ban').waitFor()
     assert.equal(await page.getByTestId('linkedin-existing-form').count(),0)
     assert.equal(await page.locator('.octo-proxy-form').count(),0)
     // Polling locks and unlocks the same application without replacing an unsaved draft.
-    prior=true;status='блок';setupPhase='provisioning'
+    prior=true;newTask=true;status='блок';setupPhase='provisioning'
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).waitFor()
     const outlookDetails=page.getByTestId('linkedin-outlook-details')
     const blockedDetails=page.getByTestId('linkedin-blocked-details')
@@ -100,20 +97,17 @@ test('registration keeps current edits and prior access, locks completed data, a
     status='не начата'
     await page.waitForTimeout(5200)
     assert.equal(await page.getByLabel('Город и страна проживания',{exact:true}).inputValue(),'Unsaved draft')
-    status='сделана экспертом'
-    await page.getByText('Заявка обработана экспертом. Для изменения данных обратись в поддержку.',{exact:true}).waitFor()
-    assert.equal(await page.getByTestId('linkedin-new-form').count(),0)
-    assert.equal(await page.getByTestId('octo-profile-1').count(),1)
-    status='блок'
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).waitFor()
     allowSave=true
-    await page.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25T10:30')
+    await page.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');await page.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');await page.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30')
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click()
     await page.getByText('Заявка обновлена',{exact:true}).waitFor()
     assert.equal(await page.getByRole('dialog').count(),0,'editing an existing task does not show a new-registration success dialog')
     assert.equal(submissions[0].scenario,'new');assert.equal(submissions[0].replacesLinkedInAccountId,undefined)
     assert.equal(writes,1)
-    writes=0;submissions.length=0;allowSave=false;status='выполнение подтверждено'
+    writes=0;submissions.length=0;allowSave=false;newTask=false;status='сделана экспертом'
+    await page.getByTestId('linkedin-report-ban').waitFor()
+    assert.equal(await page.getByTestId('linkedin-new-form').count(),0)
     for(const [dolphin,market] of [[false,'En'],[true,'En'],[true,'Ru']]){
       if(dolphin)status=''
       await visit(dolphin,market)
@@ -130,12 +124,12 @@ test('registration keeps current edits and prior access, locks completed data, a
       assert.equal(await page.getByTestId('linkedin-new-form').count(),0)
     }
     assert.equal(writes,0)
-    status='выполнение подтверждено';await visit(false,'En')
+    status='сделана экспертом';await visit(false,'En')
     await replace()
     const form=page.getByTestId('linkedin-new-form')
     const email=form.getByLabel('Логин от новой почты Outlook',{exact:true})
     await email.fill('test@example.invalid')
-    await form.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25T10:30')
+    await form.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');await page.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');await page.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30')
     await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
     const summary=form.getByTestId('linkedin-validation-error')
     await summary.waitFor()
@@ -159,7 +153,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     assert.equal(submissions[0].replacesLinkedInAccountId,11)
     assert.equal(submissions[0].outlookLogin,'replacement@outlook.com')
     assert.equal(await page.getByRole('dialog').getByText('Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.',{exact:true}).count(),1)
-    newTask=false;status='выполнение подтверждено';missingLatin=true
+    newTask=false;status='сделана экспертом';missingLatin=true
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/recovery-test?market=En`)
     await replace()
     assert.equal(await page.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).inputValue(),'')
@@ -180,10 +174,10 @@ test('registration keeps current edits and prior access, locks completed data, a
     const first=freshForm.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true})
     const dateBox=await date.boundingBox(),firstBox=await first.boundingBox()
     assert.ok(Math.abs(dateBox.y-firstBox.y)<=1,'the date and first-name inputs align despite the timezone hint')
-    await date.fill('2099-01-01T12:00')
-    assert.equal(await date.evaluate(input=>input.validationMessage),'Дата не может быть в будущем')
+    await date.fill('2099-01-01')
+    assert.equal(await date.evaluate(input=>input.validationMessage),'Дата и время регистрации не могут быть в будущем.')
     assert.equal(writes,1,'a future date is rejected before any request')
-    await date.fill('2026-10-25T10:30')
+    await date.fill('2026-10-25');await page.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');await page.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30')
     await mkdir('tmp/denis-local-qa',{recursive:true})
     await page.screenshot({path:'tmp/denis-local-qa/student-desktop.png',fullPage:true,mask:[page.locator('input[type=password]')]})
     await page.setViewportSize({width:390,height:844})

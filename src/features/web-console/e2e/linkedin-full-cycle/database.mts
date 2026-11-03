@@ -33,7 +33,7 @@ export function cycleDatabase(c:CycleContext,runId:string,clientId:number){
    profiles:(await s.query('SELECT profile_id,locale,revision,state FROM noco.octo_profiles WHERE client_id=$1 ORDER BY locale',[clientId])).rows.map(p=>({profile_id:Number(p.profile_id),locale:String(p.locale),revision:Number(p.revision),state:p.state as ManagedProfile})),
    linklab:(await s.query('SELECT * FROM noco.linklab WHERE client_id=$1',[clientId])).rows[0],
    cycles:(await s.query('SELECT * FROM noco.linkedin_account_cycles WHERE client_id=$1 ORDER BY task_id',[clientId])).rows,
-   notices:(await s.query('SELECT task_id,state,message_id FROM noco.linkedin_cycle_notifications WHERE client_id=$1 ORDER BY task_id',[clientId])).rows,
+   notices:(await s.query('SELECT task_id,recipient,chat_id,state,message_id FROM noco.linkedin_cycle_notifications WHERE client_id=$1 ORDER BY task_id',[clientId])).rows,
    proof:(await s.query('SELECT v.task_id,v.baseline_uuid,v.baseline_fingerprint,v.fingerprint,v.comparison,v.exit_ip,v.baseline_ip FROM noco.linkedin_creation_proxy v JOIN noco.linkedin_creation_task t ON t.id=v.task_id WHERE t.client_id=$1 ORDER BY t.id',[clientId])).rows
   }));},
   async profilePasswordHash(){await owned();return c.read(async s=>createHash('sha256').update(JSON.stringify((await s.query("SELECT locale,state->>'password' AS password FROM noco.octo_profiles WHERE client_id=$1 ORDER BY locale",[clientId])).rows)).digest('hex'));}

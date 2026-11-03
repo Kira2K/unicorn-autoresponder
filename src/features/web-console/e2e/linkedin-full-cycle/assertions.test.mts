@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {assertConfirmed,assertReplacement} from './assertions.mts';
-const task={id:1,source:'student_intake',linkedin_account_id:11,outlook_account_id:12,status:'выполнение подтверждено'};
+const task={id:1,source:'student_intake',linkedin_account_id:11,outlook_account_id:12,status:'сделана экспертом'};
 test('confirmation evidence rejects stale binding, repeated resets and unsent notification',()=>{
- const s={tasks:[task],linklab:{platform_account_id:11,status:'Новый',profile_filled_count:0,profile_revision:-1,blocked_at:null,profile_first_completed_at:null,new_account_url:null,crm_integration_required:true},cycles:[{}],notices:[{task_id:1,state:'sent'}]};
+ const s={tasks:[task],linklab:{platform_account_id:11,status:'Новый',profile_filled_count:0,profile_revision:-1,blocked_at:null,profile_first_completed_at:null,new_account_url:null,crm_integration_required:true},cycles:[{}],notices:[{task_id:1,recipient:'reports',state:'sent'},{task_id:1,recipient:'student',state:'sent'}]};
  assert.doesNotThrow(()=>assertConfirmed(s,1,1));
  for(const patch of [{platform_account_id:10},{profile_filled_count:1},{crm_integration_required:false}])assert.throws(()=>assertConfirmed({...s,linklab:{...s.linklab,...patch}},1,1));
  assert.throws(()=>assertConfirmed({...s,notices:[{task_id:1,state:'pending'}]},1,1));

@@ -24,7 +24,7 @@ export async function studentAccountAccess(s: SqlSession, clientId: number, acco
   if (!accountId) return {editLocked:false,completionConfirmed:false,registrationPending:false};
   const rows=(await s.query(`SELECT status FROM noco.linkedin_creation_task WHERE client_id=$1
     AND (linkedin_account_id=$2 OR outlook_account_id=$2)`,[clientId,accountId])).rows;
-  const registrationPending=rows.some(row=>row.status!=='выполнение подтверждено');
+  const registrationPending=rows.some(row=>row.status!=='сделана экспертом');
   return {editLocked:rows.some(row=>studentLocked(row.status)),registrationPending,
     completionConfirmed:rows.length>0&&!registrationPending};
 }

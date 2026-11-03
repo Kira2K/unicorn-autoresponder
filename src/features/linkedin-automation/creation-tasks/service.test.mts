@@ -55,26 +55,24 @@ test('SQL task lists use one bounded summary read rather than hydrating full cli
  assert.equal((await service.list())[0].fio,'Тест Ученик');assert.equal((await service.adminList())[0].stack,'JAVA');assert.equal(reads,2);
 });
 
-test('admin confirmation rechecks actual cloud closure for both new and legacy proxies; confirmed read-back makes no new write',async()=>{
+test('completion rechecks closure for new and legacy proxies; repeated completion performs no cloud read or status report',async()=>{
  for(const requiresNewProxy of [false,true]){
-  const f=await fixture(undefined,{assert:async()=>{},ready:async()=>true,queue:async()=>({queued:true})});
-  Object.assign(f.task,{status:'сделана экспертом',requiresNewProxy,proxyUuid:'proxy',proxyProfileId:2,proxySavedAt:new Date().toISOString()});
-  let writes=0;
-  f.store.confirm=async()=>{writes++;Object.assign(f.task,{status:'выполнение подтверждено'});return f.task;};
-  f.store.notification=async()=>({state:'pending'});
+  let reports=0;
+  const f=await fixture(async()=>{reports++;return{outcome:'sent',messageId:1}}, {assert:async()=>{},ready:async()=>true,queue:async()=>({queued:true})});
+  Object.assign(f.task,{requiresNewProxy,proxyUuid:'proxy',proxyProfileId:2,proxySavedAt:new Date().toISOString()});
+  let writes=0;f.store.status=async()=>{writes++;Object.assign(f.task,{status:'сделана экспертом'});return f.task;};
   const en=(await f.profiles.get(2))!,live=f.cloud.profiles.get(en.uuid!)!;
   live.status=1;
-  await assert.rejects(f.service.confirm(1,{version:1}),{code:'linkedin_task_close_profile_first'});
-  assert.equal(writes,0);
-  live.status=0;
-  assert.equal((await f.service.confirm(1,{version:1})).task.status,'выполнение подтверждено');
-  assert.equal(writes,1);
-  const revision=(await f.profiles.get(2))!.revision;
-  live.status=1;
-  await f.service.confirm(1,{version:1});
-  assert.equal((await f.profiles.get(2))!.revision,revision,'confirmed read-back never recaptures the proxy');
+  await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}),{code:'linkedin_task_close_profile_first'});
+  assert.equal(writes,0);live.status=0;
+  assert.equal((await f.service.status(1,{version:1,status:'сделана экспертом'})).status,'сделана экспертом');
+  assert.equal(writes,1);assert.equal(reports,0);
+  const revision=(await f.profiles.get(2))!.revision;live.status=1;
+  await f.service.status(1,{version:1,status:'сделана экспертом'});
+  assert.equal((await f.profiles.get(2))!.revision,revision);
  }
 });
+
 test('new applications cannot acquire/capture/finish using their previous proxy, including a missing validator',async()=>{
  const f=await fixture();Object.assign(f.task,{requiresNewProxy:true});
  const en=(await f.profiles.list()).find(p=>p.locale==='en')!;
@@ -133,7 +131,7 @@ test('notification failure preserves the saved status and returns a separate war
   }
 });
 
-test('expert completion reports after proxy validation and committed status, never on a refused completion',async()=>{
+test('expert completion relies on its durable two-recipient journal, without an extra status report',async()=>{
   let reports=0,committed=false;
   const f=await fixture(async event=>{
     assert.equal(committed,true);
@@ -145,7 +143,7 @@ test('expert completion reports after proxy validation and committed status, nev
   Object.assign(f.task,{proxySavedAt:new Date().toISOString(),proxyUuid:'proxy',proxyProfileId:2});
   f.store.status=async()=>{committed=true;return{...f.task,status:'сделана экспертом',version:2};};
   const task=await f.service.status(1,{version:1,status:'сделана экспертом'});
-  assert.equal(task.status,'сделана экспертом');assert.equal(reports,1);
+  assert.equal(task.status,'сделана экспертом');assert.equal(committed,true);assert.equal(reports,0);
 });
 test('task scopes EN profile, grants and account secrets; no arbitrary client/profile access',async()=>{
   const f=await fixture(),status=await f.service.profileStatus(1);

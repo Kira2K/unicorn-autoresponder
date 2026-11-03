@@ -20,7 +20,7 @@ const secrets = ref({ hasPassword: false, hasOutlookPassword: false })
 const editLocked = ref(false)
 const task = ref(null), completionConfirmed = ref(false), hasLinkedIn = ref(false), replacementId = ref(null)
 const pendingMessage = 'Мы начали создавать твой аккаунт LinkedIn. Обычно это занимает до 3 суток. Когда всё будет готово, мы тебе напишем.'
-const registrationPending = computed(() => !replacementId.value && (secrets.value.registrationPending === true || !!task.value && task.value.status !== 'выполнение подтверждено'))
+const registrationPending = computed(() => !replacementId.value && (secrets.value.registrationPending === true || !!task.value && task.value.status !== 'сделана экспертом'))
 const hadLinkedInBeforeTask = computed(() => secrets.value.hadLinkedInBeforeTask === true)
 const previousProfileTransport = {
   ...octoApi,
@@ -34,7 +34,7 @@ const previousProfileTransport = {
 const usesOcto = computed(() => !props.hasDolphin || !!task.value || completionConfirmed.value)
 const existingFormEnabled = computed(() => ['en', 'both'].includes(String(props.client.market || '').trim().toLowerCase()) && !props.hasDolphin)
 const canReportBan = computed(() => loaded.value && hasLinkedIn.value && !secrets.value.octoConnectionPending && !replacementId.value && !registrationPending.value &&
-  (!task.value || task.value.status === 'выполнение подтверждено') && (!editLocked.value || completionConfirmed.value))
+  (!task.value || task.value.status === 'сделана экспертом') && (!editLocked.value || completionConfirmed.value))
 const controller = new AbortController()
 const outlookError = ref('')
 const validationError = ref(''), outlookInput = ref(null)
@@ -45,13 +45,13 @@ const canSave = computed(() => loaded.value && (!props.hasDolphin || replacement
   (scenario.value === 'new' && (!registrationPending.value || ['не начата','блок'].includes(task.value?.status)) || !registrationPending.value && ready.value && opened.value && form.value.loggedIn))
 function updateTaskState(data) {
   task.value = data.task || null
-  completionConfirmed.value = data.completionConfirmed ?? (data.task?.status === 'выполнение подтверждено')
+  completionConfirmed.value = data.completionConfirmed ?? (data.task?.status === 'сделана экспертом')
   hasLinkedIn.value = data.hasLinkedIn ?? !!(data.url || data.login)
   secrets.value = { ...secrets.value, ...data }
-  editLocked.value = data.editLocked === true || ['сделана экспертом','выполнение подтверждено'].includes(task.value?.status)
+  editLocked.value = data.editLocked === true || ['сделана экспертом'].includes(task.value?.status)
   emit('state', { preferOcto: props.hasDolphin && (!!task.value || completionConfirmed.value) && !(registrationPending.value && hadLinkedInBeforeTask.value),
     isBanned:data.isBanned===true,linkedinAccountId:data.linkedinAccountId,outlookAccountId:data.outlookAccountId,
-    registrationPending:data.registrationPending === true || !!task.value && task.value.status !== 'выполнение подтверждено' })
+    registrationPending:data.registrationPending === true || !!task.value && task.value.status !== 'сделана экспертом' })
 }
 async function load() {
   if (loading.value) return
@@ -172,7 +172,7 @@ async function save() {
       task.value = result.task || task.value
       replacementId.value = null; hasLinkedIn.value = false
       banUndoVersion.value=null
-      completionConfirmed.value = task.value?.status === 'выполнение подтверждено'
+      completionConfirmed.value = task.value?.status === 'сделана экспертом'
       message.value = result.task ? (result.task.created ? 'Заявка успешно создана' : 'Заявка обновлена') : 'Данные сохранены. Подготавливаем профили Octo.'
       form.value.password = ''; form.value.outlookPassword = ''
       await load()
