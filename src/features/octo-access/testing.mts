@@ -111,8 +111,9 @@ export function createMockCloud(store: OctoStore, now = Date.now) {
     async proxyConnections() { return []; }, async createProxy() { throw new Error('unexpected_proxy'); },
     async attachProxy() { throw new Error('unexpected_proxy'); },
     async createProfile(input) {
-      const uuid = randomUUID().replaceAll('-', ''); calls.push('create'); passwords.set(uuid,input.password);
-      profiles.set(uuid, { ...input, uuid, has_user_password: true, status: 0, proxy: input.proxy ? { uuid: input.proxy } : null });
+      const uuid = randomUUID().replaceAll('-', ''); calls.push('create');
+      if(input.password!==undefined)passwords.set(uuid,input.password);
+      profiles.set(uuid, { ...input, uuid, has_user_password: input.password!==undefined, status: 0, proxy: input.proxy ? { uuid: input.proxy } : null });
       afterWrite?.('create'); return uuid;
     },
     async getProfile(uuid) { return structuredClone(get(uuid)); },

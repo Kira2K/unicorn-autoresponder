@@ -72,7 +72,7 @@ export interface CloudApi {
   listFolders(): Promise<Folder[]>;
   getProfile(uuid: string): Promise<Profile>;
   profileExists(uuid: string): Promise<boolean>;
-  createProfile(input: Metadata & { folder: string; password: string; proxy?: string }): Promise<string>;
+  createProfile(input: Metadata & { folder: string; password?: string; proxy?: string }): Promise<string>;
   updateProfile(uuid: string, patch: Metadata & { folder: string }): Promise<void>;
   setPassword(uuid: string, password: string): Promise<void>;
   clearPassword(uuid: string, password: string): Promise<void>;

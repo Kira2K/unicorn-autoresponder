@@ -96,7 +96,8 @@ test('bridge: early closure and unopened profiles remain protected for the full 
   for (const p of [a,b]) assert.equal((await f.cloud.api.getProfile(p.uuid!)).has_user_password,true);
   f.tick(1); await f.advance();
   for (const p of [a,b]) assert.equal((await f.store.get(p.id))!.grant!.clearMethod,'bridge');
-  assert.equal(f.cloud.calls.filter(c=>c.startsWith('clear:')||c.startsWith('protect:')).length,0);
+  assert.equal(f.cloud.calls.filter(c=>c.startsWith('clear:')).length,0);
+  assert.equal(f.cloud.calls.filter(c=>c.startsWith('protect:')).length,2);
 });
 
 test('bridge: a checkpoint change while saving the job discards only the unsent cleanup', async () => {

@@ -39,6 +39,8 @@ The bridge README describes the Render/PC setup. The PC needs no local backend.
 - `provision.mts`: private profile creation, optional En proxy reservation and naming.
   Ru uses the existing no-proxy rule. Unknown creation outcomes are reconciled using a
   persisted operation marker; they never cause blind duplicate creation.
+  New profiles are created without a profile password. Interrupted legacy protected
+  creations are adopted without rewriting their passwords or recreating their data.
 - `proxy-input.mts` / `proxy-workflow.mts`: client-owned proxy form, saved Octo proxy
   creation and verified attachment. HTTP(S), SOCKS4/5 and optional IP-change URL are
   supported. Credentials are accepted only on write, removed from operation state after
@@ -49,13 +51,16 @@ The bridge README describes the Render/PC setup. The PC needs no local backend.
 - `grant-workflow.mts`: protect, anonymize, publish, hide, then remove protection only
   after ordinary closure and complete cloud event evidence. There is no stop method
   in its cloud adapter contract.
+  The stored five-digit key is applied before sharing. Expiry hides the profile and
+  credentials; protection removal waits for ordinary closure and verified cleanup.
+  A running guest profile is never force-stopped to remove its protection.
 - `runtime.mts`: independent per-profile work, one PostgreSQL advisory-lock leader,
   durable Action Log cursor and recovery. The separate pool is a database connection
   pool, not a separate service/process. Use a direct/session-pinned PostgreSQL connection,
   not a transaction-pooling proxy, for the session advisory lock.
 - `postgres-store.mts`: short transactions, revisions and unique constraints.
   `noco.octo_clients` stores one unique five-digit plaintext password per client and
-  the private NodeMaven key/setup operation. Every owned profile has that same password,
+  the private NodeMaven key/setup operation. Every owned profile keeps that same transfer key,
   enforced by a composite foreign key. Leading zeros and existing passwords survive migration
   and protection removal. Common inventory exposes only
   `browser`, never private state/passwords. Profile-access secrets are returned only for
