@@ -10,7 +10,7 @@ test('existing LinkedIn credentials can precede Octo, but completion still requi
  assert.throws(()=>parseIntake({...account,stage:'unexpected'}),{code:'linkedin_intake_invalid'});
  assert.throws(()=>parseIntake({scenario:'new',stage:'credentials'}),{code:'linkedin_intake_invalid'});
 });
-const draft = { scenario: 'new', outlookLogin: 'test@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' };
+const draft = { scenario: 'new', outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' };
 
 test('Outlook registration cannot be in the future; a declared blocked account requires every structured field',()=>{
  const now=Date.parse('2026-10-29T00:00:00.000Z');
@@ -39,7 +39,7 @@ test('LinkedIn result validates URL separately from login and accepts email logi
 test('Outlook accepts only the exact outlook.com domain', () => {
   for (const login of ['a@gmail.com', 'a@hotmail.com', 'a@outlook.com.evil.com', 'a@sub.outlook.com', 'a@@outlook.com'])
     assert.throws(() => parseIntake({ ...draft, outlookLogin: login }), { code: 'linkedin_intake_outlook_required' });
-  assert.equal(parseIntake({ ...draft, outlookLogin: 'a@OUTLOOK.COM' }).outlookLogin, 'a@OUTLOOK.COM');
+  assert.equal(parseIntake({ ...draft, outlookLogin: 'alex.smith@OUTLOOK.COM' }).outlookLogin, 'alex.smith@OUTLOOK.COM');
 });
 test('Outlook registration timestamp validates calendar dates and requires UTC; omission remains compatible', () => {
   assert.equal(parseIntake(draft).outlookRegisteredAt, undefined);

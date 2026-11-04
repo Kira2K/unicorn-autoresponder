@@ -1,5 +1,20 @@
 # LinkedIn intake in Console
 
+## Outlook address and Latin identity
+
+Every save of a new-registration Outlook form (including open-task edits and replacements)
+requires the local part of its `@outlook.com` address to contain separate, non-overlapping
+continuous fragments from both submitted Latin name fields, in either order and case.
+Compound names are split on spaces, hyphens and apostrophes; any one part of each field
+is sufficient. Email punctuation is not stripped, so `ivanpetrov99` is valid while
+`i.v.a.n.petrov` is not. UI and backend use the same validator; a mismatch returns HTTP 400
+`linkedin_intake_outlook_name_mismatch` before writes or provisioning. Previously saved
+addresses must comply when the form is next saved; no data migration or automatic rewrite
+is performed. Existing-LinkedIn connection is unaffected.
+
+Open-status and existing-LinkedIn reports mention `@juliafeels fyi`; the final completion
+report and student notification remain without mentions.
+
 ## Account-level CRM synchronization flag
 
 `noco.platform_accounts."isUnsyncedWithCRM"` is a server-owned boolean, independent of

@@ -40,7 +40,7 @@ import { createCreationTaskStore } from '../../../linkedin-automation/creation-t
 import { createCreationTaskService } from '../../../linkedin-automation/creation-tasks/service.mts';
 import { createTaskProxyCapture } from '../../../linkedin-automation/creation-tasks/proxy-capture.mts';
 import { guardAccount } from '../../../linkedin-automation/creation-tasks/account-guard.mts';
-import { createTaskStatusReporter } from '../../../linkedin-automation/creation-tasks/status-report.mts';
+import { createTaskStatusReporter,DEFAULT_NOTIFICATION_MENTION } from '../../../linkedin-automation/creation-tasks/status-report.mts';
 import {taskProxyStore} from '../../../linkedin-automation/creation-tasks/proxy-store.mts';
 import {createNewTaskProxy} from '../../../linkedin-automation/creation-tasks/new-proxy-service.mts';
 import {cycleNotificationRuntime,cycleNotificationStore,deliverCycleNotification} from '../../../linkedin-automation/creation-tasks/cycle-notifications.mts';
@@ -134,7 +134,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
         return taskTelegram.sendOne(input);
       };
-      const notificationMention='@KiraSamsonova';
+      const notificationMention=DEFAULT_NOTIFICATION_MENTION;
       existingNotices=cycleNotificationRuntime(()=>deliverExistingNotification({store:existingNotificationStore(pool,config.database),mention:notificationMention,
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
       cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database),

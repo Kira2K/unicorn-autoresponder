@@ -168,7 +168,7 @@ try {
     await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
     await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
     const outlook = form.getByLabel('Логин от новой почты Outlook', { exact: true });
-    await outlook.fill('test@outlook.com');
+    await outlook.fill('alex.test@outlook.com');
     await submit.click();
     assert.equal(saved.has(id), false, 'missing registration time prevents submission');
     assert.equal(await registration.getAttribute('type'), 'date');
@@ -185,7 +185,7 @@ try {
     await form.getByRole('alert').waitFor();
     await submit.click();
     assert.equal(saved.has(id), false, 'non-Outlook address cannot be saved');
-    await outlook.fill('test@outlook.com');
+    await outlook.fill('alex.test@outlook.com');
     await instructionPage.route('**/api/client/linkedin-intake', async route => {
       if (route.request().method() === 'PUT') await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"linkedin_intake_unavailable"}' });
       else await route.continue();
@@ -226,7 +226,7 @@ try {
       await instructionCard.getByTestId('linkedin-report-ban').click();
       await instructionPage.getByRole('dialog').getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
       const replacement=instructionCard.getByTestId('linkedin-new-form');
-      await replacement.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('second-cycle@outlook.com');
+      await replacement.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('alex.test.second-cycle@outlook.com');
       await replacement.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('synthetic-outlook');
       await replacement.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');
       await replacement.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');
@@ -317,7 +317,7 @@ try {
   await newCard.getByTestId('linkedin-new-form').waitFor();
   assert.equal(await newCard.locator('.scenario-buttons').count(),0);
   const form = newCard.getByTestId('linkedin-new-form');
-  await form.getByLabel('Логин от новой почты Outlook', { exact: true }).fill('new@outlook.com');
+  await form.getByLabel('Логин от новой почты Outlook', { exact: true }).fill('alex.test.new@outlook.com');
   await form.getByLabel('Пароль от новой почты Outlook', { exact: true }).fill('outlook-secret');
   await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
   await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
@@ -401,7 +401,7 @@ try {
   await recovery.getByTestId('linkedin-report-ban').click();
   await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
   await recoveryForm.waitFor();
-  await recoveryForm.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('replacement@outlook.com');
+  await recoveryForm.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('alex.test.replacement@outlook.com');
   await recoveryForm.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('replacement-fixture');
   await recoveryForm.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');
   await recoveryForm.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');

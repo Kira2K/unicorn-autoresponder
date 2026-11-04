@@ -6,7 +6,7 @@ import Dialog from 'primevue/dialog'
 import OutlookRegistrationTime from './OutlookRegistrationTime.vue'
 import { octoApi } from '../octo-api.js'
 import { intakeRequest, intakeBanRequest, intakeScenario, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
-import { isOutlookLogin, isLatinIntakeName, outlookLoginError } from '../../../../linkedin-automation/console-intake/contracts.mts'
+import { isOutlookLogin, isLatinIntakeName, outlookLoginError, outlookLoginMatchesNames, outlookNameError } from '../../../../linkedin-automation/console-intake/contracts.mts'
 const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false } })
 const registrationDate = ref(''), showSavedDialog = ref(false)
 const showBanDialog=ref(false),reportingBan=ref(false),hasBlockedAccounts=ref(false)
@@ -36,7 +36,7 @@ const existingFormEnabled = computed(() => ['en', 'both'].includes(String(props.
 const canReportBan = computed(() => loaded.value && hasLinkedIn.value && !secrets.value.octoConnectionPending && !replacementId.value && !registrationPending.value &&
   (!task.value || task.value.status === 'сделана экспертом') && (!editLocked.value || completionConfirmed.value))
 const controller = new AbortController()
-const outlookError = ref('')
+const outlookError = ref(''), outlookValidated = ref(false)
 const validationError = ref(''), outlookInput = ref(null)
 let confirmationTimer, checkingConfirmation = false
 const ready = computed(() => infrastructureReady(status.value))
@@ -74,7 +74,7 @@ async function load() {
 function resetConfirmation() { form.value.loggedIn = false; opened.value = false }
 watch(() => [form.value.url, form.value.login, form.value.password], () => { form.value.loggedIn = false })
 watch(() => infrastructureSignature(status.value), resetConfirmation)
-watch(scenario, () => { resetConfirmation(); form.value.password = ''; form.value.outlookPassword = ''; message.value = ''; validationError.value = ''; outlookError.value = '' })
+watch(scenario, () => { resetConfirmation(); form.value.password = ''; form.value.outlookPassword = ''; message.value = ''; validationError.value = ''; outlookError.value = ''; outlookValidated.value = false })
 function selectScenario(value) { if (!registrationPending.value) scenario.value = value }
 async function checkConfirmation() {
   if ((!editLocked.value && !task.value && !secrets.value.registrationPending) || replacementId.value || saving.value || loading.value || document.hidden || checkingConfirmation) return
@@ -130,8 +130,12 @@ function beginReplacement() {
   showBanDialog.value=false
 }
 function validateOutlook() {
-  outlookError.value = isOutlookLogin(form.value.outlookLogin) ? '' : outlookLoginError
+  outlookValidated.value=true
+  const {outlookLogin,firstName,lastName}=form.value
+  outlookError.value = !isOutlookLogin(outlookLogin) ? outlookLoginError
+    : isLatinIntakeName(firstName.trim())&&isLatinIntakeName(lastName.trim())&&!outlookLoginMatchesNames(outlookLogin,firstName,lastName) ? outlookNameError : ''
 }
+watch(()=>[form.value.outlookLogin,form.value.firstName,form.value.lastName],()=>{if(outlookValidated.value)validateOutlook()})
 function revealInput(input) {
   for (let parent = input?.parentElement; parent; parent = parent.parentElement)
     if (parent.tagName === 'DETAILS') parent.open = true
@@ -185,6 +189,10 @@ async function save() {
     form.value.password = ''; form.value.outlookPassword = ''; form.value.loggedIn = false; emit('saved')
   } catch (error) {
     if (error.name === 'AbortError') return
+    if(error.message==='linkedin_intake_outlook_name_mismatch'){
+      outlookError.value=outlookNameError;validationError.value=`Данные не сохранены. ${outlookNameError}`
+      revealInput(outlookInput.value);return
+    }
     if(error.message==='linkedin_intake_outlook_registration_future'){message.value='Дата не может быть в будущем';return}
     if(error.message==='linkedin_intake_blocked_required'){message.value='Заполни все поля для каждого заблокированного аккаунта.';return}
     if(error.message==='octo_client_data_required'){
@@ -246,7 +254,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
           <div class="intake-fields">
         <details open data-testid="outlook-instructions"><summary>Инструкция по созданию почты Outlook</summary><ol>
           <li>Создай новую почту на outlook.com с телефона через мобильный интернет. VPN выключи, твоя локация не имеет значения. Если ты в РФ, оставь VPN включенным.</li>
-          <li>Адрес — имя.фамилия латиницей. Если занят — добавь цифры.</li>
+          <li>Адрес — <strong>имя.фамилия латиницей</strong>. Если занят — добавь цифры.</li>
           <li>Номер телефона к почте привязывать не нужно.</li>
           <li>Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.</li>
           <li>Двухфакторку не ставь.</li>

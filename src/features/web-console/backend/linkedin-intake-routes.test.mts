@@ -2,8 +2,29 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import type { LinkedInIntakeService } from '../../linkedin-automation/console-intake/service.mts';
+import {createLinkedInIntakeService} from '../../linkedin-automation/console-intake/service.mts';
+import {mockClient} from '../../octo-access/testing.mts';
 const require = createRequire(import.meta.url), express = require('express') as typeof import('express');
 const { registerLinkedInIntakeRoutes } = require('./linkedin-intake-routes.ts') as typeof import('./linkedin-intake-routes.ts');
+
+test('direct API rejects mismatched Outlook names before any storage or Octo work, including repeated and replacement saves',async()=>{
+ let writes=0,clientReads=0;
+ const service=createLinkedInIntakeService({allowed:()=>true,hasDolphin:async()=>false,
+  getClient:async id=>{clientReads++;return{...mockClient(id),market:'En'};},
+  store:{load:async()=>({}) as any,save:async()=>{writes++;return{saved:true,linkedinAccountId:11};}}});
+ const app=express();app.use(express.json());registerLinkedInIntakeRoutes(app,(req:any,_res,next)=>{req.webSession={role:'client',clientId:7};next();},service);
+ const server=app.listen(0,'127.0.0.1');await new Promise<void>(done=>server.once('listening',done));
+ const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/api/client/linkedin-intake`;
+ const draft={scenario:'new',firstName:'Ivan',lastName:'Petrov',realLocation:'Tbilisi',outlookLogin:'legacy@outlook.com',outlookPassword:'fixture',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
+ try{
+  const put=(body:unknown)=>fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  for(const body of[draft,draft,{...draft,replacesLinkedInAccountId:11}]){
+   const r=await put(body);assert.equal(r.status,400);assert.deepEqual(await r.json(),{error:'linkedin_intake_outlook_name_mismatch'});
+  }
+  assert.equal(writes,0);assert.equal(clientReads,0);
+  assert.equal((await put({...draft,outlookLogin:'petrov.ivan99@outlook.com'})).status,200);assert.equal(writes,1);
+ }finally{await new Promise<void>(done=>server.close(()=>done()));}
+});
 
 test('ban cancellation is client-only, owner-scoped and preserves safe concurrency/uncertainty errors',async()=>{
  let role='client',error:unknown,args:unknown[]=[];

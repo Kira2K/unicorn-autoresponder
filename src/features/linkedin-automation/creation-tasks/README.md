@@ -39,7 +39,7 @@ required, the card explains why access remains unavailable while the proxy form 
 ## Notifications
 
 Real transitions between open statuses through the contractor endpoint retain the existing post-commit
-reporter, manager destination and configured mention (currently `@KiraSamsonova`). Same-status saves,
+reporter, manager destination and configured mention (currently `@juliafeels`). Same-status saves,
 draft/proxy saves, initial creation and direct SQL changes do not invoke this reporter.
 
 Completion does **not** invoke that reporter. Its transaction creates two independently claimable rows

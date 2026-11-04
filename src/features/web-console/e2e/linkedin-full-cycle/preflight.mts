@@ -38,7 +38,7 @@ export async function cyclePreflight(c:CycleContext){
  await check('notification-recipient','Отчёты об открытых статусах сохраняют согласованный тег; завершение использует отдельный журнал',async()=>{
   const {ADMIN_EMAIL,ADMIN_PASSWORD}=createRequire(import.meta.url)('../../backend/app.ts');
   return verifyNotificationRecipient({url:consoleUrl,email:ADMIN_EMAIL,password:ADMIN_PASSWORD,
-    expectedMention:c.env.LINKEDIN_E2E_NOTIFY_MENTION||'@KiraSamsonova'});
+    expectedMention:c.env.LINKEDIN_E2E_NOTIFY_MENTION||'@juliafeels'});
  });
  await check('guest_rights','Гость видит только выделенную папку и не может менять профили/прокси',async()=>{
   await c.cloud.validateGuest(c.vars.OCTO_GUEST_EMAIL!,c.vars.OCTO_GUEST_FOLDER_UUID!);return{validated:true};

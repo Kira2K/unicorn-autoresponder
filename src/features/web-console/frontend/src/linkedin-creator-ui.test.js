@@ -108,20 +108,21 @@ test('creator completion checklist explains missing saved data and restores prox
     await page.waitForFunction(() => !document.querySelector('select[aria-label="Статус заявки"] option:last-child').disabled)
     assert.match(await proxy.textContent(), /Выполнено/)
     assert.equal(captures, 1, 'reopening must use the saved receipt without requiring another capture')
-    await page.getByRole('combobox', { name: 'Статус заявки', exact: true }).selectOption('сделана экспертом')
+    // Open-status notices remain separate; expert completion now has its own final report.
+    await page.getByRole('combobox', { name: 'Статус заявки', exact: true }).selectOption('блок')
     await page.getByRole('button', { name: 'Сохранить статус', exact: true }).click()
     await page.getByText('Статус сохранён. Уведомление отправлено в менеджерский Telegram-чат.', { exact: true }).waitFor()
     assert.equal(statusWrites, 1)
     notification = { outcome: 'failed', code: 'telegram_403' }
-    await page.getByRole('combobox', { name: 'Статус заявки', exact: true }).selectOption('блок')
-    await page.getByRole('button', { name: 'Сохранить статус', exact: true }).click()
-    await page.getByText('Статус сохранён. Не удалось отправить уведомление в менеджерский Telegram-чат.', { exact: true }).waitFor()
-    assert.equal(task.status, 'блок')
-    notification = { outcome: 'uncertain', code: 'transport' }
     await page.getByRole('combobox', { name: 'Статус заявки', exact: true }).selectOption('не начата')
     await page.getByRole('button', { name: 'Сохранить статус', exact: true }).click()
-    await page.getByText('Статус сохранён. Подтверждение отправки уведомления в Telegram не получено.', { exact: true }).waitFor()
+    await page.getByText('Статус сохранён. Не удалось отправить уведомление в менеджерский Telegram-чат.', { exact: true }).waitFor()
     assert.equal(task.status, 'не начата')
+    notification = { outcome: 'uncertain', code: 'transport' }
+    await page.getByRole('combobox', { name: 'Статус заявки', exact: true }).selectOption('блок')
+    await page.getByRole('button', { name: 'Сохранить статус', exact: true }).click()
+    await page.getByText('Статус сохранён. Подтверждение отправки уведомления в Telegram не получено.', { exact: true }).waitFor()
+    assert.equal(task.status, 'блок')
 
     task = { ...task, status: 'не начата' }
     intake = { ...intake, url: '', login: '', hasPassword: false }
