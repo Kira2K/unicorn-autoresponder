@@ -34,6 +34,23 @@ export const sameBlockedAccount = (left:BlockedAccount,right:BlockedAccount) => 
 export const isOutlookLogin = (value: unknown) => /^[^@\s]+@outlook\.com$/i.test(text(value));
 export const outlookLoginError = 'Укажите почту с окончанием @outlook.com, например name@outlook.com.';
 export const isLatinIntakeName = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z][A-Za-z '\-]*$/.test(value);
+export const outlookNameError = 'В адресе до @ должны присутствовать имя и фамилия из полей ниже — целиком, в любом порядке. Для составных имени и фамилии достаточно одной части каждого.';
+/** Two non-overlapping, continuous fragments; punctuation in the email is never removed. */
+export function outlookLoginMatchesNames(login:unknown,firstName:unknown,lastName:unknown):boolean {
+  const first=text(firstName),last=text(lastName);
+  if(!isOutlookLogin(login)||!isLatinIntakeName(first)||!isLatinIntakeName(last))return false;
+  const local=text(login).slice(0,text(login).indexOf('@')).toLowerCase();
+  const parts=(name:string)=>[...new Set(name.toLowerCase().split(/[ '\-]+/).filter(Boolean))];
+  let earliestFirstEnd=Infinity,latestFirstStart=-1;
+  for(const part of parts(first)){
+    const start=local.indexOf(part);
+    if(start>=0){earliestFirstEnd=Math.min(earliestFirstEnd,start+part.length);latestFirstStart=Math.max(latestFirstStart,local.lastIndexOf(part));}
+  }
+  return parts(last).some(part=>{
+    const start=local.indexOf(part);
+    return start>=0&&(local.lastIndexOf(part)>=earliestFirstEnd||start+part.length<=latestFirstStart);
+  });
+}
 function registrationTime(value: unknown,now:number): string | undefined {
   if (value === undefined || value === '') return undefined;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ||
@@ -99,6 +116,8 @@ export function parseIntake(value: unknown,now=Date.now()): LinkedInIntake {
     if (!isOutlookLogin(data.outlookLogin)) throw new IntakeError('linkedin_intake_outlook_required');
     if (![data.firstName, data.lastName].every(isLatinIntakeName) || !data.realLocation)
       throw new IntakeError('linkedin_intake_identity_required');
+    if(!outlookLoginMatchesNames(data.outlookLogin,data.firstName,data.lastName))
+      throw new IntakeError('linkedin_intake_outlook_name_mismatch');
   }
   const outlookRegisteredAt = raw.scenario === 'new' ? registrationTime(raw.outlookRegisteredAt,now) : undefined;
   const blockedAccounts=normalizeBlockedAccounts(raw.blockedAccounts??[]);

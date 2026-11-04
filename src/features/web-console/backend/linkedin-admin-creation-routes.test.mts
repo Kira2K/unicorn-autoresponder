@@ -4,7 +4,7 @@ const require=createRequire(import.meta.url),express=require('express') as typeo
 const {registerAdminCreationTaskRoutes}=require('./linkedin-admin-creation-routes.ts') as typeof import('./linkedin-admin-creation-routes.ts');
 test('admin history is read-only; the separate confirmation endpoint is absent for every role',async()=>{
  let role='client',error:unknown;
- const service={notificationConfig:()=>({notificationMention:'@KiraSamsonova'}),adminList:async()=>{
+ const service={notificationConfig:()=>({notificationMention:'@juliafeels'}),adminList:async()=>{
   if(error)throw error;return[{id:1,status:'сделана экспертом'}];},adminDetail:async()=>({task:{id:1},notification:{deliveries:[]}})} as unknown as CreationTaskService;
  const app=express();app.use(express.json());
  registerAdminCreationTaskRoutes(app,(req:any,_res,next)=>{req.webSession={role};next();},service);

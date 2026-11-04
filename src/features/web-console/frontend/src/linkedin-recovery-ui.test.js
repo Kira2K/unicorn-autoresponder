@@ -25,7 +25,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     const page=await browser.newPage();page.setDefaultTimeout(10000)
     const errors=[];page.on('pageerror',error=>errors.push(error.message))
     let status='сделана экспертом',writes=0,allowSave=false,fresh=false,prior=false
-    let newTask=false,missingLatin=false,setupPhase='complete',isBanned=false,banReports=0
+    let newTask=false,missingLatin=false,setupPhase='complete',isBanned=false,banReports=0,serverMismatch=false
     const submissions=[]
     await page.route('**/api/**',async route=>{
       if(new URL(route.request().url()).pathname==='/api/client/linkedin-intake/ban'){
@@ -33,6 +33,7 @@ test('registration keeps current edits and prior access, locks completed data, a
         return route.fulfill({json:{reported:true,isBanned:true,linkedinAccountId:11}})
       }
       if(route.request().method()!=='GET'){
+        if(serverMismatch)return route.fulfill({status:400,json:{error:'linkedin_intake_outlook_name_mismatch'}})
         writes++;assert.ok(allowSave,'opening/cancelling a replacement must not create an application')
         submissions.push(route.request().postDataJSON())
         const created=!!route.request().postDataJSON().replacesLinkedInAccountId
@@ -48,7 +49,7 @@ test('registration keeps current edits and prior access, locks completed data, a
         hadLinkedInBeforeTask:prior,previousOctoProfileIds:prior?[1]:[],
         registrationPending:!!status&&status!=='сделана экспертом',
         editLocked:['сделана экспертом'].includes(status),completionConfirmed:status==='сделана экспертом',
-        url:'https://linkedin.com/in/fixture',login:'old@example.test',hasPassword:true,outlookLogin:'old@outlook.com',hasOutlookPassword:true,
+        url:'https://linkedin.com/in/fixture',login:'old@example.test',hasPassword:true,outlookLogin:'alex.smith.old@outlook.com',hasOutlookPassword:true,
         firstName:missingLatin?'Николай':'Alex',lastName:missingLatin?'Соколов':'Smith',realLocation:'Tbilisi',blockedAccounts:[{fullName:'Earlier account',country:'Georgia',company:'Previous Company',position:'Developer',blockedAt:'2026-10-01'}]
       }})
       return route.fulfill({json:{profiles:[{id:1,locale:'en',title:'Existing EN',phase:'ready',canAcquire:true,canEditProxy:true,proxy:{configured:true,type:'socks5',host:'proxy.example.test',port:1080,credentialsLoaded:true}},
@@ -100,6 +101,27 @@ test('registration keeps current edits and prior access, locks completed data, a
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).waitFor()
     allowSave=true
     await page.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');await page.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');await page.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30')
+    const outlook=page.getByLabel('Логин от новой почты Outlook',{exact:true})
+    const latinFirst=page.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true})
+    const latinLast=page.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true})
+    const nameError=page.getByText('В адресе до @ должны присутствовать имя и фамилия из полей ниже — целиком, в любом порядке. Для составных имени и фамилии достаточно одной части каждого.',{exact:true})
+    assert.equal(await page.getByTestId('outlook-instructions').locator('strong').textContent(),'имя.фамилия латиницей')
+    await outlook.fill('legacy@outlook.com');await outlook.blur();await nameError.waitFor()
+    await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click()
+    assert.equal(writes,0,'unchanged legacy Outlook must meet the rule on every save')
+    assert.equal(await outlook.evaluate(input=>document.activeElement===input),true)
+    await outlook.fill('SMITHalex99@outlook.com');await nameError.waitFor({state:'hidden'})
+    await latinFirst.fill('Alexandre');await nameError.waitFor();await latinFirst.fill('Alex');await nameError.waitFor({state:'hidden'})
+    await outlook.fill('a.l.e.x.smith@outlook.com');await nameError.waitFor()
+    await latinFirst.fill('Anna-Maria');await latinLast.fill('Van der Berg');await outlook.fill('maria.berg@outlook.com');await nameError.waitFor({state:'hidden'})
+    await latinFirst.fill('Ivan');await latinLast.fill('Ivanov');await outlook.fill('ivanov@outlook.com');await nameError.waitFor()
+    await outlook.fill('ivanovivan@outlook.com');await nameError.waitFor({state:'hidden'})
+    await latinFirst.fill('Alex');await latinLast.fill('Smith');await outlook.fill('alex.smith@outlook.com');await nameError.waitFor({state:'hidden'})
+    serverMismatch=true
+    await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click();await nameError.waitFor()
+    assert.equal(writes,0,'a backend validation error does not become a successful save')
+    assert.equal(await page.getByLabel('Город и страна проживания',{exact:true}).inputValue(),'Unsaved draft')
+    serverMismatch=false;await outlook.fill('alex.smith.99@outlook.com');await nameError.waitFor({state:'hidden'})
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click()
     await page.getByText('Заявка обновлена',{exact:true}).waitFor()
     assert.equal(await page.getByRole('dialog').count(),0,'editing an existing task does not show a new-registration success dialog')
@@ -144,14 +166,14 @@ test('registration keeps current edits and prior access, locks completed data, a
     assert.equal(await form.getByTestId('linkedin-outlook-details').isVisible(),true,'invalid fields remain visible without an outer accordion')
     assert.equal(await form.getByLabel('Пароль от новой почты Outlook',{exact:true}).inputValue(),'fixture-password','collapsing sections preserves the draft')
     assert.equal(writes,0,'invalid Outlook must not send a save request')
-    await email.fill('replacement@outlook.com')
+    await email.fill('alex.smith.replacement@outlook.com')
     assert.equal(await summary.count(),0,'correcting the email clears the stale error')
     allowSave=true
     await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
     await page.getByRole('dialog').waitFor()
     assert.equal(writes,1)
     assert.equal(submissions[0].replacesLinkedInAccountId,11)
-    assert.equal(submissions[0].outlookLogin,'replacement@outlook.com')
+    assert.equal(submissions[0].outlookLogin,'alex.smith.replacement@outlook.com')
     assert.equal(await page.getByRole('dialog').getByText('Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.',{exact:true}).count(),1)
     newTask=false;status='сделана экспертом';missingLatin=true
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/recovery-test?market=En`)

@@ -7,7 +7,7 @@ export async function submitCycleIntake(page:Page,journal:RunJournal,cycle:numbe
  const form=workflow.getByTestId('linkedin-new-form');await form.waitFor();
  await form.getByTestId('linkedin-outlook-details').waitFor();
  assert.equal(await form.getByLabel('Логин от новой почты Outlook',{exact:true}).inputValue(),'');
- await form.getByLabel('Логин от новой почты Outlook',{exact:true}).fill(`e2e-${journal.data.runId}-${cycle}@outlook.com`);
+ await form.getByLabel('Логин от новой почты Outlook',{exact:true}).fill(`pavel.testov-e2e-${journal.data.runId}-${cycle}@outlook.com`);
  await form.getByRole('button',{name:cycle===1?'Сохранить и подготовить Octo':'Сохранить и подготовить Octo',exact:true}).click();
  await form.getByTestId('linkedin-validation-error').waitFor();
  await form.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill(`SYNTHETIC-${journal.data.runId}-${cycle}`);

@@ -5,7 +5,7 @@ import type { SqlPool } from '../../../integrations/postgres/contracts.mts';
 import { createLinkedInIntakeStore } from './postgres-store.mts';
 import { parseIntake } from './contracts.mts';
 import { tableIds } from '../../web-console/backend/postgres/tables.mts';
-const input = () => parseIntake({ scenario: 'new', outlookLogin: 'alex@outlook.com', outlookPassword: 'mail-secret',
+const input = () => parseIntake({ scenario: 'new', outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'mail-secret',
   firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', blockedAccounts: [{ fullName: 'Old Alex' }, { country: 'UK' }] });
 function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:number)=>Promise<unknown>) {
   const state: { accounts: Record<string, unknown>[]; client?: Record<string, unknown>; profiles: Record<string, unknown>[]; tasks: Record<string,unknown>[] } = { accounts: [], profiles: [], tasks: [], client: undefined };
