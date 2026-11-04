@@ -46,6 +46,7 @@ import {createNewTaskProxy} from '../../../linkedin-automation/creation-tasks/ne
 import {cycleNotificationRuntime,cycleNotificationStore,deliverCycleNotification} from '../../../linkedin-automation/creation-tasks/cycle-notifications.mts';
 import {existingNotificationStore,deliverExistingNotification} from '../../../linkedin-automation/console-intake/existing-notifications.mts';
 import type {SendOneInput} from '../../../../integrations/telegram/types.ts';
+import {createBridgeErrorReporter} from '../../../octo-access/bridge/error-reports.mts';
 import { createRequire } from 'node:module';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
@@ -102,7 +103,14 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
       const api = createCloudApi(env.OCTO_API_TOKEN!);
       const proxyConnectivity = createProxyConnectivityCheck();
+      let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
+      const sendTaskNotice=(input:SendOneInput)=>{
+        taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
+          typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
+        return taskTelegram.sendOne(input);
+      };
       octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig, allowLegacyChecks: false,
+        reportBridgeIncident:createBridgeErrorReporter({store:octoStore,client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),
         token: env.OCTO_API_TOKEN!, getClient: id => options.repository.getClientById(id),
         onboarding: {
           manualCheck: proxyConnectivity,
@@ -128,12 +136,6 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
       const tasks = createCreationTaskStore(pool,config.database,!!linklab,crmCommands?.replacement);
       await tasks.checkSchema();
-      let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
-      const sendTaskNotice=(input:SendOneInput)=>{
-        taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
-          typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
-        return taskTelegram.sendOne(input);
-      };
       const notificationMention=DEFAULT_NOTIFICATION_MENTION;
       existingNotices=cycleNotificationRuntime(()=>deliverExistingNotification({store:existingNotificationStore(pool,config.database),mention:notificationMention,
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
@@ -156,7 +158,8 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         }}),
         nodeMavenKey: () => env.NODEMAVEN_API_KEY || '', reportStatusChange,notificationMention });
       if (bridgeConfig) octoBridge = bridgeRoutes(createBridgeBroker({ store: octoStore, api, config: octoConfig,
-        bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig);
+        bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig,
+        event=>console.error(JSON.stringify(event)));
     }
     return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),
       ...(linkedinCreator ? { linkedinCreator, linkedinCreatorAuth: { login: env.LINKEDIN_CREATOR_LOGIN || '', password: env.LINKEDIN_CREATOR_PASSWORD || '' } } : {}) }, close, octoBridge, octoControl,

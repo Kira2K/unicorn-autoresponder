@@ -29,7 +29,7 @@ test('backend restart retains authorization and accepts a replayed success; disa
   await advanceGrant((await disk.store.get(p.id))!,{...deps(),passwordBridge:undefined});
   assert.equal((await disk.store.get(p.id))!.grant!.phase,'awaiting_close');
   broker=createBridgeBroker({...deps(),bridge,checkpoint:async()=>0});
-  await assert.rejects(broker.authorize(device,task.id),{code:'octo_bridge_already_authorized'});
+  await assert.rejects(broker.authorize(device,task.id),{code:'octo_bridge_task_not_ready'});
   await broker.result(device,task.id,{state:'succeeded'});await broker.result(device,task.id,{state:'succeeded'});
   await advanceGrant((await disk.store.get(p.id))!,deps());
   assert.equal((await disk.store.get(p.id))!.grant!.phase,'complete');

@@ -1,11 +1,23 @@
 import { createRequire } from 'node:module';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual,randomUUID } from 'node:crypto';
 import type { createBridgeBroker } from './broker.mts';
 import type { BridgeConfig } from './config.mts';
 const express = createRequire(import.meta.url)('express') as typeof import('express');
 export const bridgePath = '/internal/octo-bridge/v1';
-export function bridgeRoutes(broker: ReturnType<typeof createBridgeBroker>, config: BridgeConfig) {
+export function bridgeRoutes(broker: ReturnType<typeof createBridgeBroker>, config: BridgeConfig,
+  log:(event:Record<string,unknown>)=>void=()=>{}) {
   const router = express.Router(), hash = (s: string) => createHash('sha256').update(s).digest();
+  router.use((req,res,next)=>{
+    const supplied=req.get('x-octo-request-id')??'',requestId=/^[a-f0-9-]{36}$/.test(supplied)?supplied:randomUUID(),started=Date.now();
+    const operation=['/health','/poll','/authorize','/result'].includes(req.path)?req.path.slice(1):'invalid';
+    res.set('X-Octo-Request-Id',requestId);
+    res.once('finish',()=>{
+      if(res.statusCode<400&&['health','poll'].includes(operation))return;
+      const id=req.body?.id,grantId=typeof id==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(id)?id:undefined;
+      try{log({feature:'octo_bridge',target:'server',operation,method:req.method==='GET'?'GET':'POST',requestId,grantId,at:Date.now(),durationMs:Date.now()-started,
+        httpStatus:res.statusCode,responseType:'json',outcome:res.locals.bridgeCode??(res.statusCode<400?'ok':'request_refused')});}catch{}
+    });next();
+  });
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
     const auth = req.get('authorization') ?? '';
@@ -36,8 +48,9 @@ export function bridgeRoutes(broker: ReturnType<typeof createBridgeBroker>, conf
   });
   router.use(((error, _req, res, _next) => {
     const e = error as { code?: string; status?: number };
+    res.locals.bridgeCode=/^(octo_bridge_|octo_event_|octo_force_|octo_stale_)[a-z0-9_]+$/.test(e.code??'')?e.code:'octo_bridge_unavailable';
     res.status(Number.isInteger(e.status) && e.status! >= 400 && e.status! <= 599 ? e.status! : 503)
-      .json({ error: /^(octo_bridge_|octo_event_|octo_force_|octo_stale_)[a-z0-9_]+$/.test(e.code ?? '') ? e.code : 'octo_bridge_unavailable' });
+      .json({ error: res.locals.bridgeCode });
   }) as import('express').ErrorRequestHandler);
   return router;
 }

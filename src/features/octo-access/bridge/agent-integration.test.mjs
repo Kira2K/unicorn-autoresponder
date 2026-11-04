@@ -24,10 +24,11 @@ test('real HTTP bridge with durable PC state: two clients, three cycles, restart
  const server=app.listen(0,'127.0.0.1');await new Promise(done=>server.once('listening',done));
  const backendUrl=`http://127.0.0.1:${server.address().port}`,root=await mkdtemp(join(tmpdir(),'octo-bridge-http-'));
  const agentConfig={backendUrl,bridgeId:bridge.id,ownerEmail:bridge.ownerEmail,secret:bridge.secret,allowedProfileUuids:profiles.map(p=>p.uuid)};
- let journal=await openJournal(join(root,'state.json'),agentConfig,'fixture-machine'),deletes=0,lostReceipt=false;
+ let journal=await openJournal(join(root,'state.json'),agentConfig,'fixture-machine'),deletes=0,lostReceipt=false,authorizationFault;
  const fetchImpl=async(input,init)=>{
   const u=new URL(String(input));
   if(u.origin===backendUrl){
+   if(u.pathname.endsWith('/authorize')&&authorizationFault){const kind=authorizationFault;authorizationFault=undefined;if(kind==='after')await fetch(input,init);return new Response('<html>restarting</html>',{status:503,headers:{'content-type':'text/html'}});}
    if(u.pathname.endsWith('/result')&&lostReceipt){lostReceipt=false;await fetch(input,init);throw Error('lost receipt ack');}
    return fetch(input,init);
   }
@@ -52,7 +53,9 @@ test('real HTTP bridge with durable PC state: two clients, three cycles, restart
    await agent.step();assert.equal(deletes,cycle*2);
    await cloud.stop(a.uuid);await advance();time+=1000;await advance();
    if(cycle===0)lostReceipt=true;
+   else authorizationFault=cycle===1?'after':'before';
    await agent.step().catch(()=>{});
+   if(cycle>0){assert.equal(deletes,cycle*2);const entry=Object.values(journal.data.entries).find(e=>e.uuid===a.uuid&&!e.result);assert.equal(entry?.stage,'received');}
    await journal.close();journal=await openJournal(join(root,'state.json'),agentConfig,'fixture-machine');
    agent=createAgent({config:activeConfig,journal,fetchImpl,now});await agent.step();await advance();
    assert.equal(deletes,cycle*2+1);assert.equal((await store.get(a.id)).grant.phase,'complete');

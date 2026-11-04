@@ -32,6 +32,12 @@ remain bridge operations after a restart/configuration change. The default cloud
 adapter is unchanged; enabling bridge mode and deployment require a separate
 rollout after fresh second-PC archive acceptance.
 The bridge README describes the Render/PC setup. The PC needs no local backend.
+Authorization replies can now be replayed for the same device/grant after all
+eligibility checks and a revision CAS. This does not replay an unknown Desktop
+write. Correlated, redacted HTTP diagnostics and durable one-attempt bot reports
+for blocked or delayed cleanup are documented in the bridge README. The report
+receipt uses the existing grant JSON; there is no schema migration. Roll out the
+backend first, then the separately running bridge agent while preserving its journal.
 
 - `service.mts`: authenticated client ownership, locale rules, idempotent provisioning
   and grants. `OCTO_ACCESS_SCOPE=all` enables all authenticated client accounts;

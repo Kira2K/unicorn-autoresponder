@@ -26,6 +26,10 @@ export interface Grant {
     bridgeId: string; ownerEmail: string;
     claim?: { deviceId: string; authorizedAt?: number };
     result?: { state: 'succeeded' | 'uncertain' | 'rejected'; code?: string; at: number };
+    incident?: {
+      code: string; chatId: string; attemptedAt: number;
+      state: 'attempting' | 'sent' | 'failed' | 'uncertain'; messageId?: number; errorCode?: string;
+    };
   };
 }
 export interface ProfileDeletion {
