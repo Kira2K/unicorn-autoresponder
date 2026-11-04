@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {writeTransaction} from '../../../../integrations/postgres/working-session.mts';
 import {workingCrud} from '../../../../integrations/postgres/working-crud.mts';
 import {createWorkingCatalog} from '../../../../integrations/postgres/working-catalog.mts';
-import {assertFixture,fixtureEmail,fixtureMarker,fixtureNames} from './contracts.mts';
+import {assertFixture,fixtureEmail,fixtureMarker,fixtureNames,E2E_STUDENT_CHAT_ID} from './contracts.mts';
 import type {CycleContext} from './context.mts';
 import type {ManagedProfile} from '../../../octo-access/contracts.mts';
 export async function ensureCycleClient(c:CycleContext,runId:string,kind:keyof typeof fixtureNames){
@@ -18,7 +18,7 @@ export async function ensureCycleClient(c:CycleContext,runId:string,kind:keyof t
   if(stack.length!==1||market.length!==1)throw Error('e2e_fixture_reference_ambiguous');
   const n=fixtureNames[kind];
   const row=await workingCrud(s,catalog).createRecord(clients[0].id,{client_name:`${n.first} ${n.last}`,first_name:n.first,last_name:n.last,
-   calendar_email:fixtureEmail(runId,kind),telegram_general_chat_id:`NO-DELIVERY-E2E-${runId}-${kind}`,client_status:'paused',legend_info:fixtureMarker(runId,kind),stacks_id:stack[0].id,market_id:market[0].id});
+   calendar_email:fixtureEmail(runId,kind),telegram_general_chat_id:E2E_STUDENT_CHAT_ID,client_status:'paused',legend_info:fixtureMarker(runId,kind),stacks_id:stack[0].id,market_id:market[0].id});
   const id=Number(row.key[0]);
   await s.query("UPDATE noco.clients SET client_role='фейк' WHERE id=$1 AND legend_info=$2",[id,fixtureMarker(runId,kind)]);
   const check=(await s.query('SELECT * FROM noco.clients WHERE id=$1',[id])).rows[0];assertFixture(check,runId,kind);return id;
