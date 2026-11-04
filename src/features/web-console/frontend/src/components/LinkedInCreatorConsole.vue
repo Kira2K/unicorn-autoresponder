@@ -16,12 +16,13 @@ const canCaptureProxy = computed(() => profileState.value?.profiles?.some(p => p
 function updateTask(task) {
   if (task?.id !== selected.value?.task.id || task.version <= selected.value.task.version) return
   selected.value.task = task
-  captureConfirmed.value = !!task.proxySavedAt && !!canCaptureProxy.value
+  captureConfirmed.value = !!task.proxySavedAt
 }
 function updateProfileStatus(status) {
   profileState.value = status
   if (status.task) updateTask(status.task)
-  if (!canCaptureProxy.value) captureConfirmed.value = false
+  if (status.newProxyReady === false || !status.profiles?.some(p => p.locale === 'en' && p.proxy?.configured))
+    captureConfirmed.value = false
 }
 const requestedTaskId = ref(null), taskLoading = ref(false), taskLoadError = ref('')
 const controller = new AbortController()
@@ -42,7 +43,7 @@ const transport = computed(() => {
 })
 const completionChecklist = computed(() => [
   { key: 'proxy', label: 'Настройки прокси подтверждены для заявки',
-    done: !!selected.value?.task.proxySavedAt && captureConfirmed.value && !!canCaptureProxy.value,
+    done: !!selected.value?.task.proxySavedAt && captureConfirmed.value,
     hint: !profileState.value ? 'Дождитесь загрузки состояния профиля Octo.'
       : profileState.value.newProxyReady === false ? 'Введите новые реквизиты прокси в форме выше и дождитесь назначения. Прежнее подключение для нового LinkedIn не подходит.'
       : canCaptureProxy.value ? 'Нажмите «Сохранить настройки прокси» над формой LinkedIn.'
@@ -56,7 +57,8 @@ const completionChecklist = computed(() => [
   { key: 'password', label: 'Пароль LinkedIn сохранён', done: !!selected.value?.intake.hasPassword,
     hint: 'Введите пароль LinkedIn и нажмите «Сохранить данные LinkedIn».' }
 ])
-const canComplete = computed(() => completionChecklist.value.every(item => item.done))
+const checklistComplete = computed(() => completionChecklist.value.every(item => item.done))
+const canComplete = computed(() => checklistComplete.value && !!canCaptureProxy.value)
 function errorText(error) {
   const code = error.message
   if(code==='linkedin_task_new_proxy_required')return 'Для нового LinkedIn сначала назначьте и проверьте новый прокси.'
@@ -188,7 +190,7 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
         </section>
         <p><strong>Для нового LinkedIn введи новые реквизиты прокси в форме ниже и нажми «Сохранить прокси».</strong> Старое подключение повторно использовать нельзя. Дождись статуса «Прокси сохранён». В приложении Octo Browser прокси вводить или менять не нужно.</p>
         <p v-if="profileState?.newProxyRequired && profileState.newProxyReady === false" role="status" data-testid="creation-new-proxy-required">Доступ к Octo появится после сохранения и проверки нового прокси для этой заявки.</p>
-        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @access-issued="captureConfirmed = false" @proxy-changed="captureConfirmed = false" />
+        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @proxy-changed="captureConfirmed = false" />
         <p>Дождись статуса «Прокси сохранён» и нажми «Сохранить настройки прокси» ниже: кнопка проверит фактические настройки профиля и подтвердит их для заявки. Открывать профиль Octo для этого не требуется. Если доступ к профилю уже выдан, сначала закрой его и дождись завершения доступа.</p>
         <button type="button" :disabled="busy || !canCaptureProxy" @click="save('capture-proxy', {})">Сохранить настройки прокси</button>
         <p v-if="captureConfirmed">Прокси сохранён и проверен.</p>
@@ -207,7 +209,8 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
               <p v-if="!item.done">{{ item.hint }}</p>
             </li>
           </ul>
-          <p v-if="!canComplete">Статус «сделана экспертом» станет доступен после выполнения всех пунктов.</p>
+          <p v-if="!checklistComplete">Статус «сделана экспертом» станет доступен после выполнения всех пунктов.</p>
+          <p v-else-if="!canComplete">{{ !profileState ? 'Дождитесь загрузки состояния профиля Octo.' : 'Закройте профиль Octo и дождитесь завершения доступа. Сохранённое подтверждение прокси остаётся действительным.' }}</p>
         </section>
         <label>Статус заявки<select v-model="selectedStatus" aria-label="Статус заявки" aria-describedby="completion-checklist-title"><option>не начата</option><option>блок</option><option :disabled="!canComplete">{{ expertDoneStatus }}</option></select></label>
         <p v-if="expertCompleted" class="task-completion-note" role="status">Заявка завершена.</p>

@@ -12,8 +12,9 @@ Repeated completion, including an old version after a lost response, does not re
 The admin LinkedIn tab is a read-only history with independent delivery outcomes.
 
 The completion checklist lists saved LinkedIn URL, login, password and the task's proxy confirmation, with
-instructions for each missing item. Reopening a task restores its saved proxy confirmation when the EN
-profile is idle; a new access session or proxy edit requires confirmation again in the current view.
+instructions for each missing item. Reopening a task restores its saved proxy confirmation. Opening and
+closing the EN profile preserves that confirmation; completion stays disabled until access cleanup ends.
+A proxy edit, missing connection or server-reported invalid receipt still requires confirmation again.
 The backend still re-reads and validates the actual proxy when completing an unfinished task.
 The Denis result form keeps the profile URL in `url` and the account login in `login`.
 If no LinkedIn login has been saved, the form prefills it from this task's linked Outlook account,
