@@ -34,10 +34,19 @@ test('creator completion checklist explains missing saved data and restores prox
     let captures = 0, statusWrites = 0
     let notification = { outcome: 'sent', messageId: 77 }
     let newProxyRequired=false,newProxyReady=false,proxyWrites=0,assignmentPolls=0
+    let accessPhase = 'ready', grantRequests = 0, captureError
     let rejectProxy
     const proxyRejection = new Promise(resolve => { rejectProxy = resolve })
     await page.route('**/api/linkedin-creator/**', async route => {
       const request = route.request(), path = new URL(request.url()).pathname
+      if (path.endsWith('/octo/grants')) {
+        grantRequests++; accessPhase = 'preparing'
+        return route.fulfill({ json: { id: 'fixture-grant', phase: accessPhase, profileId: 349 } })
+      }
+      if (path.endsWith('/octo/grants/fixture-grant')) return route.fulfill({ json: {
+        id: 'fixture-grant', profileId: 349, phase: accessPhase === 'ready' ? 'complete' : accessPhase,
+        ...(accessPhase === 'granted' ? { expiresAt: Date.now() + 60000, password: 'fixture-only' } : {})
+      } })
       if(path.endsWith('/profiles/349/proxy')){
         proxyWrites++
         if(request.postDataJSON().login==='same')return route.fulfill({status:409,json:{error:'linkedin_task_proxy_reused'}})
@@ -52,12 +61,15 @@ test('creator completion checklist explains missing saved data and restores prox
         if(assignmentPolls && --assignmentPolls===0){task={...task,version:task.version+1};newProxyReady=true}
         return route.fulfill({ json: {task,
         ...(newProxyRequired?{newProxyRequired,newProxyReady}:{}),
-        profiles: [{ id: 349, locale: 'en', title: 'Fixture EN', phase: 'ready', canEditProxy: true,canAcquire:!newProxyRequired||newProxyReady,
+        profiles: [{ id: 349, locale: 'en', title: 'Fixture EN', phase: accessPhase,
+          ...(grantRequests ? { grantId: 'fixture-grant' } : {}),
+          canEditProxy: accessPhase === 'ready',canAcquire:accessPhase === 'ready' && (!newProxyRequired||newProxyReady),
           proxy: { configured: true, credentialsLoaded: true, type: 'socks5', host: 'example.test', port: 1080, ...(newProxyRequired&&newProxyReady?{phase:'complete'}:{}) } }],
         requiredLocales: ['en'], onboarding: { phase: 'complete' }
       } }) }
       if (path.endsWith('/capture-proxy')) {
         if(request.postDataJSON().version!==task.version)return route.fulfill({status:409,json:{error:'linkedin_task_stale_version'}})
+        if (captureError) return route.fulfill({status:409,json:{error:captureError}})
         captures++
         task = { ...task, version: task.version + 1, proxySavedAt: new Date().toISOString() }
         return route.fulfill({ json: task })
@@ -108,6 +120,24 @@ test('creator completion checklist explains missing saved data and restores prox
     await page.waitForFunction(() => !document.querySelector('select[aria-label="Статус заявки"] option:last-child').disabled)
     assert.match(await proxy.textContent(), /Выполнено/)
     assert.equal(captures, 1, 'reopening must use the saved receipt without requiring another capture')
+    const captureButton = page.getByRole('button', { name: 'Сохранить настройки прокси', exact: true })
+    await page.getByRole('button', { name: 'Получить доступ', exact: true }).click()
+    for (const [phase, label] of [['preparing', 'Подготавливаем доступ…'], ['granted', 'Доступ выдан'],
+      ['awaiting_close', 'Ожидаем закрытия браузера'], ['blocked', 'Доступ заблокирован']]) {
+      accessPhase = phase
+      await page.getByTestId('octo-profile-349').getByText(label, { exact: true }).waitFor()
+      await page.waitForFunction(() => document.querySelector('select[aria-label="Статус заявки"] option:last-child').disabled)
+      assert.match(await proxy.textContent(), /✓ Выполнено/, `saved proxy confirmation survives ${phase}`)
+      assert.equal(await captureButton.isEnabled(), false, 'capture still requires an idle profile')
+      await checklist.getByText('Закройте профиль Octo и дождитесь завершения доступа. Сохранённое подтверждение прокси остаётся действительным.', { exact: true }).waitFor()
+      // A newer task version during access must not discard its still-valid receipt either.
+      if (phase === 'granted') task = { ...task, version: task.version + 1 }
+    }
+    accessPhase = 'ready'
+    await page.waitForFunction(() => !document.querySelector('select[aria-label="Статус заявки"] option:last-child').disabled)
+    assert.match(await proxy.textContent(), /✓ Выполнено/)
+    assert.equal(captures, 1, 'cleanup restores completion without another capture or reload')
+    assert.equal(grantRequests, 1)
     // Open-status notices remain separate; expert completion now has its own final report.
     await page.getByRole('combobox', { name: 'Статус заявки', exact: true }).selectOption('блок')
     await page.getByRole('button', { name: 'Сохранить статус', exact: true }).click()
@@ -153,6 +183,7 @@ test('creator completion checklist explains missing saved data and restores prox
     assert.equal(await capture.isEnabled(),false)
     assert.equal(await page.getByRole('button',{name:'Получить доступ',exact:true}).isEnabled(),false)
     assert.match(await proxy.textContent(),/Введите новые реквизиты/)
+    assert.match(await proxy.textContent(),/Не выполнено/,'a previous receipt cannot confirm a required new connection')
     await page.getByLabel('Логин прокси',{exact:true}).fill('same')
     await page.getByLabel('Пароль прокси',{exact:true}).fill('fixture')
     await page.getByRole('button',{name:'Показать пароль прокси',exact:true}).click()
@@ -173,6 +204,7 @@ test('creator completion checklist explains missing saved data and restores prox
     assert.equal(await page.getByLabel('Логин прокси',{exact:true}).inputValue(),'offline','failed submission retains the entered fields')
     await page.getByLabel('Логин прокси',{exact:true}).fill('new')
     await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click()
+    assert.match(await proxy.textContent(),/Не выполнено/,'a proxy edit still invalidates confirmation')
     await page.waitForFunction(()=>!document.querySelector('[data-testid="octo-profile-349"] button').disabled)
     await page.getByText('Прокси сохранён',{exact:true}).waitFor()
     await page.waitForFunction(()=>!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Сохранить настройки прокси').disabled)
@@ -181,5 +213,18 @@ test('creator completion checklist explains missing saved data and restores prox
     await capture.click()
     await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor()
     assert.equal(captures,2);assert.equal(proxyWrites,3)
+    captureError = 'linkedin_task_proxy_changed'
+    await capture.click()
+    await page.getByText('Дождитесь сохранения прокси и нажмите «Сохранить настройки прокси». Если сейчас выдан доступ к профилю, сначала завершите его.', { exact: true }).waitFor()
+    assert.match(await proxy.textContent(),/Не выполнено/,'server-reported changed proxy invalidates the receipt')
+    assert.equal(await done.evaluate(option=>option.disabled),true)
+    captureError = undefined
+    await capture.click()
+    await page.waitForFunction(()=>!document.querySelector('select[aria-label="Статус заявки"] option:last-child').disabled)
+    await page.getByLabel('Логин прокси',{exact:true}).fill('another-new-connection')
+    await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click()
+    await page.waitForFunction(()=>document.querySelector('[data-testid="completion-proxy"]').textContent.includes('Не выполнено'))
+    assert.equal(await done.evaluate(option=>option.disabled),true,'editing a confirmed connection still blocks completion')
+    assert.equal(captures,3);assert.equal(proxyWrites,4)
   } finally { await browser?.close(); await server.close() }
 })
