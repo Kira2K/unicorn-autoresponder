@@ -120,8 +120,15 @@ try {
   assert.equal(await byId('work-company-0').inputValue(), 'Unsent company');
   await byId('open-profile-editor-button').click();
   await page.locator('#student-firstName').fill('Анна');
+  await byId('profile-desired-location').fill(' Barselona ,Spain ; Paris, France ; remote; Berlin,Germany ');
   await byId('save-profile-button').click();
   await byId('profile-form').waitFor({ state: 'detached' });
+  const desiredLocations = 'Barselona, Spain; Paris, France; Remote; Berlin, Germany';
+  assert.equal(profileWrites.at(-1).desiredLocation, desiredLocations);
+  assert.equal(dashboard.client.desiredLocation, desiredLocations);
+  await byId('open-profile-editor-button').click();
+  assert.equal(await byId('profile-desired-location').inputValue(), desiredLocations);
+  await byId('profile-form').getByRole('button', { name: 'Отмена', exact: true }).click();
   for (const field of ['workPlaces', 'currentCompany', 'previousCompanies', 'stopListCompany']) assert.equal(Object.hasOwn(profileWrites.at(-1), field), false);
   assert.equal(dashboard.client.previousCompanies, 'Alpha,Delta');
   assert.equal(await byId('work-company-0').inputValue(), 'Unsent company');

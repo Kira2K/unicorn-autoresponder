@@ -1,6 +1,6 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { intakeScenario, infrastructureReady, infrastructureSignature } = require('./linkedin-intake.js')
+const { intakeNameParts, intakeScenario, infrastructureReady, infrastructureSignature } = require('./linkedin-intake.js')
 const { registrationTimeInput, registrationTimeUtc } = require('./linkedin-intake.js')
 const { linkedInCreationPending } = require('./linkedin-intake.js')
 
@@ -40,4 +40,14 @@ test('checkpoint infrastructure depends on EN proxy, complete locales and proxy 
   status.profiles[1].proxy.phase = 'attaching'
   assert.equal(infrastructureReady(status), false)
   assert.notEqual(infrastructureSignature(status), signature)
+})
+
+test('combined name keeps compound surnames and existing name boundaries without losing words', () => {
+  assert.deepEqual(intakeNameParts('  Alex   van der Smith  '), { firstName: 'Alex', lastName: 'van der Smith' })
+  assert.deepEqual(intakeNameParts("Anne-Marie O'Neill"), { firstName: 'Anne-Marie', lastName: "O'Neill" })
+  const saved = { firstName: 'Mary Jane', lastName: 'van der Smith' }
+  assert.deepEqual(intakeNameParts(' Mary   Jane van der Smith ', saved), saved)
+  assert.deepEqual(intakeNameParts('Alex Jones', saved), { firstName: 'Alex', lastName: 'Jones' })
+  assert.deepEqual(intakeNameParts('Alex'), { firstName: 'Alex', lastName: '' })
+  assert.deepEqual(intakeNameParts('  '), { firstName: '', lastName: '' })
 })

@@ -165,8 +165,7 @@ try {
     const submit = form.getByRole('button', { name: 'Сохранить и подготовить Octo', exact: true });
     await form.getByLabel('Город и страна проживания', { exact: true }).fill('Tbilisi');
     await form.getByLabel('Пароль от новой почты Outlook', { exact: true }).fill('outlook-secret');
-    await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
-    await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
+    await form.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true}).fill('Alex Test');
     const outlook = form.getByLabel('Логин от новой почты Outlook', { exact: true });
     await outlook.fill('alex.test@outlook.com');
     await submit.click();
@@ -319,8 +318,7 @@ try {
   const form = newCard.getByTestId('linkedin-new-form');
   await form.getByLabel('Логин от новой почты Outlook', { exact: true }).fill('alex.test.new@outlook.com');
   await form.getByLabel('Пароль от новой почты Outlook', { exact: true }).fill('outlook-secret');
-  await form.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true }).fill('Alex');
-  await form.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true }).fill('Test');
+  await form.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true}).fill('Alex Test');
   assert.equal(await form.getByLabel('Город и страна проживания', { exact: true }).inputValue(), 'Tbilisi', 'the saved intake location is restored on reopening');
   await form.getByLabel('Дата и время регистрации Outlook-почты', { exact: true }).fill('2026-10-25');
   await form.getByLabel('Часы регистрации Outlook-почты', { exact: true }).selectOption('10');
@@ -407,8 +405,7 @@ try {
   await recoveryForm.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');
   await recoveryForm.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
   await recoveryForm.getByLabel('Город и страна проживания',{exact:true}).fill('Tbilisi');
-  await recoveryForm.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).fill('Alex');
-  await recoveryForm.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true}).fill('Test');
+  await recoveryForm.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true}).fill('Alex Test');
   await recoveryForm.getByRole('button',{name:'Сохранить данные',exact:true}).click();
   await dolphinPage.getByRole('dialog',{name:'Спасибо, данные сохранены ✅'}).waitFor();
   assert.equal(saved.get(906)?.replacesLinkedInAccountId,906);
