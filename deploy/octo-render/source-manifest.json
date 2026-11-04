@@ -11,12 +11,25 @@
     "bridge/local-api.test.mjs": "dff3010894c46a7857594f8e6584cea57a6aa3eaa4b5715df5f70ee9cf44a515"
   },
   "shipped_bridge_files_sha256": {
-    "bridge/agent.mjs": "012de549edc5ce2d189c48e230b96d07db4f070a8519ded9f155c3a89a72b6c1",
+    "bridge/agent.mjs": "f08646a0edcbca6549c4fd4c4bae57a8da97a9836edffb14f25f2ab2ae583f4c",
     "bridge/journal.mjs": "67f52dbbe51bd59cdb6743b64c8891d9d48a9c2e667ffa4e2151469412a95ef7",
     "bridge/local-api.mjs": "cf0d97d4763cf7f3a981c780e7893111b4514e292e8af9a392bec412aa6bd4dc",
-    "bridge/agent.test.mjs": "816e186eb0868d24399d64e753df207355da4bca9015b4114e5111b56bdc5b97",
+    "bridge/agent.test.mjs": "f44fb09b984370f4a13bd3fa9890d6a7a445967df7b25c40e33f9215858d5a44",
     "bridge/journal.test.mjs": "365c527563e98d66e402773e4c5db37142de5d6b7a048fb53f858e00c2fe9c6b",
     "bridge/local-api.test.mjs": "2c4d1ae3d67a80367e924852b334e1213b741a0fe4e650fbb1ddb341157bab24"
   },
-  "bridge_normalization": "CRLF to LF only; bridge source logic unchanged"
+  "bridge_normalization": "CRLF to LF only; bridge source logic unchanged",
+  "recovery_release": {
+    "backend_source_commit": "10e3d3b133ed6985971b3c7b5a5778b4c7721cdb",
+    "baseline_worker_commit": "4194dd82d612b0fdf8382ecf608fcac5b43ed089",
+    "date": "2026-11-04",
+    "changes": [
+      "replayable authorization before Desktop write",
+      "redacted request diagnostics",
+      "header-preserving draining adapter",
+      "bounded retry delay"
+    ],
+    "journal_schema_changed": false,
+    "secret_files_copied": false
+  }
 }

@@ -19,7 +19,7 @@ export function createDrainingFetch(backendUrl, fetchImpl = fetch, { graceMs = 1
       try {
         const response = await fetchImpl(input, { ...init, signal: AbortSignal.any(signals) });
         // Keep the abort controller until the body is consumed, not only until headers arrive.
-        return { ok: response.ok, status: response.status,
+        return { ok: response.ok, status: response.status, headers: response.headers,
           async json() { try { return await response.json(); } finally { release(); } } };
       } catch (e) { release(); throw e; }
     },

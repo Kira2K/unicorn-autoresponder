@@ -54,7 +54,7 @@ try {
   const env = { ...process.env, DISPLAY: ':99', OCTO_HEADLESS: '1', APPIMAGE_EXTRACT_AND_RUN: '1',
     QT_X11_NO_MITSHM: '1', OCTO_API_TOKEN: settings.token };
   const local = (input, init) => createBridgeLocalFetch(port, network.fetch)(input, init);
-  const agent = createAgent({ config: settings.config, journal, fetchImpl: local });
+  const agent = createAgent({ config: settings.config, journal, fetchImpl: local, log: report });
   report({ state: 'starting', mode: settings.mode });
   await supervise({
     stopping, beginStop, report,

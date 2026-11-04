@@ -1,5 +1,27 @@
 Octo owner + bridge on Render (one extra service, no HH)
 
+Update prepared 2026-11-04: bridge authorization recovery
+- Existing service unicorn-octo-owner (srv-dbfuou942hec73d2gggg), manual deploy.
+- Deploy the matching backend authorization/reporting update FIRST. It rechecks
+  eligibility on authorization replay; old/unknown Desktop writes are not retried.
+- This package updates only bridge agent + tests and the runtime's logging,
+  response-header forwarding and bounded backoff. Dockerfile, installer hashes,
+  settings, secret paths, persistent journal, owner cache and shutdown are unchanged.
+- 29 offline package tests passed. The exact old agent/journal from 4194dd8 also
+  read new-version fixture journals in received/executing/succeeded/uncertain states:
+  identity persisted; executed/unknown writes produced zero repeated DELETEs.
+- No Linux rebuild was run for this update: local Docker daemon is unavailable.
+  A new image and real owner cold start remain release-time checks on Render.
+- Roll back worker first if necessary to dep-dbl72n6tlv9c73b63p6g (4194dd8).
+  Then roll back Console if needed to dep-dbljkoou01pc73adcq8g (347d282).
+  Drain operations first. Keep CURRENT /var/data; never restore an old journal
+  snapshot or SQL to force a retry. Do not run both agents concurrently.
+- Render artifact rollback is supported while the artifact is retained:
+  https://render.com/docs/rollbacks
+  https://api-docs.render.com/reference/rollback-deploy
+- No services were deployed during preparation. Historical pilot details below
+  describe the original package; they are not a request to recreate this service.
+
 This is a locally prepared deployment package, not an installed service.
 The existing Unicorn backend and Kira's current PC bridge stay in place until cutover.
 Source is published only under deploy/octo-render on a separate branch.
