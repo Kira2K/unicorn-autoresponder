@@ -1,3 +1,11 @@
+export function intakeNameParts(fullName, saved = {}) {
+  const normalize = value => String(value || '').trim().replace(/\s+/g, ' ')
+  const name = normalize(fullName)
+  if (name && name === normalize(`${saved.firstName || ''} ${saved.lastName || ''}`))
+    return { firstName: saved.firstName || '', lastName: saved.lastName || '' }
+  const [firstName = '', ...surname] = name ? name.split(' ') : []
+  return { firstName, lastName: surname.join(' ') }
+}
 export function intakeScenario(data) { return data?.hasLinkedIn === true || String(data?.url || '').trim() ? 'existing' : '' }
 export function linkedInCreationPending(account, state, clientId) {
   return state?.clientId === clientId && state?.registrationPending === true &&

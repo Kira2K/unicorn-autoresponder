@@ -5,6 +5,7 @@ import {createServer} from 'vite'
 import vue from '@vitejs/plugin-vue'
 import {chromium} from 'playwright'
 import {mkdir} from 'node:fs/promises'
+import { parseIntake } from '../../../linkedin-automation/console-intake/contracts.mts'
 
 test('registration keeps current edits and prior access, locks completed data, and prevents repeat applications', {timeout:90000}, async()=>{
   const root=fileURLToPath(new URL('..',import.meta.url))
@@ -102,8 +103,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     allowSave=true
     await page.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');await page.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');await page.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30')
     const outlook=page.getByLabel('Логин от новой почты Outlook',{exact:true})
-    const latinFirst=page.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true})
-    const latinLast=page.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true})
+    const latinName=page.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true})
     const nameError=page.getByText('В адресе до @ должны присутствовать имя и фамилия из полей ниже — целиком, в любом порядке. Для составных имени и фамилии достаточно одной части каждого.',{exact:true})
     assert.equal(await page.getByTestId('outlook-instructions').locator('strong').textContent(),'имя.фамилия латиницей')
     await outlook.fill('legacy@outlook.com');await outlook.blur();await nameError.waitFor()
@@ -111,12 +111,12 @@ test('registration keeps current edits and prior access, locks completed data, a
     assert.equal(writes,0,'unchanged legacy Outlook must meet the rule on every save')
     assert.equal(await outlook.evaluate(input=>document.activeElement===input),true)
     await outlook.fill('SMITHalex99@outlook.com');await nameError.waitFor({state:'hidden'})
-    await latinFirst.fill('Alexandre');await nameError.waitFor();await latinFirst.fill('Alex');await nameError.waitFor({state:'hidden'})
+    await latinName.fill('Alexandre Smith');await nameError.waitFor();await latinName.fill('Alex Smith');await nameError.waitFor({state:'hidden'})
     await outlook.fill('a.l.e.x.smith@outlook.com');await nameError.waitFor()
-    await latinFirst.fill('Anna-Maria');await latinLast.fill('Van der Berg');await outlook.fill('maria.berg@outlook.com');await nameError.waitFor({state:'hidden'})
-    await latinFirst.fill('Ivan');await latinLast.fill('Ivanov');await outlook.fill('ivanov@outlook.com');await nameError.waitFor()
+    await latinName.fill('Anna-Maria Van der Berg');await outlook.fill('maria.berg@outlook.com');await nameError.waitFor({state:'hidden'})
+    await latinName.fill('Ivan Ivanov');await outlook.fill('ivanov@outlook.com');await nameError.waitFor()
     await outlook.fill('ivanovivan@outlook.com');await nameError.waitFor({state:'hidden'})
-    await latinFirst.fill('Alex');await latinLast.fill('Smith');await outlook.fill('alex.smith@outlook.com');await nameError.waitFor({state:'hidden'})
+    await latinName.fill('Alex Smith');await outlook.fill('alex.smith@outlook.com');await nameError.waitFor({state:'hidden'})
     serverMismatch=true
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click();await nameError.waitFor()
     assert.equal(writes,0,'a backend validation error does not become a successful save')
@@ -137,7 +137,7 @@ test('registration keeps current edits and prior access, locks completed data, a
       const form=page.getByTestId('linkedin-new-form');await form.waitFor()
       assert.equal(await form.getByLabel('Логин от новой почты Outlook',{exact:true}).inputValue(),'')
       assert.equal(await form.getByLabel('Пароль от новой почты Outlook',{exact:true}).getAttribute('required'),'')
-      assert.equal(await form.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).inputValue(),'Alex')
+      assert.equal(await form.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true}).inputValue(),'Alex Smith')
       assert.equal(await form.getByLabel('Город и страна проживания',{exact:true}).inputValue(),'Tbilisi','saved intake location is preserved')
       assert.equal(await form.locator('.blocked-account').count(),1)
       assert.equal(await page.getByRole('button',{name:'Меня забанили',exact:true}).count(),0)
@@ -178,8 +178,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     newTask=false;status='сделана экспертом';missingLatin=true
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/recovery-test?market=En`)
     await replace()
-    assert.equal(await page.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).inputValue(),'')
-    assert.equal(await page.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true}).inputValue(),'')
+    assert.equal(await page.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true}).inputValue(),'')
     fresh=true
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/recovery-test?market=En`)
     await page.getByRole('button',{name:'Нет LinkedIn / аккаунт заблокирован',exact:true}).click()
@@ -193,7 +192,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     assert.equal(writes,1,'viewing placeholders and instructions does not save defaults')
     assert.equal(banReports,1,'a repeated ban report is not sent again after the owner view records it')
     const date=freshForm.getByLabel('Дата и время регистрации Outlook-почты',{exact:true})
-    const first=freshForm.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true})
+    const first=freshForm.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true})
     const dateBox=await date.boundingBox(),firstBox=await first.boundingBox()
     assert.ok(Math.abs(dateBox.y-firstBox.y)<=1,'the date and first-name inputs align despite the timezone hint')
     await date.fill('2099-01-01')
@@ -207,4 +206,106 @@ test('registration keeps current edits and prior access, locks completed data, a
     await page.screenshot({path:'tmp/denis-local-qa/student-mobile.png',fullPage:true,mask:[page.locator('input[type=password]')]})
     assert.deepEqual(errors,[])
   }finally{await browser?.close();await server.close()}
+})
+
+test('all clients get combined Latin name and multiple desired locations; Unicode values survive saving', { timeout: 60000 }, async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const fixture = `import {createApp,h,ref} from 'vue';import PrimeVue from 'primevue/config';
+    import Profile from '/src/StudentProfile.vue';import Workflow from '/src/components/LinkedInOctoWorkflow.vue';
+    const client=ref((await (await fetch('/api/client/me')).json()).client);
+    const save=async patch=>{const response=await fetch('/api/client/me',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});const data=await response.json();client.value=data.client;return data;};
+    createApp({render:()=>h('main',[h(Profile,{client:client.value,englishLevels:[{id:1,label:'B2'}],save}),h(Workflow,{client:client.value})])}).use(PrimeVue).mount('#app')`
+  const server = await createServer({ configFile: false, root, cacheDir: 'node_modules/.vite-client-204-forms', plugins: [vue(), {
+    name: 'client-form-pilot-fixture', resolveId: id => id === 'virtual:client-forms' ? '\0client-forms' : null,
+    load: id => id === '\0client-forms' ? fixture : null,
+    configureServer(s) { s.middlewares.use('/client-forms', async (_req, res) => {
+      res.setHeader('Content-Type', 'text/html')
+      res.end(await s.transformIndexHtml('/client-forms', '<div id="app"></div><script type="module" src="/@id/virtual:client-forms"></script>'))
+    }) }
+  }], server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' })
+  let browser
+  try {
+    await server.listen(); browser = await chromium.launch()
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(10000)
+    const errors = []; page.on('pageerror', error => errors.push(error.message))
+    const clients = new Map(), names = new Map(), outlookLogins = new Map(), personalWrites = [], nameWrites = []
+    let currentId = 204
+    await page.route('**/api/**', async route => {
+      const pathname = new URL(route.request().url()).pathname
+      const id = currentId
+      if (!clients.has(id)) clients.set(id, { id, market: 'En', firstName: 'Кира', lastName: 'Самсонова', birthDate: '2000-04-20',
+        englishLevelId: 1, readyForInterviewInEnglishIn2Months: 'No', noHigherEducation: true,
+        educationEntries: [{ uni: 'School', yearOfEnd: '2020', city: 'Moscow' }], realLocation: 'Tbilisi, Georgia', desiredLocation: 'Remote',
+        calendarEmail: 'student@gmail.com', telegramPersonalChatId: '@student_test' })
+      if (!names.has(id)) names.set(id, { firstName: 'Mary Jane', lastName: 'van der Smith' })
+      if (!outlookLogins.has(id)) outlookLogins.set(id, 'mary.smith@outlook.com')
+      if (pathname === '/api/client/me') {
+        if (route.request().method() === 'PATCH') {
+          const patch = route.request().postDataJSON(); personalWrites.push({ id, patch })
+          clients.set(id, { ...clients.get(id), ...patch })
+        }
+        return route.fulfill({ json: { client: clients.get(id) } })
+      }
+      if (pathname === '/api/client/linkedin-intake') {
+        if (route.request().method() === 'PUT') {
+          const data = parseIntake(route.request().postDataJSON()); nameWrites.push({ id, data }); names.set(id, { firstName: data.firstName, lastName: data.lastName })
+          outlookLogins.set(id, data.outlookLogin)
+          return route.fulfill({ json: { saved: true, task: { id: 1, status: 'не начата', created: false } } })
+        }
+        return route.fulfill({ json: { ...names.get(id), outlookLogin: outlookLogins.get(id), hasOutlookPassword: true,
+          outlookRegisteredAt: '2026-10-25T08:30:00.000Z', realLocation: 'Tbilisi', blockedAccounts: [],
+          registrationPending: true, task: { id: 1, status: 'не начата' } } })
+      }
+      return route.fulfill({ json: { profiles: [], requiredLocales: [], onboarding: { phase: 'idle' } } })
+    })
+    const visit = async id => {
+      currentId = id
+      await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/client-forms?client=${id}`)
+      await page.getByTestId('linkedin-new-form').waitFor()
+    }
+    const combined = page.getByLabel('Имя и Фамилия латиницей (как в документах)', { exact: true })
+    const first = page.getByLabel('Имя латиницей (как в иностранных документах)', { exact: true })
+    const last = page.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true })
+    const saveName = async () => {
+      const response = page.waitForResponse(r => r.url().endsWith('/api/client/linkedin-intake') && r.request().method() === 'PUT')
+      await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
+      assert.equal((await response).status(), 200)
+      await page.getByText('Заявка обновлена', { exact: true }).waitFor()
+    }
+    for (const clientId of [204, 205]) {
+      await page.setViewportSize({ width: 1440, height: 1000 })
+      const previousNameWrites = nameWrites.length
+      await visit(clientId)
+      assert.equal(await combined.inputValue(), 'Mary Jane van der Smith')
+      assert.equal(await first.count(), 0); assert.equal(await last.count(), 0)
+      await saveName(); assert.deepEqual(names.get(clientId), { firstName: 'Mary Jane', lastName: 'van der Smith' })
+      await combined.fill('Alex'); await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
+      assert.equal(await combined.getAttribute('aria-invalid'), 'true'); assert.equal(nameWrites.length, previousNameWrites + 1)
+      await combined.fill('José O’Connor')
+      const outlookLogin = page.getByLabel('Логин от новой почты Outlook', { exact: true })
+      assert.equal(await outlookLogin.getAttribute('aria-invalid'), 'true', 'changing the combined name revalidates the saved Outlook address')
+      await outlookLogin.fill('jose.oconnor@outlook.com')
+      assert.equal(await outlookLogin.getAttribute('aria-invalid'), 'false', 'Outlook validates against the newly entered combined name')
+      await saveName()
+      assert.deepEqual(names.get(clientId), { firstName: 'José', lastName: 'O’Connor' })
+      await page.getByTestId('open-profile-editor-button').click()
+      await page.getByTestId('profile-real-location').fill('São Paulo, Brazil')
+      await page.getByTestId('profile-desired-location').fill(' São Paulo ,Brazil ; L’Haÿ-les-Roses, France ; remote; Mu\u0308nchen,Germany ')
+      await page.getByTestId('save-profile-button').click(); await page.getByTestId('profile-form').waitFor({ state: 'detached' })
+      const locations = 'São Paulo, Brazil; L’Haÿ-les-Roses, France; Remote; Mu\u0308nchen, Germany'
+      assert.equal(personalWrites.at(-1).patch.desiredLocation, locations)
+      assert.equal(personalWrites.at(-1).patch.realLocation, 'São Paulo, Brazil')
+      await visit(clientId); assert.equal(await combined.inputValue(), 'José O’Connor')
+      await page.getByTestId('open-profile-editor-button').click()
+      assert.equal(await page.getByTestId('profile-desired-location').inputValue(), locations)
+      assert.equal(await page.getByTestId('profile-real-location').inputValue(), 'São Paulo, Brazil')
+      await mkdir('tmp/client-204-forms', { recursive: true })
+      await page.screenshot({ path: `tmp/client-204-forms/client-${clientId}-desktop.png`, fullPage: true })
+      await page.setViewportSize({ width: 390, height: 844 })
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      await page.screenshot({ path: `tmp/client-204-forms/client-${clientId}-mobile.png`, fullPage: true })
+    }
+    assert.equal(personalWrites.length, 2)
+    assert.deepEqual(errors, [])
+  } finally { await browser?.close(); await server.close() }
 })

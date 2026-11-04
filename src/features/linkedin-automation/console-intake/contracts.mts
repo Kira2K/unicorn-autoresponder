@@ -33,14 +33,19 @@ export const completeBlockedAccount = (card:BlockedAccount) => (['fullName','cou
 export const sameBlockedAccount = (left:BlockedAccount,right:BlockedAccount) => blockedFields.every(field=>text(left[field])===text(right[field]));
 export const isOutlookLogin = (value: unknown) => /^[^@\s]+@outlook\.com$/i.test(text(value));
 export const outlookLoginError = 'Укажите почту с окончанием @outlook.com, например name@outlook.com.';
-export const isLatinIntakeName = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z][A-Za-z '\-]*$/.test(value);
+export const isLatinIntakeName = (value: unknown): value is string =>
+  typeof value === 'string' && /^\p{Script=Latin}[\p{Script=Latin}\p{M} '’\-]*$/u.test(value);
+const foldedLatinLetters: Record<string, string> = { 'ß': 'ss', 'æ': 'ae', 'œ': 'oe', 'ø': 'o', 'ł': 'l', 'đ': 'd', 'ð': 'd', 'þ': 'th', 'ı': 'i' };
+const foldLatinName = (value: string) => value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+  .replace(/[ßæœøłđðþı]/g, letter => foldedLatinLetters[letter]);
 export const outlookNameError = 'В адресе до @ должны присутствовать имя и фамилия из полей ниже — целиком, в любом порядке. Для составных имени и фамилии достаточно одной части каждого.';
 /** Two non-overlapping, continuous fragments; punctuation in the email is never removed. */
 export function outlookLoginMatchesNames(login:unknown,firstName:unknown,lastName:unknown):boolean {
   const first=text(firstName),last=text(lastName);
   if(!isOutlookLogin(login)||!isLatinIntakeName(first)||!isLatinIntakeName(last))return false;
   const local=text(login).slice(0,text(login).indexOf('@')).toLowerCase();
-  const parts=(name:string)=>[...new Set(name.toLowerCase().split(/[ '\-]+/).filter(Boolean))];
+  const parts=(name:string)=>[...new Set(foldLatinName(name)
+    .split(/[ '’\-]+/).filter(Boolean))];
   let earliestFirstEnd=Infinity,latestFirstStart=-1;
   for(const part of parts(first)){
     const start=local.indexOf(part);

@@ -66,3 +66,11 @@ test('personal and workplace patches contain only their own section fields', () 
     stopListCompany: 'Alpha,Beta', currentCompany: 'Alpha', previousCompanies: 'Beta'
   })
 })
+
+test('mixed desired locations survive normalization, save payload and reopening without losing entries', () => {
+  const draft = studentProfileDraft({ desiredLocation: ' Barselona,Spain ; Paris, France; rEmOtE ' })
+  const { value } = validateStudentProfile(draft, { today: '2026-10-05', englishLevelIds: [] })
+  const payload = studentProfileSavePayload(value)
+  assert.equal(payload.desiredLocation, 'Barselona, Spain; Paris, France; Remote')
+  assert.equal(studentProfileDraft(payload).desiredLocation, payload.desiredLocation)
+})
