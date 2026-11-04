@@ -52,3 +52,51 @@ test('HH contact phone accepts international codes without substituting country 
   for (const value of ['', '+', '+7999', '+0123456789', '+1234567890123456', 'call +79991234567', '79991234567', '8 (977) 544-21-05', '++995555123456'])
     assert.equal(isInternationalPhone(value), false, value);
 });
+
+test('desired locations accept city-country pairs and Remote anywhere in a semicolon-separated list', () => {
+  for (const [input, expected] of [
+    ['Barselona, Spain; Paris, France', 'Barselona, Spain; Paris, France'],
+    ['Barcelona, Spain; Paris, France; Berlin, Germany', 'Barcelona, Spain; Paris, France; Berlin, Germany'],
+    ['  Barselona ,Spain ; Paris, France ; rEmOtE  ', 'Barselona, Spain; Paris, France; Remote'],
+    ['remote; New York, United States; REMOTE; Paris,France', 'Remote; New York, United States; Remote; Paris, France'],
+    ['remote', 'Remote'],
+  ]) {
+    const result = validateStudentProfile({ ...complete(), desiredLocation: input }, options);
+    assert.equal(result.valid, true, input);
+    assert.equal(result.value.desiredLocation, expected);
+  }
+});
+
+test('desired locations have no count limit and preserve every entry in order', () => {
+  const locations = Array.from({ length: 1000 }, (_, index) => index % 2 ? 'Paris, France' : 'Remote');
+  const result = validateStudentProfile({ ...complete(), desiredLocation: locations.join(';') }, options);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.value.desiredLocation.split('; '), locations);
+});
+
+test('each desired location must be complete; real location still accepts one city-country pair', () => {
+  for (const desiredLocation of ['', ' ', ';', 'Paris, France;', ';Paris, France', 'Paris, France;;Remote',
+    'Paris, France; ; Remote', 'Paris, France; London', 'Paris, France; , Spain', 'Paris, France; Москва, Россия',
+    'Paris, France, Remote', 'Remote; Paris, France; Remote work']) {
+    assert.ok(validateStudentProfile({ ...complete(), desiredLocation }, options).errors.desiredLocation, desiredLocation);
+  }
+  assert.ok(validateStudentProfile({ ...complete(), realLocation: 'Paris, France; Berlin, Germany' }, options).errors.realLocation);
+});
+
+test('locations accept Latin diacritics and apostrophes without accepting other scripts', () => {
+  {
+    for (const location of ['São Paulo, Brazil', 'Sa\u0303o Paulo, Brazil', 'L’Haÿ-les-Roses, France', "St. John's, Canada"]) {
+      const result = validateStudentProfile({ realLocation: location, desiredLocation: location }, {
+        englishLevelIds: [] });
+      const expected = true;
+      assert.equal(!result.errors.realLocation, expected, location);
+      assert.equal(!result.errors.desiredLocation, expected, location);
+      assert.equal(result.value.desiredLocation, location);
+    }
+  }
+  const result = validateStudentProfile({ desiredLocation: 'São Paulo, Brazil; Saint John’s, Canada; Remote' }, {
+    englishLevelIds: [] });
+  assert.equal(result.errors.desiredLocation, undefined);
+  for (const location of ['Москва, Russia', 'Αθήνα, Greece', '\u0301Paris, France', 'Paris😀, France'])
+    assert.ok(validateStudentProfile({ desiredLocation: location }, { englishLevelIds: [] }).errors.desiredLocation);
+});

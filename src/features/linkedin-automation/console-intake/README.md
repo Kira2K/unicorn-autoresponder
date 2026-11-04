@@ -163,6 +163,10 @@ or recreating profiles. “Меня забанили” remains available for an
 
 Preparation saves LinkedIn metadata in existing `platform_accounts` text columns:
 `linkedin_first_name`, `linkedin_last_name`, `real_location`, `old_link_blocked`.
+All clients enter one “Имя и Фамилия латиницей (как в документах)” field.
+Unchanged compound names preserve their saved first/last boundaries; changed input uses the first word as the given name and the remaining words as the surname.
+Latin diacritics and straight/curly apostrophes are accepted and preserved. Outlook matching folds name fragments only for comparison.
+See `docs/student-profile-rollout.md` for the consolidated location/name contract and checks.
 Outlook credentials use a separate account with platform name `email_outlook`.
 Platforms are resolved by name; missing/ambiguous platforms or account rows reject
 the write. Normal intake requests never mutate the schema.

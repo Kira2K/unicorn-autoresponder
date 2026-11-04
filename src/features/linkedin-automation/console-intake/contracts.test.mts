@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseIntake, parseLinkedInResult, readBlockedAccounts, normalizeBlockedAccounts } from './contracts.mts';
+import { parseIntake, parseLinkedInResult, readBlockedAccounts, normalizeBlockedAccounts, isLatinIntakeName, outlookLoginMatchesNames } from './contracts.mts';
 
 test('existing LinkedIn credentials can precede Octo, but completion still requires login confirmation',()=>{
  const account={scenario:'existing',url:'https://linkedin.com/in/test',login:'person@example.com',password:'fixture'};
@@ -66,4 +66,31 @@ test('existing credentials require URL and explicit self confirmation', () => {
   assert.throws(() => parseIntake({ scenario: 'existing', url: 'https://linkedin.com/in/alex', login: 'alex' }), { code: 'linkedin_intake_login_confirmation_required' });
   assert.equal(parseIntake({ scenario: 'existing', url: 'linkedin.com/in/alex', login: 'alex', loggedIn: true }).scenario, 'existing');
   assert.throws(() => parseIntake({ ...draft, outlookLogin: 'test@outlook.com.evil.com' }), { code: 'linkedin_intake_outlook_required' });
+});
+
+test('international Latin names allow composed/decomposed diacritics and straight/curly apostrophes', () => {
+  for (const name of ['José', 'Mu\u0308ller', 'D’Ávila', "O'Connor", 'François', 'Łukasz', 'Søren', 'İpek', 'Strauß'])
+    assert.equal(isLatinIntakeName(name), true, name);
+  for (const name of ['Иван', 'Jоsé', 'Αλέξης', '東京', '\u0301Jose', 'José😀', 'Alex,Smith', 'J.'])
+    assert.equal(isLatinIntakeName(name), false, name);
+  assert.equal(isLatinIntakeName('José'), true);
+  assert.equal(isLatinIntakeName('O’Connor'), true);
+  assert.equal(isLatinIntakeName("O'Connor"), true);
+});
+
+test('Outlook comparison folds names, preserving original values and nonoverlapping continuous fragments', () => {
+  for (const [login, first, last] of [
+    ['jose.oconnor@outlook.com', 'José', 'O’Connor'],
+    ['jose.muller@outlook.com', 'Jose\u0301', 'Mu\u0308ller'],
+    ['soren.strauss@outlook.com', 'Søren', 'Strauß'],
+    ['lukasz.davila@outlook.com', 'Łukasz', 'D’Ávila'],
+  ]) assert.equal(outlookLoginMatchesNames(login, first, last), true, login);
+  assert.equal(outlookLoginMatchesNames('j.o.s.e.muller@outlook.com', 'José', 'Müller'), false);
+  assert.equal(outlookLoginMatchesNames('jose@outlook.com', 'José', 'José'), false);
+  assert.equal(outlookLoginMatchesNames('josejose@outlook.com', 'José', 'José'), true);
+  assert.equal(outlookLoginMatchesNames('jose.muller@outlook.com', 'José', 'Müller'), true);
+  const raw = { scenario: 'new', firstName: 'José', lastName: 'O’Connor', outlookLogin: 'jose.oconnor@outlook.com', realLocation: 'São Paulo, Brazil' };
+  const parsed = parseIntake(raw, Date.now());
+  assert.equal(parsed.firstName, raw.firstName); assert.equal(parsed.lastName, raw.lastName);
+  assert.throws(() => parseIntake({ ...raw, outlookLogin: 'other.person@outlook.com' }), { code: 'linkedin_intake_outlook_name_mismatch' });
 });

@@ -47,7 +47,7 @@ export function normalizeInternationalPhone(value: unknown): string {
 export const internationalPhoneError = 'Укажите +, код страны и номер: от 6 до 15 цифр, например +995555123456';
 export const isInternationalPhone = (value: unknown) => /^\+[1-9]\d{5,14}$/.test(normalizeInternationalPhone(value));
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const locationPattern = /^[A-Za-z][A-Za-z .'\-]*,\s*[A-Za-z][A-Za-z .'\-]*$/;
+const locationPattern = /^\p{Script=Latin}[\p{Script=Latin}\p{M} .'’\-]*,\s*\p{Script=Latin}[\p{Script=Latin}\p{M} .'’\-]*$/u;
 const normalizeLocation = (value: unknown) => cleanProfileText(value).replace(/\s*,\s*/g, ', ');
 const namePattern = /^[\p{Script=Cyrillic}][\p{Script=Cyrillic} -]*[\p{Script=Cyrillic}]$/u;
 export function validateWorkPlaces(input: unknown): { value: WorkPlace[]; error: string } {
@@ -66,6 +66,10 @@ export function validateStudentProfile(input: unknown, options: { today?: string
   const workplaceValidation = validateWorkPlaces(draft.workPlaces);
   const workPlaces = workplaceValidation.value;
   const telegram = cleanProfileText(draft.telegramPersonalChatId);
+  const desiredLocations = cleanProfileText(draft.desiredLocation).split(';').map(location => {
+    const normalized = normalizeLocation(location);
+    return /^remote$/i.test(normalized) ? 'Remote' : normalized;
+  });
   const value: StudentProfile = {
     firstName: cleanProfileText(draft.firstName), lastName: cleanProfileText(draft.lastName), middleName: cleanProfileText(draft.middleName),
     fio: profileFullName(draft), birthDate: isoBirthDate(draft.birthDate), realAge: profileAge(draft.birthDate, today),
@@ -73,7 +77,7 @@ export function validateStudentProfile(input: unknown, options: { today?: string
     readyForInterviewInEnglishIn2Months: cleanProfileText(draft.readyForInterviewInEnglishIn2Months),
     educationEntries: education.value, noHigherEducation,
     realLocation: normalizeLocation(draft.realLocation),
-    desiredLocation: /^remote$/i.test(cleanProfileText(draft.desiredLocation)) ? 'Remote' : normalizeLocation(draft.desiredLocation),
+    desiredLocation: desiredLocations.join('; '),
     workPlaces, calendarEmail: cleanProfileText(draft.calendarEmail).toLowerCase(),
     telegramPersonalChatId: telegram ? '@' + telegram.replace(/^@/, '') : ''
   };
@@ -91,7 +95,8 @@ export function validateStudentProfile(input: unknown, options: { today?: string
   if (!['Yes', 'No'].includes(value.readyForInterviewInEnglishIn2Months)) errors.readyForInterviewInEnglishIn2Months = 'Выберите вариант';
   if (education.error) errors.educationEntries = education.error;
   if (!locationPattern.test(value.realLocation)) errors.realLocation = 'Укажите в формате City, Country латиницей';
-  if (value.desiredLocation !== 'Remote' && !locationPattern.test(value.desiredLocation)) errors.desiredLocation = 'Укажите City, Country латиницей или Remote';
+  if (!desiredLocations.every(location => location === 'Remote' || locationPattern.test(location)))
+    errors.desiredLocation = 'Укажите City, Country латиницей или Remote; несколько вариантов разделяйте «;»';
   if (workplaceValidation.error) errors.workPlaces = workplaceValidation.error;
   if (!/^[A-Za-z0-9._%+\-]+@gmail\.com$/i.test(value.calendarEmail)) errors.calendarEmail = 'Укажите адрес на @gmail.com';
   if (!/^@?[A-Za-z0-9_]{5,32}$/.test(telegram)) errors.telegramPersonalChatId = 'Укажите username: 5–32 символа, латиница, цифры и «_»';

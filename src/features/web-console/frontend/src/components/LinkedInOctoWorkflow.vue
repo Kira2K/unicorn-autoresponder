@@ -5,7 +5,7 @@ import ExistingLinkedInSetup from './ExistingLinkedInSetup.vue'
 import Dialog from 'primevue/dialog'
 import OutlookRegistrationTime from './OutlookRegistrationTime.vue'
 import { octoApi } from '../octo-api.js'
-import { intakeRequest, intakeBanRequest, intakeScenario, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
+import { intakeRequest, intakeBanRequest, intakeScenario, intakeNameParts, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
 import { isOutlookLogin, isLatinIntakeName, outlookLoginError, outlookLoginMatchesNames, outlookNameError } from '../../../../linkedin-automation/console-intake/contracts.mts'
 const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false } })
 const registrationDate = ref(''), showSavedDialog = ref(false)
@@ -16,6 +16,7 @@ const emit = defineEmits(['saved', 'state'])
 const loaded = ref(false), loading = ref(false), loadError = ref(''), message = ref(''), saving = ref(false)
 const scenario = ref(''), existing = ref(false), newSaved = ref(false), opened = ref(false), status = ref(null)
 const form = ref({ url: '', login: '', password: '', outlookLogin: '', outlookPassword: '', firstName: '', lastName: '', realLocation: '', blockedAccounts: [], loggedIn: false })
+const fullName = ref(''), fullNameInput = ref(null), fullNameError = ref('')
 const secrets = ref({ hasPassword: false, hasOutlookPassword: false })
 const editLocked = ref(false)
 const task = ref(null), completionConfirmed = ref(false), hasLinkedIn = ref(false), replacementId = ref(null)
@@ -63,6 +64,8 @@ async function load() {
     hasBlockedAccounts.value=form.value.blockedAccounts.length>0
     form.value.firstName = isLatinIntakeName(data.firstName) ? data.firstName : ''
     form.value.lastName = isLatinIntakeName(data.lastName) ? data.lastName : ''
+    fullName.value = [form.value.firstName, form.value.lastName].filter(Boolean).join(' ')
+    fullNameError.value = ''
     registrationDate.value = registrationTimeInput(data.outlookRegisteredAt)
     replacementId.value = null
     updateTaskState(data)
@@ -125,17 +128,24 @@ function beginReplacement() {
   form.value = { ...form.value, url: '', login: '', password: '', outlookLogin: '', outlookPassword: '', loggedIn: false,
     firstName: isLatinIntakeName(form.value.firstName) ? form.value.firstName : '',
     lastName: isLatinIntakeName(form.value.lastName) ? form.value.lastName : '' }
+  fullName.value = [form.value.firstName, form.value.lastName].filter(Boolean).join(' ')
+  fullNameError.value = ''
   registrationDate.value = ''; secrets.value = { ...secrets.value, hasPassword: false, hasOutlookPassword: false }
   editLocked.value = false; existing.value = false; newSaved.value = false; scenario.value = 'new'; message.value = ''
   showBanDialog.value=false
 }
 function validateOutlook() {
   outlookValidated.value=true
-  const {outlookLogin,firstName,lastName}=form.value
+  const {outlookLogin}=form.value
+  const {firstName,lastName}=intakeNameParts(fullName.value,form.value)
   outlookError.value = !isOutlookLogin(outlookLogin) ? outlookLoginError
     : isLatinIntakeName(firstName.trim())&&isLatinIntakeName(lastName.trim())&&!outlookLoginMatchesNames(outlookLogin,firstName,lastName) ? outlookNameError : ''
 }
-watch(()=>[form.value.outlookLogin,form.value.firstName,form.value.lastName],()=>{if(outlookValidated.value)validateOutlook()})
+watch(()=>[form.value.outlookLogin,form.value.firstName,form.value.lastName,fullName.value],()=>{if(outlookValidated.value)validateOutlook()})
+function validateFullName() {
+  const { firstName, lastName } = intakeNameParts(fullName.value, form.value)
+  fullNameError.value = [firstName, lastName].every(isLatinIntakeName) ? '' : 'Укажи имя и фамилию латиницей (как в документах).'
+}
 function revealInput(input) {
   for (let parent = input?.parentElement; parent; parent = parent.parentElement)
     if (parent.tagName === 'DETAILS') parent.open = true
@@ -159,6 +169,12 @@ async function save() {
       revealInput(outlookInput.value)
       return
     }
+    validateFullName()
+    if (fullNameError.value) {
+      validationError.value = `Данные не сохранены. ${fullNameError.value}`
+      revealInput(fullNameInput.value)
+      return
+    }
   }
   saving.value = true; message.value = ''
   try {
@@ -168,6 +184,7 @@ async function save() {
       throw new Error('linkedin_intake_outlook_registration_required')
     if(registration.outlookRegisteredAt&&Date.parse(registration.outlookRegisteredAt)>Date.now())throw new Error('linkedin_intake_outlook_registration_future')
     const result = await intakeRequest('PUT', { ...form.value, ...registration, scenario: scenario.value,
+      ...(scenario.value === 'new' ? intakeNameParts(fullName.value, form.value) : {}),
       ...(scenario.value==='new'?{hasBlockedAccounts:hasBlockedAccounts.value,blockedAccounts:hasBlockedAccounts.value?form.value.blockedAccounts:[]}:{}),
       ...(replacementId.value ? { replacesLinkedInAccountId: replacementId.value } : {}) }, controller.signal)
     if (controller.signal.aborted) return
@@ -265,8 +282,9 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
         </label>
         <label class="intake-field"><span>Пароль от новой почты Outlook</span><input v-model="form.outlookPassword" type="password" :required="!secrets.hasOutlookPassword" :placeholder="secrets.hasOutlookPassword ? 'Сохранён. Оставь пустым, чтобы не менять' : ''" autocomplete="new-password"></label>
         <OutlookRegistrationTime v-model="registrationDate" class="intake-field" />
-        <label class="intake-field"><span>Имя латиницей (как в иностранных документах)</span><input v-model="form.firstName" required></label>
-        <label class="intake-field"><span>Фамилия латиницей (как в иностранных документах)</span><input v-model="form.lastName" required></label>
+        <label class="intake-field"><span>Имя и Фамилия латиницей (как в документах)</span><input ref="fullNameInput" v-model="fullName" required autocomplete="name" aria-label="Имя и Фамилия латиницей (как в документах)" :aria-invalid="!!fullNameError" :aria-describedby="fullNameError ? 'intake-full-name-error' : undefined" @input="fullNameError && validateFullName()">
+          <small v-if="fullNameError" id="intake-full-name-error" role="alert">{{ fullNameError }}</small>
+        </label>
         <label class="intake-field"><span>Город и страна проживания</span><input v-model="form.realLocation" required></label>
           </div>
         </section>

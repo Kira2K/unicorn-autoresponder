@@ -104,3 +104,19 @@ test('Dolphin users cannot enter either Octo intake scenario or create tasks', a
   await assert.rejects(service.save(7, { scenario: 'existing', url: 'https://linkedin.com/in/alex', login: 'alex', loggedIn: true }),
     { code: 'linkedin_intake_use_dolphin' });
 });
+
+test('international names are accepted by the service for all authenticated clients', async () => {
+  const writes: Array<{ id: number; firstName: string; lastName: string }> = [];
+  const service = createLinkedInIntakeService({ allowed: () => true, hasDolphin: async () => false,
+    getClient: async id => ({ ...mockClient(id), market: 'En' }),
+    store: { load: async () => ({ url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
+      firstName: '', lastName: '', realLocation: '', blockedAccounts: [] }),
+      save: async (id, data) => { writes.push({ id, firstName: data.firstName, lastName: data.lastName }); return { saved: true, linkedinAccountId: 1 }; } } });
+  const raw = { scenario: 'new', firstName: 'José', lastName: 'O’Connor', outlookLogin: 'jose.oconnor@outlook.com',
+    realLocation: 'São Paulo, Brazil', outlookRegisteredAt: '2026-10-25T10:30:00.000Z' };
+  await service.save(204, raw);
+  assert.deepEqual(writes, [{ id: 204, firstName: 'José', lastName: 'O’Connor' }]);
+  await service.save(205, { ...raw, clientId: 204 });
+  assert.deepEqual(writes.at(-1), { id: 205, firstName: 'José', lastName: 'O’Connor' });
+  assert.equal(writes.length, 2);
+});

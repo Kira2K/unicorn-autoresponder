@@ -14,8 +14,7 @@ export async function submitCycleIntake(page:Page,journal:RunJournal,cycle:numbe
  await form.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');
  await form.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');
  await form.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
- await form.getByLabel('Имя латиницей (как в иностранных документах)',{exact:true}).fill('Pavel');
- await form.getByLabel('Фамилия латиницей (как в иностранных документах)',{exact:true}).fill('Testov');
+ await form.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true}).fill('Pavel Testov');
  await form.getByLabel('Город и страна проживания',{exact:true}).fill('Tbilisi, Georgia');
  const result=await submitAndRead(page,'/api/client/linkedin-intake',()=>form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click());
  assert.ok(result.task?.id);await page.getByRole('dialog').waitFor();

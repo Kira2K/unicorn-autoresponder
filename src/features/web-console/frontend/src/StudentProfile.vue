@@ -124,11 +124,11 @@ const viewFields = computed(() => [
           <small v-if="errors.educationEntries" class="student-error">{{ errors.educationEntries }}</small>
         </section>
         <div class="student-grid student-section">
-          <StudentProfileField name="realLocation" label="Реальная локация" required :error="errors.realLocation" hint="Формат: City, Country — на английском. Например: Tbilisi, Georgia" v-slot="field">
+          <StudentProfileField name="realLocation" label="Реальная локация" required :error="errors.realLocation" hint="Формат: City, Country — латиницей. Допустимы диакритические знаки и апостроф. Например: São Paulo, Brazil" v-slot="field">
             <input :id="field.id" v-model="draft.realLocation" placeholder="Tbilisi, Georgia" :aria-invalid="field.invalid" :aria-describedby="field.describedby" aria-required="true" data-testid="profile-real-location" />
           </StudentProfileField>
-          <StudentProfileField name="desiredLocation" label="Желаемая локация" required :error="errors.desiredLocation" hint="Формат: City, Country — на английском. Укажи Remote, если рассматриваешь исключительно удалённую работу, используй &quot;; &quot; как разделитель" v-slot="field">
-            <input :id="field.id" v-model="draft.desiredLocation" placeholder="City, Country или Remote" :aria-invalid="field.invalid" :aria-describedby="field.describedby" aria-required="true" data-testid="profile-desired-location" />
+          <StudentProfileField name="desiredLocation" label="Желаемая локация" required :error="errors.desiredLocation" hint="Формат: City, Country — латиницей, включая диакритику и апостроф. Укажи любое количество локаций через «;». Remote можно указать отдельно или добавить к списку для удалённой работы." v-slot="field">
+            <input :id="field.id" v-model="draft.desiredLocation" placeholder="Barcelona, Spain; Paris, France; Remote" :aria-invalid="field.invalid" :aria-describedby="field.describedby" aria-required="true" data-testid="profile-desired-location" />
             <button type="button" class="student-chip" @click="draft.desiredLocation = 'Remote'">Remote</button>
           </StudentProfileField>
         </div>
