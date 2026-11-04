@@ -62,8 +62,10 @@ export function createBridgeBroker({ store, api, config, bridge, checkpoint, now
     async authorize(deviceId: string, id: string) {
       device(deviceId); const p = await find(id), state = p.grant!.bridgeClear!;
       if (state.claim?.deviceId !== deviceId) throw new OctoError('octo_bridge_claim_mismatch', 409);
-      if (state.claim.authorizedAt !== undefined) throw new OctoError('octo_bridge_already_authorized', 409);
-      await eligible(p); state.claim.authorizedAt = now(); await check(); await store.save(p);
+      // Lost authorization responses are replayable only for the same claimed
+      // device/grant. Recheck all barriers and CAS-save even on a replay so a
+      // concurrent result, deletion or new grant cannot be overwritten.
+      await eligible(p); state.claim.authorizedAt ??= now(); await check(); await store.save(p);
       return { authorized: true };
     },
     async result(deviceId: string, id: string, receipt: Receipt) {

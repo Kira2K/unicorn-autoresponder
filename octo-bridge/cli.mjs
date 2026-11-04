@@ -22,15 +22,15 @@ try{
  }else{
  journal=await openJournal(resolve(stateRoot,'journal.json'),config);
  await unlink(stopPath).catch(e=>{if(e.code!=='ENOENT')throw e;});
- const agent=createAgent({config,journal,fetchImpl});
+ const agent=createAgent({config,journal,fetchImpl,log:output});
  do{
-  let status;
-  try{status=await agent.step();}catch(e){status={error:/^bridge_[a-z0-9_]{1,100}$/.test(e.code??'')?e.code:'bridge_unavailable'};}
+  let status,delay=config.pollMilliseconds;
+  try{status=await agent.step();delay=Math.max(delay,status.retryAfterMs??0);}catch(e){status={error:/^bridge_[a-z0-9_]{1,100}$/.test(e.code??'')?e.code:'bridge_unavailable'};delay=Math.max(delay,e.retryAfterMs??0);}
   const line=JSON.stringify(status);
   if(line!==lastOutput||Date.now()-lastOutputAt>=60000||args.includes('--once')){output(status);lastOutput=line;lastOutputAt=Date.now();}
   if(await stat(stopPath).then(()=>true,e=>{if(e.code==='ENOENT')return false;throw e;}))stop=true;
   if(args.includes('--once')||stop)break;
-  await new Promise(done=>{const t=setTimeout(done,config.pollMilliseconds);wake=()=>{clearTimeout(t);done();};});wake=undefined;
+  await new Promise(done=>{const t=setTimeout(done,delay);wake=()=>{clearTimeout(t);done();};});wake=undefined;
  }while(!stop);
  }
 }catch(e){output({error:/^bridge_[a-z0-9_]{1,100}$/.test(e.code??'')?e.code:'bridge_configuration_or_lock_error'});process.exitCode=1;}

@@ -11,12 +11,13 @@ import { advanceOnboarding } from './onboarding-workflow.mts';
 import { octoClientAllowed } from './access-policy.mts';
 import { advanceDeletion } from './deletion-workflow.mts';
 export function createOctoRuntime({ store, api, config, token, getClient, now = Date.now,
-  listen = createActionLogListener, report = () => {}, onboarding, passwordBridge, allowLegacyChecks = true }: {
+  listen = createActionLogListener, report = () => {}, onboarding, passwordBridge, reportBridgeIncident, allowLegacyChecks = true }: {
   store: OctoStore; api: CloudApi; config: OctoConfig; token: string; getClient(id: number): Promise<WebClient>;
   now?: () => number; listen?: typeof createActionLogListener; report?: (event: { code: string; profileId?: number }) => void;
   onboarding?: OnboardingDependencies;
   allowLegacyChecks?: boolean;
   passwordBridge?: { id: string; ownerEmail: string };
+  reportBridgeIncident?: (profileId:number)=>Promise<void>;
 }) {
   let lease: Awaited<ReturnType<OctoStore['leader']>>, listener: ReturnType<typeof listen> | undefined;
   let signature = '', stopped = true, timer: ReturnType<typeof setTimeout> | undefined, work: Promise<void> | undefined;
@@ -90,6 +91,10 @@ export function createOctoRuntime({ store, api, config, token, getClient, now = 
           const delay = grant?.phase === 'granted' && !grant.error ? Math.min(30_000, Math.max(0, grant.expiresAt! - now())) : 30_000;
           nextCheck.set(p.id, now() + delay);
           if (grant?.error) report({ code: grant.error, profileId: p.id });
+          // Durable send claims live with the grant; a report failure cannot
+          // prevent other profiles from expiring, completing or being restored.
+          if(reportBridgeIncident)try{await reportBridgeIncident(p.id);}
+          catch{report({code:'octo_bridge_report_failed',profileId:p.id});}
         });
       }
       // Sequential creation makes pool-proxy reservation deterministic; it never

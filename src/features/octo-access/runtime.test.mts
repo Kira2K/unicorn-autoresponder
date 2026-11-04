@@ -36,7 +36,7 @@ async function fixture() {
     start() { listeners++; }, async stop() {}, status() { return { connected,reconnects:0,lastSafeError:undefined,checkpoint:connected?0:undefined }; }
   });
   const reports: Array<{ code: string; profileId?: number }> = [];
-  const runtime = () => createOctoRuntime({ store, api: cloud.api, config: testConfig, token: 'mock-token', now, listen,
+  const runtime = (reportBridgeIncident?:(profileId:number)=>Promise<void>) => createOctoRuntime({ store, api: cloud.api, config: testConfig, token: 'mock-token', now, listen,reportBridgeIncident,
     getClient: async id => mockClient(id), report: event => reports.push(event) });
   return { store, cloud, profile, writes, reports, runtime, now,
     advance(ms: number) { time += ms; }, disconnect() { connected = false; }, reconnect() { connected = true; }, listenerCount: () => listeners };
@@ -65,6 +65,16 @@ test('in-process scheduler restart preserves the persisted grant deadline and cl
     assert.deepEqual(f.cloud.calls,[`update:${f.profile.uuid}`,`clear:${f.profile.uuid}`]);
     assert.deepEqual(f.reports,[]);
   } finally { await runtime.stop(); }
+});
+
+test('bridge report delivery failure never reverses grant cleanup or stops the worker',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});const f=await fixture();let reports=0;
+ const runtime=f.runtime(async()=>{reports++;throw Error('telegram unavailable');});
+ try{await runtime.start();await settled(()=>f.reports.some(e=>e.code==='octo_bridge_report_failed'));
+  f.advance(testConfig.leaseMs);t.mock.timers.tick(testConfig.leaseMs);
+  await settled(async()=>(await f.store.get(f.profile.id))!.grant!.phase==='complete');assert.ok(reports>0);
+  assert.equal(runtime.status().leader,true);assert.ok(f.reports.some(e=>e.code==='octo_bridge_report_failed'));
+ }finally{await runtime.stop();}
 });
 
 test('two schedulers sharing a store have one leader and perform each expiry write only once', async t => {

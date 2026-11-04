@@ -66,7 +66,10 @@ test('bridge: metadata false is insufficient; a lost Desktop result remains unce
   const job = (await f.broker.poll(device))!;
   assert.equal(await f.broker.poll(otherDevice), null);
   await f.broker.authorize(device, job.id);
-  await assert.rejects(f.broker.authorize(device, job.id), { code: 'octo_bridge_already_authorized' });
+  const authorizedAt = (await f.store.get(a.id))!.grant!.bridgeClear!.claim!.authorizedAt;
+  assert.deepEqual(await f.broker.authorize(device, job.id), { authorized: true });
+  assert.equal((await f.store.get(a.id))!.grant!.bridgeClear!.claim!.authorizedAt, authorizedAt);
+  await assert.rejects(f.broker.authorize(otherDevice, job.id), { code: 'octo_bridge_claim_mismatch' });
   f.cloud.profiles.get(a.uuid!)!.has_user_password = false;
   await f.advance(); assert.notEqual((await f.store.get(a.id))!.grant!.phase, 'complete');
   await f.broker.result(device, job.id, { state: 'uncertain', code: 'bridge_local_outcome_unknown' });
@@ -74,6 +77,21 @@ test('bridge: metadata false is insufficient; a lost Desktop result remains unce
   assert.equal((await f.store.get(a.id))!.grant!.phase, 'blocked');
   assert.equal((await f.store.get(a.id))!.grant!.error, 'octo_bridge_outcome_unknown');
   assert.equal(f.cloud.calls.filter(c => c.startsWith('clear:')).length, 0);
+});
+
+test('bridge: a replayed authorization rechecks closure, metadata, history and terminal receipts', async () => {
+  for (const changed of ['running','metadata','history','receipt','grant'] as const) {
+    const f=await fixture(),[p]=await f.store.list();
+    await f.service.acquire(p.clientId,p.id);await f.advance();f.tick(120000);await f.advance();
+    const job=(await f.broker.poll(device))!;await f.broker.authorize(device,job.id);
+    if(changed==='running')await f.cloud.start(p.uuid!);
+    if(changed==='metadata')f.cloud.profiles.get(p.uuid!)!.title='changed';
+    if(changed==='history')f.connection(undefined);
+    if(changed==='receipt')await f.broker.result(device,job.id,{state:'uncertain',code:'bridge_local_outcome_unknown'});
+    if(changed==='grant'){const current=(await f.store.get(p.id))!;current.grant!.id='replacement';await f.store.save(current);}
+    await assert.rejects(f.broker.authorize(device,job.id));
+    assert.equal(f.cloud.calls.filter(c=>c.startsWith('clear:')).length,0);
+  }
 });
 test('bridge: history loss, disconnect and force-stop cannot authorize a queued clear', async () => {
   for (const kind of ['gap', 'force', 'disconnect'] as const) {

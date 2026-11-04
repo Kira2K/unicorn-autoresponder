@@ -13,11 +13,19 @@ const f=await createConsoleFixture(45_000,Date.now,bridge);
 const directory=await mkdtemp(join(tmpdir(),'octo-bridge-console-'));
 const journal=await openJournal(join(directory,'journal.json'),{backendUrl:f.url,bridgeId:bridge.id,ownerEmail:bridge.ownerEmail},'e2e-machine');
 const cleared=new Set<string>();
+const authorizationFaults:string[]=[];
 const agent=createAgent({config:{backendUrl:f.url,bridgeId:bridge.id,secret:bridge.secret,
   ownerEmail:bridge.ownerEmail,allowedProfileUuids:[],allowAllManagedProfiles:true},journal,
   fetchImpl:async(input:string|URL,init?:RequestInit)=>{
     const url=new URL(String(input));
-    if(url.origin===f.url)return fetch(input,init);
+    if(url.origin===f.url){
+      if(url.pathname.endsWith('/authorize')&&authorizationFaults.length<2){
+        const kind=authorizationFaults.length===0?'before_commit':'after_commit';authorizationFaults.push(kind);
+        if(kind==='after_commit'){const saved=await fetch(input,init);assert.equal(saved.status,200);}
+        return new Response('<html>Simulated backend restart</html>',{status:503,headers:{'content-type':'text/html'}});
+      }
+      return fetch(input,init);
+    }
     assert.equal(url.origin,'http://127.0.0.1:58888');
     if(url.pathname==='/api/username')return Response.json({username:bridge.ownerEmail});
     if(url.pathname==='/api/profiles/active')return Response.json([...f.cloud.profiles.values()].filter(p=>p.status===1));
@@ -59,8 +67,8 @@ try {
       for(const p of await f.store.list())if(p.uuid&&f.cloud.profiles.get(p.uuid)?.status===1)await f.cloud.stop(p.uuid);
     }}});
   const bridgeResult={...report,bridge:{nativeClears:cleared.size,
-    cloudClears:f.cloud.calls.filter(c=>c.startsWith('clear:')).length}};
-  bridgeResult.passed=report.passed&&cleared.size===6&&bridgeResult.bridge.cloudClears===0;
+    cloudClears:f.cloud.calls.filter(c=>c.startsWith('clear:')).length,authorizationFaults}};
+  bridgeResult.passed=report.passed&&cleared.size===6&&bridgeResult.bridge.cloudClears===0&&authorizationFaults.length===2;
   await writeFile('tmp/octo-console-mock/report.json',JSON.stringify(bridgeResult,null,2));
   console.log(JSON.stringify(bridgeResult));if(!bridgeResult.passed)process.exitCode=1;
 }finally{
