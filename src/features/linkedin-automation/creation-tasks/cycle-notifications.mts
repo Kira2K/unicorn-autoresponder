@@ -28,7 +28,7 @@ export async function deliverCycleNotification(deps:{store:ReturnType<typeof cyc
   const c=await deps.client(event.clientId),name=[c.firstName,c.lastName].filter(Boolean).join(' ')||c.fio||c.clientName;
   const result=await deps.sendOne({chatId:event.chatId,
    ...(event.recipient==='student'?{parseMode:'HTML' as const,text:studentCompletionMessage}:
-    {text:`🚨 НОВЫЙ LINKEDIN ГОТОВ — ЗАПУЩЕН НОВЫЙ ЦИКЛ\nКлиент: ${name}\nСтек: ${c.primaryStack||'не указан'}\nЗаявка №${event.taskId}: сделана экспертом\nНовый LinkedIn: ${event.url}\nLinkLab: Новый, прогресс 0%`}),
+    {text:`🚨 НОВЫЙ LINKEDIN ГОТОВ — ЗАПУЩЕН НОВЫЙ ЦИКЛ\nКлиент: ${name}\nСтек: ${c.primaryStack||'не указан'}\nЗаявка №${event.taskId}: сделана экспертом\nНовый LinkedIn: ${event.url}\nLinkLab: Новый, прогресс 0%\n\n@juliafeels fyi`}),
    reportContext:{clientId:event.clientId,clientName:name,chatPurpose:event.recipient==='student'?'Общий чат ученика':'Ботоотчёты'}});
   if(result.kind==='telegram-response'){
    if(result.response.ok)await deps.store.finish(event,'sent',result.response.result.message_id);

@@ -10,7 +10,7 @@ const events:CycleNotice[]=['reports','student'].map(recipient=>({taskId:16,clie
 const success=(id:number):SendOneResult=>({kind:'telegram-response',response:{ok:true,result:{message_id:id,date:1,
  chat:{id:-7007,type:'supergroup',title:'test'},text:'fixture'}}});
 
-test('completion sends exactly one report without mentions and one formatted student message to frozen destinations',async()=>{
+test('Denis completion sends one report with Julia FYI and one unchanged student message to frozen destinations',async()=>{
  const pending=structuredClone(events),sent:SendOneInput[]=[],finished:unknown[][]=[];
  const store={claim:async()=>pending.shift(),finish:async(...args:unknown[])=>{finished.push(args);return{rows:[]}}};
  const pass=()=>deliverCycleNotification({store,client,sendOne:async input=>{sent.push(input);return success(sent.length)}});
@@ -18,7 +18,10 @@ test('completion sends exactly one report without mentions and one formatted stu
  assert.equal(sent.length,2);assert.deepEqual(sent.map(m=>m.chatId),['-1003187558078','-7007']);
  assert.match(sent[0].text,/🚨 НОВЫЙ LINKEDIN/);assert.match(sent[0].text,/Николай Соколов/);
  assert.match(sent[0].text,/JAVA/);assert.match(sent[0].text,/№16/);assert.match(sent[0].text,/https:\/\/linkedin.com\/in\/new/);
- assert.doesNotMatch(sent[0].text,/@|fyi|password|proxy/i);
+ assert.equal(sent[0].text,'🚨 НОВЫЙ LINKEDIN ГОТОВ — ЗАПУЩЕН НОВЫЙ ЦИКЛ\nКлиент: Николай Соколов\nСтек: JAVA\nЗаявка №16: сделана экспертом\nНовый LinkedIn: https://linkedin.com/in/new\nLinkLab: Новый, прогресс 0%\n\n@juliafeels fyi');
+ assert.equal(sent[0].text.match(/@juliafeels fyi/g)?.length,1);
+ assert.doesNotMatch(sent[0].text,/password|proxy/i);
+ assert.doesNotMatch(sent[1].text,/@juliafeels|fyi/);
  assert.equal(sent[1].parseMode,'HTML');
  assert.equal(sent[1].text,'Привет! Твой LinkedIn готов! 🎉\n\nЛогин и пароль от LinkedIn и доступ к Octo — в личном кабинете, в разделе «LinkedIn».\n\nЧтобы аккаунт не забанили, пожалуйста:\n\n• <b>Первый месяц вообще не заходи в LinkedIn.</b> Аккаунт сейчас прогревает наша команда, и любой лишний вход может привести к бану.\n\n• Через месяц заходи в LinkedIn <b>ТОЛЬКО через Octo на компьютере</b>: не с телефона и не из обычного браузера.\n\n• Не включай двухфакторную аутентификацию и не меняй пароль.');
  assert.deepEqual(finished.map(row=>row[1]),['sent','sent']);
