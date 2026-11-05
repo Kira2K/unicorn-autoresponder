@@ -4,7 +4,6 @@ import { isOutlookLogin, outlookLoginError } from '../../../linkedin-automation/
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
-import FieldInfoLabel from './FieldInfoLabel.vue'
 import { usernameDisplay, updateUsernameInput } from './username-input.js'
 import { studentPreviewLabel } from './student-preview-labels.js'
 import { isAccountPhoneField, phoneInputValue, updateContactInput } from './contact-input.js'
@@ -21,7 +20,6 @@ const ui = text => studentPreviewLabel(text, props.preview)
 const platformDisplayLabel = text => props.preview ? previewPlatformLabel(text) : text
 const accountFieldEnabled = field => props.policy?.fields.includes(field) ?? false
 const accountFieldRequired = field => props.policy?.requiredFields.includes(field) ?? false
-const urlInfoVisible = computed(() => ['github', 'linkedin'].includes(props.displayLabel))
 const githubSelected = computed(() => props.displayLabel === 'github')
 const outlookSelected = computed(() => props.displayLabel === 'email_outlook')
 const loginTouched = ref(false)
@@ -89,11 +87,7 @@ function capturePhone(event) {
     <small v-if="preview && accountFieldEnabled('nickname')">Латинские буквы A–Z, a–z, цифры 0–9 и «_». Знак @ добавляется автоматически.</small>
   </label>
   <label class="field" :class="{ 'wide-field': !githubSelected }">
-    <span>
-      <template v-if="preview && urlInfoVisible">URL <small class="account-login-hint">— ссылка без https://</small></template>
-      <FieldInfoLabel v-else-if="editing && displayLabel === 'github'" label="URL" tooltip="ссылка без https://" test-id="account-url-info" />
-      <template v-else>URL</template>
-    </span>
+    <span>URL</span>
     <InputText v-model="form.linkedInUrl" :disabled="!accountFieldEnabled('linkedInUrl')" :required="accountFieldRequired('linkedInUrl')" data-testid="account-linkedin-url" />
   </label>
   <label v-if="githubSelected" class="github-empty-field">

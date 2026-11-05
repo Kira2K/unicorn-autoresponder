@@ -167,7 +167,7 @@ try {
   }
   for (const platform of ['16', '29']) {
     await byId('account-platform').selectOption(platform);
-    assert.match(await page.getByRole('dialog').innerText(), /ссылка без https:\/\//);
+    assert.doesNotMatch(await page.getByRole('dialog').innerText(), /ссылка без https:\/\//);
     assert.equal(await byId('account-url-info').count(), 0);
   }
   await byId('account-platform').selectOption('24');
