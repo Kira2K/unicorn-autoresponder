@@ -49,6 +49,12 @@ test('real PostgreSQL: raw SQL events, rollback, startup scan, narrow rights and
     const config = { ...options, database: 'unicorn_noco_copy_restore' as const, user: 'unicorn_sql_app', password: 'fixture' };
     pool = createPostgresPool(config);
     const store = clientIdStore(pool, config.database), events: string[] = [];
+    // Paging must use numeric source IDs, even though the returned IDs are text.
+    await admin.query("INSERT INTO noco.clients(id,telegram_personal_chat_id) SELECT n,'@paged_user' FROM generate_series(2,121) AS n");
+    assert.deepEqual(await store.pending('0'), Array.from({ length: 100 }, (_, i) => String(i + 1)));
+    assert.deepEqual(await store.pending('100'), Array.from({ length: 21 }, (_, i) => String(i + 101)));
+    assert.deepEqual(await store.pending('121'), []);
+    await admin.query('DELETE FROM noco.clients WHERE id BETWEEN 2 AND 121');
     let lost = 0;
     unsubscribe = await clientIdSubscription(config)(id => events.push(id), () => { lost++; });
     assert.deepEqual(await store.pending('0'), ['1']);

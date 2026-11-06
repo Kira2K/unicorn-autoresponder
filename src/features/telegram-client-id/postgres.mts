@@ -12,7 +12,7 @@ export function clientIdStore(pool: SqlPool, database: CopyDatabase): Store {
   const read = createReadSession(pool, database);
   return {
     pending: after => read(async s => (await s.query(
-      `SELECT id::text FROM noco.clients WHERE ${eligible} AND id>$1::bigint ORDER BY id LIMIT 100`, [after]
+      `SELECT id::text FROM noco.clients WHERE ${eligible} AND id>$1::bigint ORDER BY noco.clients.id LIMIT 100`, [after]
     )).rows.map(r => String(r.id))),
     get: id => read(async s => {
       const row = (await s.query(`SELECT id::text,telegram_personal_chat_id AS username
