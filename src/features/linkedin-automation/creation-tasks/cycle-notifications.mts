@@ -3,16 +3,16 @@ import {writeTransaction} from '../../../integrations/postgres/working-session.m
 import type {SqlPool,CopyDatabase} from '../../../integrations/postgres/contracts.mts';
 import type {SendOneInput,SendOneResult} from '../../../integrations/telegram/types.ts';
 import type {WebClient} from '../../web-console/backend/types.ts';
-export interface CycleNotice{taskId:number;clientId:number;url:string;token:string;recipient:'reports'|'student';chatId?:string}
-export function cycleNotificationStore(pool:SqlPool,database:CopyDatabase){
+export interface CycleNotice{taskId:number;clientId:number;url:string;token:string;recipient:'reports'|'student';chatId?:string;test?:boolean}
+export function cycleNotificationStore(pool:SqlPool,database:CopyDatabase,localClientIds?:readonly number[],testChatId='-5216637594'){
  return{
   claim:():Promise<CycleNotice|undefined>=>writeTransaction(pool,database,async s=>{
-   await s.query("UPDATE noco.linkedin_cycle_notifications SET state='uncertain',error_code='claim_expired' WHERE state='attempting' AND claimed_at<clock_timestamp()-interval '10 minutes'");
-   const row=(await s.query("SELECT task_id,client_id,url,recipient,chat_id FROM noco.linkedin_cycle_notifications WHERE state='pending' ORDER BY task_id,recipient FOR UPDATE SKIP LOCKED LIMIT 1")).rows[0];
+   await s.query("UPDATE noco.linkedin_cycle_notifications SET state='uncertain',error_code='claim_expired' WHERE state='attempting' AND claimed_at<clock_timestamp()-interval '10 minutes' AND ($1::bigint[] IS NULL OR client_id=ANY($1))",[localClientIds??null]);
+   const row=(await s.query("SELECT n.task_id,n.client_id,n.url,n.recipient,n.chat_id,c.client_role='фейк' AS is_test FROM noco.linkedin_cycle_notifications n JOIN noco.clients c ON c.id=n.client_id WHERE (($1::bigint[] IS NULL AND n.state='pending') OR (n.client_id=ANY($1) AND (n.state='pending' OR n.state='failed' AND n.error_code='local_delivery_pending'))) ORDER BY n.task_id,n.recipient FOR UPDATE OF n SKIP LOCKED LIMIT 1",[localClientIds??null])).rows[0];
    if(!row)return undefined;const token=randomUUID();
-   await s.query("UPDATE noco.linkedin_cycle_notifications SET state='attempting',claim_token=$2,claimed_at=clock_timestamp() WHERE task_id=$1 AND recipient=$3",[row.task_id,token,row.recipient]);
+   await s.query("UPDATE noco.linkedin_cycle_notifications SET state='attempting',claim_token=$2,claimed_at=clock_timestamp(),error_code=NULL WHERE task_id=$1 AND recipient=$3",[row.task_id,token,row.recipient]);
    return{taskId:Number(row.task_id),clientId:Number(row.client_id),url:String(row.url),token,
-    recipient:row.recipient as CycleNotice['recipient'],chatId:row.chat_id?String(row.chat_id):undefined};
+    recipient:row.recipient as CycleNotice['recipient'],chatId:row.is_test===true?testChatId:row.chat_id?String(row.chat_id):undefined,...(row.is_test===true?{test:true}:{})};
   }),
   finish:(event:CycleNotice,state:'sent'|'failed'|'uncertain',messageId?:number,code?:string)=>writeTransaction(pool,database,
    s=>s.query("UPDATE noco.linkedin_cycle_notifications SET state=$3,message_id=$4,error_code=$5 WHERE task_id=$1 AND claim_token=$2 AND state='attempting' AND recipient=$6",[event.taskId,event.token,state,messageId??null,code??null,event.recipient]))

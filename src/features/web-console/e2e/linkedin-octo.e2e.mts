@@ -143,14 +143,15 @@ try {
       !!(element.compareDocumentPosition(document.querySelector('[data-testid="telegram-card"]')!) & Node.DOCUMENT_POSITION_FOLLOWING)), true,
       'platform accounts appear before Telegram for both EN and Both clients');
     await instructionCard.getByRole('button', { name: 'Нет LinkedIn / аккаунт заблокирован', exact: true }).click();
-    const instruction = instructionCard.locator('details ol');
+    const instruction = instructionCard.getByTestId('outlook-instructions').locator('ol');
     assert.equal(await instruction.isVisible(), true);
     assert.deepEqual(await instruction.locator('li').allTextContents(), [
       'Создай новую почту на outlook.com с телефона через мобильный интернет. VPN выключи, твоя локация не имеет значения. Если ты в РФ, оставь VPN включенным.',
       'Адрес — имя.фамилия латиницей. Если занят — добавь цифры.',
       'Номер телефона к почте привязывать не нужно.',
       'Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.',
-      'Двухфакторку не ставь.'
+      'Двухфакторку не ставь.',
+      'Сразу включи пересылку писем на нашу почту по инструкции в блоке «Пересылка писем» ниже.'
     ]);
     const registration = instructionCard.getByLabel('Дата и время регистрации Outlook-почты', { exact: true });
     await instructionCard.getByRole('checkbox',{name:'У меня есть заблокированные аккаунты',exact:true}).check();
@@ -169,6 +170,9 @@ try {
     const outlook = form.getByLabel('Логин от новой почты Outlook', { exact: true });
     await outlook.fill('alex.test@outlook.com');
     await submit.click();
+    await instructionPage.getByRole('dialog',{name:'Сначала включи пересылку писем',exact:true}).getByRole('button',{name:'Открыть инструкцию',exact:true}).click();
+    await form.getByTestId('outlook-forwarding').getByRole('checkbox').check();
+    await submit.click();
     assert.equal(saved.has(id), false, 'missing registration time prevents submission');
     assert.equal(await registration.getAttribute('type'), 'date');
     await form.getByText('Дата не может быть в будущем', { exact: true }).waitFor();
@@ -180,6 +184,7 @@ try {
     assert.equal(saved.has(id), false, 'future registration date prevents submission');
     await registration.fill('2026-10-25');
     await outlook.fill('test@gmail.com');
+    await form.getByTestId('outlook-forwarding').getByRole('checkbox').check();
     await registration.focus();
     await form.getByRole('alert').waitFor();
     await submit.click();
@@ -189,6 +194,7 @@ try {
       if (route.request().method() === 'PUT') await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"linkedin_intake_unavailable"}' });
       else await route.continue();
     });
+    await form.getByTestId('outlook-forwarding').getByRole('checkbox').check();
     await submit.click();
     await instructionCard.getByText('Не удалось сохранить.', { exact: false }).waitFor();
     assert.equal(await instructionPage.getByRole('dialog').count(), 0, 'failure must not show success');
@@ -334,6 +340,8 @@ try {
   await form.getByRole('button', { name: 'Удалить аккаунт 3', exact: true }).click();
   assert.equal(await form.locator('.blocked-account').count(), 2);
   assert.equal(await form.getByText('Желаемый стек', { exact: false }).count(), 0);
+  await form.getByTestId('outlook-forwarding').locator('summary').click();
+  await form.getByTestId('outlook-forwarding').getByRole('checkbox').check();
   await form.getByRole('button', { name: 'Сохранить изменения', exact: true }).click();
   await newCard.getByText('Заявка обновлена', { exact: true }).waitFor();
   assert.deepEqual(saved.get(904)?.blockedAccounts, histories);

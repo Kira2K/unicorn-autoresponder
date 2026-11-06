@@ -4,14 +4,15 @@ export const E2E_STUDENT_CHAT_ID='-5216637594';
 export interface Evidence {step:string;expected:string;actual:string;state:CheckState;at:string;screenshot?:string;db?:Record<string,unknown>}
 export const fixtureNames={auto:{first:'Павел',last:'Тестов'},manual:{first:'Илья',last:'Проверкин'}} as const;
 export function parseCycleArgs(args:string[]){
- let apply=false,runId:string|undefined;
+ let apply=false,runId:string|undefined,withProxyMove=false;
  for(let i=0;i<args.length;i++){
   if(args[i]==='--apply'){if(apply)throw Error('e2e_duplicate_apply');apply=true;}
+  else if(args[i]==='--with-proxy-move'){if(withProxyMove)throw Error('e2e_duplicate_proxy_move');withProxyMove=true;}
   else if(args[i]==='--preflight'){if(args.includes('--apply'))throw Error('e2e_conflicting_mode');}
   else if(args[i]==='--run-id'){runId=args[++i];if(!runId||!/^[a-z0-9-]{8,64}$/.test(runId))throw Error('e2e_invalid_run_id');}
   else throw Error('e2e_invalid_argument');
  }
- return{apply,runId};
+ return{apply,runId,withProxyMove};
 }
 export const fixtureMarker=(runId:string,kind:keyof typeof fixtureNames)=>`linkedin-full-cycle-e2e:${runId}:${kind}`;
 export const fixtureEmail=(runId:string,kind:keyof typeof fixtureNames)=>`linkedin-cycle-${runId}-${kind}@example.invalid`;

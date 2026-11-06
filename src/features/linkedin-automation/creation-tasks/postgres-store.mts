@@ -8,7 +8,7 @@ import { taskRow, providerStatus } from './contracts.mts';
 
 const fail = (code: string): never => { throw new PostgresReadError(code); };
 export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, linklab = false,
-  afterComplete?: (taskId:number)=>Promise<unknown>) {
+  afterComplete?: (taskId:number)=>Promise<unknown>, localNotificationClientIds:readonly number[] = []) {
   const read = createReadSession(pool, database);
   async function lock(s: SqlSession, id: number, version: number, allowCompleted = false) {
     const hint = (await s.query('SELECT client_id FROM noco.linkedin_creation_task WHERE id=$1', [id])).rows[0];
@@ -60,13 +60,14 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
         const row = (await s.query("SELECT * FROM noco.linkedin_creation_task WHERE id=$1"+(admin?'':" AND status<>'сделана экспертом'"), [id])).rows[0];
         if (!row) return fail('linkedin_task_not_found');
         const task = taskRow(row);
-        const rows = (await s.query(`SELECT id,url,login,password,linkedin_first_name,linkedin_last_name,real_location,old_link_blocked,outlook_registered_at
+        const rows = (await s.query(`SELECT id,url,login,password,linkedin_first_name,linkedin_last_name,real_location,old_link_blocked,outlook_registered_at,to_jsonb(platform_accounts)->>'outlook_forwarding_confirmed_at' AS outlook_forwarding_confirmed_at
           FROM noco.platform_accounts WHERE clients_id=$1 AND id=ANY($2::bigint[]) AND (NOT coalesce(__nc_deleted,false) OR $3::boolean)`,
         [task.clientId, [task.linkedinAccountId, task.outlookAccountId],admin&&task.status==='сделана экспертом'])).rows;
         const li = rows.find(r => Number(r.id) === task.linkedinAccountId), mail = rows.find(r => Number(r.id) === task.outlookAccountId);
         if (!li || !mail) return fail('linkedin_task_account_binding_invalid');
         return { task, intake: { url: String(li.url ?? ''), login: String(li.login ?? ''), hasPassword: !!li.password,
           outlookLogin: String(mail.login ?? ''), hasOutlookPassword: !!mail.password,
+          ...(mail.outlook_forwarding_confirmed_at?{outlookForwardingConfirmedAt:new Date(String(mail.outlook_forwarding_confirmed_at)).toISOString()}:{}),
           ...(mail.outlook_registered_at?{outlookRegisteredAt:(mail.outlook_registered_at instanceof Date?mail.outlook_registered_at:new Date(String(mail.outlook_registered_at))).toISOString()}:{}),
           firstName: String(li.linkedin_first_name ?? ''), lastName: String(li.linkedin_last_name ?? ''),
           realLocation: String(li.real_location ?? ''),
@@ -95,7 +96,9 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
         }
         if (task.status === status) return {task,completed:false};
         if (status === 'сделана экспертом') await requireResult(s,task);
-        return {task:taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *', [id, status])).rows[0]),completed:status==='сделана экспертом'};
+        const updated=taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *', [id, status])).rows[0]);
+        if(status==='сделана экспертом'&&localNotificationClientIds.includes(task.clientId))await s.query("UPDATE noco.linkedin_cycle_notifications SET state='failed',error_code='local_delivery_pending',chat_id=(SELECT telegram_general_chat_id FROM noco.clients WHERE id=$2) WHERE task_id=$1 AND client_id=$2 AND state='pending'",[id,task.clientId]);
+        return {task:updated,completed:status==='сделана экспертом'};
       });
       if(completed&&afterComplete)try{await afterComplete(task.id);}catch{/* Existing CRM command owner reports failures. */}
       return task;

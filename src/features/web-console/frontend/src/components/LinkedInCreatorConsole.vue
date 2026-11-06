@@ -10,6 +10,7 @@ const orderedTasks = computed(() => tasks.value.filter(task => task.status !== e
 const expertCompleted = computed(() => selected.value?.task.status === expertDoneStatus)
 const message = ref(''), busy = ref(false), selectedStatus = ref('не начата'), copied = ref('')
 const captureConfirmed = ref(false)
+const proxyDraftDirty = ref(false)
 const profileState = ref(null)
 const canCaptureProxy = computed(() => profileState.value?.profiles?.some(p => p.locale === 'en' &&
   p.phase === 'ready' && p.canEditProxy === true && p.proxy?.configured) && profileState.value?.newProxyReady !== false)
@@ -43,7 +44,7 @@ const transport = computed(() => {
 })
 const completionChecklist = computed(() => [
   { key: 'proxy', label: 'Настройки прокси подтверждены для заявки',
-    done: !!selected.value?.task.proxySavedAt && captureConfirmed.value,
+    done: !!selected.value?.task.proxySavedAt && captureConfirmed.value && !proxyDraftDirty.value,
     hint: !profileState.value ? 'Дождитесь загрузки состояния профиля Octo.'
       : profileState.value.newProxyReady === false ? 'Введите новые реквизиты прокси в форме выше и дождитесь назначения. Прежнее подключение для нового LinkedIn не подходит.'
       : canCaptureProxy.value ? 'Нажмите «Сохранить настройки прокси» над формой LinkedIn.'
@@ -95,7 +96,7 @@ async function open(id) {
   try {
     const data = await request(`${base}/tasks/${id}`, { signal: taskController.signal })
     if (current !== selection || controller.signal.aborted) return
-    selected.value = data; selectedStatus.value = data.task.status; captureConfirmed.value = !!data.task.proxySavedAt
+    selected.value = data; selectedStatus.value = data.task.status; captureConfirmed.value = !!data.task.proxySavedAt; proxyDraftDirty.value = false
     result.value = { url: data.intake.url, login: data.intake.login || data.intake.outlookLogin || '', password: '' }
   } catch (e) {
     if (e.name !== 'AbortError' && !controller.signal.aborted && current === selection) taskLoadError.value = errorText(e)
@@ -132,7 +133,7 @@ async function save(action, body) {
   } catch (e) {
     if (current === selection && !controller.signal.aborted) {
       message.value = errorText(e)
-      if (action === 'capture-proxy' || ['linkedin_task_proxy_required', 'linkedin_task_proxy_changed'].includes(e.message)) captureConfirmed.value = false
+      if (['linkedin_task_proxy_required', 'linkedin_task_proxy_changed'].includes(e.message)) captureConfirmed.value = false
     }
   } finally { busy.value = false }
 }
@@ -182,6 +183,8 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
           <dt>Реальная локация</dt><dd>{{ selected.intake.realLocation }}</dd><dt>Почта Outlook</dt><dd>{{ selected.intake.outlookLogin }}</dd>
           <dt>Дата и время регистрации Outlook</dt><dd>{{ selected.intake.outlookRegisteredAt?new Date(selected.intake.outlookRegisteredAt).toLocaleString():'Не указаны' }}</dd></dl>
         <label>Пароль Outlook <input type="password" value="saved-password" readonly aria-label="Пароль Outlook"></label>
+        <p data-testid="creator-forwarding">Пересылка писем: {{ selected.intake.outlookForwardingConfirmedAt ? '✅ включена ' + new Date(selected.intake.outlookForwardingConfirmedAt).toLocaleString() : '⚠️ не подтверждена' }}</p>
+        <p>Коды искать на kind.cute.unicorn@gmail.com по адресу {{ selected.intake.outlookLogin }}. Проверь также папку «Спам».</p>
         <button type="button" @click="copy('outlook')">{{ copied === 'outlook' ? 'Скопировано' : 'Копировать пароль Outlook' }}</button>
         <h3>Старые заблокированные аккаунты ({{ selected.intake.blockedAccounts.length }})</h3><p v-if="!selected.intake.blockedAccounts.length">Не указаны.</p>
         <section v-for="(account,index) in selected.intake.blockedAccounts" :key="index" data-testid="creator-blocked-account">
@@ -190,10 +193,10 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
         </section>
         <p><strong>Для нового LinkedIn введи новые реквизиты прокси в форме ниже и нажми «Сохранить прокси».</strong> Старое подключение повторно использовать нельзя. Дождись статуса «Прокси сохранён». В приложении Octo Browser прокси вводить или менять не нужно.</p>
         <p v-if="profileState?.newProxyRequired && profileState.newProxyReady === false" role="status" data-testid="creation-new-proxy-required">Доступ к Octo появится после сохранения и проверки нового прокси для этой заявки.</p>
-        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @proxy-changed="captureConfirmed = false" />
+        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @proxy-draft-changed="proxyDraftDirty = $event" @proxy-changed="captureConfirmed = false" />
         <p>Дождись статуса «Прокси сохранён» и нажми «Сохранить настройки прокси» ниже: кнопка проверит фактические настройки профиля и подтвердит их для заявки. Открывать профиль Octo для этого не требуется. Если доступ к профилю уже выдан, сначала закрой его и дождись завершения доступа.</p>
-        <button type="button" :disabled="busy || !canCaptureProxy" @click="save('capture-proxy', {})">Сохранить настройки прокси</button>
-        <p v-if="captureConfirmed">Прокси сохранён и проверен.</p>
+        <button type="button" :disabled="busy || !canCaptureProxy || proxyDraftDirty" @click="save('capture-proxy', {})">Сохранить настройки прокси</button>
+        <p v-if="captureConfirmed && !proxyDraftDirty">Прокси сохранён и проверен.</p>
         <form @submit.prevent="save('result', result)">
           <h3>Созданный LinkedIn</h3>
           <label>Ссылка LinkedIn<input v-model="result.url" required placeholder="https://www.linkedin.com/in/..." autocomplete="off"></label>

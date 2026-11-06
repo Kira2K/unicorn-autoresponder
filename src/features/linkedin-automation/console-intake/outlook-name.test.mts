@@ -31,7 +31,7 @@ test('name matches cannot overlap, including equal names and later valid occurre
 });
 
 test('new and replacement intake enforce Outlook names before storage; existing LinkedIn is unchanged',()=>{
- const draft={scenario:'new',firstName:'Ivan',lastName:'Petrov',outlookLogin:'ivan.petrov@outlook.com',realLocation:'Tbilisi'};
+ const draft={scenario:'new',outlookForwardingConfirmed:true,firstName:'Ivan',lastName:'Petrov',outlookLogin:'ivan.petrov@outlook.com',realLocation:'Tbilisi'};
  assert.equal(parseIntake(draft).outlookLogin,draft.outlookLogin);
  for(const replacesLinkedInAccountId of [undefined,42])
   assert.throws(()=>parseIntake({...draft,replacesLinkedInAccountId,outlookLogin:'legacy@outlook.com'}),{code:'linkedin_intake_outlook_name_mismatch'});

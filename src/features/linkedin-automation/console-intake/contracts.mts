@@ -7,12 +7,14 @@ export interface LinkedInIntake {
   url: string; login: string; password: string;
   outlookLogin: string; outlookPassword: string;
   outlookRegisteredAt?: string;
+  outlookForwardingConfirmed?: boolean;
   replacesLinkedInAccountId?: number;
   firstName: string; lastName: string; realLocation: string;
   blockedAccounts: BlockedAccount[]; loggedIn: boolean;
   hasBlockedAccounts?:boolean;
 }
 export interface LinkedInIntakeView {
+  outlookForwardingConfirmedAt?: string;
   octoConnectionPending?:boolean;
   url:string;login:string;hasPassword:boolean;outlookLogin:string;hasOutlookPassword:boolean;
   firstName:string;lastName:string;realLocation:string;blockedAccounts:BlockedAccount[];
@@ -129,10 +131,12 @@ export function parseIntake(value: unknown,now=Date.now()): LinkedInIntake {
   if(raw.hasBlockedAccounts!==undefined&&typeof raw.hasBlockedAccounts!=='boolean')throw new IntakeError('linkedin_intake_blocked_invalid');
   if(raw.hasBlockedAccounts===true&&(!blockedAccounts.length||blockedAccounts.some(card=>!completeBlockedAccount(card))))throw new IntakeError('linkedin_intake_blocked_required');
   if(raw.hasBlockedAccounts===false&&blockedAccounts.length)throw new IntakeError('linkedin_intake_blocked_invalid');
+  if(raw.scenario==='new'&&raw.outlookForwardingConfirmed!==true)throw new IntakeError('linkedin_intake_forwarding_required');
   return { ...data, scenario: raw.scenario as LinkedInIntake['scenario'], password, outlookPassword,
     ...(raw.stage!==undefined?{stage:raw.stage as 'credentials'|'complete'}:{}),
     ...(raw.replacesLinkedInAccountId !== undefined ? {replacesLinkedInAccountId:raw.replacesLinkedInAccountId as number} : {}),
     ...(outlookRegisteredAt ? { outlookRegisteredAt } : {}),
+    ...(raw.scenario==='new'?{outlookForwardingConfirmed:true}:{}),
     ...(raw.hasBlockedAccounts!==undefined?{hasBlockedAccounts:raw.hasBlockedAccounts as boolean}:{}),loggedIn: raw.loggedIn === true, blockedAccounts };
 }
 /** Future staff-task boundary: preparation data only, never an automated signup. */

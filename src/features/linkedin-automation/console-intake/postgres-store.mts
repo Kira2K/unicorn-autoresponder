@@ -20,7 +20,7 @@ import type { Locale } from '../../octo-access/contracts.mts';
 import { markConsoleAccountCreation } from './crm-sync.mts';
 
 const accountQuery = `SELECT a.id,a.platforms_id,a.url,a.login,a.password,a.linkedin_first_name,
-  a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,to_jsonb(a)->'is_banned' AS is_banned,a.linkedin_octo_connection_pending,lower(p.name) AS platform
+  a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,to_jsonb(a)->>'outlook_forwarding_confirmed_at' AS outlook_forwarding_confirmed_at,to_jsonb(a)->'is_banned' AS is_banned,a.linkedin_octo_connection_pending,lower(p.name) AS platform
   FROM noco.platform_accounts a JOIN noco.platforms p ON p.id=a.platforms_id
   WHERE a.clients_id=$1 AND lower(p.name) IN ('linkedin','email_outlook')
   AND NOT COALESCE(a.__nc_deleted,false) AND NOT COALESCE(p.__nc_deleted,false) ORDER BY a.id`;
@@ -40,7 +40,7 @@ async function lockBanAccount(s:SqlSession,clientId:number,expectedAccountId:num
   return li;
 }
 export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false, creationTasks = false,
-  afterBan?: (clientId:number,accountId:number)=>Promise<unknown>) {
+  afterBan?: (clientId:number,accountId:number)=>Promise<unknown>, notifications = true) {
   const read = createReadSession(pool, database);
   return {
     async checkSchema() { await read(async s => { await s.query(accountQuery + ' LIMIT 0', [0]);await s.query('SELECT is_banned FROM noco.platform_accounts LIMIT 0');await s.query('SELECT account_id,state FROM noco.linkedin_intake_notifications LIMIT 0'); }); },
@@ -65,6 +65,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
           ...(confirmedAt?{warmupUntil:new Date(new Date(String(confirmedAt)).getTime()+30*86400000).toISOString()}:{}),
           url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
           outlookLogin: String(email?.login ?? ''), hasOutlookPassword: !!email?.password,
+          ...(email?.outlook_forwarding_confirmed_at ? {outlookForwardingConfirmedAt:timestamp(email.outlook_forwarding_confirmed_at)} : {}),
           ...(email?.outlook_registered_at ? { outlookRegisteredAt: timestamp(email.outlook_registered_at) } : {}),
           firstName: String(li?.linkedin_first_name ?? ''), lastName: String(li?.linkedin_last_name ?? ''),
           realLocation: String(li?.real_location ?? ''), blockedAccounts,editableBlockedAccounts,archivedBlockedAccounts };
@@ -169,21 +170,19 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
             ...(data.password ? { password: data.password } : {}) });
           if (linklab&&data.stage!=='credentials') await syncLinkLabAccount(s, clientId);
           const changed=!li||String(li.url??'')!==data.url||String(li.login??'')!==data.login||!!data.password&&data.password!==li.password;
-          if(data.stage!=='credentials'&&(changed||li?.linkedin_octo_connection_pending===true))await s.query('INSERT INTO noco.linkedin_intake_notifications(account_id,client_id) VALUES($1,$2) ON CONFLICT(account_id) DO NOTHING',[linkedinAccountId,clientId]);
+          if(notifications&&data.stage!=='credentials'&&(changed||li?.linkedin_octo_connection_pending===true))await s.query('INSERT INTO noco.linkedin_intake_notifications(account_id,client_id) VALUES($1,$2) ON CONFLICT(account_id) DO NOTHING',[linkedinAccountId,clientId]);
         } else {
           linkedinAccountId = await upsert('linkedin', li, { linkedin_first_name: data.firstName,
             linkedin_last_name: data.lastName, real_location: data.realLocation, old_link_blocked: JSON.stringify(data.blockedAccounts) });
           outlookAccountId = await upsert('email_outlook', email, { login: data.outlookLogin,
             ...(data.outlookRegisteredAt ? { outlook_registered_at: data.outlookRegisteredAt } : {}),
             ...(data.outlookPassword ? { password: data.outlookPassword } : {}) });
+          await s.query('UPDATE noco.platform_accounts SET outlook_forwarding_confirmed_at=COALESCE(outlook_forwarding_confirmed_at,$3::timestamptz) WHERE id=$1 AND clients_id=$2',
+            [outlookAccountId,clientId,new Date().toISOString()]);
           if (options.createOctoProfiles && !editingTask) await queueDirectProfiles(s, clientId, locales, replacement);
         }
         const task = creationTasks && outlookAccountId ? await saveStudentTask(s, clientId, linkedinAccountId, outlookAccountId,
-          !li || !email || String(li.linkedin_first_name ?? '') !== data.firstName ||
-          String(li.linkedin_last_name ?? '') !== data.lastName || String(li.real_location ?? '') !== data.realLocation ||
-          String(li.old_link_blocked ?? '') !== JSON.stringify(data.blockedAccounts) || String(email.login ?? '') !== data.outlookLogin ||
-          !!data.outlookRegisteredAt && timestamp(email.outlook_registered_at) !== data.outlookRegisteredAt ||
-          !!data.outlookPassword && data.outlookPassword !== email.password,editingTask?.id) : undefined;
+          !li || !email || replacement,editingTask?.id) : undefined;
         if(replacement){
           if(!task)throw new PostgresReadError('linkedin_task_account_binding_invalid');
           await s.query('SELECT noco.crm_finish_account_replacement($1,$2,$3,$4)',[clientId,data.replacesLinkedInAccountId,task.id,linkedinAccountId]);
@@ -193,7 +192,7 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
     }
   };
 }
-async function queueDirectProfiles(s: SqlSession, clientId: number, locales: string[], confirmDolphin = false) {
+export async function queueDirectProfiles(s: SqlSession, clientId: number, locales: string[], confirmDolphin = false) {
   const state = await claimClientPassword(s, clientId, generateProfilePassword());
   const profiles = (await s.query('SELECT locale,state FROM noco.octo_profiles WHERE client_id=$1', [clientId])).rows;
   if (profiles.some(p => (p.state as { deletion?: unknown })?.deletion)) throw new PostgresReadError('octo_profile_deleting');

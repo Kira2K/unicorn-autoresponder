@@ -456,6 +456,7 @@ function createMockCvTailoringService(): CvTailoringService {
 function createWebConsoleApp(options: {
   octoService?: import('../../octo-access/service.mts').OctoService
   linkedinIntake?: import('../../linkedin-automation/console-intake/service.mts').LinkedInIntakeService
+  linkedinProxyMove?: import('../../linkedin-automation/proxy-move/service.mts').ProxyMoveService
   linkedinCreator?: import('../../linkedin-automation/creation-tasks/service.mts').CreationTaskService
   linkedinCreatorAuth?: { login: string; password: string }
   repository?: WebConsoleRepository
@@ -1371,6 +1372,8 @@ function createWebConsoleApp(options: {
   registerOctoRoutes(app, requireAuth, options.octoService)
   const { registerLinkedInIntakeRoutes } = require('./linkedin-intake-routes.ts') as typeof import('./linkedin-intake-routes.ts')
   registerLinkedInIntakeRoutes(app, requireAuth, options.linkedinIntake)
+  const { registerProxyMoveRoutes } = require('./linkedin-proxy-move-routes.ts') as typeof import('./linkedin-proxy-move-routes.ts')
+  registerProxyMoveRoutes(app, requireAuth, options.linkedinProxyMove)
   const { registerCreationTaskRoutes } = require('./linkedin-creation-routes.ts') as typeof import('./linkedin-creation-routes.ts')
   registerCreationTaskRoutes(app, requireAuth, options.linkedinCreator)
   const { registerAdminCreationTaskRoutes } = require('./linkedin-admin-creation-routes.ts') as typeof import('./linkedin-admin-creation-routes.ts')

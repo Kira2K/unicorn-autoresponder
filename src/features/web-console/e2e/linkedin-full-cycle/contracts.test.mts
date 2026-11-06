@@ -6,7 +6,8 @@ test('student E2E notifications use the permanent logs group with its negative B
  assert.ok(BigInt(E2E_STUDENT_CHAT_ID)<0n,'a positive ID addresses a user, not the logs group');
 });
 test('live is opt-in and run IDs cannot escape private evidence storage',()=>{
- assert.deepEqual(parseCycleArgs([]),{apply:false,runId:undefined});assert.equal(parseCycleArgs(['--apply']).apply,true);
+ assert.deepEqual(parseCycleArgs([]),{apply:false,runId:undefined,withProxyMove:false});assert.equal(parseCycleArgs(['--apply']).apply,true);
+ assert.equal(parseCycleArgs(['--with-proxy-move']).withProxyMove,true);
  for(const args of [['--apply','--preflight'],['--run-id','../../secret'],['--unknown'],['--apply','--apply']])assert.throws(()=>parseCycleArgs(args));
 });
 test('only the exact marked Cyrillic fixture is reusable; an email collision is never adopted',()=>{

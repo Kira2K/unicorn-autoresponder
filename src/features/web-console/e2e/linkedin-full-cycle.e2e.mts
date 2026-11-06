@@ -5,15 +5,15 @@ import {cycleContext} from './linkedin-full-cycle/context.mts';
 import {cyclePreflight} from './linkedin-full-cycle/preflight.mts';
 import {lockCycleRun} from './linkedin-full-cycle/run-lock.mts';
 export async function runFullCycle(args:string[],env:NodeJS.ProcessEnv){
- const options=parseCycleArgs(args),journal=await openCycleJournal(options.runId),release=await lockCycleRun(journal.dir);
+ const options=parseCycleArgs(args),journal=await openCycleJournal(options.runId),release=await lockCycleRun(journal.dir,journal.data.runId);
  let context:Awaited<ReturnType<typeof cycleContext>>|undefined;
  try{
   context=await cycleContext(env);
-  const preflight=await cyclePreflight(context);
+  const preflight=await cyclePreflight(context,options.withProxyMove);
   journal.data.checks=journal.data.checks.filter(c=>!preflight.checks.some(p=>p.step===c.step));journal.data.checks.push(...preflight.checks);await journal.save();
   console.log(JSON.stringify({runId:journal.data.runId,mode:options.apply?'apply':'preflight',passed:preflight.passed,checks:preflight.checks.map(c=>({step:c.step,state:c.state,code:c.actual}))}));
   if(!preflight.passed){process.exitCode=2;return;}
-  if(options.apply){const {runBrowserCycles}=await import('./linkedin-full-cycle/browser.mts');await runBrowserCycles(context,journal,preflight.connections);if(!journal.data.passed)process.exitCode=2;}
+  if(options.apply){const {runBrowserCycles}=await import('./linkedin-full-cycle/browser.mts');await runBrowserCycles(context,journal,preflight.connections,options.withProxyMove);if(!journal.data.passed)process.exitCode=2;}
  }finally{try{await context?.close();}finally{await release();}}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){

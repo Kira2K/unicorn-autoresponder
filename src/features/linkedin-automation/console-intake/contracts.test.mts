@@ -8,9 +8,9 @@ test('existing LinkedIn credentials can precede Octo, but completion still requi
  assert.throws(()=>parseIntake({...account,stage:'complete'}),{code:'linkedin_intake_login_confirmation_required'});
  assert.equal(parseIntake({...account,loggedIn:true}).stage,undefined);
  assert.throws(()=>parseIntake({...account,stage:'unexpected'}),{code:'linkedin_intake_invalid'});
- assert.throws(()=>parseIntake({scenario:'new',stage:'credentials'}),{code:'linkedin_intake_invalid'});
+ assert.throws(()=>parseIntake({scenario:'new',outlookForwardingConfirmed:true,stage:'credentials'}),{code:'linkedin_intake_invalid'});
 });
-const draft = { scenario: 'new', outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' };
+const draft = { scenario:'new',outlookForwardingConfirmed:true, outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' };
 
 test('Outlook registration cannot be in the future; a declared blocked account requires every structured field',()=>{
  const now=Date.parse('2026-10-29T00:00:00.000Z');
@@ -89,8 +89,18 @@ test('Outlook comparison folds names, preserving original values and nonoverlapp
   assert.equal(outlookLoginMatchesNames('jose@outlook.com', 'José', 'José'), false);
   assert.equal(outlookLoginMatchesNames('josejose@outlook.com', 'José', 'José'), true);
   assert.equal(outlookLoginMatchesNames('jose.muller@outlook.com', 'José', 'Müller'), true);
-  const raw = { scenario: 'new', firstName: 'José', lastName: 'O’Connor', outlookLogin: 'jose.oconnor@outlook.com', realLocation: 'São Paulo, Brazil' };
+  const raw = { scenario:'new',outlookForwardingConfirmed:true, firstName: 'José', lastName: 'O’Connor', outlookLogin: 'jose.oconnor@outlook.com', realLocation: 'São Paulo, Brazil' };
   const parsed = parseIntake(raw, Date.now());
   assert.equal(parsed.firstName, raw.firstName); assert.equal(parsed.lastName, raw.lastName);
   assert.throws(() => parseIntake({ ...raw, outlookLogin: 'other.person@outlook.com' }), { code: 'linkedin_intake_outlook_name_mismatch' });
+});
+
+test('forwarding is mandatory for new and replacement requests; existing accounts remain compatible',()=>{
+ for(const replacesLinkedInAccountId of [undefined,42]){
+  const {outlookForwardingConfirmed,...withoutReceipt}=draft;const data={...withoutReceipt,replacesLinkedInAccountId};
+  assert.throws(()=>parseIntake(data),{code:'linkedin_intake_forwarding_required'});
+  assert.throws(()=>parseIntake({...data,outlookForwardingConfirmed:false}),{code:'linkedin_intake_forwarding_required'});
+  assert.equal(parseIntake({...data,outlookForwardingConfirmed:true}).outlookForwardingConfirmed,true);
+ }
+ assert.equal(parseIntake({scenario:'existing',url:'https://linkedin.com/in/test',login:'test',loggedIn:true}).outlookForwardingConfirmed,undefined);
 });
