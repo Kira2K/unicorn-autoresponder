@@ -54,6 +54,7 @@ import {manualProxyUrl} from '../../../octo-access/manual-proxy-check.mts';
 import type {SendOneInput} from '../../../../integrations/telegram/types.ts';
 import {createBridgeErrorReporter} from '../../../octo-access/bridge/error-reports.mts';
 import { createRequire } from 'node:module';
+import { clientIdRuntime } from '../../../telegram-client-id/live.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const crmCommandConfig=readAccountCommandConfig(env);
@@ -62,6 +63,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
   const bridgeConfig = readBridgeConfig(env);
   const control = readControlConfig(env);
   const config = readPostgresAppDbConfig(env), pool = open(config);
+  const telegramIds = clientIdRuntime(env, pool, config);
   let closing: Promise<void> | undefined;
   let octo: ReturnType<typeof createOctoRuntime> | undefined, octoLockPool: ReturnType<typeof createPostgresPool> | undefined;
   let octoBridge: ReturnType<typeof bridgeRoutes> | undefined;
@@ -76,7 +78,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
   const crmDeliveries=crmCommandConfig?createAccountDeliveryWorker({pool,database:config.database,config:crmCommandConfig,
     report:event=>console.error(JSON.stringify(event))}):undefined;
   const close = () => closing ??= (async () => {
-    try { await crmDeliveries?.stop();await moveNotices?.stop();await cycleNotices?.stop();await existingNotices?.stop();await lifecycle?.stop(); } finally {
+    try { await telegramIds?.stop();await crmDeliveries?.stop();await moveNotices?.stop();await cycleNotices?.stop();await existingNotices?.stop();await lifecycle?.stop(); } finally {
       try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
     }
   })();
@@ -184,6 +186,6 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),...(linkedinProxyMove?{linkedinProxyMove}:{}),
       ...(linkedinCreator ? { linkedinCreator, linkedinCreatorAuth: { login: env.LINKEDIN_CREATOR_LOGIN || '', password: env.LINKEDIN_CREATOR_PASSWORD || '' } } : {}) }, close, octoBridge, octoControl,
       startLocalBackground:async()=>{if(!control?.url||!localClientIds.length)throw new OctoError('octo_control_configuration_required',503);await moveNotices?.start();await cycleNotices?.start();},
-      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start();await existingNotices?.start();await moveNotices?.start();await crmDeliveries?.start(); } };
+      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start();await existingNotices?.start();await moveNotices?.start();await crmDeliveries?.start();await telegramIds?.start(); } };
   } catch (error) { await close(); throw error; }
 }
