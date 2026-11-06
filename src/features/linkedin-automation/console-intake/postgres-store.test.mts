@@ -5,7 +5,7 @@ import type { SqlPool } from '../../../integrations/postgres/contracts.mts';
 import { createLinkedInIntakeStore } from './postgres-store.mts';
 import { parseIntake } from './contracts.mts';
 import { tableIds } from '../../web-console/backend/postgres/tables.mts';
-const input = () => parseIntake({ scenario: 'new', outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'mail-secret',
+const input = () => parseIntake({ scenario:'new',outlookForwardingConfirmed:true, outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'mail-secret',
   firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', blockedAccounts: [{ fullName: 'Old Alex' }, { country: 'UK' }] });
 function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:number)=>Promise<unknown>) {
   const state: { accounts: Record<string, unknown>[]; client?: Record<string, unknown>; profiles: Record<string, unknown>[]; tasks: Record<string,unknown>[] } = { accounts: [], profiles: [], tasks: [], client: undefined };
@@ -68,6 +68,7 @@ function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:numb
       state.accounts.push(row); return { rows: [{ id: row.id }] };
     }
     if (sql.startsWith('UPDATE noco.platform_accounts')) {
+      if(sql.includes('outlook_forwarding_confirmed_at=COALESCE')){const row=state.accounts.find(r=>Number(r.id)===Number(values[0]))!;row.outlook_forwarding_confirmed_at??=values[2];return{rows:[]};}
       if(sql.includes('SET is_banned=true')){const row=state.accounts.find(row=>Number(row.id)===Number(values[0])&&Number(row.clients_id)===Number(values[1]));if(row){row.is_banned=true;row.ban_version=`2026-10-30 00:00:00.${String(++banRevision).padStart(6,'0')}+00`;return{rows:[{id:row.id,ban_version:row.ban_version}]};}return{rows:[]};}
       if(sql.includes('SET is_banned=false')){
         const row=state.accounts.find(row=>Number(row.id)===Number(values[0])&&Number(row.clients_id)===Number(values[1])&&row.is_banned===true&&row.ban_version===values[2]);
@@ -79,6 +80,7 @@ function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:numb
         return{rows:rows.map(row=>({id:row.id}))};
       }
       const row = state.accounts.find(r => r.id === values[0])!;
+      const login=sql.match(/\blogin=\$(\d+)/);if(login&&String(row.login).trim().toLowerCase()!==String(values[Number(login[1])-1]).trim().toLowerCase())row.outlook_forwarding_confirmed_at=null;
       for (const m of sql.matchAll(/(\w+)=\$(\d+)/g)) if (!['id','clients_id'].includes(m[1])) row[m[1]] = values[Number(m[2]) - 1];
       return { rows: [] };
     }
@@ -236,12 +238,14 @@ test('open and blocked intake edits retain the task, account identities and expe
   for(const status of ['не начата','блок']){
     const f=fixture(true);const initial=await f.store.save(7,input(),['ru','en']);
     f.state.tasks[0].status=status;
+    Object.assign(f.state.tasks[0],{proxy_saved_at:'2026-11-01T10:00:00Z',proxy_uuid:'saved-proxy',proxy_profile_id:17});
     Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/expert-draft',login:'expert-draft',password:'expert-secret'});
     const ids=f.state.accounts.map(a=>a.id),profileState=structuredClone(f.state.client);
     const beforeEdit=f.calls.length;
     const updated=await f.store.save(7,{...input(),outlookLogin:'corrected@outlook.com',outlookPassword:'',realLocation:'Yerevan'},['ru','en']);
     assert.ok(!f.calls.slice(beforeEdit).some(sql=>sql.includes('noco.octo_')),'editing does not queue or touch Octo setup');
     assert.equal(updated.task?.id,initial.task?.id);assert.equal(updated.task?.created,false);
+    assert.equal(updated.task?.proxyUuid,'saved-proxy');assert.equal(updated.task?.proxyProfileId,17);assert.ok(updated.task?.proxySavedAt);
     assert.deepEqual(f.state.accounts.map(a=>a.id),ids);assert.equal(f.state.tasks.length,1);
     assert.equal(f.state.accounts[0].url,'https://linkedin.com/in/expert-draft');
     assert.equal(f.state.accounts[0].login,'expert-draft');assert.equal(f.state.accounts[0].password,'expert-secret');
@@ -420,4 +424,14 @@ test('existing ready Octo profiles, attached proxy and completed setup remain un
   const original = structuredClone({ client: f.state.client, profiles: f.state.profiles });
   await f.store.save(7, input(), ['ru','en']);
   assert.deepEqual({ client: f.state.client, profiles: f.state.profiles }, original);
+});
+
+test('forwarding receipt belongs to its mailbox and ordinary edits preserve its original timestamp',async()=>{
+  const f=fixture(true);await f.store.save(7,input(),['en']);
+  const mailbox=f.state.accounts.find(a=>a.platform==='email_outlook')!;
+  mailbox.outlook_forwarding_confirmed_at='2026-01-01T00:00:00Z';
+  await f.store.save(7,{...input(),realLocation:'Yerevan'},['en']);
+  assert.equal((await f.store.load(7)).outlookForwardingConfirmedAt,'2026-01-01T00:00:00.000Z');
+  await f.store.save(7,{...input(),outlookLogin:'new@outlook.com'},['en']);
+  assert.notEqual((await f.store.load(7)).outlookForwardingConfirmedAt,'2026-01-01T00:00:00.000Z');
 });

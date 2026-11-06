@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import {parseProxyLine} from '../proxy-line.js'
-const props=defineProps({ modelValue: { type: Object, required: true }, prefix: { type: String, default: 'octo' },guided:{type:Boolean,default:false},errors:{type:Object,default:()=>({})},singleLine:{type:Boolean,default:false} })
+const props=defineProps({ modelValue: { type: Object, required: true }, prefix: { type: String, default: 'octo' },guided:{type:Boolean,default:false},errors:{type:Object,default:()=>({})},singleLine:{type:Boolean,default:false},saveLabel:{type:String,default:'Сохранить прокси'},linePlaceholder:{type:String,default:'адрес:порт:логин:пароль'} })
 const showPassword = ref(false)
 const proxyLine=ref(''),lineError=ref(''),lineParsed=ref(false)
 function splitLine(){
@@ -21,10 +21,10 @@ function splitLine(){
   <p v-if="guided" class="proxy-entry-note"><strong>Введи данные прокси здесь.</strong> В приложении Octo Browser менять прокси не нужно. После заполнения нажми «Проверить и подключить прокси».</p>
   <p v-else class="proxy-entry-note"><strong>Введите данные прокси здесь, в форме нашей веб-консоли.</strong> В приложении Octo Browser прокси вводить или менять не нужно. После заполнения полей нажмите кнопку под формой.</p>
   <div v-if="singleLine" class="proxy-single-line">
-    <label>Прокси одной строкой (SOCKS5)<input v-model="proxyLine" type="password" autocomplete="new-password" spellcheck="false" placeholder="адрес:порт:логин:пароль" :data-testid="`${prefix}-line`" :aria-invalid="!!lineError" :aria-describedby="`${prefix}-line-help`" @input="splitLine" @keydown.enter.prevent="splitLine" @blur="lineParsed && (proxyLine='')"></label>
-    <small :id="`${prefix}-line-help`">Только SOCKS5. Вставь строку — поля ниже заполнятся автоматически, тип прокси станет SOCKS5. Для сохранения нажми «Сохранить прокси».</small>
+    <label>Прокси одной строкой (SOCKS5)<input v-model="proxyLine" type="password" autocomplete="new-password" spellcheck="false" :placeholder="linePlaceholder" :data-testid="`${prefix}-line`" :aria-invalid="!!lineError" :aria-describedby="`${prefix}-line-help`" @input="splitLine" @keydown.enter.prevent="splitLine" @blur="lineParsed && (proxyLine='')"></label>
+    <small :id="`${prefix}-line-help`">Только SOCKS5. Вставь строку — поля ниже заполнятся автоматически, тип прокси станет SOCKS5. Для сохранения нажми «{{saveLabel}}».</small>
     <p v-if="lineError" class="field-error" role="alert" :data-testid="`${prefix}-line-error`">{{lineError}}</p>
-    <p v-else-if="lineParsed" role="status">Поля SOCKS5 заполнены. Для сохранения нажми «Сохранить прокси».</p>
+    <p v-else-if="lineParsed" role="status">Поля SOCKS5 заполнены. Для сохранения нажми «{{saveLabel}}».</p>
   </div>
   <label>Тип прокси<select v-model="modelValue.type" :data-testid="`${prefix}-type`"><option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks4">SOCKS4</option><option value="socks5">SOCKS5</option></select></label>
   <label>Адрес прокси<input v-model="modelValue.host" aria-label="Адрес прокси" required autocomplete="off" spellcheck="false" :placeholder="guided ? 'gate.example.com' : undefined" :aria-invalid="!!errors.host" :data-testid="`${prefix}-host`"><small v-if="errors.host" class="field-error" role="alert">{{errors.host}}</small></label>

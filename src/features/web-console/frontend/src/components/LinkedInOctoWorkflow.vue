@@ -2,13 +2,19 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import OctoAccessCard from './OctoAccessCard.vue'
 import ExistingLinkedInSetup from './ExistingLinkedInSetup.vue'
+import OutlookForwarding from './OutlookForwarding.vue'
+import LinkedInProxyMove from './LinkedInProxyMove.vue'
 import Dialog from 'primevue/dialog'
 import OutlookRegistrationTime from './OutlookRegistrationTime.vue'
 import { octoApi } from '../octo-api.js'
-import { intakeRequest, intakeBanRequest, intakeScenario, intakeNameParts, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
+import { hasProxyMoveProfile } from '../proxy-move-ui.js'
+import { intakeRequest, intakeBanRequest, intakeScenario, intakeNameParts, registrationStage, infrastructureReady, infrastructureSignature, registrationTimeInput, registrationTimeUtc } from '../linkedin-intake.js'
 import { isOutlookLogin, isLatinIntakeName, outlookLoginError, outlookLoginMatchesNames, outlookNameError } from '../../../../linkedin-automation/console-intake/contracts.mts'
 const props = defineProps({ client: { type: Object, required: true }, hasDolphin: { type: Boolean, default: false } })
 const registrationDate = ref(''), showSavedDialog = ref(false)
+const forwarding = ref(false), forwardingBlock = ref(null)
+const showProxyMove = ref(false)
+function checkForwarding(event) { if (!forwarding.value) { event?.preventDefault(); forwardingBlock.value?.requireConfirmation(); return false } return true }
 const showBanDialog=ref(false),reportingBan=ref(false),hasBlockedAccounts=ref(false)
 const banUndoVersion=ref(null)
 const archivedHistory=computed(()=>secrets.value.archivedBlockedAccounts||[])
@@ -18,6 +24,10 @@ const scenario = ref(''), existing = ref(false), newSaved = ref(false), opened =
 const form = ref({ url: '', login: '', password: '', outlookLogin: '', outlookPassword: '', firstName: '', lastName: '', realLocation: '', blockedAccounts: [], loggedIn: false })
 const fullName = ref(''), fullNameInput = ref(null), fullNameError = ref('')
 const secrets = ref({ hasPassword: false, hasOutlookPassword: false })
+watch(() => form.value.outlookLogin, login => {
+  forwarding.value = !!secrets.value.outlookForwardingConfirmedAt && login.trim().toLowerCase() === String(secrets.value.outlookLogin || '').trim().toLowerCase()
+})
+watch(() => secrets.value.outlookForwardingConfirmedAt, (next, previous) => { if (previous && !next) forwarding.value = false })
 const editLocked = ref(false)
 const task = ref(null), completionConfirmed = ref(false), hasLinkedIn = ref(false), replacementId = ref(null)
 const pendingMessage = 'Мы начали создавать твой аккаунт LinkedIn. Обычно это занимает до 3 суток. Когда всё будет готово, мы тебе напишем.'
@@ -33,13 +43,22 @@ const previousProfileTransport = {
   }
 }
 const usesOcto = computed(() => !props.hasDolphin || !!task.value || completionConfirmed.value)
+const canOpenProxyMove = computed(() => loaded.value && usesOcto.value && (!props.hasDolphin || completionConfirmed.value) &&
+  hasLinkedIn.value && !registrationPending.value && !secrets.value.isBanned && hasProxyMoveProfile(status.value))
 const existingFormEnabled = computed(() => ['en', 'both'].includes(String(props.client.market || '').trim().toLowerCase()) && !props.hasDolphin)
 const canReportBan = computed(() => loaded.value && hasLinkedIn.value && !secrets.value.octoConnectionPending && !replacementId.value && !registrationPending.value &&
   (!task.value || task.value.status === 'сделана экспертом') && (!editLocked.value || completionConfirmed.value))
 const controller = new AbortController()
 const outlookError = ref(''), outlookValidated = ref(false)
 const validationError = ref(''), outlookInput = ref(null)
-let confirmationTimer, checkingConfirmation = false
+let confirmationTimer, proxyAvailabilityTimer, checkingConfirmation = false, checkingProxyAvailability = false
+async function refreshProxyMoveAvailability() {
+  if (controller.signal.aborted || document.hidden || showProxyMove.value || checkingProxyAvailability) return
+  checkingProxyAvailability = true
+  try { const data = await octoApi.profileStatus({ proxyCredentials: false, signal: controller.signal }); if (!controller.signal.aborted) status.value = data }
+  catch { /* No initial verified profile means no move action. Preserve prior state during a transient read failure. */ }
+  finally { checkingProxyAvailability = false }
+}
 const ready = computed(() => infrastructureReady(status.value))
 const historyFields = { fullName: 'Какие имя и фамилия стояли?', country: 'Какая страна была указана?', company: 'Какая компания была указана последним местом работы?', position: 'Какая должность была указана?', blockedAt: 'Когда заблокировали аккаунт?' }
 const canSave = computed(() => loaded.value && (!props.hasDolphin || replacementId.value || task.value) && !editLocked.value && !saving.value && !reportingBan.value &&
@@ -48,11 +67,11 @@ function updateTaskState(data) {
   task.value = data.task || null
   completionConfirmed.value = data.completionConfirmed ?? (data.task?.status === 'сделана экспертом')
   hasLinkedIn.value = data.hasLinkedIn ?? !!(data.url || data.login)
-  secrets.value = { ...secrets.value, ...data }
-  editLocked.value = data.editLocked === true || ['сделана экспертом'].includes(task.value?.status)
+  secrets.value = { ...secrets.value, ...data, outlookForwardingConfirmedAt: data.outlookForwardingConfirmedAt }
+  editLocked.value = data.editLocked === true || task.value?.status === 'сделана экспертом'
   emit('state', { preferOcto: props.hasDolphin && (!!task.value || completionConfirmed.value) && !(registrationPending.value && hadLinkedInBeforeTask.value),
     isBanned:data.isBanned===true,linkedinAccountId:data.linkedinAccountId,outlookAccountId:data.outlookAccountId,
-    registrationPending:data.registrationPending === true || !!task.value && task.value.status !== 'сделана экспертом' })
+    registrationPending:data.registrationPending === true || !!task.value && task.value.status !== 'сделана экспертом',registrationStage:registrationStage(data) })
 }
 async function load() {
   if (loading.value) return
@@ -69,8 +88,10 @@ async function load() {
     registrationDate.value = registrationTimeInput(data.outlookRegisteredAt)
     replacementId.value = null
     updateTaskState(data)
+    forwarding.value = !!data.outlookForwardingConfirmedAt
     scenario.value = registrationPending.value ? 'new' : intakeScenario(data) || (data.task && data.hasOutlookPassword ? 'new' : ''); existing.value = !!data.task || !!intakeScenario(data)
     newSaved.value = !!data.hasOutlookPassword && !!data.firstName; loaded.value = true
+    void refreshProxyMoveAvailability()
   } catch (error) { if (error.name !== 'AbortError') loadError.value = 'Не удалось загрузить данные LinkedIn. Попробуй ещё раз.' }
   finally { loading.value = false }
 }
@@ -80,7 +101,7 @@ watch(() => infrastructureSignature(status.value), resetConfirmation)
 watch(scenario, () => { resetConfirmation(); form.value.password = ''; form.value.outlookPassword = ''; message.value = ''; validationError.value = ''; outlookError.value = ''; outlookValidated.value = false })
 function selectScenario(value) { if (!registrationPending.value) scenario.value = value }
 async function checkConfirmation() {
-  if ((!editLocked.value && !task.value && !secrets.value.registrationPending) || replacementId.value || saving.value || loading.value || document.hidden || checkingConfirmation) return
+  if ((!editLocked.value && !task.value && !secrets.value.registrationPending) || replacementId.value || showProxyMove.value || saving.value || loading.value || document.hidden || checkingConfirmation) return
   checkingConfirmation = true
   try {
     const data = await intakeRequest('GET', undefined, controller.signal)
@@ -130,7 +151,7 @@ function beginReplacement() {
     lastName: isLatinIntakeName(form.value.lastName) ? form.value.lastName : '' }
   fullName.value = [form.value.firstName, form.value.lastName].filter(Boolean).join(' ')
   fullNameError.value = ''
-  registrationDate.value = ''; secrets.value = { ...secrets.value, hasPassword: false, hasOutlookPassword: false }
+  registrationDate.value = ''; secrets.value = { ...secrets.value, hasPassword: false, hasOutlookPassword: false, outlookForwardingConfirmedAt:undefined }; forwarding.value = false
   editLocked.value = false; existing.value = false; newSaved.value = false; scenario.value = 'new'; message.value = ''
   showBanDialog.value=false
 }
@@ -160,6 +181,7 @@ function showInvalidField(event) {
 }
 async function save() {
   if (!canSave.value) return
+  if (scenario.value === 'new' && !checkForwarding()) return
   const editingCurrentTask = registrationPending.value
   outlookError.value = ''; validationError.value = ''
   if (scenario.value === 'new') {
@@ -186,6 +208,7 @@ async function save() {
     const result = await intakeRequest('PUT', { ...form.value, ...registration, scenario: scenario.value,
       ...(scenario.value === 'new' ? intakeNameParts(fullName.value, form.value) : {}),
       ...(scenario.value==='new'?{hasBlockedAccounts:hasBlockedAccounts.value,blockedAccounts:hasBlockedAccounts.value?form.value.blockedAccounts:[]}:{}),
+      ...(scenario.value==='new'?{outlookForwardingConfirmed:forwarding.value,hasBlockedAccounts:hasBlockedAccounts.value,blockedAccounts:hasBlockedAccounts.value?form.value.blockedAccounts:[]}:{}),
       ...(replacementId.value ? { replacesLinkedInAccountId: replacementId.value } : {}) }, controller.signal)
     if (controller.signal.aborted) return
     if (scenario.value === 'new') {
@@ -237,23 +260,27 @@ async function save() {
       'Не удалось сохранить. Проверь поля и состояние Octo; при повторной ошибке обратись в поддержку.'
   } finally { saving.value = false }
 }
-onMounted(() => { load(); confirmationTimer = setInterval(checkConfirmation, 5000) })
-onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.value.password = ''; form.value.outlookPassword = '' })
+onMounted(() => { load(); refreshProxyMoveAvailability(); confirmationTimer = setInterval(checkConfirmation, 5000); proxyAvailabilityTimer = setInterval(refreshProxyMoveAvailability, 10000) })
+onUnmounted(() => { clearInterval(confirmationTimer); clearInterval(proxyAvailabilityTimer); controller.abort(); form.value.password = ''; form.value.outlookPassword = '' })
 </script>
 <template>
-  <section class="linkedin-card" aria-labelledby="linkedin-intake-title" data-testid="linkedin-octo-workflow">
+  <section class="linkedin-card" aria-labelledby="linkedin-intake-title" data-testid="linkedin-octo-workflow" :data-proxy-move-checked="!!status">
     <details open class="linkedin-section" data-testid="linkedin-section-details">
     <summary class="linkedin-summary"><h2 id="linkedin-intake-title">LinkedIn</h2></summary>
+    <button v-if="canOpenProxyMove || showProxyMove" type="button" data-testid="proxy-move-open" :aria-pressed="showProxyMove" @click="showProxyMove=!showProxyMove">{{showProxyMove?'Вернуться к LinkedIn':'Сменить прокси (Octo)'}}</button>
+    <LinkedInProxyMove v-if="showProxyMove" :client-id="client.id" />
+    <div v-show="!showProxyMove">
     <p v-if="loading" role="status">Загружаем данные…</p>
+    <p v-if="loaded && ['не начата','блок'].includes(task?.status) && !secrets.outlookForwardingConfirmedAt" role="status">Новый шаг: включи пересылку писем. Открой блок «Пересылка писем», выполни инструкцию и сохрани изменения.</p>
     <div v-if="loadError" role="alert">{{ loadError }} <button type="button" @click="load">Повторить</button></div>
     <button v-if="canReportBan" type="button" :disabled="saving||reportingBan" data-testid="linkedin-report-ban" @click="reportBan">Меня забанили</button>
     <p v-if="loaded && registrationPending" role="status" data-testid="linkedin-registration-pending">{{ pendingMessage }}</p>
     <p v-if="loaded && registrationPending" role="status">Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.</p>
     <template v-if="loaded && editLocked && completionConfirmed">
-      <p role="status">Создание LinkedIn подтверждено. Твои профили Octo доступны ниже.</p>
-      <OctoAccessCard v-if="usesOcto" :client-id="client.id" :setup-enabled="false" :proxy-editing-enabled="false" :warmup-until="secrets.warmupUntil||''" />
+      <p role="status" data-testid="linkedin-registration-completed">Твой аккаунт LinkedIn готов. Доступ к Octo — ниже.</p>
+      <OctoAccessCard v-if="usesOcto && !showProxyMove" :client-id="client.id" :setup-enabled="false" :proxy-editing-enabled="false" :warmup-until="secrets.warmupUntil||''" />
     </template>
-    <p v-else-if="editLocked" role="status">Заявка обработана экспертом. Для изменения данных обратись в поддержку.</p>
+    <p v-else-if="editLocked" role="status">Для изменения данных обратись в поддержку.</p>
     <OctoAccessCard v-if="loaded && registrationPending && hadLinkedInBeforeTask && secrets.previousOctoProfileIds?.length"
       :client-id="client.id" :setup-enabled="false" :proxy-editing-enabled="false" :transport="previousProfileTransport" />
     <template v-if="loaded && !editLocked">
@@ -275,6 +302,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
           <li>Номер телефона к почте привязывать не нужно.</li>
           <li>Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.</li>
           <li>Двухфакторку не ставь.</li>
+          <li>Сразу включи пересылку писем на нашу почту по инструкции в блоке «Пересылка писем» ниже.</li>
         </ol></details>
         <label class="intake-field"><span>Логин от новой почты Outlook</span><input ref="outlookInput" v-model="form.outlookLogin" type="email" required autocomplete="off" aria-label="Логин от новой почты Outlook" placeholder="name@outlook.com" :aria-invalid="!!outlookError" :aria-describedby="outlookError ? 'outlook-error' : 'outlook-hint'" @input="outlookError && validateOutlook()" @blur="validateOutlook">
           <span v-if="outlookError" id="outlook-error" class="validation-error" role="alert">{{ outlookError }}</span>
@@ -286,6 +314,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
           <small v-if="fullNameError" id="intake-full-name-error" role="alert">{{ fullNameError }}</small>
         </label>
         <label class="intake-field"><span>Город и страна проживания</span><input v-model="form.realLocation" required></label>
+        <OutlookForwarding ref="forwardingBlock" v-model="forwarding" />
           </div>
         </section>
         <section class="blocked-history intake-details" aria-labelledby="blocked-title" data-testid="linkedin-blocked-details">
@@ -307,12 +336,12 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
         </section>
         <p>После сохранения создадим заявку эксперту на подготовку LinkedIn. Недостающие профили Octo подготовятся автоматически; готовые профили сохраняются.</p>
         <p v-if="validationError" class="validation-error" role="alert" data-testid="linkedin-validation-error">{{ validationError }}</p>
-        <button type="submit" :disabled="!canSave">{{ saving ? 'Сохраняем…' : registrationPending ? 'Сохранить изменения' : hasDolphin ? 'Сохранить данные' : 'Сохранить и подготовить Octo' }}</button>
+        <button type="submit" :disabled="!canSave" :class="{'forwarding-missing':!forwarding}" @click="checkForwarding">{{ saving ? 'Сохраняем…' : registrationPending ? 'Сохранить изменения' : hasDolphin ? 'Сохранить данные' : 'Сохранить и подготовить Octo' }}</button>
       </form>
       <p v-if="message" role="status">{{ message }}</p>
       <OctoAccessCard v-if="scenario === 'new' && newSaved && usesOcto && !registrationPending" :client-id="client.id" :setup-enabled="false" />
     </template>
-    </details>
+    </div></details>
     <Dialog v-model:visible="showSavedDialog" modal header="Спасибо, данные сохранены ✅" :closable="false" :draggable="false" :style="{ width: '32rem', maxWidth: 'calc(100vw - 2rem)' }">
       <p>{{ pendingMessage }}</p>
       <p>Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.</p>
@@ -326,6 +355,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); controller.abort(); form.v
   </section>
 </template>
 <style scoped>
+.intake-form>button.forwarding-missing{background:#e2e8f0;color:#475569;border-color:#cbd5e1}
 .linkedin-summary h2{display:inline;margin:0}.linkedin-section[open]>.linkedin-summary{margin-bottom:12px}
 .validation-error{color:#b91c1c;font-weight:600;grid-column:1 / -1}
 input[aria-invalid="true"]{border-color:#b91c1c}

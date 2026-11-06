@@ -2,8 +2,8 @@ import {mkdir,readFile,writeFile,rename} from 'node:fs/promises';import {resolve
 import type {Evidence} from './contracts.mts';
 export interface CycleJournal {runId:string;passed:boolean;createdAt:string;checks:Evidence[];clientId?:number;manualClientId?:number;completedCycles:number[];
  baseline?:{passwordHash:string;profiles:Array<[number,string]>;ruHash:string}}
-export async function openCycleJournal(requested?:string){
- const root=resolve('tmp/linkedin-full-cycle');await mkdir(root,{recursive:true});
+export async function openCycleJournal(requested?:string,rootDirectory='tmp/linkedin-full-cycle'){
+ const root=resolve(rootDirectory);await mkdir(root,{recursive:true});
  let runId=requested;
  if(!runId)try{runId=String(JSON.parse(await readFile(resolve(root,'current.json'),'utf8')).runId);}catch{/* First invocation creates only a local journal. */}
  runId??=new Date().toISOString().replace(/[^0-9]/g,'').slice(0,14)+'-'+randomUUID().slice(0,8);

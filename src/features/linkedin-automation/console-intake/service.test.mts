@@ -19,7 +19,7 @@ test('omitting blocked-history declaration cannot add partial cards; unchanged l
  const legacy={fullName:'Old',legacyText:'Original history'};
  const service=createLinkedInIntakeService({allowed:()=>true,hasDolphin:async()=>false,getClient:async id=>({...mockClient(id),market:'En'}),
   store:{load:async()=>({blockedAccounts:[legacy],editableBlockedAccounts:[legacy]}) as any,save:async()=>{writes++;return{saved:true,linkedinAccountId:1};}}});
- const data={scenario:'new',outlookLogin:'test.student@outlook.com',outlookPassword:'secret',firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
+ const data={scenario:'new',outlookForwardingConfirmed:true,outlookLogin:'test.student@outlook.com',outlookPassword:'secret',firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
  for(const blockedAccounts of [[{fullName:'New'}],[{...legacy,company:'Changed'}],[legacy,legacy]])
   await assert.rejects(service.save(7,{...data,blockedAccounts}),{code:'linkedin_intake_blocked_required'});
  assert.equal(writes,0);
@@ -31,7 +31,7 @@ test('missing Octo client data exposes safe field labels and does not write the 
  let writes=0;
  const store={load:async()=>({realLocation:''}),save:async()=>{writes++;}} as any;
  const service=createLinkedInIntakeService({store,allowed:()=>true,hasDolphin:async()=>false,getClient:async id=>({...mockClient(id),market:'En',calendarEmail:''})});
- await assert.rejects(service.save(7,{scenario:'new',outlookLogin:'test.student@outlook.com',outlookPassword:'secret',firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'}),
+ await assert.rejects(service.save(7,{scenario:'new',outlookForwardingConfirmed:true,outlookLogin:'test.student@outlook.com',outlookPassword:'secret',firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'}),
   (e:any)=>{assert.equal(e.code,'octo_client_data_required');assert.deepEqual(e.fields,[{field:'calendarEmail',label:'Личный email'}]);return true;});
  assert.equal(writes,0);
 });
@@ -44,7 +44,7 @@ test('registration time is required and round-trips for every eligible client', 
     save: async (_id: number, data: { outlookRegisteredAt?: string }) => { saves++; saved = data; return { saved: true, linkedinAccountId: 1 }; } };
   const service = createLinkedInIntakeService({ store, allowed: () => true, hasDolphin: async () => false,
     getClient: async id => ({ ...mockClient(id), calendarEmail, market: 'En' }) });
-  const data = { scenario: 'new', outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', userEmail: 'other@example.com' };
+  const data = { scenario:'new',outlookForwardingConfirmed:true, outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret', firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', userEmail: 'other@example.com' };
   for (const email of ['first@example.invalid', 'second@example.invalid']) {
     calendarEmail = email;
     const previousSaves = saves;
@@ -69,11 +69,11 @@ test('owner reads support Dolphin and RU recovery; normal writes keep market/sco
   await service.load(8);
   dolphin = true; await service.load(7);
   dolphin = false; market = 'Ru'; await service.load(7);
-  const fresh={scenario:'new',outlookLogin:'alex.smith@outlook.com',outlookPassword:'secret',firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
+  const fresh={scenario:'new',outlookForwardingConfirmed:true,outlookLogin:'alex.smith@outlook.com',outlookPassword:'secret',firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
   await assert.rejects(service.save(8,fresh),{code:'forbidden'});
   await assert.rejects(service.save(7,fresh),{code:'forbidden'});
   market = 'En';
-  await service.save(7, { clientId: 8, scenario: 'new', outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret',
+  await service.save(7, { clientId: 8, scenario:'new',outlookForwardingConfirmed:true, outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret',
     firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', outlookRegisteredAt: '2026-10-25T10:30:00.000Z' });
   assert.equal(savedId, 7);
 });
@@ -83,7 +83,7 @@ test('explicit banned-account replacement supports Dolphin and RU with an EN pro
   const store={load:async()=>({url:'https://linkedin.com/in/old',login:'old',hasPassword:true,outlookLogin:'old@outlook.com',hasOutlookPassword:true,firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',blockedAccounts:[]}),
     save:async(...args:unknown[])=>{saved=args;return{saved:true,linkedinAccountId:42};}};
   const service=createLinkedInIntakeService({store,allowed:()=>true,hasDolphin:async()=>true,getClient:async id=>({...mockClient(id),market:'Ru'})});
-  await service.save(7,{scenario:'new',replacesLinkedInAccountId:11,outlookLogin:'alex.smith.new@outlook.com',outlookPassword:'new-secret',
+  await service.save(7,{scenario:'new',outlookForwardingConfirmed:true,replacesLinkedInAccountId:11,outlookLogin:'alex.smith.new@outlook.com',outlookPassword:'new-secret',
     firstName:'Alex',lastName:'Smith',realLocation:'Tbilisi',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'});
   assert.deepEqual((saved as unknown[])[2],['ru','en']);
   assert.deepEqual((saved as unknown[])[3],{createOctoProfiles:true});
@@ -98,7 +98,7 @@ test('Dolphin users cannot enter either Octo intake scenario or create tasks', a
     } };
   const service = createLinkedInIntakeService({ store, allowed: () => true, hasDolphin: async () => true,
     getClient: async id => ({ ...mockClient(id), market: 'En', commonChatId: '' }) });
-  await assert.rejects(service.save(7, { scenario: 'new', outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret',
+  await assert.rejects(service.save(7, { scenario:'new',outlookForwardingConfirmed:true, outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'secret',
     firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi' }), {code:'linkedin_intake_use_dolphin'});
   assert.equal(creation, undefined);
   await assert.rejects(service.save(7, { scenario: 'existing', url: 'https://linkedin.com/in/alex', login: 'alex', loggedIn: true }),
@@ -112,7 +112,7 @@ test('international names are accepted by the service for all authenticated clie
     store: { load: async () => ({ url: '', login: '', hasPassword: false, outlookLogin: '', hasOutlookPassword: false,
       firstName: '', lastName: '', realLocation: '', blockedAccounts: [] }),
       save: async (id, data) => { writes.push({ id, firstName: data.firstName, lastName: data.lastName }); return { saved: true, linkedinAccountId: 1 }; } } });
-  const raw = { scenario: 'new', firstName: 'José', lastName: 'O’Connor', outlookLogin: 'jose.oconnor@outlook.com',
+  const raw = { scenario:'new',outlookForwardingConfirmed:true, firstName: 'José', lastName: 'O’Connor', outlookLogin: 'jose.oconnor@outlook.com',
     realLocation: 'São Paulo, Brazil', outlookRegisteredAt: '2026-10-25T10:30:00.000Z' };
   await service.save(204, raw);
   assert.deepEqual(writes, [{ id: 204, firstName: 'José', lastName: 'O’Connor' }]);

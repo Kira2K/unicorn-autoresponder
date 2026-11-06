@@ -1,0 +1,91 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {resolve} from 'node:path';
+import {chromium} from 'playwright';
+import {createLinkedInMockFixture} from '../../linkedin-automation/local-console/mock-fixture.mts';
+import {runProxyMoveFlow} from './linkedin-proxy-move/flow.mts';
+const require=createRequire(import.meta.url),express=require('express');
+const f=await createLinkedInMockFixture();
+f.app.use(express.static(resolve('dist/web-console')));f.app.use((_req,res)=>res.sendFile(resolve('dist/web-console/index.html')));
+const server=f.app.listen(0,'127.0.0.1');await new Promise<void>(done=>server.once('listening',done));
+const url=`http://127.0.0.1:${(server.address() as {port:number}).port}`,browser=await chromium.launch({headless:true});
+try{
+  const page=await browser.newPage();page.setDefaultTimeout(30000);
+  await page.addInitScript(()=>localStorage.setItem('webConsole.octoWelcome.v1.901','closed'));
+  await page.goto(url);await page.getByTestId('email-input').fill('linkedin-local-901@example.invalid');await page.locator('#password').fill('1234');await page.getByTestId('login-button').click();
+  const existing=(await f.profiles.list(901))[0];
+  await f.profiles.save({...existing,proxy:undefined});await page.reload();
+  await page.locator('[data-testid="linkedin-octo-workflow"][data-proxy-move-checked="true"]').waitFor();
+  assert.equal(await page.getByTestId('proxy-move-open').count(),0,'existing EN without attached proxy means no migration button');
+  const restored=await f.profiles.get(existing.id);assert.ok(restored);await f.profiles.save({...restored,proxy:existing.proxy});await page.reload();
+  let statusRequests=0,releaseRead!:()=>void;const heldRead=new Promise<void>(resolve=>{releaseRead=resolve});
+  await page.route('**/api/client/linkedin-proxy-move',async route=>{statusRequests++;await heldRead;await route.continue()});
+  await page.getByTestId('proxy-move-open').click();await page.getByText('Проверяем готовность профиля Octo…',{exact:true}).waitFor();
+  await page.waitForTimeout(5500);assert.equal(statusRequests,1,'a slow initial status must never spawn overlapping polls');releaseRead();await page.getByTestId('proxy-move-save').waitFor();await page.unroute('**/api/client/linkedin-proxy-move');await page.getByTestId('proxy-move-open').click();
+  await page.route('**/api/client/linkedin-proxy-move',route=>route.fulfill({status:403,json:{error:'linkedin_proxy_move_forbidden'}}));
+  await page.getByTestId('proxy-move-open').click();
+  const failed=page.getByTestId('linkedin-proxy-move');await failed.getByRole('alert').waitFor();
+  assert.equal(await failed.locator('form').count(),0,'initial status failure must not show a false-ready form');
+  assert.match(await failed.getByRole('alert').innerText(),/EN-профиля Octo с подключённым прокси/);
+  await page.unroute('**/api/client/linkedin-proxy-move');await failed.getByRole('button',{name:'Обновить состояние',exact:true}).click();await failed.getByTestId('proxy-move-save').waitFor();
+  await page.getByTestId('proxy-move-open').click();
+  const input={type:'socks5' as const,host:'proxy.example.invalid',port:1080,login:'mock',password:'mock-only'};
+  const result=await runProxyMoveFlow(page,input,async()=>{
+    const button=page.getByTestId('linkedin-proxy-move').getByRole('button',{name:'Получить доступ',exact:true});await button.click();
+    await page.getByTestId('linkedin-proxy-move').locator('.octo-credentials').waitFor();
+    const p=(await f.profiles.list(901))[0];await f.cloud.start(p.uuid!);await f.cloud.stop(p.uuid!);
+    f.advanceClock(121000);
+    const until=Date.now()+30000;while((await f.profiles.get(p.id))?.grant?.phase!=='complete'){if(Date.now()>until)throw Error('e2e_mock_cleanup_timeout');await new Promise(r=>setTimeout(r,500));}
+  });
+  assert.equal(f.notices.length,1);assert.equal(f.notices[0].chatId,'-5216637594');assert.equal(result.move.country,'ES');
+  assert.equal((await f.profiles.list(901))[0].proxy?.isMadeByExpert,false);
+  assert.equal(JSON.stringify(result).includes('mock-only'),false);
+  await page.getByRole('dialog').getByRole('button',{name:'Понятно',exact:true}).click();await page.reload();await page.getByTestId('proxy-move-open').click();const completedConfirmation=page.getByTestId('proxy-move-country-confirmation');await completedConfirmation.waitFor();assert.equal(await completedConfirmation.isChecked(),true);assert.equal(await completedConfirmation.isDisabled(),true,'completed confirmation survives reload and cannot be unchecked');
+  const completedMoveId=result.move.id,profileId=existing.id;
+  for(const host of ['replacement-one.example.invalid','replacement-two.example.invalid']){
+    const form=page.getByTestId(`octo-proxy-form-${profileId}`);
+    await form.waitFor({state:'visible'});
+    await form.getByTestId(`octo-proxy-${profileId}-host`).fill(host);
+    await form.getByTestId(`octo-proxy-${profileId}-login`).fill('mock');
+    await form.getByTestId(`octo-proxy-${profileId}-password`).fill('mock-only');
+    await form.getByTestId(`octo-proxy-save-${profileId}`).click();
+    const until=Date.now()+30000;
+    while((await f.profiles.get(profileId))?.proxy?.host!==host||(await f.profiles.get(profileId))?.proxyChange?.phase!=='complete'){
+      if(Date.now()>until)throw Error('e2e_repeat_proxy_replacement_timeout');await new Promise(r=>setTimeout(r,250));
+    }
+    await page.reload();await page.getByTestId('proxy-move-open').click();
+    await page.getByTestId(`octo-proxy-form-${profileId}`).waitFor({state:'visible'});
+    assert.equal(await page.getByTestId(`octo-proxy-${profileId}-host`).inputValue(),host);
+    assert.equal(f.moves.get(901)?.id,completedMoveId,'ordinary replacement preserves the completed move');
+    assert.equal(f.notices.length,1,'ordinary replacement does not repeat move completion or notification');
+  }
+  const studentContext=await browser.newContext();await studentContext.addInitScript(()=>localStorage.setItem('webConsole.octoWelcome.v1.902','closed'));
+  const student=await studentContext.newPage();student.setDefaultTimeout(15000);
+  await student.goto(url);await student.getByTestId('email-input').fill('linkedin-local-902@example.invalid');await student.locator('#password').fill('1234');await student.getByTestId('login-button').click();
+  await student.locator('[data-testid="linkedin-octo-workflow"][data-proxy-move-checked="true"]').waitFor();
+  assert.equal(await student.getByTestId('proxy-move-open').count(),0,'no Octo/profile/proxy means no migration button');
+  await student.getByRole('button',{name:'Нет LinkedIn / аккаунт заблокирован',exact:true}).click();
+  const form=student.getByTestId('linkedin-new-form');await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click();
+  assert.equal(f.accounts.has(902),false);
+  await student.getByRole('dialog',{name:'Сначала включи пересылку писем',exact:true}).getByRole('button',{name:'Открыть инструкцию',exact:true}).click();
+  for(const [label,value] of [['Логин от новой почты Outlook','alex.test@outlook.com'],['Пароль от новой почты Outlook','mock-mail-only'],['Дата и время регистрации Outlook-почты','2026-10-25'],['Имя и Фамилия латиницей (как в документах)','Alex Test'],['Город и страна проживания','Tbilisi']])await form.getByLabel(label,{exact:true}).fill(value);
+  await form.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');await form.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
+  await form.getByTestId('outlook-forwarding').getByRole('checkbox').check();
+  await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click();await student.getByRole('dialog',{name:'Спасибо, данные сохранены ✅',exact:true}).getByRole('button',{name:'Понятно',exact:true}).click();
+  assert.ok(f.accounts.get(902)?.outlookForwardingConfirmedAt);
+  await student.reload();await form.getByLabel('Город и страна проживания',{exact:true}).fill('Batumi');
+  await form.getByRole('button',{name:'Сохранить изменения',exact:true}).click();await student.getByText('Заявка обновлена',{exact:true}).waitFor();
+  const creator=await browser.newPage();creator.setDefaultTimeout(15000);await creator.goto(url);await creator.getByTestId('email-input').fill('local-denis');await creator.locator('#password').fill('local-test-only');await creator.getByTestId('login-button').click();
+  await creator.getByTestId('creation-task-902').click();await creator.getByTestId('creator-forwarding').waitFor();
+  await creator.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
+  const host=creator.getByLabel('Адрес прокси',{exact:true}),original=await host.inputValue();await host.fill('edited.example.invalid');
+  await creator.getByText('Есть несохранённые изменения.',{exact:false}).waitFor();assert.equal(await creator.getByText('Прокси сохранён и проверен.',{exact:true}).count(),0);
+  await host.fill(original);await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
+  await creator.getByRole('button',{name:'Получить доступ',exact:true}).click();await creator.locator('.octo-credentials').waitFor();
+  await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
+  const created=(await f.profiles.list(902))[0];await f.cloud.start(created.uuid!);await f.cloud.stop(created.uuid!);f.advanceClock(121000);
+  const end=Date.now()+30000;while((await f.profiles.get(created.id))?.grant?.phase!=='complete'){if(Date.now()>end)throw Error('e2e_creator_cleanup_timeout');await new Promise(r=>setTimeout(r,500));}
+  await creator.reload();await creator.getByTestId('creation-task-902').click();await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
+  console.log('Forwarding + Denis MOCK E2E passed: mandatory modal, server timestamp, repeat edit without duplicate, dirty/revert, access/expiry/close/reload preserve proxy confirmation.');
+  console.log('Proxy move MOCK E2E passed: real routes/service/worker, country assignment, reload, access cleanup, two subsequent proxy replacements with reload, one completion/event, no secrets. LinkedIn country itself remains a manual check.');
+}finally{await browser.close();await f.close();await new Promise<void>(done=>server.close(()=>done()));}

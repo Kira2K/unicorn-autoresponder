@@ -8,7 +8,7 @@ export function createAccountDeliveryWorker(deps: {
   pool: SqlPool; database: CopyDatabase; config: {baseUrl:string;secret:string};
   fetch?: typeof globalThis.fetch; report?(event:{feature:string;state:string;code?:string}):void;
 }) {
-  const sql = <T>(fn:Parameters<typeof writeTransaction<T>>[2]) => writeTransaction(deps.pool,deps.database,fn);
+  const sql = <T,>(fn:Parameters<typeof writeTransaction<T>>[2]) => writeTransaction(deps.pool,deps.database,fn);
   let timer:ReturnType<typeof setTimeout>|undefined, running:Promise<void>|undefined, stopped=true;
   async function deliver() {
     const lease=randomUUID();

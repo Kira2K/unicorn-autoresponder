@@ -15,7 +15,7 @@ test('direct API rejects mismatched Outlook names before any storage or Octo wor
  const app=express();app.use(express.json());registerLinkedInIntakeRoutes(app,(req:any,_res,next)=>{req.webSession={role:'client',clientId:7};next();},service);
  const server=app.listen(0,'127.0.0.1');await new Promise<void>(done=>server.once('listening',done));
  const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/api/client/linkedin-intake`;
- const draft={scenario:'new',firstName:'Ivan',lastName:'Petrov',realLocation:'Tbilisi',outlookLogin:'legacy@outlook.com',outlookPassword:'fixture',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
+ const draft={scenario:'new',outlookForwardingConfirmed:true,firstName:'Ivan',lastName:'Petrov',realLocation:'Tbilisi',outlookLogin:'legacy@outlook.com',outlookPassword:'fixture',outlookRegisteredAt:'2026-10-25T10:30:00.000Z'};
  try{
   const put=(body:unknown)=>fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   for(const body of[draft,draft,{...draft,replacesLinkedInAccountId:11}]){

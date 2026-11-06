@@ -5,7 +5,7 @@ import {createWorkingCatalog} from '../../../../integrations/postgres/working-ca
 import {assertFixture,fixtureEmail,fixtureMarker,fixtureNames,E2E_STUDENT_CHAT_ID} from './contracts.mts';
 import type {CycleContext} from './context.mts';
 import type {ManagedProfile} from '../../../octo-access/contracts.mts';
-export async function ensureCycleClient(c:CycleContext,runId:string,kind:keyof typeof fixtureNames){
+export async function ensureCycleClient(c:Pick<CycleContext,'pool'|'config'>,runId:string,kind:keyof typeof fixtureNames){
  return writeTransaction(c.pool,c.config.database,async s=>{
   await s.query('SELECT pg_advisory_xact_lock(730699,hashtext($1))',[fixtureMarker(runId,kind)]);
   const rows=(await s.query('SELECT * FROM noco.clients WHERE legend_info=$1 OR lower(calendar_email)=$2',[fixtureMarker(runId,kind),fixtureEmail(runId,kind)])).rows;

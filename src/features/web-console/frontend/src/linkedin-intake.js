@@ -11,6 +11,10 @@ export function linkedInCreationPending(account, state, clientId) {
   return state?.clientId === clientId && state?.registrationPending === true &&
     state?.linkedinAccountId != null && account.id === state.linkedinAccountId
 }
+export function registrationStage(data) {
+  const pending = data?.registrationPending === true || !!data?.task && data.task.status !== 'сделана экспертом'
+  return pending ? 'creating' : 'ready'
+}
 export function registrationTimeInput(value) {
   if (!value) return ''
   const date = new Date(value)

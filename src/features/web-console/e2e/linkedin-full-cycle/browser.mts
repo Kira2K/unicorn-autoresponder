@@ -11,14 +11,14 @@ import {auditCompletedCycles,auditPrivateRecipients} from './audit.mts';
 import {verifyCycleCompletion} from './admin.mts';
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const {CLIENT_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD}=createRequire(import.meta.url)('../../backend/app.ts');
-export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connections:Array<{input:ProxyInput}>){
+export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connections:Array<{input:ProxyInput}>,withProxyMove=false){
  const browser=await chromium.launch({headless:true});
  try{
   const integrity=await globalCycleIntegrity(c),baselineClean=Object.values(integrity).every(v=>Number(v)===0);
   await journal.record({step:'database-baseline',expected:'Нет нарушений владельцев и связей в затронутых сущностях',actual:baselineClean?'Проверки целостности пройдены':'Обнаружены существующие несоответствия; чужие записи не изменяются',state:baselineClean?'passed':'failed',db:integrity});
   journal.data.clientId=await ensureCycleClient(c,journal.data.runId,'auto');await journal.save();
   const clientId=journal.data.clientId,db=cycleDatabase(c,journal.data.runId,clientId);
-  const student=await loginCycleUser(browser,fixtureEmail(journal.data.runId,'auto'),CLIENT_PASSWORD),creator=await loginCycleUser(browser,c.vars.LINKEDIN_CREATOR_LOGIN!,c.vars.LINKEDIN_CREATOR_PASSWORD!);
+  const student=await loginCycleUser(browser,fixtureEmail(journal.data.runId,'auto'),CLIENT_PASSWORD),creator=await loginCycleUser(browser,c.localConsoleTarget?'local-denis':c.vars.LINKEDIN_CREATOR_LOGIN!,c.localConsoleTarget?'local-test-only':c.vars.LINKEDIN_CREATOR_PASSWORD!);
   const admin=await loginCycleUser(browser,ADMIN_EMAIL,ADMIN_PASSWORD);
   await admin.page.getByTestId('admin-linkedin-tab').click();await admin.page.getByTestId('linkedin-admin-confirmations').waitFor();
   await creator.page.getByTestId('linkedin-creator-console').waitFor();
@@ -38,7 +38,7 @@ export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connect
     await waitForCycle(async()=>await student.page.getByRole('button',{name:'Сохранить изменения',exact:true}).count()===1,'e2e_block_edit_timeout');
     const before=await readJson(creator.context,`/api/linkedin-creator/tasks/${taskId}`);
     const intake=await readJson(student.context,'/api/client/linkedin-intake');
-    const r=await student.context.request.put(consoleUrl+'/api/client/linkedin-intake',{data:{...intake,blockedAccounts:intake.editableBlockedAccounts??intake.blockedAccounts,scenario:'new',password:'',outlookPassword:'',loggedIn:false}});
+    const r=await student.context.request.put(consoleUrl+'/api/client/linkedin-intake',{data:{...intake,outlookForwardingConfirmed:true,blockedAccounts:intake.editableBlockedAccounts??intake.blockedAccounts,scenario:'new',password:'',outlookPassword:'',loggedIn:false}});
     assert.equal(r.status(),200);assert.equal((await r.json()).task.id,taskId);
     const after=await readJson(creator.context,`/api/linkedin-creator/tasks/${taskId}`);assert.equal(after.intake.url,before.intake.url);assert.equal(after.intake.login,before.intake.login);assert.equal(after.intake.hasPassword,true);
     await creator.page.getByTestId(`creation-task-${taskId}`).click();
@@ -60,6 +60,7 @@ export async function runBrowserCycles(c:CycleContext,journal:RunJournal,connect
    journal.data.completedCycles=[...new Set([...journal.data.completedCycles,cycle])];
    await journal.record({step:`cycle-${cycle}-confirmed`,expected:'Новый цикл, две отправки, повтор не сбрасывает данные',actual:'Завершено Денисом; read-back БД и уведомление sent проверены, доступ ученика восстановлен',state:'passed',db:{taskId,cycles:snapshot.cycles.length},screenshot:await evidenceScreenshot(student.page,journal,`cycle-${cycle}-confirmed`)});
   }
+  if(withProxyMove){const {runLiveProxyMove}=await import('../linkedin-proxy-move/live.mts');await runLiveProxyMove(c,journal,student.page);}
   await auditCompletedCycles(c,journal);
   await auditPrivateRecipients(c,journal);
   assert.deepEqual(await globalCycleIntegrity(c),integrity);

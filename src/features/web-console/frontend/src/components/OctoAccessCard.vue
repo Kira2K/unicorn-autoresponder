@@ -5,13 +5,14 @@ import OctoManualSetup from './OctoManualSetup.vue'
 import OctoProxyFields from './OctoProxyFields.vue'
 import Dialog from 'primevue/dialog'
 import { octoOnboardingBusy } from '../octo-onboarding.js'
+import { proxyDraftChanged } from '../proxy-draft.js'
 
 const props = defineProps({ clientId: { type: [Number, String], required: true }, setupEnabled: { type: Boolean, default: true },
   transport: { type: Object, default: () => octoApi }, proxyEditingEnabled: { type: Boolean, default: true },
   proxyChecking: { type: Boolean, default: false },proxySingleLine:{type:Boolean,default:false},proxySaveBelowCard:{type:Boolean,default:false},
   proxyExpanded: { type: Boolean, default: false },warmupUntil:{type:String,default:''},friendlyErrors:{type:Boolean,default:false} })
 const accessWarning=ref(null)
-const emit = defineEmits(['status', 'access-issued', 'proxy-changed'])
+const emit = defineEmits(['status', 'access-issued', 'proxy-changed', 'proxy-draft-changed'])
 const visible = ref(false)
 const initialLoading = ref(false), initialLoadError = ref('')
 const status = ref({ profiles: [], requiredLocales: [] })
@@ -20,6 +21,11 @@ const requesting = ref({})
 const requestErrors = ref({})
 const proxyDrafts = ref({})
 const proxyDirty = ref({})
+const proxyBaselines = ref({})
+watch(proxyDrafts, drafts => {
+  for (const [id, draft] of Object.entries(drafts)) proxyDirty.value[id] = proxyDraftChanged(draft, proxyBaselines.value[id])
+  emit('proxy-draft-changed', Object.values(proxyDirty.value).some(Boolean))
+}, { deep: true })
 const proxySaving = ref({})
 const proxyMessages = ref({})
 const message = ref('')
@@ -92,6 +98,7 @@ function denied(error) {
   initialLoadError.value = ''
   proxyDrafts.value = {}
   proxyDirty.value = {}
+  proxyBaselines.value = {}
   visible.value = false
   status.value = { profiles: [], requiredLocales: [] }
   grants.value = {}
@@ -120,6 +127,9 @@ async function refresh(version) {
     initialLoadError.value = ''
     message.value = ''
     const profileIds = new Set(nextStatus.profiles.map(profile => String(profile.id)))
+    for (const profile of nextStatus.profiles) {
+      if (profile.proxy?.credentialsLoaded && !proxyDirty.value[profile.id]) proxyBaselines.value[profile.id] = octoProxyDraft(profile.proxy)
+    }
     proxyDrafts.value = Object.fromEntries(nextStatus.profiles.map(profile => [profile.id,
       profile.proxy?.canViewCredentials===false?octoProxyDraft({}):!proxyDrafts.value[profile.id] || profile.proxy?.credentialsLoaded && !proxyDirty.value[profile.id]
         ? octoProxyDraft(profile.proxy) : proxyDrafts.value[profile.id]]))
@@ -211,6 +221,8 @@ async function saveProxy(profile) {
     emit('proxy-changed')
     if (active(version)) {
       proxyDirty.value[profile.id] = false
+      proxyBaselines.value[profile.id] = { ...proxyDrafts.value[profile.id] }
+      emit('proxy-draft-changed', false)
       loadProxyCredentials = true
       status.value = { ...status.value, profiles: status.value.profiles.map(item => item.id === profile.id
         ? { ...item, canEditProxy: false, proxy: { ...item.proxy, phase: 'queued' } } : item) }
@@ -282,6 +294,7 @@ watch(() => props.clientId, () => {
   proxyMessages.value = {}
   proxyDrafts.value = {}
   proxyDirty.value = {}
+  proxyBaselines.value = {}
   visible.value = false
   status.value = { profiles: [], requiredLocales: [] }
   grants.value = {}
@@ -361,7 +374,8 @@ onUnmounted(() => {
       <details v-if="proxyEditingEnabled && profile.proxy?.canViewCredentials!==false" :open="proxyExpanded" class="octo-proxy-settings">
         <summary>Настройки прокси</summary>
         <p>Введи реквизиты подключения в этой форме и дождись завершения сохранения.</p>
-        <form v-if="proxyDrafts[profile.id]" :id="`octo-proxy-form-${profile.id}`" class="octo-proxy-form" :aria-busy="proxySaving[profile.id] || proxyPending(profile)" :data-testid="`octo-proxy-form-${profile.id}`" @input="proxyDirty[profile.id] = true" @change="proxyDirty[profile.id] = true" @submit.prevent="saveProxy(profile)">
+        <p v-if="proxyDirty[profile.id]" role="status">Есть несохранённые изменения. Профиль использует сохранённый прокси.</p>
+        <form v-if="proxyDrafts[profile.id]" :id="`octo-proxy-form-${profile.id}`" class="octo-proxy-form" :aria-busy="proxySaving[profile.id] || proxyPending(profile)" :data-testid="`octo-proxy-form-${profile.id}`" @submit.prevent="saveProxy(profile)">
           <fieldset :disabled="!canEditProxy(profile)">
             <legend>Настроить прокси</legend>
             <OctoProxyFields v-model="proxyDrafts[profile.id]" :prefix="`octo-proxy-${profile.id}`" :single-line="proxySingleLine" />

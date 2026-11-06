@@ -5,9 +5,9 @@ const input={type:'socks5' as const,host:'proxy.example.com',port:1080,login:'te
 test('connectivity requires one successful HTTPS response and IP, without score or geography',async()=>{
  let probes=0;
  const check=createProxyConnectivityCheck({lookup:async()=>[{address:'1.1.1.1',family:4}],probe:async options=>{
-  probes++;assert.deepEqual(options.input,input);assert.equal(options.address,'1.1.1.1');return{status:200,body:'{"ip":"203.0.113.25"}'};
+  probes++;assert.deepEqual(options.input,input);assert.equal(options.address,'1.1.1.1');return{status:200,body:'{"ip":"31.178.15.163"}'};
  }});
- assert.deepEqual(await check(input),{ok:true,exit_ip:'203.0.113.25'});assert.equal(probes,1);
+ assert.deepEqual(await check(input),{ok:true,exit_ip:'31.178.15.163'});assert.equal(probes,1);
 });
 test('connectivity rejects private/mixed DNS addresses before opening a proxy connection',async()=>{
  for(const address of ['127.0.0.1','10.0.0.1','172.18.0.1','169.254.169.254','::1','::ffff:127.0.0.1','fc00::1','2001:db8::1']){

@@ -1,4 +1,5 @@
 import { createPostgresPool } from '../../../../integrations/postgres/pg-pool.mts';
+import {routeLocalTestNotice,localTestChat} from '../../../linkedin-automation/local-console/notification-target.mts';
 import { createPostgresClient } from '../../../../integrations/postgres/working-client.mts';
 import type { PostgresTransaction } from '../../../../integrations/postgres/working-client.mts';
 import { assertGeneratedIds } from '../../../../integrations/postgres/identity-preflight.mts';
@@ -46,12 +47,18 @@ import {taskProxyStore} from '../../../linkedin-automation/creation-tasks/proxy-
 import {createNewTaskProxy} from '../../../linkedin-automation/creation-tasks/new-proxy-service.mts';
 import {cycleNotificationRuntime,cycleNotificationStore,deliverCycleNotification} from '../../../linkedin-automation/creation-tasks/cycle-notifications.mts';
 import {existingNotificationStore,deliverExistingNotification} from '../../../linkedin-automation/console-intake/existing-notifications.mts';
+import {createProxyMoveStore} from '../../../linkedin-automation/proxy-move/postgres-store.mts';
+import {createProxyMoveService} from '../../../linkedin-automation/proxy-move/service.mts';
+import {moveNoticeStore,deliverMoveNotice} from '../../../linkedin-automation/proxy-move/notifications.mts';
+import {manualProxyUrl} from '../../../octo-access/manual-proxy-check.mts';
 import type {SendOneInput} from '../../../../integrations/telegram/types.ts';
 import {createBridgeErrorReporter} from '../../../octo-access/bridge/error-reports.mts';
 import { createRequire } from 'node:module';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const crmCommandConfig=readAccountCommandConfig(env);
+  const localClientIds=(env.LINKEDIN_LOCAL_TEST_CLIENT_IDS||env.LINKEDIN_LOCAL_TEST_CLIENT_ID||'').split(',').filter(Boolean).map(Number);
+  if(localClientIds.some(id=>!Number.isSafeInteger(id)||id<=0))throw new OctoError('octo_local_test_configuration_required',503);
   const bridgeConfig = readBridgeConfig(env);
   const control = readControlConfig(env);
   const config = readPostgresAppDbConfig(env), pool = open(config);
@@ -64,10 +71,12 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
   let linkedinCreator: ReturnType<typeof createCreationTaskService> | undefined;
   let cycleNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
   let existingNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
+  let linkedinProxyMove:ReturnType<typeof createProxyMoveService>|undefined;
+  let moveNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
   const crmDeliveries=crmCommandConfig?createAccountDeliveryWorker({pool,database:config.database,config:crmCommandConfig,
     report:event=>console.error(JSON.stringify(event))}):undefined;
   const close = () => closing ??= (async () => {
-    try { await crmDeliveries?.stop();await cycleNotices?.stop();await existingNotices?.stop();await lifecycle?.stop(); } finally {
+    try { await crmDeliveries?.stop();await moveNotices?.stop();await cycleNotices?.stop();await existingNotices?.stop();await lifecycle?.stop(); } finally {
       try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
     }
   })();
@@ -107,11 +116,12 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         throw Object.assign(new Error('octo_pilot_clients_required'), { code: 'octo_pilot_clients_required' });
       const api = createCloudApi(env.OCTO_API_TOKEN!);
       const proxyConnectivity = createProxyConnectivityCheck();
+      const proxyChecker=env.PROXY_CHECKER_BASE_URL&&env.UNICORN_PROXY_CHECKER_SECRET_KEY ? createProxyChecker({baseUrl:env.PROXY_CHECKER_BASE_URL,secret:env.UNICORN_PROXY_CHECKER_SECRET_KEY}):undefined;
       let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
       const sendTaskNotice=(input:SendOneInput)=>{
         taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
-          typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
-        return taskTelegram.sendOne(input);
+          typeof import('../../../../integrations/telegram/index.ts')).telegramForReports(localTestChat,env);
+        return taskTelegram.sendOne(routeLocalTestNotice(input,localClientIds));
       };
       octo = createOctoRuntime({ store: octoStore, api, config: octoConfig, passwordBridge: bridgeConfig, allowLegacyChecks: false,
         reportBridgeIncident:createBridgeErrorReporter({store:octoStore,client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),
@@ -133,25 +143,31 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         config: octoConfig, service: octo.service, ready: uuid => octo!.grantReady(uuid) });
       const crmCommands=createAccountCommandActions({pool,database:config.database,config:crmCommandConfig,
         report:event=>console.error(JSON.stringify({feature:'crm_account_command',...event}))});
-      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true,crmCommands?.ban);
+      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true,crmCommands?.ban, !localClientIds.length);
       await intakeStore.checkSchema();
       linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
         getClient: id => options.repository.getClientById(id),
         hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
-      const tasks = createCreationTaskStore(pool,config.database,!!linklab);
+      const tasks = createCreationTaskStore(pool,config.database,!!linklab,undefined,localClientIds);
       await tasks.checkSchema();
       const notificationMention=DEFAULT_NOTIFICATION_MENTION;
-      existingNotices=cycleNotificationRuntime(()=>deliverExistingNotification({store:existingNotificationStore(pool,config.database),mention:notificationMention,
+      if(env.LINKEDIN_PROXY_MOVE_ENABLED==='1') {
+        const moves=createProxyMoveStore(pool,config.database);await moves.checkSchema();
+        linkedinProxyMove=createProxyMoveService({store:moves,profiles:octoStore,account:id=>intakeStore.load(id),
+          allowed:id=>octo!.service.allowed(id)&&(!localClientIds.length||localClientIds.includes(id)),hasDolphin:async id=>(await options.repository.getDolphinProfilesForClient(id)).length>0,
+          client:id=>options.repository.getClientById(id),
+          check:async input=>{if(!proxyChecker)throw new OctoError('octo_checker_configuration_required',503);return proxyChecker.check(manualProxyUrl(input));},
+          previousProxy:async uuid=>{if(!api.readProfileProxy)throw new OctoError('octo_proxy_check_failed',503);return api.readProfileProxy(uuid);}});
+        moveNotices=cycleNotificationRuntime(()=>deliverMoveNotice({store:moveNoticeStore(pool,config.database,localClientIds.length?localClientIds:undefined),
+          client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice,testChatId:localTestChat}),code=>console.error(JSON.stringify({feature:'linkedin-proxy-move',code})));
+      }
+      existingNotices=cycleNotificationRuntime(()=>deliverExistingNotification({store:existingNotificationStore(pool,config.database),mention:DEFAULT_NOTIFICATION_MENTION,
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
-      cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database),
+      cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database,localClientIds.length?localClientIds:undefined,localTestChat),
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
-      const reportStatusChange = createTaskStatusReporter({chatId:'-1003187558078',mention:notificationMention,
+      const reportStatusChange = createTaskStatusReporter({chatId:env.LINKEDIN_LOCAL_TEST_CLIENT_ID?'-5216637594':'-1003187558078',mention:notificationMention,
         client:id=>options.repository.getClientById(id),
-        sendOne:input=>{
-          taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
-            typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
-          return taskTelegram.sendOne(input);
-        }});
+        sendOne:sendTaskNotice});
       linkedinCreator = createCreationTaskService({ store: tasks, profiles: octoStore, octo: octoService,
         client: id => options.repository.getClientById(id),
         secrets: (id,account) => options.repository.getPlatformAccountSecrets(id,account),
@@ -165,8 +181,9 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         bridge: bridgeConfig, checkpoint: () => octo!.bridgeCheckpoint() }), bridgeConfig,
         event=>console.error(JSON.stringify(event)));
     }
-    return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),
+    return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),...(linkedinProxyMove?{linkedinProxyMove}:{}),
       ...(linkedinCreator ? { linkedinCreator, linkedinCreatorAuth: { login: env.LINKEDIN_CREATOR_LOGIN || '', password: env.LINKEDIN_CREATOR_PASSWORD || '' } } : {}) }, close, octoBridge, octoControl,
-      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start();await existingNotices?.start();await crmDeliveries?.start(); } };
+      startLocalBackground:async()=>{if(!control?.url||!localClientIds.length)throw new OctoError('octo_control_configuration_required',503);await moveNotices?.start();await cycleNotices?.start();},
+      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start();await existingNotices?.start();await moveNotices?.start();await crmDeliveries?.start(); } };
   } catch (error) { await close(); throw error; }
 }

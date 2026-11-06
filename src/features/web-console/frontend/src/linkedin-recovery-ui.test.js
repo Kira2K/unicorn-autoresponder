@@ -1,3 +1,4 @@
+async function confirmForwarding(page){const block=page.getByTestId('outlook-forwarding');if(!await block.count())return;if(!await block.evaluate(el=>el.open))await block.locator('summary').click();await block.getByRole('checkbox').check();}
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {fileURLToPath} from 'node:url'
@@ -87,7 +88,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     await page.getByRole('button',{name:'Сохранить изменения',exact:true}).waitFor()
     const outlookDetails=page.getByTestId('linkedin-outlook-details')
     const blockedDetails=page.getByTestId('linkedin-blocked-details')
-    assert.equal(await outlookDetails.locator('summary').count(),1,'only the instructions remain collapsible')
+    assert.equal(await outlookDetails.locator('summary').count(),2,'Outlook instructions and forwarding remain collapsible')
     assert.equal(await blockedDetails.locator('summary').count(),0)
     assert.equal(await blockedDetails.getByLabel('Какие имя и фамилия стояли?',{exact:true}).inputValue(),'Earlier account')
     await page.getByTestId('octo-profile-1').waitFor()
@@ -107,7 +108,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     const nameError=page.getByText('В адресе до @ должны присутствовать имя и фамилия из полей ниже — целиком, в любом порядке. Для составных имени и фамилии достаточно одной части каждого.',{exact:true})
     assert.equal(await page.getByTestId('outlook-instructions').locator('strong').textContent(),'имя.фамилия латиницей')
     await outlook.fill('legacy@outlook.com');await outlook.blur();await nameError.waitFor()
-    await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click()
+    await confirmForwarding(page);await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click()
     assert.equal(writes,0,'unchanged legacy Outlook must meet the rule on every save')
     assert.equal(await outlook.evaluate(input=>document.activeElement===input),true)
     await outlook.fill('SMITHalex99@outlook.com');await nameError.waitFor({state:'hidden'})
@@ -118,11 +119,11 @@ test('registration keeps current edits and prior access, locks completed data, a
     await outlook.fill('ivanovivan@outlook.com');await nameError.waitFor({state:'hidden'})
     await latinName.fill('Alex Smith');await outlook.fill('alex.smith@outlook.com');await nameError.waitFor({state:'hidden'})
     serverMismatch=true
-    await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click();await nameError.waitFor()
+    await confirmForwarding(page);await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click();await nameError.waitFor()
     assert.equal(writes,0,'a backend validation error does not become a successful save')
     assert.equal(await page.getByLabel('Город и страна проживания',{exact:true}).inputValue(),'Unsaved draft')
     serverMismatch=false;await outlook.fill('alex.smith.99@outlook.com');await nameError.waitFor({state:'hidden'})
-    await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click()
+    await confirmForwarding(page);await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click()
     await page.getByText('Заявка обновлена',{exact:true}).waitFor()
     assert.equal(await page.getByRole('dialog').count(),0,'editing an existing task does not show a new-registration success dialog')
     assert.equal(submissions[0].scenario,'new');assert.equal(submissions[0].replacesLinkedInAccountId,undefined)
@@ -152,13 +153,13 @@ test('registration keeps current edits and prior access, locks completed data, a
     const email=form.getByLabel('Логин от новой почты Outlook',{exact:true})
     await email.fill('test@example.invalid')
     await form.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');await page.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');await page.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30')
-    await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
+    await confirmForwarding(page);await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
     const summary=form.getByTestId('linkedin-validation-error')
     await summary.waitFor()
     assert.match(await summary.innerText(),/Пароль от новой почты Outlook/)
     assert.equal(writes,0,'native required-field validation also explains why nothing was submitted')
     await form.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill('fixture-password')
-    await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
+    await confirmForwarding(page);await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
     await summary.waitFor()
     assert.match(await summary.innerText(),/@outlook\.com/)
     assert.equal(await summary.getAttribute('role'),'alert')
@@ -169,7 +170,7 @@ test('registration keeps current edits and prior access, locks completed data, a
     await email.fill('alex.smith.replacement@outlook.com')
     assert.equal(await summary.count(),0,'correcting the email clears the stale error')
     allowSave=true
-    await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
+    await confirmForwarding(page);await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click()
     await page.getByRole('dialog').waitFor()
     assert.equal(writes,1)
     assert.equal(submissions[0].replacesLinkedInAccountId,11)
@@ -268,7 +269,7 @@ test('all clients get combined Latin name and multiple desired locations; Unicod
     const last = page.getByLabel('Фамилия латиницей (как в иностранных документах)', { exact: true })
     const saveName = async () => {
       const response = page.waitForResponse(r => r.url().endsWith('/api/client/linkedin-intake') && r.request().method() === 'PUT')
-      await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
+      await confirmForwarding(page);await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
       assert.equal((await response).status(), 200)
       await page.getByText('Заявка обновлена', { exact: true }).waitFor()
     }
@@ -279,7 +280,7 @@ test('all clients get combined Latin name and multiple desired locations; Unicod
       assert.equal(await combined.inputValue(), 'Mary Jane van der Smith')
       assert.equal(await first.count(), 0); assert.equal(await last.count(), 0)
       await saveName(); assert.deepEqual(names.get(clientId), { firstName: 'Mary Jane', lastName: 'van der Smith' })
-      await combined.fill('Alex'); await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
+      await confirmForwarding(page);await combined.fill('Alex'); await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
       assert.equal(await combined.getAttribute('aria-invalid'), 'true'); assert.equal(nameWrites.length, previousNameWrites + 1)
       await combined.fill('José O’Connor')
       const outlookLogin = page.getByLabel('Логин от новой почты Outlook', { exact: true })
