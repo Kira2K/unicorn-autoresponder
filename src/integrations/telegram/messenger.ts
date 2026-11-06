@@ -20,6 +20,7 @@ const TELEGRAM_SEND_TIMEOUT_MS = Number(
 
 type CreateTelegramClientOptions = {
   saveSession?: boolean
+  interactive?: boolean
 }
 
 function readStoredTelegramSession(): string {
@@ -123,10 +124,23 @@ async function createTelegramClient(
     apiHash,
     {
       connectionRetries: 5,
+      ...(options.interactive === false ? { connectionRetries: 1, requestRetries: 1, floodSleepThreshold: 0 } : {}),
       baseLogger: new Logger(LogLevel.NONE)
     }
   );
   client.setLogLevel?.(LogLevel.NONE)
+
+  if (options.interactive === false) {
+    try {
+      if (!telegramSession) throw Object.assign(new Error('Telegram session is required.'), { code: 'telegram_session_required' })
+      await client.connect()
+      if (!await client.isUserAuthorized()) throw Object.assign(new Error('Telegram session is not authorized.'), { code: 'telegram_session_required' })
+      return client
+    } catch (error) {
+      await client.disconnect().catch(() => {})
+      throw error
+    }
+  }
 
   await client.start({
     phoneNumber: async () => await input.text("Phone: +995595830004"),
