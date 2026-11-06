@@ -36,6 +36,7 @@ import { loadClientNotificationSettings } from '../../../client-lifecycle/postgr
 import { createLinkedInIntakeStore } from '../../../linkedin-automation/console-intake/postgres-store.mts';
 import { createLinkedInIntakeService } from '../../../linkedin-automation/console-intake/service.mts';
 import {createAccountCommandActions,readAccountCommandConfig} from '../../../linkedin-automation/linklab/crm-account-actions.mts';
+import {createAccountDeliveryWorker} from '../../../linkedin-automation/linklab/crm-account-delivery.mts';
 import { createCreationTaskStore } from '../../../linkedin-automation/creation-tasks/postgres-store.mts';
 import { createCreationTaskService } from '../../../linkedin-automation/creation-tasks/service.mts';
 import { createTaskProxyCapture } from '../../../linkedin-automation/creation-tasks/proxy-capture.mts';
@@ -63,8 +64,10 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
   let linkedinCreator: ReturnType<typeof createCreationTaskService> | undefined;
   let cycleNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
   let existingNotices:ReturnType<typeof cycleNotificationRuntime>|undefined;
+  const crmDeliveries=crmCommandConfig?createAccountDeliveryWorker({pool,database:config.database,config:crmCommandConfig,
+    report:event=>console.error(JSON.stringify(event))}):undefined;
   const close = () => closing ??= (async () => {
-    try { await cycleNotices?.stop();await existingNotices?.stop();await lifecycle?.stop(); } finally {
+    try { await crmDeliveries?.stop();await cycleNotices?.stop();await existingNotices?.stop();await lifecycle?.stop(); } finally {
       try { await octo?.stop(); } finally { try { await octoLockPool?.end(); } finally { await pool.end(); } }
     }
   })();
@@ -72,6 +75,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     const db = await createPostgresClient(pool, config.database, { writable: true,
       beforeWrite: async (s,table,key,data) => { if(table===tableIds.accounts) await guardAccount(s,key,data); } });
     await assertGeneratedIds(pool, config.database, runtimeCreateTables(db));
+    await crmDeliveries?.checkSchema();
     const crmSync=linkedInCrmSyncStore(pool,config.database);await crmSync.checkSchema();
     const create = (tx: PostgresTransaction, table: string, data: Readonly<Record<string, unknown>>) => tx.createRecord(table, data);
     const linklab = env.LINKLAB_ENABLED === '1' ? await openLinkLabIntake(pool, config.database, tableIds.cv) : undefined;
@@ -134,7 +138,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
         getClient: id => options.repository.getClientById(id),
         hasDolphin: async id => (await options.repository.getDolphinProfilesForClient(id)).length > 0 });
-      const tasks = createCreationTaskStore(pool,config.database,!!linklab,crmCommands?.replacement);
+      const tasks = createCreationTaskStore(pool,config.database,!!linklab);
       await tasks.checkSchema();
       const notificationMention=DEFAULT_NOTIFICATION_MENTION;
       existingNotices=cycleNotificationRuntime(()=>deliverExistingNotification({store:existingNotificationStore(pool,config.database),mention:notificationMention,
@@ -163,6 +167,6 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
     }
     return { options: { ...options, ...(octoService ? { octoService } : {}), ...(linkedinIntake ? { linkedinIntake } : {}),
       ...(linkedinCreator ? { linkedinCreator, linkedinCreatorAuth: { login: env.LINKEDIN_CREATOR_LOGIN || '', password: env.LINKEDIN_CREATOR_PASSWORD || '' } } : {}) }, close, octoBridge, octoControl,
-      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start();await existingNotices?.start(); } };
+      startBackground: async () => { if (!control?.url) await octo?.start(); await lifecycle?.start();await cycleNotices?.start();await existingNotices?.start();await crmDeliveries?.start(); } };
   } catch (error) { await close(); throw error; }
 }

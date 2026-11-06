@@ -53,7 +53,7 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
       CREATE TABLE noco.clients(id bigint PRIMARY KEY,client_name text,__nc_deleted boolean DEFAULT false);
       CREATE TABLE noco.platforms(id bigint PRIMARY KEY,name text,__nc_deleted boolean DEFAULT false);
       CREATE TABLE noco.platform_accounts(id bigint PRIMARY KEY,clients_id bigint REFERENCES noco.clients(id),platforms_id bigint REFERENCES noco.platforms(id),
-        url text,login text,password text,__nc_deleted boolean DEFAULT false,linkedin_first_name text,linkedin_last_name text,real_location text,
+        url text,login text,password text,__nc_deleted boolean DEFAULT false,"isUnsyncedWithCRM" boolean DEFAULT true,linkedin_first_name text,linkedin_last_name text,real_location text,
         old_link_blocked text,outlook_registered_at timestamptz,updated_at timestamptz DEFAULT clock_timestamp());
       CREATE TABLE noco.octo_profiles(profile_id bigint PRIMARY KEY,client_id bigint REFERENCES noco.clients(id),locale text,revision bigint,state jsonb);
       CREATE TABLE noco.dolphin_profiles(id bigint PRIMARY KEY,browser text,octo_profile_id text);
@@ -66,6 +66,7 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
     await migration('./sql/006-account-cycle.up.sql');await migration('../creation-tasks/sql/003-denis-workflow.up.sql');
     await q('ALTER TABLE noco.clients ADD COLUMN telegram_general_chat_id text');
     await migration('../creation-tasks/sql/004-three-statuses.up.sql');
+    await migration('./sql/007-binding-delivery.up.sql');
     await q("INSERT INTO noco.linklab(client_id,platform_account_id,status) VALUES(101,11,'Раскачка')");
     await q('UPDATE noco.linklab SET crm_student_id=$1,confirmed_version=version WHERE client_id=101',[student]);
     const before=await control('fixture',{student_id:student,account_id:'11',version:'1'});
@@ -99,20 +100,28 @@ test('button HTTP → committed source SQL → real CRM command handler',{skip:!
     assert.equal(blocked.open_sessions,0);assert.deepEqual(blocked.done,before.done);
     await sendAccountCommand({body:captures[0].body,expectedStudentId:student},options);assert.equal(captures.at(-1)!.status,200);
     assert.equal((await control('probe')).ban_receipts,1);
-    await q(`UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id IN(11,12);
+    await q(`BEGIN;SELECT noco.crm_begin_account_replacement(101,11);
+      UPDATE noco.platform_accounts SET __nc_deleted=true WHERE id IN(11,12);
       INSERT INTO noco.platform_accounts(id,clients_id,platforms_id,url,login,password) VALUES
-      (21,101,16,'https://www.linkedin.com/IN/студент/?trk=profile#details','new','fixture'),(22,101,31,'','new@outlook.com','fixture');
+      (21,101,16,'https://www.linkedin.com/in/new-synthetic/','new','fixture'),(22,101,31,'','new@outlook.com','fixture');
       INSERT INTO noco.octo_profiles VALUES(1,101,'en',1,'{"phase":"ready","proxy":{"uuid":"fixture-proxy"}}');
       INSERT INTO noco.linkedin_creation_task(client_id,linkedin_account_id,outlook_account_id,status,requires_new_proxy,proxy_profile_id,proxy_uuid,proxy_saved_at)
-      VALUES(101,21,22,'не начата',false,1,'fixture-proxy',clock_timestamp());`);
+      VALUES(101,21,22,'не начата',false,1,'fixture-proxy',clock_timestamp());
+      SELECT noco.crm_finish_account_replacement(101,11,(SELECT id FROM noco.linkedin_creation_task WHERE client_id=101),21);COMMIT;`);
     const task=(await q('SELECT id,version FROM noco.linkedin_creation_task')).rows[0],confirmPath='/api/linkedin-creator/tasks/'+task.id+'/status';
     const count=captures.length;
     const confirmations=await Promise.all([click(confirmPath,{version:Number(task.version),status:'сделана экспертом'},'linkedin_creator'),click(confirmPath,{version:Number(task.version),status:'сделана экспертом'},'linkedin_creator')]);
-    assert.ok(confirmations.every(r=>r.status===200));assert.equal(captures.length,count+1);assert.equal(captures.at(-1)!.status,201);
+    assert.ok(confirmations.every(r=>r.status===200));assert.equal(captures.length,count,'completion only persists a durable intent');
+    assert.equal((await actions.replacement(Number(task.id))).state,'queued');
+    const queued=(await q('SELECT body FROM noco.crm_account_deliveries WHERE task_id=$1',[task.id])).rows[0];
+    // This historical two-DB wire fixture intentionally has source/legacy guard disabled.
+    // Atomic source ACK + actual worker are covered by test_binding_delivery_20261106.
+    await sendAccountCommand({body:Buffer.from(queued.body),expectedStudentId:student},options);
+    assert.equal(captures.at(-1)!.status,201);
     const recovered=await control('probe');assert.equal(recovered.student_id,student);assert.equal(recovered.account_id,'21');
     assert.equal(recovered.status,'warmup');assert.equal(recovered.profile_filled,0);assert.equal(recovered.ssi_current,0);assert.equal(recovered.ssi_history,before.ssi_history);
     assert.deepEqual(recovered.done.map((d:any)=>[d.estimated_minutes,d.operator_added_minutes]),before.done.map((d:any)=>[d.estimated_minutes,d.operator_added_minutes]));
-    assert.equal((await q('SELECT crm_integration_required FROM noco.linklab WHERE client_id=101')).rows[0].crm_integration_required,true,'source ACK is not part of this command PR');
+    assert.equal((await q('SELECT crm_integration_required FROM noco.linklab WHERE client_id=101')).rows[0].crm_integration_required,true,'separate legacy wire fixture does not implement the co-located source ACK');
     await sendAccountCommand({body:captures.at(-1)!.body,expectedStudentId:student},options);assert.equal((await control('probe')).receipt_count,1);
     verifyCommitted=false;
     await assert.rejects(sendAccountCommand({body:captures[0].body,expectedStudentId:student},options),/receipt/);

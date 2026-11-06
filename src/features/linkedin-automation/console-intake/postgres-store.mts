@@ -184,6 +184,10 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
           String(li.old_link_blocked ?? '') !== JSON.stringify(data.blockedAccounts) || String(email.login ?? '') !== data.outlookLogin ||
           !!data.outlookRegisteredAt && timestamp(email.outlook_registered_at) !== data.outlookRegisteredAt ||
           !!data.outlookPassword && data.outlookPassword !== email.password,editingTask?.id) : undefined;
+        if(replacement){
+          if(!task)throw new PostgresReadError('linkedin_task_account_binding_invalid');
+          await s.query('SELECT noco.crm_finish_account_replacement($1,$2,$3,$4)',[clientId,data.replacesLinkedInAccountId,task.id,linkedinAccountId]);
+        }
         return { saved: true, ...(task ? { task } : {}), linkedinAccountId, ...(outlookAccountId ? { outlookAccountId } : {}) };
       });
     }
