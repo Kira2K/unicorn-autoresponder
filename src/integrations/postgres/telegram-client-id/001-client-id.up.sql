@@ -1,5 +1,7 @@
 -- Apply only in an explicitly approved deployment. No data backfill or new storage.
 BEGIN;
+SET LOCAL lock_timeout='3s';
+SET LOCAL statement_timeout='15s';
 CREATE OR REPLACE FUNCTION noco.notify_client_tg_id()
 RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $body$
 BEGIN
