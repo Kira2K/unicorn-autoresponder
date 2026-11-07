@@ -32,8 +32,10 @@ import { runHHSkillsTests } from './hh-skills.test.ts'
 import { runHHResumeLanguageTests } from './hh-resume-language.test.ts'
 import { runHHJobSearchStatusTests } from './hh-job-search-status.test.ts'
 import { runHHLiveDomTests } from './hh-live-dom.test.ts'
+import { runAreaDropdownTests } from './hh-area-dropdown.test.ts'
 
 async function main() {
+  await runAreaDropdownTests()
   runRecoveryPolicyTests()
   await runPreserveExistingTest()
   await runExperienceLocationTests()

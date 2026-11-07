@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright'
 import { ensureResumeSkills, verifyResumeSkills } from '../hh-skills.ts'
+import { syncStrictSkills } from '../hh-resume-ui.ts'
+import type { PreparedProfile } from '../types.ts'
 
 export async function runHHSkillsTests() {
   const browser = await chromium.launch({ headless: true }).catch(() =>
@@ -78,5 +80,18 @@ export async function runHHSkillsTests() {
     await assert.rejects(verifyResumeSkills(page, resume, expected), { code: 'profile_hh_skills_incomplete' })
     saved = []
     await assert.rejects(verifyResumeSkills(page, resume, expected), { code: 'profile_hh_skills_incomplete' })
+    discardLevel = false
+    const recovered = await syncStrictSkills(page, {
+      cv: { skills: expected, skillGroups: [], experience: [] }
+    } as unknown as PreparedProfile, { ...resume, isDraft: true })
+    assert.deepEqual(recovered.tags, expected,
+      'An empty draft without a public skills card must be filled through its exact editor')
+    assert.deepEqual(recovered.advanced, expected)
+    const writesAfterRecovery = [nameWrites, levelWrites]
+    await syncStrictSkills(page, {
+      cv: { skills: expected, skillGroups: [], experience: [] }
+    } as unknown as PreparedProfile, { ...resume, isDraft: true })
+    assert.deepEqual([nameWrites, levelWrites], writesAfterRecovery,
+      'Recovery must preserve a complete saved set without rewriting it')
   } finally { await browser.close() }
 }

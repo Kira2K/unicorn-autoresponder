@@ -11,7 +11,8 @@ import { fillProfileLanguages, verifyProfileLanguages } from './hh-languages.ts'
 import { orderedSkillCandidates, requiredSkillSet } from './skill-selection.ts'
 import fs from 'node:fs'
 import path from 'node:path'
-import { ensureThirtyAdvanced, type SavedSkills } from './skill-contract.ts'
+import type { SavedSkills } from './skill-contract.ts'
+import { ensureResumeSkills } from './hh-skills.ts'
 import { contentText, datePresent } from './content-policy.ts'
 import { readResumeContract } from './hh-contract-reader.ts'
 import { preserveFirstObservation } from './preservation-state.ts'
@@ -132,6 +133,14 @@ async function exactAreaSuggestion(sheet: Locator, value: string): Promise<Locat
 }
 
 async function visibleAreaSheet(page: Page, value: string): Promise<Locator | undefined> {
+  // Desktop HH renders the city results in the combobox's own listbox.
+  // Scope by aria-controls so another field's suggestions cannot be selected.
+  const area = await firstVisible([page.locator('[data-qa="profile-common-edit-area"]')])
+  const controlledId = await area?.getAttribute('aria-controls')
+  if (controlledId) {
+    const dropdown = page.locator(`[role="listbox"][id=${JSON.stringify(controlledId)}]`)
+    if (await dropdown.isVisible().catch(() => false)) return dropdown
+  }
   const sheets = page.locator('[data-qa="bottom-sheet-css-variables"]')
   const count = await sheets.count().catch(() => 0)
   for (let index = count - 1; index >= 0; index -= 1) {
@@ -3160,47 +3169,12 @@ export async function readPersistedSkills(page: Page, id: string): Promise<Saved
   }
 }
 
-async function syncStrictSkills(page: Page, profile: PreparedProfile, resume: ResumeSnapshot): Promise<SavedSkills> {
-  const saveTags = async (skills: string[]) => {
-    if (resume.isDraft) {
-      await page.goto(`https://hh.ru/profile/resume/keyskills?resume=${encodeURIComponent(resume.id)}`, {
-        waitUntil: 'domcontentloaded', timeout: 120_000
-      })
-      await addSkills(page, skills)
-      await nextWizardStep(page, 'skills')
-    } else {
-      await page.goto(`https://hh.ru/resume/edit/${resume.id}/keySkills`, {
-        waitUntil: 'domcontentloaded', timeout: 120_000
-      })
-      await fillDirectSkillsEditor(page, skills)
-      await saveChangesWithoutPublishing(page)
-    }
-  }
-  return await ensureThirtyAdvanced({
-    same: sameSkill,
-    read: () => readPersistedSkills(page, resume.id), saveTags,
-    async saveAdvanced(tags) {
-      if (resume.isDraft) {
-        await saveTags(tags)
-      } else {
-        await readPersistedSkills(page, resume.id)
-        const control = page.locator('[data-qa="skills-card"]:visible')
-          .getByRole('button', { name: /^(?:Указать уровень|Оценить навыки|Редактировать уровни|Edit levels)$/i })
-        if (await control.count() !== 1) throw profileFillerError('profile_hh_skill_level_missing',
-          'A resume-scoped skill level editor is unavailable.', 'fill_skills')
-        await control.click()
-      }
-      const rows = page.locator('[data-qa="skill"]:visible')
-      const names = await rows.locator('[data-qa="skillName"]').allInnerTexts()
-      if (names.length !== 30 || tags.some(tag => !names.some(name => sameSkill(tag, name)))) {
-        throw profileFillerError('profile_hh_thirty_levels_unavailable',
-          'HH does not expose Advanced controls for all 30 saved skills.', 'fill_skills')
-      }
-      await setAllSkillsAdvanced(page, tags)
-      if (resume.isDraft) await nextWizardStep(page, 'skill levels')
-      else await saveChangesWithoutPublishing(page)
-    }
-  }, profile.cv.skills)
+export async function syncStrictSkills(page: Page, profile: PreparedProfile, resume: ResumeSnapshot): Promise<SavedSkills> {
+  // Empty drafts have no public skills card. The exact partial editors expose
+  // both empty and populated sets and verify names/levels after saving.
+  const saved = await ensureResumeSkills(page, resume, requiredSkillSet(profile.cv))
+  return { tags: saved.map(skill => skill.name),
+    advanced: saved.filter(skill => skill.level === 'advanced').map(skill => skill.name) }
 }
 
 export async function resumeSkills(page: Page, profile: PreparedProfile,
