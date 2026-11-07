@@ -84,16 +84,9 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
       if(changed&&afterBan)try{await afterBan(clientId,expectedAccountId);}catch{/* Delivery owner reports failures. */}
       return result;
     },
-    async cancelBan(clientId:number,expectedAccountId:number,banUndoVersion:string){
-      return writeTransaction(pool,database,async s=>{
-        const li=await lockBanAccount(s,clientId,expectedAccountId);
-        if(li.is_banned===true){
-          const result=await s.query(`UPDATE noco.platform_accounts SET is_banned=false,updated_at=statement_timestamp()
-            WHERE id=$1 AND clients_id=$2 AND is_banned=true AND xmin::text=$3 RETURNING id`,[expectedAccountId,clientId,banUndoVersion]);
-          if(result.rows.length!==1)throw new PostgresReadError('linkedin_intake_ban_changed');
-        }
-        return{cancelled:true,linkedinAccountId:expectedAccountId,isBanned:false};
-      });
+    async cancelBan(_clientId:number,_expectedAccountId:number,_banUndoVersion:string){
+      // A local-only undo leaves CRM blocked. False reports require coordinated support recovery.
+      throw new PostgresReadError('linkedin_intake_ban_cancel_requires_support');
     },
     async save(clientId: number, data: LinkedInIntake, locales: string[], options = { createOctoProfiles: true }) {
       return writeTransaction(pool, database, async s => {

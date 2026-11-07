@@ -50,20 +50,23 @@ separate authorization. The PR prepares the migration; it does not apply it to p
 Students with Dolphin profiles keep access to their previous Dolphin profiles during
 a replacement LinkedIn registration. Every student with a registered LinkedIn has
 one “Меня забанили” button in the single LinkedIn section, including Dolphin, Octo
-and RU students. It records the owner-scoped `is_banned` flag and opens recovery instructions. It does
+and RU students. The first click only opens a read-only confirmation explaining that
+phone/code/captcha checks do not themselves prove a ban and that confirmation stops account work.
+Only the explicit “Подтверждаю блокировку” action sends `confirmed: true`, records the
+owner-scoped `is_banned` flag and opens recovery instructions. The server rejects a missing,
+false or non-boolean confirmation before storage, including requests from cached older clients. It does
 not create a replacement application. The student attests that a week of recovery
 attempts has passed before opening the Outlook/identity/history form; no server timer
 is enforced. A newly reported current account immediately appears as a read-only
 blocked-history card with its saved URL/login, without exposing its password or
 inventing missing employment details. It becomes an archived card when the
 replacement application is saved, without copying it into editable history.
-Cancelling restores the saved form and undoes only the ban set by this interaction.
-Owner-scoped `DELETE /api/client/linkedin-intake/ban` requires the exact
-`banUndoVersion` returned by the first successful report; an already-banned account
-returns no undo receipt. PostgreSQL's row version `xmin` provides the concurrency guard,
-without a schema migration. Pending/replaced applications or a changed account
-reject cancellation instead of overwriting later work. A lost commit acknowledgement
-requires a read-back, with no automatic replay. The button is hidden while
+Cancelling the confirmation performs no write. Cancelling a replacement draft restores
+the saved form and preserves the explicitly confirmed ban on both sides. It sends no DELETE.
+The legacy `DELETE /api/client/linkedin-intake/ban` endpoint rejects local-only undo with
+`linkedin_intake_ban_cancel_requires_support`; a false report must be reconciled by support
+across Unicorn and CRM while preserving the student's existing stage and history.
+A lost commit acknowledgement requires a read-back, with no automatic replay. The button is hidden while
 any registration request for the current account is unconfirmed (`не начата`, `блок`,
 `сделана экспертом`), even if Denis already saved its credentials. It becomes available
 after `сделана экспертом`, or for an existing account without a registration
@@ -76,10 +79,8 @@ also report a ban without a data migration. Preparation-only rows remain unregis
 The student's stack comes from the existing client record; this form never edits it.
 
 CRM compatibility: master's after-commit ban/replacement hooks are preserved.
-Cancellation restores only Unicorn's local flag. If CRM commands are enabled,
-an already delivered CRM ban is not reversed here; the available CRM `unban`
-starts warmup and is not an exact cancellation. Reconcile that CRM state separately
-instead of silently starting a new CRM cycle from the cancel button.
+The generic CRM `unban` command starts warmup and is not an exact cancellation of a false
+report. The replacement-draft cancel button invokes neither that command nor a local-only undo.
 
 ## Pending registration in the student Console
 

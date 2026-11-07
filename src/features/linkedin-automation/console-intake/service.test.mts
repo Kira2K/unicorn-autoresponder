@@ -3,14 +3,25 @@ import assert from 'node:assert/strict';
 import { createLinkedInIntakeService } from './service.mts';
 import { mockClient } from '../../octo-access/testing.mts';
 
+test('reporting a ban requires explicit boolean confirmation before any write',async()=>{
+ const calls:unknown[][]=[];
+ const service=createLinkedInIntakeService({allowed:()=>true,hasDolphin:async()=>true,getClient:async id=>mockClient(id),
+  store:{load:async()=>({}) as any,save:async()=>({}) as any,reportBan:async(...args)=>{calls.push(args);return{reported:true,linkedinAccountId:42,isBanned:true};}}});
+ for(const confirmed of [undefined,false,null,0,1,'true'])
+  await assert.rejects(service.reportBan(7,{linkedinAccountId:42,confirmed}),{code:'linkedin_intake_ban_confirmation_required'});
+ assert.deepEqual(calls,[]);
+ await service.reportBan(7,{clientId:99,linkedinAccountId:42,confirmed:true});
+ assert.deepEqual(calls,[[7,42]]);
+});
+
 test('cancel ban accepts only an explicit account/version receipt and derives the student from the session',async()=>{
  let args:unknown[]=[];
  const service=createLinkedInIntakeService({allowed:()=>true,hasDolphin:async()=>true,getClient:async id=>mockClient(id),
-  store:{load:async()=>({}) as any,save:async()=>({}) as any,cancelBan:async(...values)=>{args=values;return{cancelled:true,linkedinAccountId:42,isBanned:false};}}});
+  store:{load:async()=>({}) as any,save:async()=>({}) as any,cancelBan:async(...values)=>{args=values;throw Object.assign(Error(),{code:'linkedin_intake_ban_cancel_requires_support'});}}});
  for(const raw of [null,{}, {linkedinAccountId:'42',banUndoVersion:'version'},{linkedinAccountId:42},{linkedinAccountId:42,banUndoVersion:''},{linkedinAccountId:42,banUndoVersion:'v'.repeat(101)}])
   await assert.rejects(service.cancelBan(7,raw),{code:'linkedin_intake_replacement_invalid'});
  assert.deepEqual(args,[]);
- await service.cancelBan(7,{clientId:99,linkedinAccountId:42,banUndoVersion:'original-version'});
+ await assert.rejects(service.cancelBan(7,{clientId:99,linkedinAccountId:42,banUndoVersion:'original-version'}),{code:'linkedin_intake_ban_cancel_requires_support'});
  assert.deepEqual(args,[7,42,'original-version']);
 });
 

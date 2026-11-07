@@ -26,7 +26,7 @@ test('direct API rejects mismatched Outlook names before any storage or Octo wor
  }finally{await new Promise<void>(done=>server.close(()=>done()));}
 });
 
-test('ban cancellation is client-only, owner-scoped and preserves safe concurrency/uncertainty errors',async()=>{
+test('legacy ban cancellation is owner-scoped and exposes the support-required error without private diagnostics',async()=>{
  let role='client',error:unknown,args:unknown[]=[];
  const app=express();app.use(express.json());
  const service={async cancelBan(...values:unknown[]){if(error)throw error;args=values;return{cancelled:true,isBanned:false};}} as unknown as LinkedInIntakeService;
@@ -38,9 +38,26 @@ test('ban cancellation is client-only, owner-scoped and preserves safe concurren
  try{
   for(role of ['admin','provider','linkedin_creator'])assert.equal((await cancel()).status,403);
   role='client';const result=await cancel();assert.equal(result.status,200);assert.equal(result.headers.get('cache-control'),'no-store');assert.deepEqual(args,[7,body]);
-  error=Object.assign(Error('private SQL diagnostics'),{code:'linkedin_intake_ban_changed'});
-  assert.equal((await cancel()).status,409);assert.deepEqual(await(await cancel()).json(),{error:'linkedin_intake_ban_changed'});
+  error=Object.assign(Error('private SQL diagnostics'),{code:'linkedin_intake_ban_cancel_requires_support'});
+  assert.equal((await cancel()).status,409);assert.deepEqual(await(await cancel()).json(),{error:'linkedin_intake_ban_cancel_requires_support'});
   error=Object.assign(Error('private ack diagnostics'),{code:'commit_uncertain'});assert.equal((await cancel()).status,503);
+ }finally{await new Promise<void>(done=>server.close(()=>done()));}
+});
+
+test('unconfirmed ban requests from cached clients cannot reach storage',async()=>{
+ let writes=0;
+ const service=createLinkedInIntakeService({allowed:()=>true,hasDolphin:async()=>true,getClient:async id=>mockClient(id),
+  store:{load:async()=>({}) as any,save:async()=>({}) as any,reportBan:async()=>{writes++;return{reported:true,linkedinAccountId:42,isBanned:true};}}});
+ const app=express();app.use(express.json());registerLinkedInIntakeRoutes(app,(req:any,_res,next)=>{req.webSession={role:'client',clientId:7};next();},service);
+ const server=app.listen(0,'127.0.0.1');await new Promise<void>(done=>server.once('listening',done));
+ const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/api/client/linkedin-intake/ban`;
+ const post=(body:unknown)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ try{
+  for(const body of [{linkedinAccountId:42},{linkedinAccountId:42,confirmed:false},{linkedinAccountId:42,confirmed:'true'}]){
+   const r=await post(body);assert.equal(r.status,409);assert.deepEqual(await r.json(),{error:'linkedin_intake_ban_confirmation_required'});
+  }
+  assert.equal(writes,0);
+  assert.equal((await post({linkedinAccountId:42,confirmed:true})).status,200);assert.equal(writes,1);
  }finally{await new Promise<void>(done=>server.close(()=>done()));}
 });
 test('owner-scoped intake ignores supplied client ID, denies other roles, never returns upstream diagnostics', async () => {

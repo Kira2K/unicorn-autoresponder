@@ -16,7 +16,7 @@ const forwarding = ref(false), forwardingBlock = ref(null)
 const showProxyMove = ref(false)
 function checkForwarding(event) { if (!forwarding.value) { event?.preventDefault(); forwardingBlock.value?.requireConfirmation(); return false } return true }
 const showBanDialog=ref(false),reportingBan=ref(false),hasBlockedAccounts=ref(false)
-const banUndoVersion=ref(null)
+const banReportUncertain=ref(false)
 const archivedHistory=computed(()=>secrets.value.archivedBlockedAccounts||[])
 const emit = defineEmits(['saved', 'state'])
 const loaded = ref(false), loading = ref(false), loadError = ref(''), message = ref(''), saving = ref(false)
@@ -88,6 +88,7 @@ async function load() {
     registrationDate.value = registrationTimeInput(data.outlookRegisteredAt)
     replacementId.value = null
     updateTaskState(data)
+    banReportUncertain.value=false
     forwarding.value = !!data.outlookForwardingConfirmedAt
     scenario.value = registrationPending.value ? 'new' : intakeScenario(data) || (data.task && data.hasOutlookPassword ? 'new' : ''); existing.value = !!data.task || !!intakeScenario(data)
     newSaved.value = !!data.hasOutlookPassword && !!data.firstName; loaded.value = true
@@ -114,37 +115,35 @@ async function checkConfirmation() {
   } catch { /* The next read can confirm completion; no business action is retried. */ }
   finally { checkingConfirmation = false }
 }
-async function reportBan(){
+function reportBan(){
   if(!canReportBan.value||reportingBan.value)return
+  message.value='';showBanDialog.value=true
+}
+async function confirmBan(){
+  if(!showBanDialog.value||secrets.value.isBanned||banReportUncertain.value||!canReportBan.value||reportingBan.value)return
   reportingBan.value=true;message.value=''
   try{
     if(!secrets.value.isBanned){
-      const result=await intakeBanRequest('POST',{linkedinAccountId:secrets.value.linkedinAccountId},controller.signal)
-      if(result.banUndoVersion)banUndoVersion.value=result.banUndoVersion
+      await intakeBanRequest('POST',{linkedinAccountId:secrets.value.linkedinAccountId,confirmed:true},controller.signal)
       await load();emit('saved')
       if(loadError.value)throw new Error('linkedin_intake_unavailable')
     }
     showBanDialog.value=true
-  }catch(error){if(error.name!=='AbortError')message.value=error.message==='commit_uncertain'?'Результат неизвестен. Перечитай данные перед следующим действием.':'Не удалось отметить блокировку. Перечитай данные и попробуй снова.'}
+  }catch(error){if(error.name!=='AbortError'){banReportUncertain.value=true;message.value='Не удалось подтвердить результат. Перечитай состояние перед следующим действием.'}}
   finally{reportingBan.value=false}
 }
 async function cancelReplacement(){
   if(saving.value||reportingBan.value)return
   reportingBan.value=true;message.value=''
   try{
-    if(banUndoVersion.value){
-      await intakeBanRequest('DELETE',{linkedinAccountId:replacementId.value,banUndoVersion:banUndoVersion.value},controller.signal)
-      banUndoVersion.value=null
-    }
     await load();emit('saved')
+    if(!loadError.value)message.value='Заполнение заявки отменено. Подтверждённая блокировка аккаунта сохраняется. Если отметил её по ошибке, обратись в поддержку.'
   }catch(error){
-    if(error.name!=='AbortError')message.value=error.message==='commit_uncertain'
-      ?'Результат отмены неизвестен. Перезагрузи страницу, чтобы проверить статус; повторная отправка не запускается автоматически.'
-      :'Не удалось отменить блокировку: аккаунт или заявка изменились. Перезагрузи страницу, чтобы проверить актуальный статус.'
+    if(error.name!=='AbortError')message.value='Не удалось перечитать данные LinkedIn. Обнови страницу.'
   }finally{reportingBan.value=false}
 }
 function beginReplacement() {
-  if (!canReportBan.value || !secrets.value.linkedinAccountId || saving.value) return
+  if (!secrets.value.isBanned || !canReportBan.value || !secrets.value.linkedinAccountId || saving.value) return
   replacementId.value = secrets.value.linkedinAccountId
   form.value = { ...form.value, url: '', login: '', password: '', outlookLogin: '', outlookPassword: '', loggedIn: false,
     firstName: isLatinIntakeName(form.value.firstName) ? form.value.firstName : '',
@@ -215,7 +214,6 @@ async function save() {
       newSaved.value = true; secrets.value.hasOutlookPassword = true
       task.value = result.task || task.value
       replacementId.value = null; hasLinkedIn.value = false
-      banUndoVersion.value=null
       completionConfirmed.value = task.value?.status === 'сделана экспертом'
       message.value = result.task ? (result.task.created ? 'Заявка успешно создана' : 'Заявка обновлена') : 'Данные сохранены. Подготавливаем профили Octo.'
       form.value.password = ''; form.value.outlookPassword = ''
@@ -286,6 +284,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); clearInterval(proxyAvailab
     <template v-if="loaded && !editLocked">
       <p v-if="replacementId">Подготовим новый LinkedIn через тот же процесс с Octo. Укажи новую почту Outlook. Старые аккаунты сохранятся в архиве после сохранения формы.</p>
       <button v-if="replacementId" type="button" :disabled="saving||reportingBan" @click="cancelReplacement">{{reportingBan?'Отменяем…':'Отмена'}}</button>
+      <p v-if="replacementId">Отмена заполнения заявки не снимает подтверждённую блокировку LinkedIn.</p>
       <div v-if="!registrationPending && !existing && !replacementId && !hasDolphin" class="scenario-buttons" aria-label="Выбери сценарий LinkedIn">
         <button type="button" :aria-pressed="scenario === 'existing'" @click="selectScenario('existing')">У меня есть LinkedIn</button>
         <button type="button" :aria-pressed="scenario === 'new'" @click="selectScenario('new')">Нет LinkedIn / аккаунт заблокирован</button>
@@ -347,10 +346,25 @@ onUnmounted(() => { clearInterval(confirmationTimer); clearInterval(proxyAvailab
       <p>Пока ждёшь, пожалуйста, не заходи в профиль Octo: это может помешать регистрации.</p>
       <template #footer><button type="button" autofocus @click="showSavedDialog = false">Понятно</button></template>
     </Dialog>
-    <Dialog v-model:visible="showBanDialog" modal header="Попробуй восстановить LinkedIn" :draggable="false" :style="{width:'34rem',maxWidth:'calc(100vw - 2rem)'}">
+    <Dialog v-model:visible="showBanDialog" modal :header="secrets.isBanned?'Попробуй восстановить LinkedIn':'Подтверди блокировку LinkedIn'" :closable="!reportingBan" :close-on-escape="!reportingBan" :draggable="false" :style="{width:'34rem',maxWidth:'calc(100vw - 2rem)'}">
+      <template v-if="!secrets.isBanned">
+        <p>LinkedIn сообщил, что твой аккаунт заблокирован? После подтверждения работа по этому аккаунту будет остановлена.</p>
+        <p>Запрос подтверждения телефона, кода, капчи или повторного входа сам по себе не означает бан. Если сомневаешься, не подтверждай блокировку и обратись в поддержку.</p>
+      </template>
+      <template v-else>
       <p>Нам жаль, что аккаунт заблокировали. Перед созданием нового LinkedIn попробуй восстановить доступ в течение недели.</p>
       <p>Инструкции и помощь — в <a href="https://t.me/+Dum9NCHQjnIyYTMy" target="_blank" rel="noopener noreferrer">чате по разблокировке LinkedIn</a>. Если за неделю восстановить аккаунт не получится, подай новую заявку.</p>
-      <template #footer><button type="button" @click="showBanDialog=false">Попробую восстановить аккаунт</button><button type="button" @click="beginReplacement">Прошла неделя — подать заявку</button></template>
+      <p>Если отметил блокировку по ошибке, обратись в поддержку.</p>
+      </template>
+      <p v-if="message" role="alert">{{message}}</p>
+      <template #footer>
+        <template v-if="!secrets.isBanned">
+          <button type="button" :disabled="reportingBan" @click="showBanDialog=false">Отмена</button>
+          <button v-if="banReportUncertain" type="button" :disabled="loading" @click="load">Перечитать состояние</button>
+          <button type="button" :disabled="reportingBan||loading||banReportUncertain" @click="confirmBan">{{reportingBan?'Подтверждаем…':'Подтверждаю блокировку'}}</button>
+        </template>
+        <template v-else><button type="button" @click="showBanDialog=false">Попробую восстановить аккаунт</button><button type="button" @click="beginReplacement">Прошла неделя — подать заявку</button></template>
+      </template>
     </Dialog>
   </section>
 </template>
