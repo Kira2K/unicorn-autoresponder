@@ -143,11 +143,11 @@ test('master CRM hook observes a committed ban once; cancellation does not send 
  Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});f.state.tasks[0].status='сделана экспертом';
  const first=await f.store.reportBan(7,id);await f.store.reportBan(7,id);
  assert.deepEqual(deliveries,[[7,id]]);assert.ok(first.banUndoVersion);
- await f.store.cancelBan(7,id,first.banUndoVersion!);
- assert.equal(f.state.accounts[0].is_banned,false);assert.equal(deliveries.length,1);
+ await assert.rejects(f.store.cancelBan(7,id,first.banUndoVersion!),{code:'linkedin_intake_ban_cancel_requires_support'});
+ assert.equal(f.state.accounts[0].is_banned,true);assert.equal(deliveries.length,1);
 });
 
-test('reported current account appears in blocked history immediately; cancellation restores only this ban',async()=>{
+test('reported current account and its history survive a legacy local-only undo request',async()=>{
  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
  const li=f.state.accounts[0],id=Number(li.id);Object.assign(li,{url:'https://linkedin.com/in/old',login:'old@example.test',password:'never-return'});
  f.state.tasks[0].status='сделана экспертом';
@@ -160,39 +160,23 @@ test('reported current account appears in blocked history immediately; cancellat
  assert.match(bannedView.archivedBlockedAccounts![0].legacyText!,/https:\/\/linkedin.com\/in\/old/);
  assert.match(bannedView.archivedBlockedAccounts![0].legacyText!,/old@example.test/);
  assert.ok(!JSON.stringify(bannedView).includes('never-return'));
- await f.store.cancelBan(7,id,report.banUndoVersion!);
- await f.store.cancelBan(7,id,report.banUndoVersion!);
- assert.equal(f.state.accounts[0].is_banned,false);
- const restored=await f.store.load(7);assert.equal(restored.archivedBlockedAccounts?.length,0);
+ await assert.rejects(f.store.cancelBan(7,id,report.banUndoVersion!),{code:'linkedin_intake_ban_cancel_requires_support'});
+ assert.equal(f.state.accounts[0].is_banned,true);
+ const restored=await f.store.load(7);assert.equal(restored.archivedBlockedAccounts?.length,1);
  assert.deepEqual(restored.editableBlockedAccounts,input().blockedAccounts);
  assert.equal(JSON.stringify(f.state.accounts[0].old_link_blocked),original);
  assert.deepEqual([f.state.accounts.length,f.state.tasks.length],counts);
 });
 
-test('ban cancellation rejects another owner, changed data and a pending/replaced application',async()=>{
+test('legacy ban undo cannot write local flags for any owner or receipt',async()=>{
  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
  const id=Number(f.state.accounts[0].id);Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});
  f.state.tasks[0].status='сделана экспертом';
  const report=await f.store.reportBan(7,id);
- await assert.rejects(f.store.cancelBan(8,id,report.banUndoVersion!),{code:'linkedin_intake_replacement_stale'});
- await assert.rejects(f.store.cancelBan(7,id,'changed-version'),{code:'linkedin_intake_ban_changed'});
- assert.equal(f.state.accounts[0].is_banned,true);
- f.state.tasks[0].status='не начата';
- await assert.rejects(f.store.cancelBan(7,id,report.banUndoVersion!),{code:'linkedin_intake_registration_pending'});
- f.state.tasks[0].status='сделана экспертом';
- await f.store.save(7,{...input(),replacesLinkedInAccountId:id},['ru','en']);
- await assert.rejects(f.store.cancelBan(7,id,report.banUndoVersion!),{code:'linkedin_intake_replacement_stale'});
- assert.equal(f.state.accounts.find(a=>Number(a.id)===id)?.is_banned,true);
-});
-
-test('an uncertain cancellation is read back without repeating the status update',async()=>{
- const f=fixture(true);await f.store.save(7,input(),['ru','en']);
- const id=Number(f.state.accounts[0].id);Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});f.state.tasks[0].status='сделана экспертом';
- const report=await f.store.reportBan(7,id);f.control.uncertain=true;
- await assert.rejects(f.store.cancelBan(7,id,report.banUndoVersion!),{code:'commit_uncertain'});
- assert.equal((await f.store.load(7)).isBanned,false);
- await f.store.cancelBan(7,id,report.banUndoVersion!);
- assert.equal(f.calls.filter(sql=>sql.includes('SET is_banned=false')).length,1);
+ const before=structuredClone(f.state),calls=f.calls.length;
+ for(const owner of [7,8])for(const version of [report.banUndoVersion!,'changed-version'])
+  await assert.rejects(f.store.cancelBan(owner,id,version),{code:'linkedin_intake_ban_cancel_requires_support'});
+ assert.deepEqual(f.state,before);assert.equal(f.calls.length,calls,'no SQL work or external delivery is allowed');
 });
 
 test('Outlook registration time round-trips on the email account and survives legacy updates and rollback', async () => {

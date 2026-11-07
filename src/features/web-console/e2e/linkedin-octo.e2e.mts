@@ -46,7 +46,7 @@ const intake = createLinkedInIntakeService({ allowed: () => true, getClient: id 
       octoConnectionPending:data.scenario==='existing'&&data.stage==='credentials', hasPassword: !!data.password, hasOutlookPassword: !!data.outlookPassword } : empty; },
     async reportBan(id,accountId){assert.equal(activeAccountIds.get(id)||id,accountId);const wasBanned=banned.has(id);banned.add(id);if(!wasBanned)banVersions.set(id,`ban-version-${++banVersion}`);
       return{reported:true,linkedinAccountId:accountId,isBanned:true,...(!wasBanned?{banUndoVersion:banVersions.get(id)}:{})};},
-    async cancelBan(id,accountId,version){assert.equal(activeAccountIds.get(id)||id,accountId);assert.equal(version,banVersions.get(id));banned.delete(id);return{cancelled:true,linkedinAccountId:accountId,isBanned:false};},
+    async cancelBan(){throw Object.assign(Error(),{code:'linkedin_intake_ban_cancel_requires_support'});},
     async save(id, data, _locales, options) {
       const created=data.scenario==='new'&&(!recoveryTasks.has(id)||!!data.replacesLinkedInAccountId);
       if(data.replacesLinkedInAccountId){priorLinkedIn.add(id);previousProfiles.set(id,(profiles.get(id)||[]).map(p=>p.id));
@@ -229,6 +229,8 @@ try {
       }
       await instructionPage.reload();await accountRow.getByText('Активен',{exact:true}).waitFor();
       await instructionCard.getByTestId('linkedin-report-ban').click();
+      assert.equal(banned.has(id),false,'opening the confirmation does not report a ban');
+      await instructionPage.getByRole('dialog').getByRole('button',{name:'Подтверждаю блокировку',exact:true}).click();
       await instructionPage.getByRole('dialog').getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
       const replacement=instructionCard.getByTestId('linkedin-new-form');
       await replacement.getByLabel('Логин от новой почты Outlook',{exact:true}).fill('alex.test.second-cycle@outlook.com');
@@ -236,6 +238,8 @@ try {
       await replacement.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');
       await replacement.getByLabel('Часы регистрации Outlook-почты',{exact:true}).selectOption('10');
       await replacement.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
+      await replacement.getByTestId('outlook-forwarding').locator('summary').click();
+      await replacement.getByTestId('outlook-forwarding').getByRole('checkbox').check();
       await replacement.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click();
       const created=instructionPage.getByRole('dialog',{name:'Спасибо, данные сохранены ✅',exact:true});await created.waitFor();
       await created.getByRole('button',{name:'Понятно',exact:true}).click();
@@ -243,7 +247,7 @@ try {
       await completeViaDenis(recoveryTasks.get(id).id);
       await instructionCard.getByTestId('linkedin-report-ban').waitFor();await accountRow.getByText('Активен',{exact:true}).waitFor();
       assert.equal(completionCycles.length,2);assert.equal(completionMessages.length,4);
-      assert.ok(completionMessages.filter(m=>m.chatId==='-1003187558078').every(m=>!/@|fyi/.test(m.text)));
+      assert.ok(completionMessages.filter(m=>m.chatId==='-1003187558078').every(m=>m.text.endsWith('\n\n@juliafeels fyi')));
       assert.equal(completionMessages.filter(m=>m.chatId==='-700907'&&m.text.startsWith('Привет! Твой LinkedIn готов!')).length,2);
       await instructionPage.reload();await accountRow.getByText('Активен',{exact:true}).waitFor();
       const record=(await noco.fetchRecords(TABLES.platformAccounts.id)).find((row:any)=>row.Id===(activeAccountIds.get(id)||id))!;
@@ -379,7 +383,27 @@ try {
   assert.equal(await dolphinPage.getByRole('button',{name:'Меня забанили',exact:true}).count(),1);
   assert.equal(await dolphinPage.locator('.octo-card').count(),0);
   await recovery.getByRole('button',{name:'Меня забанили',exact:true}).click();
+  const confirmation=dolphinPage.getByRole('dialog',{name:'Подтверди блокировку LinkedIn',exact:true});await confirmation.waitFor();
+  assert.equal(banned.has(906),false,'opening the explanation is read-only');
+  await confirmation.getByRole('button',{name:'Отмена',exact:true}).click();
+  assert.equal(banned.has(906),false,'cancelling confirmation does not record a ban');
+  await recovery.getByRole('button',{name:'Меня забанили',exact:true}).click();await confirmation.waitFor();
+  await dolphinPage.keyboard.press('Escape');await confirmation.waitFor({state:'hidden'});
+  assert.equal(banned.has(906),false,'closing the confirmation does not record a ban');
+  let confirmedBanRequests=0;
+  await dolphinPage.route('**/api/client/linkedin-intake/ban',async route=>{
+    if(route.request().method()!=='POST')return route.continue();
+    confirmedBanRequests++;const response=await route.fetch();assert.equal(response.status(),200);
+    await route.fulfill({status:503,json:{error:'commit_uncertain'}});
+  });
+  await recovery.getByRole('button',{name:'Меня забанили',exact:true}).click();
+  await confirmation.getByRole('button',{name:'Подтверждаю блокировку',exact:true}).click();
+  await confirmation.getByRole('button',{name:'Перечитать состояние',exact:true}).waitFor();
+  assert.equal(await confirmation.getByRole('button',{name:'Подтверждаю блокировку',exact:true}).isDisabled(),true);
+  await confirmation.getByRole('button',{name:'Перечитать состояние',exact:true}).click();
   await dolphinPage.getByRole('dialog',{name:'Попробуй восстановить LinkedIn'}).waitFor();
+  assert.equal(confirmedBanRequests,1,'a lost acknowledgement is read back without replay');
+  await dolphinPage.unroute('**/api/client/linkedin-intake/ban');
   assert.equal(banned.has(906),true,'ban is recorded before a replacement application');
   assert.equal(recoveryTasks.has(906),false,'ban alone does not create an application');
   await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
@@ -388,17 +412,13 @@ try {
   const reported=recoveryForm.getByTestId('student-archived-account');
   await reported.getByText('Ссылка LinkedIn: https://linkedin.com/in/existing-dolphin',{exact:false}).waitFor();
   assert.equal(await reported.count(),1,'the reported account appears automatically before being archived');
-  await dolphinPage.route('**/api/client/linkedin-intake/ban',async route=>route.request().method()==='DELETE'
-    ?route.fulfill({status:409,json:{error:'linkedin_intake_ban_changed'}}):route.continue());
-  await recovery.getByRole('button',{name:'Отмена',exact:true}).click();
-  await recovery.getByText('Не удалось отменить блокировку:',{exact:false}).waitFor();
-  assert.equal(banned.has(906),true);assert.equal(await recoveryForm.isVisible(),true,'failed cancellation keeps the draft visible');
-  await dolphinPage.unroute('**/api/client/linkedin-intake/ban');
+  let localUndoRequests=0;dolphinPage.on('request',request=>{if(request.method()==='DELETE'&&request.url().endsWith('/linkedin-intake/ban'))localUndoRequests++;});
   await recovery.getByRole('button',{name:'Отмена',exact:true}).click();
   await recovery.getByTestId('linkedin-report-ban').waitFor();
-  assert.equal(banned.has(906),false,'cancel restores the status changed by the same action');
+  assert.equal(banned.has(906),true,'cancelling a replacement draft preserves the explicitly confirmed ban');
+  assert.equal(localUndoRequests,0,'no local-only undo can diverge from CRM');
   assert.equal(await recoveryForm.count(),0);assert.equal(recoveryTasks.has(906),false);assert.equal(profiles.has(906),false);
-  await dolphinPage.reload();await recovery.getByTestId('linkedin-report-ban').waitFor();assert.equal(banned.has(906),false);
+  await dolphinPage.reload();await recovery.getByTestId('linkedin-report-ban').waitFor();assert.equal(banned.has(906),true);
   banned.add(906);
   await recovery.getByTestId('linkedin-report-ban').click();
   await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
@@ -414,6 +434,8 @@ try {
   await recoveryForm.getByLabel('Минуты регистрации Outlook-почты',{exact:true}).selectOption('30');
   await recoveryForm.getByLabel('Город и страна проживания',{exact:true}).fill('Tbilisi');
   await recoveryForm.getByLabel('Имя и Фамилия латиницей (как в документах)',{exact:true}).fill('Alex Test');
+  await recoveryForm.getByTestId('outlook-forwarding').locator('summary').click();
+  await recoveryForm.getByTestId('outlook-forwarding').getByRole('checkbox').check();
   await recoveryForm.getByRole('button',{name:'Сохранить данные',exact:true}).click();
   await dolphinPage.getByRole('dialog',{name:'Спасибо, данные сохранены ✅'}).waitFor();
   assert.equal(saved.get(906)?.replacesLinkedInAccountId,906);
