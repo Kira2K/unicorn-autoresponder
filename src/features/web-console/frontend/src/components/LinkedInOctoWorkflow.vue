@@ -17,6 +17,7 @@ const showProxyMove = ref(false)
 function checkForwarding(event) { if (!forwarding.value) { event?.preventDefault(); forwardingBlock.value?.requireConfirmation(); return false } return true }
 const showBanDialog=ref(false),reportingBan=ref(false),hasBlockedAccounts=ref(false)
 const banReportUncertain=ref(false)
+const showCancelBanDialog=ref(false),banCancellationUncertain=ref(false),banCancellationProof=ref(null)
 const archivedHistory=computed(()=>secrets.value.archivedBlockedAccounts||[])
 const emit = defineEmits(['saved', 'state'])
 const loaded = ref(false), loading = ref(false), loadError = ref(''), message = ref(''), saving = ref(false)
@@ -137,10 +138,46 @@ async function cancelReplacement(){
   reportingBan.value=true;message.value=''
   try{
     await load();emit('saved')
-    if(!loadError.value)message.value='Заполнение заявки отменено. Подтверждённая блокировка аккаунта сохраняется. Если отметил её по ошибке, обратись в поддержку.'
+    if(!loadError.value)message.value='Заполнение заявки отменено. Для ошибочно указанной блокировки выбери «Я отметил блокировку по ошибке» в её карточке.'
   }catch(error){
     if(error.name!=='AbortError')message.value='Не удалось перечитать данные LinkedIn. Обнови страницу.'
   }finally{reportingBan.value=false}
+}
+function openBanCancellation() {
+  if (reportingBan.value || !secrets.value.canCancelBan || !secrets.value.banUndoVersion) return
+  message.value=''
+  banCancellationProof.value=null
+  banCancellationUncertain.value=false
+  showBanDialog.value=false
+  showCancelBanDialog.value=true
+}
+async function confirmBanCancellation() {
+  if (reportingBan.value || !showCancelBanDialog.value) return
+  const proof=banCancellationProof.value || {
+    linkedinAccountId:secrets.value.linkedinAccountId,banUndoVersion:secrets.value.banUndoVersion,confirmed:true
+  }
+  if (!proof.linkedinAccountId || !proof.banUndoVersion) return
+  banCancellationProof.value=proof
+  reportingBan.value=true
+  message.value=''
+  try {
+    await intakeBanRequest('DELETE',proof,controller.signal)
+    showCancelBanDialog.value=false
+    banCancellationProof.value=null
+    banCancellationUncertain.value=false
+    await load()
+    emit('saved')
+    message.value=loadError.value?'Отмена подтверждена. Обнови страницу, чтобы перечитать данные.'
+      :secrets.value.isBanned?'Состояние аккаунта успело измениться. Проверь текущую отметку.'
+      :'Ошибочная отметка о блокировке отменена.'
+  } catch(error) {
+    if(error.name!=='AbortError'){
+      banCancellationUncertain.value=error.message==='linkedin_intake_ban_cancel_uncertain'||error.status>=500
+      message.value=banCancellationUncertain.value
+        ?'Ответ сервера не подтверждён. Нажми «Проверить результат отмены» — проверим ту же операцию.'
+        :'Не удалось согласовать отмену. Обнови страницу, а если ошибка повторится — обратись в поддержку.'
+    }
+  } finally { reportingBan.value=false }
 }
 function beginReplacement() {
   if (!secrets.value.isBanned || !canReportBan.value || !secrets.value.linkedinAccountId || saving.value) return
@@ -354,7 +391,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); clearInterval(proxyAvailab
       <template v-else>
       <p>Нам жаль, что аккаунт заблокировали. Перед созданием нового LinkedIn попробуй восстановить доступ в течение недели.</p>
       <p>Инструкции и помощь — в <a href="https://t.me/+Dum9NCHQjnIyYTMy" target="_blank" rel="noopener noreferrer">чате по разблокировке LinkedIn</a>. Если за неделю восстановить аккаунт не получится, подай новую заявку.</p>
-      <p>Если отметил блокировку по ошибке, обратись в поддержку.</p>
+      <p v-if="!secrets.canCancelBan">Если отметил блокировку по ошибке, обратись в поддержку.</p>
       </template>
       <p v-if="message" role="alert">{{message}}</p>
       <template #footer>
@@ -363,7 +400,19 @@ onUnmounted(() => { clearInterval(confirmationTimer); clearInterval(proxyAvailab
           <button v-if="banReportUncertain" type="button" :disabled="loading" @click="load">Перечитать состояние</button>
           <button type="button" :disabled="reportingBan||loading||banReportUncertain" @click="confirmBan">{{reportingBan?'Подтверждаем…':'Подтверждаю блокировку'}}</button>
         </template>
-        <template v-else><button type="button" @click="showBanDialog=false">Попробую восстановить аккаунт</button><button type="button" @click="beginReplacement">Прошла неделя — подать заявку</button></template>
+        <template v-else>
+          <button v-if="secrets.canCancelBan" type="button" @click="openBanCancellation">Я отметил блокировку по ошибке</button>
+          <button type="button" @click="showBanDialog=false">Попробую восстановить аккаунт</button>
+          <button type="button" @click="beginReplacement">Прошла неделя — подать заявку</button>
+        </template>
+      </template>
+    </Dialog>
+    <Dialog v-model:visible="showCancelBanDialog" modal header="Отменить ошибочную отметку?" :closable="!reportingBan" :close-on-escape="!reportingBan" :draggable="false" :style="{width:'34rem',maxWidth:'calc(100vw - 2rem)'}">
+      <p>Подтверди, что отметил блокировку LinkedIn по ошибке. Отметка будет снята в личном кабинете и CRM. Текущий этап сохранится.</p>
+      <p v-if="message" role="alert">{{message}}</p>
+      <template #footer>
+        <button type="button" :disabled="reportingBan" @click="showCancelBanDialog=false">Закрыть</button>
+        <button type="button" :disabled="reportingBan" @click="confirmBanCancellation">{{reportingBan?'Проверяем…':banCancellationUncertain?'Проверить результат отмены':'Отменить отметку'}}</button>
       </template>
     </Dialog>
   </section>

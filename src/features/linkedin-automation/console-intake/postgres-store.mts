@@ -18,6 +18,7 @@ import { archiveBannedAccounts } from './archive-banned-accounts.mts';
 import {blockedHistoryCard,loadBlockedHistory} from '../creation-tasks/blocked-history.mts';
 import type { Locale } from '../../octo-access/contracts.mts';
 import { markConsoleAccountCreation } from './crm-sync.mts';
+import type {BanCancellation} from '../linklab/crm-ban-cancellation.mts';
 
 const accountQuery = `SELECT a.id,a.platforms_id,a.url,a.login,a.password,a.linkedin_first_name,
   a.linkedin_last_name,a.real_location,a.old_link_blocked,a.outlook_registered_at,to_jsonb(a)->>'outlook_forwarding_confirmed_at' AS outlook_forwarding_confirmed_at,to_jsonb(a)->'is_banned' AS is_banned,a.linkedin_octo_connection_pending,lower(p.name) AS platform
@@ -40,8 +41,16 @@ async function lockBanAccount(s:SqlSession,clientId:number,expectedAccountId:num
   return li;
 }
 export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase, linklab = false, creationTasks = false,
-  afterBan?: (clientId:number,accountId:number)=>Promise<unknown>, notifications = true) {
+  afterBan?: (clientId:number,accountId:number)=>Promise<unknown>, notifications = true,
+  cancelBanInCrm?: (input: BanCancellation) => Promise<void>) {
   const read = createReadSession(pool, database);
+  const cancellationTarget = async (s: SqlSession, clientId: number, accountId: number) => (await s.query(`
+    SELECT l.crm_student_id,l.version::text,a.xmin::text AS ban_version,
+      to_char(coalesce(a.updated_at,a.created_at,'epoch'::timestamptz) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS ban_confirmed_at
+    FROM noco.linklab l JOIN noco.platform_accounts a ON a.id=l.platform_account_id AND a.clients_id=l.client_id
+    JOIN noco.clients c ON c.id=l.client_id
+    WHERE l.client_id=$1 AND a.id=$2 AND l.crm_student_id IS NOT NULL
+      AND NOT coalesce(a.__nc_deleted,false) AND NOT coalesce(c.__nc_deleted,false)`, [clientId, accountId])).rows[0];
   return {
     async checkSchema() { await read(async s => { await s.query(accountQuery + ' LIMIT 0', [0]);await s.query('SELECT is_banned FROM noco.platform_accounts LIMIT 0');await s.query('SELECT account_id,state FROM noco.linkedin_intake_notifications LIMIT 0'); }); },
     async load(clientId: number):Promise<LinkedInIntakeView> {
@@ -57,11 +66,15 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
         const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
         const archivedBlockedAccounts=blockedAccounts.filter(card=>!editableBlockedAccounts.some(entered=>same(card,entered)));
         const confirmedAt=task?.status==='сделана экспертом'?(await s.query('SELECT applied_at FROM noco.linkedin_account_cycles WHERE task_id=$1',[task.id])).rows[0]?.applied_at:undefined;
+        const cancellation = cancelBanInCrm && li?.is_banned === true
+          ? await cancellationTarget(s, clientId, Number(li.id)) : undefined;
         return { ...(creationTasks ? { task, ...await studentAccountAccess(s,clientId,li?Number(li.id):undefined),
           ...await previousProfileAccess(s,clientId,task) } : {}),
           linkedinAccountId:li?Number(li.id):undefined,hasLinkedIn:!!li&&(!!li.url||!!li.login||!!li.password),
           octoConnectionPending:li?.linkedin_octo_connection_pending===true,
           outlookAccountId:email?Number(email.id):undefined,isBanned:li?.is_banned===true,
+          ...(cancellation ? {canCancelBan: true,
+            banUndoVersion: `${cancellation.ban_version}:${cancellation.version}:${cancellation.ban_confirmed_at}`} : {}),
           ...(confirmedAt?{warmupUntil:new Date(new Date(String(confirmedAt)).getTime()+30*86400000).toISOString()}:{}),
           url: String(li?.url ?? ''), login: String(li?.login ?? ''), hasPassword: !!li?.password,
           outlookLogin: String(email?.login ?? ''), hasOutlookPassword: !!email?.password,
@@ -84,9 +97,22 @@ export function createLinkedInIntakeStore(pool: SqlPool, database: CopyDatabase,
       if(changed&&afterBan)try{await afterBan(clientId,expectedAccountId);}catch{/* Delivery owner reports failures. */}
       return result;
     },
-    async cancelBan(_clientId:number,_expectedAccountId:number,_banUndoVersion:string){
-      // A local-only undo leaves CRM blocked. False reports require coordinated support recovery.
-      throw new PostgresReadError('linkedin_intake_ban_cancel_requires_support');
+    async cancelBan(clientId:number,expectedAccountId:number,banUndoVersion:string){
+      if (!cancelBanInCrm) throw new PostgresReadError('linkedin_intake_ban_cancel_requires_support');
+      const target = await read(s => cancellationTarget(s, clientId, expectedAccountId));
+      if (!target) throw new PostgresReadError('linkedin_intake_replacement_stale');
+      // The read session is released before HTTP. CRM commits both flags and its receipt together.
+      try {
+        await cancelBanInCrm({clientId, accountId: expectedAccountId, studentId: String(target.crm_student_id),
+          linklabVersion: String(target.version), banUndoVersion});
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        const conflict = message === 'crm_ban_cancel_invalid' ||
+          /^crm_account_command_http_4\d\d$/.test(message) && !message.endsWith('_408') && !message.endsWith('_429');
+        throw Object.assign(new PostgresReadError(conflict ? 'linkedin_intake_ban_cancel_changed' : 'linkedin_intake_ban_cancel_uncertain'),
+          {status: conflict ? 409 : 503});
+      }
+      return {cancelled: true, linkedinAccountId: expectedAccountId, isBanned: false};
     },
     async save(clientId: number, data: LinkedInIntake, locales: string[], options = { createOctoProfiles: true }) {
       return writeTransaction(pool, database, async s => {

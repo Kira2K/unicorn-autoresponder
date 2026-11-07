@@ -55,6 +55,7 @@ import type {SendOneInput} from '../../../../integrations/telegram/types.ts';
 import {createBridgeErrorReporter} from '../../../octo-access/bridge/error-reports.mts';
 import { createRequire } from 'node:module';
 import { clientIdRuntime } from '../../../telegram-client-id/live.mts';
+import {createBanCancellation} from '../../../linkedin-automation/linklab/crm-ban-cancellation.mts';
 
 export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgresPool) {
   const crmCommandConfig=readAccountCommandConfig(env);
@@ -145,7 +146,8 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         config: octoConfig, service: octo.service, ready: uuid => octo!.grantReady(uuid) });
       const crmCommands=createAccountCommandActions({pool,database:config.database,config:crmCommandConfig,
         report:event=>console.error(JSON.stringify({feature:'crm_account_command',...event}))});
-      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true,crmCommands?.ban, !localClientIds.length);
+      const intakeStore = createLinkedInIntakeStore(pool, config.database, !!linklab, true,crmCommands?.ban,
+        !localClientIds.length,createBanCancellation(crmCommandConfig));
       await intakeStore.checkSchema();
       linkedinIntake = createLinkedInIntakeService({ store: intakeStore, allowed: id => octo!.service.allowed(id),
         getClient: id => options.repository.getClientById(id),

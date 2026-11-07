@@ -21,7 +21,9 @@ test('cancel ban accepts only an explicit account/version receipt and derives th
  for(const raw of [null,{}, {linkedinAccountId:'42',banUndoVersion:'version'},{linkedinAccountId:42},{linkedinAccountId:42,banUndoVersion:''},{linkedinAccountId:42,banUndoVersion:'v'.repeat(101)}])
   await assert.rejects(service.cancelBan(7,raw),{code:'linkedin_intake_replacement_invalid'});
  assert.deepEqual(args,[]);
- await assert.rejects(service.cancelBan(7,{clientId:99,linkedinAccountId:42,banUndoVersion:'original-version'}),{code:'linkedin_intake_ban_cancel_requires_support'});
+ await assert.rejects(service.cancelBan(7,{linkedinAccountId:42,banUndoVersion:'original-version'}),{code:'linkedin_intake_ban_confirmation_required'});
+ assert.deepEqual(args,[]);
+ await assert.rejects(service.cancelBan(7,{clientId:99,linkedinAccountId:42,banUndoVersion:'original-version',confirmed:true}),{code:'linkedin_intake_ban_cancel_requires_support'});
  assert.deepEqual(args,[7,42,'original-version']);
 });
 

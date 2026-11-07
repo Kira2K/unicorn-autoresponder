@@ -12,6 +12,7 @@ const commonKeys = ['schema_version', 'event_type', 'source', 'command', 'event_
 const recoveryKeys = ['cycle_id', 'old_account_id', 'account_url'];
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const eventUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export type CrmCommandOptions = {baseUrl: string; secret: string; fetch?: typeof globalThis.fetch; now?: () => number};
 function fail(code: string): never {throw new Error('crm_account_command_' + code);}
 function bigint(value: unknown) {
   if (typeof value !== 'string' || !/^[1-9][0-9]{0,18}$/.test(value) || BigInt(value) > 9223372036854775807n)
@@ -44,7 +45,7 @@ export function accountCommandBody(command: AccountCommand): Buffer {
 /** One API call only. This module does not change SQL, account bindings or the sending schedule. */
 export async function sendAccountCommand(
   input: {body: Buffer; expectedStudentId: string},
-  options: {baseUrl: string; secret: string; fetch?: typeof globalThis.fetch; now?: () => number},
+  options: CrmCommandOptions,
 ): Promise<{studentId: string; status: 'blocked' | 'warmup'; warmupStartedOn?: string}> {
   const expectedStudentId = input.expectedStudentId;
   if (!Buffer.isBuffer(input.body) || input.body.length === 0 || input.body.length > 8192 ||
@@ -54,8 +55,30 @@ export async function sendAccountCommand(
   let event: WireCommand;
   try {event = validate(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(body)));}
   catch {return fail('payload_invalid');}
+  const receipt = await requestCrmAccount(body, options);
+  for (const key of ['event_id', 'client_id', 'account_id', 'command', 'linklab_version'] as const)
+    if (receipt[key] !== event[key]) fail('receipt_mismatch');
+  const status = event.command === 'ban' ? 'blocked' : 'warmup';
+  if (receipt.student_id !== expectedStudentId || receipt.payload_sha256 !== createHash('sha256').update(body).digest('hex') ||
+    receipt.state !== 'applied' || receipt.effects_applied !== true || receipt.current !== true ||
+    receipt.current_linklab_version !== event.linklab_version || receipt.status !== status || receipt.current_status !== status)
+    fail('receipt_mismatch');
+  if (event.command !== 'ban' && (receipt.cycle_id !== event.cycle_id ||
+    typeof receipt.warmup_started_on !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(receipt.warmup_started_on))) fail('receipt_mismatch');
+  return {studentId: expectedStudentId, status,
+    ...(status === 'warmup' ? {warmupStartedOn: receipt.warmup_started_on as string} : {})};
+}
+
+/** Shared authenticated transport. Each operation validates its own wire and receipt. */
+export async function requestCrmAccount(
+  input: Buffer,
+  options: CrmCommandOptions,
+  path: '/integrations/linkedin/account-commands/' | '/integrations/linkedin/ban-cancellations/' = '/integrations/linkedin/account-commands/',
+): Promise<Record<string, unknown>> {
+  if (!Buffer.isBuffer(input) || input.length === 0 || input.length > 8192) fail('payload_invalid');
+  const body = Buffer.from(input);
   let endpoint: URL;
-  try {endpoint = new URL('/integrations/linkedin/account-commands/', options.baseUrl);}
+  try {endpoint = new URL(path, options.baseUrl);}
   catch {return fail('endpoint_invalid');}
   if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) fail('endpoint_invalid');
   if (!/^[A-Za-z0-9_-]{32,256}$/.test(options.secret)) fail('secret_invalid');
@@ -90,15 +113,5 @@ export async function sendAccountCommand(
     receipt = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(Buffer.concat(chunks)));
     if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return fail('receipt_invalid');
   } catch {return fail('receipt_invalid');}
-  for (const key of ['event_id', 'client_id', 'account_id', 'command', 'linklab_version'] as const)
-    if (receipt[key] !== event[key]) fail('receipt_mismatch');
-  const status = event.command === 'ban' ? 'blocked' : 'warmup';
-  if (receipt.student_id !== expectedStudentId || receipt.payload_sha256 !== createHash('sha256').update(body).digest('hex') ||
-    receipt.state !== 'applied' || receipt.effects_applied !== true || receipt.current !== true ||
-    receipt.current_linklab_version !== event.linklab_version || receipt.status !== status || receipt.current_status !== status)
-    fail('receipt_mismatch');
-  if (event.command !== 'ban' && (receipt.cycle_id !== event.cycle_id ||
-    typeof receipt.warmup_started_on !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(receipt.warmup_started_on))) fail('receipt_mismatch');
-  return {studentId: expectedStudentId, status,
-    ...(status === 'warmup' ? {warmupStartedOn: receipt.warmup_started_on as string} : {})};
+  return receipt;
 }

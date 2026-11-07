@@ -20,6 +20,8 @@ export interface LinkedInIntakeView {
   firstName:string;lastName:string;realLocation:string;blockedAccounts:BlockedAccount[];
   outlookRegisteredAt?:string;task?:CreationTask;editLocked?:boolean;completionConfirmed?:boolean;registrationPending?:boolean;
   linkedinAccountId?:number;outlookAccountId?:number;hasLinkedIn?:boolean;
+  canCancelBan?: boolean;
+  banUndoVersion?: string;
   hadLinkedInBeforeTask?:boolean;previousOctoProfileIds?:number[];
   archivedBlockedAccounts?:BlockedAccount[];editableBlockedAccounts?:BlockedAccount[];isBanned?:boolean;warmupUntil?:string;
 }

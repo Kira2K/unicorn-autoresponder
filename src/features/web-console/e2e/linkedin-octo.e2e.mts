@@ -31,6 +31,7 @@ const activeAccountIds=new Map<number,number>();
 const previousProfiles=new Map<number,number[]>(),priorLinkedIn=new Set<number>();
 const profiles = new Map<number, any[]>();
 const banned = new Set<number>();
+const crmBanned = new Set<number>();
 const banVersions=new Map<number,string>(),archivedAccounts=new Map<number,any[]>();let banVersion=0;
 function historyCard(id:number,data:LinkedInIntake,archived=false){return blockedHistoryCard({id,url:data.url,login:data.login,
   linkedin_first_name:data.firstName,linkedin_last_name:data.lastName,real_location:data.realLocation,has_password:!!data.password},archived)!;}
@@ -40,13 +41,17 @@ const intake = createLinkedInIntakeService({ allowed: () => true, getClient: id 
   hasDolphin: async id => (await repository.getDolphinProfilesForClient(id)).length > 0, store: {
     async load(id) { const data = saved.get(id),task=recoveryTasks.get(id),history=[...(archivedAccounts.get(id)||[]),...(data&&banned.has(id)?[historyCard(id,data)]:[])]; return data ? { ...empty, ...data, linkedinAccountId:activeAccountIds.get(id)||id,task,
       editableBlockedAccounts:data.blockedAccounts,archivedBlockedAccounts:history,blockedAccounts:[...data.blockedAccounts,...history],
-      isBanned:banned.has(id),registrationPending:!!task&&task.status!=='сделана экспертом',completionConfirmed:task?.status==='сделана экспертом',
+      isBanned:banned.has(id),canCancelBan:banned.has(id),banUndoVersion:banVersions.get(id),registrationPending:!!task&&task.status!=='сделана экспертом',completionConfirmed:task?.status==='сделана экспертом',
       editLocked:['сделана экспертом'].includes(task?.status),
       hadLinkedInBeforeTask:priorLinkedIn.has(id),previousOctoProfileIds:previousProfiles.get(id)||[],password: undefined, outlookPassword: undefined,
       octoConnectionPending:data.scenario==='existing'&&data.stage==='credentials', hasPassword: !!data.password, hasOutlookPassword: !!data.outlookPassword } : empty; },
-    async reportBan(id,accountId){assert.equal(activeAccountIds.get(id)||id,accountId);const wasBanned=banned.has(id);banned.add(id);if(!wasBanned)banVersions.set(id,`ban-version-${++banVersion}`);
+    async reportBan(id,accountId){assert.equal(activeAccountIds.get(id)||id,accountId);const wasBanned=banned.has(id);banned.add(id);crmBanned.add(id);if(!wasBanned)banVersions.set(id,`ban-version-${++banVersion}`);
       return{reported:true,linkedinAccountId:accountId,isBanned:true,...(!wasBanned?{banUndoVersion:banVersions.get(id)}:{})};},
-    async cancelBan(){throw Object.assign(Error(),{code:'linkedin_intake_ban_cancel_requires_support'});},
+    async cancelBan(id,accountId,version){
+      assert.equal(activeAccountIds.get(id)||id,accountId);assert.equal(banVersions.get(id),version);
+      banned.delete(id);crmBanned.delete(id);
+      return{cancelled:true,linkedinAccountId:accountId,isBanned:false};
+    },
     async save(id, data, _locales, options) {
       const created=data.scenario==='new'&&(!recoveryTasks.has(id)||!!data.replacesLinkedInAccountId);
       if(data.replacesLinkedInAccountId){priorLinkedIn.add(id);previousProfiles.set(id,(profiles.get(id)||[]).map(p=>p.id));
@@ -419,7 +424,33 @@ try {
   assert.equal(localUndoRequests,0,'no local-only undo can diverge from CRM');
   assert.equal(await recoveryForm.count(),0);assert.equal(recoveryTasks.has(906),false);assert.equal(profiles.has(906),false);
   await dolphinPage.reload();await recovery.getByTestId('linkedin-report-ban').waitFor();assert.equal(banned.has(906),true);
-  banned.add(906);
+  await recovery.getByTestId('linkedin-report-ban').click();
+  await dolphinPage.getByRole('button',{name:'Я отметил блокировку по ошибке',exact:true}).click();
+  const undo=dolphinPage.getByRole('dialog',{name:'Отменить ошибочную отметку?',exact:true});
+  await undo.getByRole('button',{name:'Закрыть',exact:true}).click();
+  assert.equal(banned.has(906),true);assert.equal(crmBanned.has(906),true);
+  await recovery.getByTestId('linkedin-report-ban').click();
+  await dolphinPage.getByRole('button',{name:'Я отметил блокировку по ошибке',exact:true}).click();
+  const cancellationBodies:unknown[]=[];
+  await dolphinPage.route('**/api/client/linkedin-intake/ban',async route=>{
+    if(route.request().method()!=='DELETE')return route.continue();
+    cancellationBodies.push(route.request().postDataJSON());
+    const response=await route.fetch();assert.equal(response.status(),200);
+    if(cancellationBodies.length===1)return route.fulfill({status:503,json:{error:'linkedin_intake_ban_cancel_uncertain'}});
+    await route.fulfill({response});
+  });
+  await undo.getByRole('button',{name:'Отменить отметку',exact:true}).click();
+  await undo.getByRole('button',{name:'Проверить результат отмены',exact:true}).waitFor();
+  assert.equal(banned.has(906),false);assert.equal(crmBanned.has(906),false);
+  await undo.getByRole('button',{name:'Проверить результат отмены',exact:true}).click();
+  await undo.waitFor({state:'hidden'});
+  assert.deepEqual(cancellationBodies[0],cancellationBodies[1],'a lost reply retains the exact cancellation request');
+  assert.equal(cancellationBodies.length,2);assert.equal(recoveryTasks.has(906),false);assert.equal(profiles.has(906),false);
+  await dolphinPage.unroute('**/api/client/linkedin-intake/ban');
+  await recovery.getByTestId('linkedin-report-ban').click();
+  await confirmation.getByRole('button',{name:'Подтверждаю блокировку',exact:true}).click();
+  await dolphinPage.getByRole('button',{name:'Попробую восстановить аккаунт',exact:true}).click();
+  assert.equal(banned.has(906),true);assert.equal(crmBanned.has(906),true);
   await recovery.getByTestId('linkedin-report-ban').click();
   await dolphinPage.getByRole('button',{name:'Прошла неделя — подать заявку',exact:true}).click();
   await recoveryForm.waitFor();await recovery.getByRole('button',{name:'Отмена',exact:true}).click();
