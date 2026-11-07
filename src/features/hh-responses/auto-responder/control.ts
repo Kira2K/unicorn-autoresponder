@@ -15,6 +15,7 @@ const {
   waitForDomContentLoaded
 } = require('../../../platform/browser/page-utils.ts')
 const { wait } = require('../orchestrator/runtime-utils.ts')
+const { createResponseDeadline } = require('./response-deadline.ts')
 
 type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
 const RESUME_LOOP_STALL_MS = 90 * 1000
@@ -28,6 +29,7 @@ type ResumeLoopProbe = {
 type AutoResponderProgressSnapshot = {
   key: string
   details: string
+  responseCount: number
 }
 
 function normalizeResumeLoopProbe(value: any): ResumeLoopProbe | undefined {
@@ -211,6 +213,7 @@ async function getAutoResponderProgressSnapshot(
 
         return {
           key,
+          responseCount: safeResponseCount,
           details: [
             `responses ${safeResponseCount}`,
             `logs ${logs.length}`,
@@ -381,6 +384,7 @@ async function waitForAutoResponderToFinish(
   let lastProgressDetails: string | undefined
   let resumeLoopProbeKey: string | undefined
   let resumeLoopSince: number | undefined
+  const responseDeadline = createResponseDeadline(idleTimeoutMs)
   const hasWatchTimeout =
     typeof timeoutMs === 'number' &&
     Number.isFinite(timeoutMs) &&
@@ -428,7 +432,8 @@ async function waitForAutoResponderToFinish(
       idleSince = undefined
       if (
         idleTimeoutMs > 0 &&
-        Date.now() - lastProgressAt >= idleTimeoutMs
+        (Date.now() - lastProgressAt >= idleTimeoutMs ||
+          responseDeadline.observe(progressSnapshot?.responseCount ?? 0))
       ) {
         await stopAutoResponderForIdleTimeout(
           page,

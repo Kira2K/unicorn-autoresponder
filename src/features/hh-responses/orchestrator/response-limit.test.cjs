@@ -1,0 +1,6 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');
+const {createResponseLimitResolver}=require('./response-limit.ts');
+test('ordinary runs retain the configured default',()=>{const limit=createResponseLimitResolver(120);assert.equal(limit(1),120);assert.equal(limit(2),120);assert.equal(createResponseLimitResolver(0)(1),0)});
+test('remaining quotas are isolated and preserve the run snapshot',()=>{const input={1:1,2:18,3:92};const limit=createResponseLimitResolver(120,input);input[1]=120;assert.equal(limit(1),1);assert.equal(limit(2),18);assert.equal(limit(3),92)});
+test('missing selected-profile quotas fail before work can start',()=>{const limit=createResponseLimitResolver(120,{1:20});let started=0;assert.throws(()=>{const quotas=[1,2].map(limit);for(const quota of quotas)started++},/Missing remaining response limit/);assert.equal(started,0)});
+test('invalid, fractional, zero and excessive quotas never become live limits',()=>{for(const value of [0,-1,1.5,121,NaN,Infinity,'18'])assert.throws(()=>createResponseLimitResolver(120,{1:value}),/Invalid remaining response limit/);for(const limits of [{},{oops:10},{'01':10},[],null])assert.throws(()=>createResponseLimitResolver(120,limits),/Invalid/)});
