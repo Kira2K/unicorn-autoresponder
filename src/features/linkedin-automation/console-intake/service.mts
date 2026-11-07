@@ -23,6 +23,7 @@ export function createLinkedInIntakeService(deps: {
       const {linkedinAccountId:accountId,banUndoVersion}=raw as {linkedinAccountId?:unknown;banUndoVersion?:unknown}||{};
       if(typeof accountId!=='number'||!Number.isSafeInteger(accountId)||accountId<1||typeof banUndoVersion!=='string'||!banUndoVersion||banUndoVersion.length>100)
         throw new IntakeError('linkedin_intake_replacement_invalid');
+      if((raw as {confirmed?:unknown}).confirmed!==true)throw new IntakeError('linkedin_intake_ban_confirmation_required',409);
       if(!deps.store.cancelBan)throw new IntakeError('linkedin_intake_ban_unavailable',503);
       return deps.store.cancelBan(id,accountId,banUndoVersion);
     },

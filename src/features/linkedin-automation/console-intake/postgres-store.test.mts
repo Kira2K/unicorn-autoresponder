@@ -5,9 +5,10 @@ import type { SqlPool } from '../../../integrations/postgres/contracts.mts';
 import { createLinkedInIntakeStore } from './postgres-store.mts';
 import { parseIntake } from './contracts.mts';
 import { tableIds } from '../../web-console/backend/postgres/tables.mts';
+import type {BanCancellation} from '../linklab/crm-ban-cancellation.mts';
 const input = () => parseIntake({ scenario:'new',outlookForwardingConfirmed:true, outlookLogin: 'alex.smith@outlook.com', outlookPassword: 'mail-secret',
   firstName: 'Alex', lastName: 'Smith', realLocation: 'Tbilisi', blockedAccounts: [{ fullName: 'Old Alex' }, { country: 'UK' }] });
-function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:number)=>Promise<unknown>) {
+function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:number)=>Promise<unknown>,cancelInCrm?:(input:BanCancellation)=>Promise<void>) {
   const state: { accounts: Record<string, unknown>[]; client?: Record<string, unknown>; profiles: Record<string, unknown>[]; tasks: Record<string,unknown>[] } = { accounts: [], profiles: [], tasks: [], client: undefined };
   const control = { failQueue: false, failTask: false, uncertain: false,completedAt:undefined as string|undefined }, calls: string[] = [];
   let backup = structuredClone(state);
@@ -52,6 +53,10 @@ function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:numb
       else row.version=Number(row.version)+1;
       if(values[3]) {delete row.proxy_uuid;delete row.proxy_saved_at;delete row.proxy_profile_id;}
       return {rows:[{...row,created}]};
+    }
+    if(sql.includes('FROM noco.linklab l JOIN noco.platform_accounts a')){
+      const account=state.accounts.find(a=>Number(a.id)===Number(values[1])&&Number(a.clients_id)===Number(values[0])&&!a.__nc_deleted);
+      return{rows:account?[{crm_student_id:'10000000-0000-4000-8000-000000000001',version:'7',ban_version:'123456',ban_confirmed_at:'2026-11-07T05:00:00.123456Z'}]:[]};
     }
     if (sql.includes('FROM noco.clients')) return { rows: [{ id: values[0] }] };
     if (sql.includes('FROM noco.platform_accounts a JOIN')) return { rows: structuredClone(state.accounts.filter(row=>Number(row.clients_id)===Number(values[0])&&
@@ -98,7 +103,7 @@ function fixture(creationTasks = false,afterBan?:(clientId:number,accountId:numb
     }
     return { rows: [] };
   } }; } };
-  return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore', false, creationTasks,afterBan) };
+  return { state, control, calls, store: createLinkedInIntakeStore(pool, 'unicorn_noco_copy_restore', false, creationTasks,afterBan,true,cancelInCrm) };
 }
 
 test('saving existing credentials before Octo is durable, owner scoped and creates neither profiles nor ready notice',async()=>{
@@ -168,7 +173,7 @@ test('reported current account and its history survive a legacy local-only undo 
  assert.deepEqual([f.state.accounts.length,f.state.tasks.length],counts);
 });
 
-test('legacy ban undo cannot write local flags for any owner or receipt',async()=>{
+test('legacy ban undo without a coordinated CRM operation cannot write local flags for any owner or receipt',async()=>{
  const f=fixture(true);await f.store.save(7,input(),['ru','en']);
  const id=Number(f.state.accounts[0].id);Object.assign(f.state.accounts[0],{url:'https://linkedin.com/in/old'});
  f.state.tasks[0].status='сделана экспертом';
@@ -177,6 +182,38 @@ test('legacy ban undo cannot write local flags for any owner or receipt',async()
  for(const owner of [7,8])for(const version of [report.banUndoVersion!,'changed-version'])
   await assert.rejects(f.store.cancelBan(owner,id,version),{code:'linkedin_intake_ban_cancel_requires_support'});
  assert.deepEqual(f.state,before);assert.equal(f.calls.length,calls,'no SQL work or external delivery is allowed');
+});
+
+test('coordinated cancellation releases SQL before HTTP and never performs a separate local undo',async()=>{
+ const received:BanCancellation[]=[];
+ const f=fixture(true,undefined,async input=>{
+  assert.equal(f.calls.at(-1),'ROLLBACK','the read connection is released before the external operation');
+  received.push(input);
+  f.state.accounts[0].is_banned=false;
+ });
+ await f.store.save(7,input(),['ru','en']);
+ const id=Number(f.state.accounts[0].id);f.state.accounts[0].url='https://linkedin.com/in/old';f.state.tasks[0].status='сделана экспертом';
+ await f.store.reportBan(7,id);
+ const view=await f.store.load(7);
+ assert.equal(view.canCancelBan,true);assert.equal(view.banUndoVersion,'123456:7:2026-11-07T05:00:00.123456Z');
+ await f.store.cancelBan(7,id,view.banUndoVersion!);
+ await f.store.cancelBan(7,id,view.banUndoVersion!);
+ assert.deepEqual(received[0],received[1],'the retained proof survives an idempotent status check');
+ assert.equal(received[0].clientId,7);assert.equal(received[0].accountId,id);
+ assert.ok(!f.calls.some(sql=>sql.includes('SET is_banned=false')));
+ assert.equal((await f.store.load(7)).isBanned,false);
+ await assert.rejects(f.store.cancelBan(8,id,view.banUndoVersion!),{code:'linkedin_intake_replacement_stale'});
+ assert.equal(received.length,2);
+});
+
+test('an unknown cancellation reply leaves the source state to the atomic CRM operation',async()=>{
+ const f=fixture(true,undefined,async()=>{throw Error('crm_account_command_delivery_uncertain');});
+ await f.store.save(7,input(),['ru','en']);
+ const id=Number(f.state.accounts[0].id);f.state.accounts[0].url='https://linkedin.com/in/old';f.state.tasks[0].status='сделана экспертом';await f.store.reportBan(7,id);
+ const view=await f.store.load(7);
+ await assert.rejects(f.store.cancelBan(7,id,view.banUndoVersion!),{code:'linkedin_intake_ban_cancel_uncertain',status:503});
+ assert.equal((await f.store.load(7)).isBanned,true);
+ assert.ok(!f.calls.some(sql=>sql.includes('SET is_banned=false')));
 });
 
 test('Outlook registration time round-trips on the email account and survives legacy updates and rollback', async () => {
