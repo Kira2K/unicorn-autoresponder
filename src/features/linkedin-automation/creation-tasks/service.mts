@@ -4,6 +4,7 @@ import type { OctoService } from '../../octo-access/service.mts';
 import type { WebClient } from '../../web-console/backend/types.ts';
 import { IntakeError } from '../console-intake/contracts.mts';
 import { taskId,providerStatus } from './contracts.mts';
+import type {TaskProxyReceipt} from './contracts.mts';
 import type { StatusNotification, TaskStatusChange } from './status-report.mts';
 import type {createNewTaskProxy} from './new-proxy-service.mts';
 import {DEFAULT_NOTIFICATION_MENTION} from './status-report.mts';
@@ -99,17 +100,19 @@ export function createCreationTaskService(deps: {
     async status(id: unknown, body: Record<string, unknown>) {
       const requestedStatus=providerStatus(body.status);
       const before = await deps.store.detail(taskId(id),true), previousStatus = before.task.status;
+      let proxyReceipt:TaskProxyReceipt|undefined;
       if (requestedStatus === 'сделана экспертом' && previousStatus !== requestedStatus) {
         const d = await en(id);
         if (d.task.version !== taskId(body.version)) throw new IntakeError('linkedin_task_stale_version',409);
         await requireNewProxy(d);
-        if (!d.task.proxySavedAt || !d.task.proxyUuid || !d.task.proxyProfileId) throw new IntakeError('linkedin_task_proxy_required',409);
-        // Re-read the cloud proxy at completion too; a changed proxy invalidates the old receipt.
+        // Completion itself confirms the actual closed cloud profile. A prior receipt,
+        // when present, still cannot silently accept a different connection.
         const p = await deps.capture(d.profile);
-        if (!d.task.proxySavedAt || p.proxy?.uuid !== d.task.proxyUuid || p.id !== d.task.proxyProfileId)
+        if (!p.proxy || d.task.proxySavedAt && (p.proxy.uuid !== d.task.proxyUuid || p.id !== d.task.proxyProfileId))
           throw new IntakeError('linkedin_task_proxy_required',409);
+        proxyReceipt={profileId:p.id,proxyUuid:p.proxy.uuid,revision:p.revision};
       }
-      const task = await deps.store.status(taskId(id), taskId(body.version), requestedStatus);
+      const task = await deps.store.status(taskId(id), taskId(body.version), requestedStatus,proxyReceipt);
       if (task.status === 'сделана экспертом' || task.status === previousStatus || !deps.reportStatusChange) return task;
       let notification: StatusNotification;
       try {

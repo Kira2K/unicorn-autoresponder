@@ -9,6 +9,7 @@ export async function request(path, options = {}) {
     const error = new Error(body.message || body.error || `Request failed: ${response.status}`)
     error.status = response.status
     error.fields = body.fields
+    error.proxyCheck = body.proxyCheck
     throw error
   }
   return body

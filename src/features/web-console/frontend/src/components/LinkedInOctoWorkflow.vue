@@ -306,7 +306,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); clearInterval(proxyAvailab
     <LinkedInProxyMove v-if="showProxyMove" :client-id="client.id" />
     <div v-show="!showProxyMove">
     <p v-if="loading" role="status">Загружаем данные…</p>
-    <p v-if="loaded && ['не начата','блок'].includes(task?.status) && !secrets.outlookForwardingConfirmedAt" role="status">Новый шаг: включи пересылку писем. Открой блок «Пересылка писем», выполни инструкцию и сохрани изменения.</p>
+    <p v-if="loaded && ['не начата','блок'].includes(task?.status) && !secrets.outlookForwardingConfirmedAt" role="status"><strong>Новый шаг: включи пересылку писем</strong><br>Без него эксперт не сможет получить код от LinkedIn и создание аккаунта затянется. Это займёт 2 минуты — инструкция ниже.</p>
     <div v-if="loadError" role="alert">{{ loadError }} <button type="button" @click="load">Повторить</button></div>
     <button v-if="canReportBan" type="button" :disabled="saving||reportingBan" data-testid="linkedin-report-ban" @click="reportBan">Меня забанили</button>
     <p v-if="loaded && registrationPending" role="status" data-testid="linkedin-registration-pending">{{ pendingMessage }}</p>
@@ -338,7 +338,7 @@ onUnmounted(() => { clearInterval(confirmationTimer); clearInterval(proxyAvailab
           <li>Номер телефона к почте привязывать не нужно.</li>
           <li>Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.</li>
           <li>Двухфакторку не ставь.</li>
-          <li>Сразу включи пересылку писем на нашу почту по инструкции в блоке «Пересылка писем» ниже.</li>
+          <li>Сразу включи пересылку писем на нашу почту — как это сделать, написано ниже, в блоке «Пересылка писем».</li>
         </ol></details>
         <label class="intake-field"><span>Логин от новой почты Outlook</span><input ref="outlookInput" v-model="form.outlookLogin" type="email" required autocomplete="off" aria-label="Логин от новой почты Outlook" placeholder="name@outlook.com" :aria-invalid="!!outlookError" :aria-describedby="outlookError ? 'outlook-error' : 'outlook-hint'" @input="outlookError && validateOutlook()" @blur="validateOutlook">
           <span v-if="outlookError" id="outlook-error" class="validation-error" role="alert">{{ outlookError }}</span>

@@ -1,9 +1,14 @@
 import type {Browser,BrowserContext,Page} from 'playwright';import {consoleUrl} from './context.mts';
 import {resolve} from 'node:path';import type {RunJournal} from './journal.mts';
-export async function loginCycleUser(browser:Browser,email:string,password:string){
- const context=await browser.newContext({viewport:{width:1440,height:1100},timezoneId:'Asia/Tbilisi'}),page=await context.newPage();page.setDefaultTimeout(20000);
+import {protectRecording} from './video.mts';
+export async function loginCycleUser(browser:Browser,email:string,password:string,videoDirectory?:string){
+ const context=await browser.newContext({viewport:{width:1440,height:1100},timezoneId:'Asia/Tbilisi',...(videoDirectory?{recordVideo:{dir:videoDirectory,size:{width:1440,height:1100}}}:{})});
+ if(videoDirectory)await protectRecording(context);
+ const page=await context.newPage();page.setDefaultTimeout(60000);
  await page.goto(consoleUrl);await page.getByTestId('email-input').fill(email);await page.locator('#password').fill(password);await page.getByTestId('login-button').click();
  await page.getByTestId('login-button').waitFor({state:'hidden'});
+ // The welcome dialog is created after the student's SQL dashboard finishes loading.
+ if(await page.getByTestId('client-dashboard').count())await page.getByTestId('linkedin-octo-workflow').waitFor();
  if(await page.getByTestId('octo-welcome').waitFor({timeout:4000}).then(()=>true,()=>false))await page.getByRole('button',{name:'Понятно, продолжить',exact:true}).click();
  return{context,page};
 }

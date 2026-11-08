@@ -1,6 +1,7 @@
 import { IntakeError } from '../console-intake/contracts.mts';
 export const taskStatuses = ['не начата', 'блок', 'сделана экспертом'] as const;
 export type TaskStatus = typeof taskStatuses[number];
+export interface TaskProxyReceipt {profileId:number;proxyUuid:string;revision:number}
 export const studentLocked = (status: unknown) => status === taskStatuses[2];
 export const providerStatuses = taskStatuses;
 export function taskId(value: unknown): number {

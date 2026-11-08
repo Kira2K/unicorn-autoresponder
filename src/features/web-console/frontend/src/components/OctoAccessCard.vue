@@ -1,4 +1,5 @@
 <script setup>
+import {proxyCountryFailure} from '../proxy-check-ui.js'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { octoApi, octoGrantForDisplay, octoProxyDraft, octoGrantPoll } from '../octo-api.js'
 import OctoManualSetup from './OctoManualSetup.vue'
@@ -232,6 +233,9 @@ async function saveProxy(profile) {
     if (active(version) && error.name !== 'AbortError' && !denied(error)) {
       proxyMessages.value[profile.id] = error.message === 'invalid_proxy_fields'
         ? 'Проверь тип, адрес, порт и URL смены IP.'
+        : error.message === 'linkedin_proxy_move_country_mismatch' ? proxyCountryFailure(error.proxyCheck)
+        : error.message === 'linkedin_proxy_move_check_failed' ? 'Прокси не отвечает или не удалось определить выходной IP. Старый прокси сохранён. Проверь реквизиты и попробуй снова.'
+        : ['linkedin_proxy_move_close_profile_first','linkedin_proxy_move_stale','linkedin_proxy_move_binding_changed'].includes(error.message) ? 'Состояние профиля изменилось. Закрой профиль, дождись окончания доступа и обнови состояние. Старый прокси сохранён.'
         : error.message === 'linkedin_task_proxy_reused' ? 'Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.'
         : error.message === 'linkedin_task_proxy_ip_reused' ? 'Внешний IP совпадает с прежним. Укажи другое подключение.'
         : ['linkedin_task_proxy_check_failed','octo_proxy_check_failed'].includes(error.message) ? 'Прокси не прошёл проверку подключения. Проверь адрес, порт, логин и пароль и попробуй снова.'
