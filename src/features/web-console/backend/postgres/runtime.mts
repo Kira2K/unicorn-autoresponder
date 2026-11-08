@@ -48,6 +48,7 @@ import {createNewTaskProxy} from '../../../linkedin-automation/creation-tasks/ne
 import {cycleNotificationRuntime,cycleNotificationStore,deliverCycleNotification} from '../../../linkedin-automation/creation-tasks/cycle-notifications.mts';
 import {existingNotificationStore,deliverExistingNotification} from '../../../linkedin-automation/console-intake/existing-notifications.mts';
 import {createProxyMoveStore} from '../../../linkedin-automation/proxy-move/postgres-store.mts';
+import {guardStudentProxy} from '../../../linkedin-automation/proxy-move/student-proxy.mts';
 import {createProxyMoveService} from '../../../linkedin-automation/proxy-move/service.mts';
 import {moveNoticeStore,deliverMoveNotice} from '../../../linkedin-automation/proxy-move/notifications.mts';
 import {manualProxyUrl} from '../../../octo-access/manual-proxy-check.mts';
@@ -162,6 +163,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
           client:id=>options.repository.getClientById(id),
           check:async input=>{if(!proxyChecker)throw new OctoError('octo_checker_configuration_required',503);return proxyChecker.check(manualProxyUrl(input));},
           previousProxy:async uuid=>{if(!api.readProfileProxy)throw new OctoError('octo_proxy_check_failed',503);return api.readProfileProxy(uuid);}});
+        octoService=guardStudentProxy(octoService!,linkedinProxyMove);
         moveNotices=cycleNotificationRuntime(()=>deliverMoveNotice({store:moveNoticeStore(pool,config.database,localClientIds.length?localClientIds:undefined),
           client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice,testChatId:localTestChat}),code=>console.error(JSON.stringify({feature:'linkedin-proxy-move',code})));
       }

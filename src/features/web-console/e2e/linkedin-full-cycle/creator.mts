@@ -17,16 +17,17 @@ export async function completeCycleByCreator(c:CycleContext,page:Page,journal:Ru
  if(proof?.fingerprint!==proxyFingerprint(input)){
   assert.equal(await page.getByRole('button',{name:'Получить доступ',exact:true}).isEnabled(),false);
   if(oldInput){
-   const form=await fillProxy(page,profile.profile_id,oldInput);
-   const r=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith(`/profiles/${profile.profile_id}/proxy`)&&r.request().method()==='POST');await form.getByRole('button',{name:'Сохранить прокси',exact:true}).click();
-   assert.equal((await r).status(),409);await page.getByText('Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.',{exact:true}).waitFor();
+   await fillProxy(page,profile.profile_id,oldInput);
+   const [response]=await Promise.all([page.waitForResponse(r=>new URL(r.url()).pathname.endsWith(`/profiles/${profile.profile_id}/proxy`)&&r.request().method()==='POST'),page.getByTestId(`octo-proxy-save-${profile.profile_id}`).click()]);
+   assert.equal(response.status(),409);await page.getByText('Для нового LinkedIn нужны новые реквизиты прокси. Сейчас введено прежнее подключение.',{exact:true}).waitFor();
    await journal.record({step:'cycle-2-reused-proxy',expected:'Прежние реквизиты отклоняются',actual:'409 и понятная ошибка в форме, назначение не выполняется',state:'passed'});
   }
   if(journal.data.checks.some(e=>e.step===`cycle-${cycle}-proxy-attempt`))throw Error('e2e_proxy_outcome_requires_review');
-  const form=await fillProxy(page,profile.profile_id,input);
+  await fillProxy(page,profile.profile_id,input);
+  const saveButton=page.getByTestId(`octo-proxy-save-${profile.profile_id}`);await saveButton.waitFor();
   await journal.record({step:`cycle-${cycle}-proxy-attempt`,expected:'Одно назначение нового подключения',actual:'Попытка записана перед POST',state:'blocked'});
-  const response=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith(`/profiles/${profile.profile_id}/proxy`)&&r.request().method()==='POST',{timeout:900000});
-  await form.getByRole('button',{name:'Сохранить прокси',exact:true}).click();if(!(await response).ok())throw Error('e2e_new_proxy_rejected');
+  const [response]=await Promise.all([page.waitForResponse(r=>new URL(r.url()).pathname.endsWith(`/profiles/${profile.profile_id}/proxy`)&&r.request().method()==='POST',{timeout:90000}),saveButton.click()]);
+  if(!response.ok())throw Error('e2e_new_proxy_rejected');
  }
  await waitForCycle(async()=>{profile=await c.read(async s=>(await s.query("SELECT profile_id,state FROM noco.octo_profiles WHERE client_id=$1 AND locale='en'",[journal.data.clientId])).rows[0]);
   if(profile.state.proxyChange?.phase==='blocked')throw Error('e2e_proxy_assignment_blocked');return profile.state.proxyChange?.phase==='complete';},'e2e_proxy_assignment_timeout',300000);
@@ -34,8 +35,7 @@ export async function completeCycleByCreator(c:CycleContext,page:Page,journal:Ru
  const attempt=journal.data.checks.find(e=>e.step===`cycle-${cycle}-proxy-attempt`);if(attempt){attempt.state='passed';attempt.actual='Назначение сверено с фактическим подключением Octo';await journal.save();}
  await waitForCycle(async()=>await page.getByRole('button',{name:'Получить доступ',exact:true}).isEnabled(),'e2e_access_ui_timeout');
  await verifyCycleAccess(c,page,journal,cycle,taskId,profile);
- await waitForCycle(async()=>await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).isEnabled(),'e2e_capture_ui_timeout');
- await submitAndRead(page,`/api/linkedin-creator/tasks/${taskId}/capture-proxy`,()=>page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click());
+ assert.equal(await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).count(),0);
  const detail=await readJson(page.context(),`/api/linkedin-creator/tasks/${taskId}`);
  assert.equal(await page.getByLabel('Логин LinkedIn',{exact:true}).inputValue(),detail.intake.outlookLogin);
  await page.getByLabel('Ссылка LinkedIn',{exact:true}).fill(`https://www.linkedin.com/in/veu-synthetic-${journal.data.runId}-${cycle}`);
@@ -45,5 +45,6 @@ export async function completeCycleByCreator(c:CycleContext,page:Page,journal:Ru
  await page.getByLabel('Статус заявки',{exact:true}).selectOption('сделана экспертом');
  const completed=await submitAndRead(page,`/api/linkedin-creator/tasks/${taskId}/status`,()=>page.getByRole('button',{name:'Сохранить статус',exact:true}).click());
  assert.equal(completed.status,'сделана экспертом');assert.equal(completed.notification,undefined,'completion uses the journal, not a third status notice');
+ assert.ok(completed.proxySavedAt,'completion confirms the actual proxy without a separate action');
  await journal.record({step:`cycle-${cycle}-expert-done`,expected:'Результат сохранён; логин взят из Outlook этой заявки',actual:'Денис сохранил синтетический результат и завершил заявку через UI',state:'passed',screenshot:await evidenceScreenshot(page,journal,`cycle-${cycle}-expert-done`)});
 }

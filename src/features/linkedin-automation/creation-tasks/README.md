@@ -11,11 +11,12 @@ starts the local LinkLab cycle and records two deliveries. Completed tasks canno
 Repeated completion, including an old version after a lost response, does not replay effects.
 The admin LinkedIn tab is a read-only history with independent delivery outcomes.
 
-The completion checklist lists saved LinkedIn URL, login, password and the task's proxy confirmation, with
-instructions for each missing item. Reopening a task restores its saved proxy confirmation. Opening and
-closing the EN profile preserves that confirmation; completion stays disabled until access cleanup ends.
-A proxy edit, missing connection or server-reported invalid receipt still requires confirmation again.
-The backend still re-reads and validates the actual proxy when completing an unfinished task.
+The completion checklist lists saved LinkedIn URL, login, password and the current attached EN proxy,
+with instructions for each missing item. Unsaved proxy edits, a missing connection or pending assignment
+block completion. Opening and closing EN requires no extra proxy confirmation; completion stays disabled
+until access cleanup ends. Completing an unfinished task re-reads the actual closed cloud profile and
+atomically saves its verified receipt with the final status. A changed existing receipt still rejects
+completion; an old explicit capture API remains compatible but has no separate UI button.
 The Denis result form keeps the profile URL in `url` and the account login in `login`.
 If no LinkedIn login has been saved, the form prefills it from this task's linked Outlook account,
 without checking its email domain. It remains editable and is persisted only by the explicit result save.
@@ -29,7 +30,8 @@ Failed requests show a retry hint instead of an empty-list message. Only the new
 List labels use a single read of client names and stacks, avoiding full client hydration for every task.
 
 The expert proxy form shows a SOCKS5 one-line input immediately. It accepts `host:port:login:password`
-or a `socks5://` / `socks5h://` URL and fills the existing fields locally; parsing never saves or checks a proxy.
+or `USERNAME:PASSWORD@IP:PORT` or a `socks5://` / `socks5h://` URL and fills the existing fields locally;
+parsing never saves or checks a proxy.
 Passwords containing colons are preserved, and invalid input leaves the existing fields unchanged.
 Saved credentials hydrate the same fields, including the password show/hide control; background status
 polling preserves unsaved edits. «Сохранить прокси» below the Octo card submits that form and retains its
@@ -89,8 +91,8 @@ The contractor's EN card also reuses the student's existing proxy form, expanded
 Its task-scoped `POST /api/linkedin-creator/tasks/:id/octo/profiles/:profile/proxy` resolves
 the student and sole EN profile server-side, then delegates to the same `saveProxy` queue.
 RU/foreign profiles are rejected and no other profile data is returned. Enter a proxy in
-this card, save, wait for attachment, then use the existing capture button to verify it
-for the task. No login to the student's Console and no Octo edit rights are required.
+this card, save and wait for attachment. Final completion verifies it automatically.
+No login to the student's Console and no Octo edit rights are required.
 
 Students with any Dolphin binding continue their Dolphin flow and cannot use this Octo intake. Completed tasks
 lock the student's LinkedIn/Outlook changes through both intake and generic platform-account mutations.
@@ -100,9 +102,10 @@ intake/expert changes. Other platform types are unaffected.
 ## Proxy and completion
 
 Opening Octo is not required to confirm a saved proxy. If access is already active, close Octo normally and
-wait for the grant's cleanup to complete before capturing. The capture adapter verifies
+wait for the grant's cleanup to complete before completion. The capture adapter verifies
 the cloud profile is closed/private, reads its actual proxy, persists its existing saved-proxy reference through
-the Octo store, then writes a task receipt after revision/read-back checks. Inline connections use the existing
+the Octo store, then completion writes a task receipt after revision/read-back checks in the same SQL
+transaction as the final status. Missing result fields or stale state roll both writes back. Inline connections use the existing
 durable proxy creation/attachment workflow; pending or uncertain results cannot produce a success receipt.
 No input password is copied into a task. Concurrent profile edits invalidate the operation.
 
@@ -134,7 +137,7 @@ capture/completion also re-read actual cloud connection fields. Substitution inv
 
 Expert result editing writes URL/login/password to the linked platform account and preserves a blank submitted
 password. Draft result saves do not rebind LinkLab. Completion verifies full
-LinkedIn credentials and the current closed EN proxy against the receipt, with SQL checks as a second barrier.
+LinkedIn credentials and the current closed EN proxy, with SQL checks as a second barrier.
 Student saves, result saves and status changes serialize on the client; stale task versions return 409.
 An uncertain commit requires reloading the task, never automatic retry.
 
@@ -227,8 +230,8 @@ Normal market rules reserve RU+EN for an En client; the contractor sees only EN.
 The demo's required chat marker exists only in the injected fixture client object;
 no Telegram destination is written. Reservation/provisioning and proxy attachment reuse
 the existing durable workflows and shared worker. It performs real authenticated Console
-grant requests, scoped Desktop starts and ordinary closes, cleanup, the proxy-capture
-button, then demo-only LinkedIn result saving, expert completion and reload/readback.
+grant requests, scoped Desktop starts and ordinary closes, cleanup, the compatible proxy-capture
+API contract, then demo-only LinkedIn result saving, expert completion and reload/readback.
 Proxy fields are typed with keyboard events in a visible browser and submitted once with
 the form button; no target proxy is assigned through an operator API call. The test verifies
 all actual cloud connection fields in memory, the SQL proxy reference, and the task receipt.

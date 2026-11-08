@@ -35,6 +35,15 @@ test('statuses use expert wording; contractor cannot choose confirmation',()=>{
   assert.throws(()=>providerStatus('сделана исполнителем'));
   assert.equal(studentLocked('сделана экспертом'),true);assert.equal(studentLocked('блок'),false);
 });
+
+test('completion captures the actual closed profile without a separate receipt action',async()=>{
+ const f=await fixture();let receipt:unknown;
+ f.store.status=async(_id,_version,_status,proof)=>{receipt=proof;return{...f.task,status:'сделана экспертом'};};
+ const done=await f.service.status(1,{version:1,status:'сделана экспертом'});
+ const p=(await f.profiles.get(2))!;
+ assert.equal(done.status,'сделана экспертом');assert.deepEqual(receipt,{profileId:2,proxyUuid:'proxy',revision:p.revision});
+ assert.equal(f.received(),undefined,'manual receipt action is not required');
+});
 test('task lists bound client reads to two connections and reuse repeated client summaries',async()=>{
  const f=await fixture();const rows=Array.from({length:13},(_,i)=>({...f.task,id:i+1,clientId:901+i}));rows.push({...f.task,id:14});
  const scopes:boolean[]=[];f.store.list=async(admin=false)=>{scopes.push(admin);return rows;};
@@ -138,9 +147,6 @@ test('expert completion relies on its durable two-recipient journal, without an 
     assert.deepEqual(event,{taskId:1,clientId:901,from:'не начата',to:'сделана экспертом'});
     reports++;return{outcome:'sent',messageId:99};
   });
-  await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}),{code:'linkedin_task_proxy_required'});
-  assert.equal(reports,0);
-  Object.assign(f.task,{proxySavedAt:new Date().toISOString(),proxyUuid:'proxy',proxyProfileId:2});
   f.store.status=async()=>{committed=true;return{...f.task,status:'сделана экспертом',version:2};};
   const task=await f.service.status(1,{version:1,status:'сделана экспертом'});
   assert.equal(task.status,'сделана экспертом');assert.equal(committed,true);assert.equal(reports,0);
@@ -195,8 +201,8 @@ test('active, still closing, running, public and shared profiles cannot produce 
     await assert.rejects(f.service.capture(1,{version:1}));assert.equal(f.received(),undefined);
   }
 });
-test('done cannot bypass proxy button, stale cloud proxy and confirmed task visibility',async()=>{
-  const f=await fixture();await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}),{code:'linkedin_task_proxy_required'});
+test('automatic completion cannot bypass a stale durable proxy receipt',async()=>{
+  const f=await fixture();
   Object.assign(f.task,{proxySavedAt:new Date().toISOString(),proxyUuid:'old',proxyProfileId:2});
   await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}),{code:'linkedin_task_proxy_required'});
 });

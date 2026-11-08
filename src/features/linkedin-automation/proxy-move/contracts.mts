@@ -11,17 +11,21 @@ export function checkedCountry(value:unknown):Country|undefined {
   return ['es','spain','españa','испания'].includes(v)?'ES':['ge','georgia','грузия'].includes(v)?'GE':undefined;
 }
 export function fail(code:string):never { throw new OctoError(`linkedin_proxy_move_${code}`,409); }
+export interface ProxyProof {exitIp:string;country:Country;checkedAt:string}
 export interface Move {
   id:string;clientId:number;accountId:number;profileId:number;profileUuid:string;country:Country;
   phase:'assigning'|'assigned'|'completed';fingerprint:string;previousProxy?:unknown;
   createdAt:string;completedAt?:string;pauseUntil?:string;
-  proof?:{exitIp:string;country:Country;checkedAt:string};
+  proof?:ProxyProof;
+  lastProxyCheck?:ProxyProof&{operationId:string;fingerprint:string};
 }
 export interface MoveStore {
   checkSchema():Promise<void>;
   read(clientId:number,accountId:number):Promise<Move|undefined>;
+  readForProfile(clientId:number,profileId:number):Promise<Move|undefined>;
   begin(move:Move,profile:ManagedProfile,input:ProxyInput):Promise<void>;
   finish(move:Move,profile:ManagedProfile,at:string):Promise<Move>;
+  queueReplacement(move:Move,profile:ManagedProfile,input:ProxyInput,proof:ProxyProof,operationId:string,fingerprint:string):Promise<void>;
 }
 export function crmProxyPause(move:Move,now:number) {
   if(!move.completedAt||!move.pauseUntil)fail('not_completed');

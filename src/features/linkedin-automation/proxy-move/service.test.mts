@@ -8,7 +8,7 @@ function fixture(answer='Yes') {
   let move:Move|undefined,writes=0,checks=0;
   const profile:ManagedProfile={id:1,clientId:901,locale:'en',revision:1,operationId:'setup',password:'12345',uuid:'en-test',
     phase:'ready',ownProxy:false,createdAt:0,original:{title:'Test',description:'',tags:[],start_pages:[]},proxy:{uuid:'old',title:'old',isMadeByExpert:true}};
-  const store:MoveStore={async checkSchema(){},async read(){return move;},async begin(m,p,input){writes++;move=m;profile.proxyChange={id:m.id,phase:'queued',title:'new',input};},
+  const store:MoveStore={async checkSchema(){},async read(){return move;},async readForProfile(){return move;},async queueReplacement(){throw Error('not used');},async begin(m,p,input){writes++;move=m;profile.proxyChange={id:m.id,phase:'queued',title:'new',input};},
     async finish(m,p,at){writes++;return move={...m,phase:'completed',completedAt:at,pauseUntil:new Date(Date.parse(at)+48*3600000).toISOString()};}};
   let country='Spain',dolphin=false;
   const service=createProxyMoveService({store,profiles:{async list(){return [profile];}},allowed:id=>id===901,async hasDolphin(){return dolphin;},

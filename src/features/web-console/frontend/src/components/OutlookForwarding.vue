@@ -12,22 +12,25 @@ defineExpose({ requireConfirmation: () => { visible.value = true } })
 <template>
   <details ref="block" data-testid="outlook-forwarding">
     <summary>Пересылка писем</summary>
-    <p>Коды LinkedIn приходят на твою новую почту Outlook. Включи пересылку, чтобы эксперт мог получить код. Копии писем останутся у тебя.</p>
+    <p>Когда эксперт регистрирует LinkedIn и входит в него, LinkedIn присылает код на твою почту Outlook. Чтобы эксперт сразу получал код и не ждал тебя, включи пересылку писем с твоей почты на нашу:</p>
     <p><strong>{{ address }}</strong> <button type="button" @click="copy">{{ copied ? 'Скопировано' : 'Скопировать' }}</button></p>
+    <p>Почта новая и нужна только для LinkedIn, личных писем в ней не будет. Все письма останутся и у тебя.</p>
+    <p><strong>Как включить пересылку:</strong></p>
     <ol>
-      <li>Открой Outlook в браузере. На телефоне включи версию сайта для компьютера, если нужных настроек нет.</li>
-      <li>Открой настройки → «Почта» / Mail.</li>
-      <li>Выбери «Пересылка» / Forwarding или «Пересылка и IMAP» / Forwarding and IMAP.</li>
-      <li>Включи «Включить пересылку» / Enable forwarding.</li>
-      <li>Введи {{ address }}.</li>
-      <li>Поставь галочку «Сохранять копии пересылаемых сообщений» / Keep a copy of forwarded messages.</li>
-      <li>Нажми «Сохранить» / Save. Outlook может попросить войти повторно или ввести код.</li>
+      <li>Открой <strong>outlook.live.com</strong> в браузере и войди в новую почту. В приложении Outlook этой настройки нет. Если на телефоне нужного пункта не видно, включи в меню браузера «Версия для ПК».</li>
+      <li>Нажми <strong>⚙ Настройки</strong> справа вверху. Settings</li>
+      <li>Открой <strong>Почта → Пересылка</strong>. Mail → Forwarding. Пункт может называться «Пересылка и IMAP» / Forwarding and IMAP.</li>
+      <li>Включи <strong>«Включить пересылку»</strong>. Enable forwarding</li>
+      <li>В поле адреса вставь <strong>{{ address }}</strong>.</li>
+      <li>Поставь галочку <strong>«Сохранять копии пересылаемых сообщений»</strong>. Keep a copy of forwarded messages</li>
+      <li>Нажми <strong>«Сохранить»</strong>. Save</li>
     </ol>
-    <p>Номер телефона привязывать не нужно. Если Outlook требует телефон, напиши в поддержку и приложи скриншот.</p>
+    <p>Если Outlook попросит ещё раз войти или подтвердить почту кодом — сделай это.</p>
+    <p>Номер телефона к почте не привязывай. Если Outlook не даёт включить пересылку без телефона — напиши в поддержку и пришли скриншот.</p>
     <label class="check"><input type="checkbox" :checked="modelValue" @change="emit('update:modelValue', $event.target.checked)">Я включил(а) пересылку на {{ address }} и нажал(а) «Сохранить»</label>
   </details>
   <Dialog v-model:visible="visible" modal header="Сначала включи пересылку писем" :style="{ width:'34rem', maxWidth:'calc(100vw - 2rem)' }">
-    <p>Без неё эксперт не сможет получить код от LinkedIn, и создание аккаунта застрянет. Открой инструкцию, включи пересылку и поставь галочку внизу блока.</p>
+    <p>Без неё эксперт не сможет получить код от LinkedIn, и создание аккаунта застрянет. Открой блок «Пересылка писем», включи пересылку на {{ address }} по инструкции и поставь галочку внизу блока. После этого кнопка сохранения заработает.</p>
     <template #footer><button type="button" @click="open">Открыть инструкцию</button><button type="button" @click="visible=false">Закрыть</button></template>
   </Dialog>
 </template>

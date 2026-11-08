@@ -5,7 +5,16 @@ export function parseProxyLine(raw){
  if(typeof raw!=='string'||!raw.trim()||raw.length>4096||/[\r\n]/.test(raw))fail('format')
  const type='socks5'
  let host,port,login='',password=''
- if(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trimStart())){
+ const hasScheme=/^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trimStart())
+ const legacyFields=!hasScheme&&/^(\[[^\]]+\]|[^:@]{4,}):\d+(?::|$)/.test(raw.trimStart())
+ if(!hasScheme&&raw.includes('@')&&!legacyFields){
+  const text=raw.trim(),at=text.lastIndexOf('@'),credentials=text.slice(0,at),colon=credentials.indexOf(':')
+  if(colon<1)fail('format')
+  login=credentials.slice(0,colon);password=credentials.slice(colon+1)
+  const address=/^(\[[^\]]+\]|[^:]+):(\d+)$/.exec(text.slice(at+1))
+  if(!address)fail('format')
+  host=address[1];port=Number(address[2])
+ }else if(hasScheme){
   let url
   try{url=new URL(raw.trim())}catch{fail('format')}
   if(!['socks5:','socks5h:'].includes(url.protocol))fail('protocol')

@@ -9,6 +9,11 @@ export async function submitCycleIntake(page:Page,journal:RunJournal,cycle:numbe
  assert.equal(await form.getByLabel('Логин от новой почты Outlook',{exact:true}).inputValue(),'');
  await form.getByLabel('Логин от новой почты Outlook',{exact:true}).fill(`pavel.testov-e2e-${journal.data.runId}-${cycle}@outlook.com`);
  await form.getByRole('button',{name:cycle===1?'Сохранить и подготовить Octo':'Сохранить и подготовить Octo',exact:true}).click();
+ const forwarding=page.getByRole('dialog',{name:'Сначала включи пересылку писем',exact:true});
+ await forwarding.getByRole('button',{name:'Открыть инструкцию',exact:true}).click();
+ // Synthetic E2E only: this exercises the existing confirmation gate, never Outlook delivery.
+ await form.getByTestId('outlook-forwarding').getByRole('checkbox').check();
+ await form.getByRole('button',{name:'Сохранить и подготовить Octo',exact:true}).click();
  await form.getByTestId('linkedin-validation-error').waitFor();
  await form.getByLabel('Пароль от новой почты Outlook',{exact:true}).fill(`SYNTHETIC-${journal.data.runId}-${cycle}`);
  await form.getByLabel('Дата и время регистрации Outlook-почты',{exact:true}).fill('2026-10-25');

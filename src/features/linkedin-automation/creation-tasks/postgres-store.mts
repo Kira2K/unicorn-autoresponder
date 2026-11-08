@@ -5,6 +5,7 @@ import { PostgresReadError } from '../../../integrations/postgres/contracts.mts'
 import { parseLinkedInResult } from '../console-intake/contracts.mts';
 import { loadBlockedHistory } from './blocked-history.mts';
 import { taskRow, providerStatus } from './contracts.mts';
+import type {TaskProxyReceipt} from './contracts.mts';
 
 const fail = (code: string): never => { throw new PostgresReadError(code); };
 export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, linklab = false,
@@ -34,6 +35,15 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
     const li=(await s.query('SELECT url,login,password FROM noco.platform_accounts WHERE id=$1 FOR UPDATE',[task.linkedinAccountId])).rows[0];
     try{parseLinkedInResult(li);}catch{return fail('linkedin_task_result_required');}
     if(!li.password)return fail('linkedin_task_result_required');
+  }
+  async function saveProxyReceipt(s:SqlSession,task:ReturnType<typeof taskRow>,proof:TaskProxyReceipt,preserveExisting=false){
+    const p=(await s.query("SELECT state,revision FROM noco.octo_profiles WHERE profile_id=$1 AND client_id=$2 AND locale='en' FOR UPDATE",[proof.profileId,task.clientId])).rows[0];
+    const state=p?.state as any;
+    if(!p||Number(p.revision)!==proof.revision||state.proxy?.uuid!==proof.proxyUuid||state.phase!=='ready'||state.deletion||state.pending||
+      state.grant&&state.grant.phase!=='complete'||state.proxyChange&&state.proxyChange.phase!=='complete')return fail('linkedin_task_proxy_changed');
+    if(preserveExisting&&task.proxyProfileId===proof.profileId&&task.proxyUuid===proof.proxyUuid&&task.proxySavedAt)return task;
+    return taskRow((await s.query(`UPDATE noco.linkedin_creation_task SET proxy_profile_id=$2,proxy_uuid=$3,proxy_saved_at=clock_timestamp()
+      WHERE id=$1 RETURNING *`,[task.id,proof.profileId,proof.proxyUuid])).rows[0]);
   }
   return {
     async clientSummaries(ids:number[]) {
@@ -86,16 +96,19 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
         return taskRow((await s.query('UPDATE noco.linkedin_creation_task SET updated_at=clock_timestamp() WHERE id=$1 RETURNING *', [id])).rows[0]);
       });
     },
-    async status(id: number, version: number, value: unknown) {
+    async status(id: number, version: number, value: unknown, proxyReceipt?:TaskProxyReceipt) {
       const status = providerStatus(value);
       const {task,completed} = await writeTransaction(pool, database, async s => {
-        const task = await lock(s, id, version, true);
+        let task = await lock(s, id, version, true);
         if(task.status==='сделана экспертом') {
           if(status!==task.status)return fail('linkedin_task_completed');
           return {task,completed:false};
         }
         if (task.status === status) return {task,completed:false};
-        if (status === 'сделана экспертом') await requireResult(s,task);
+        if (status === 'сделана экспертом') {
+          if(proxyReceipt)task=await saveProxyReceipt(s,task,proxyReceipt,true);
+          await requireResult(s,task);
+        }
         const updated=taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *', [id, status])).rows[0]);
         if(status==='сделана экспертом'&&localNotificationClientIds.includes(task.clientId))await s.query("UPDATE noco.linkedin_cycle_notifications SET state='failed',error_code='local_delivery_pending',chat_id=(SELECT telegram_general_chat_id FROM noco.clients WHERE id=$2) WHERE task_id=$1 AND client_id=$2 AND state='pending'",[id,task.clientId]);
         return {task:updated,completed:status==='сделана экспертом'};
@@ -113,12 +126,7 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
     async receipt(id: number, version: number, profileId: number, proxyUuid: string, revision: number) {
       return writeTransaction(pool, database, async s => {
         const task = await lock(s, id, version);
-        const p = (await s.query("SELECT state,revision FROM noco.octo_profiles WHERE profile_id=$1 AND client_id=$2 AND locale='en' FOR UPDATE", [profileId,task.clientId])).rows[0];
-        const state = p?.state as any;
-        if (!p || Number(p.revision) !== revision || state.proxy?.uuid !== proxyUuid || state.phase !== 'ready' || state.deletion || state.pending ||
-          state.grant && state.grant.phase !== 'complete' || state.proxyChange && state.proxyChange.phase !== 'complete') return fail('linkedin_task_proxy_changed');
-        return taskRow((await s.query(`UPDATE noco.linkedin_creation_task SET proxy_profile_id=$2,proxy_uuid=$3,proxy_saved_at=clock_timestamp()
-          WHERE id=$1 RETURNING *`, [id,profileId,proxyUuid])).rows[0]);
+        return saveProxyReceipt(s,task,{profileId,proxyUuid,revision});
       });
     }
   };

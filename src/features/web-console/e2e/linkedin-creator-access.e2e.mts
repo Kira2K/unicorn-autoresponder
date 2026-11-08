@@ -220,8 +220,11 @@ try {
         return (await profiles.get(bound.id))?.grant?.phase === 'complete';
       }, 'denis_e2e_cleanup_timeout', 300_000);
       stage = `task-${taskId}-capture`; console.log(JSON.stringify({ stage }));
-      await page.getByRole('button', { name: 'Сохранить настройки прокси', exact: true }).click();
-      await page.getByText('Настройки прокси сохранены.', { exact: true }).waitFor();
+      check(await page.getByRole('button', { name: 'Сохранить настройки прокси', exact: true }).count()===0,'denis_e2e_obsolete_capture_button');
+      // Retain explicit compatibility coverage for the old API in this legacy access test.
+      const compatibilityDetail=await (await context.request.get(`${url}/api/linkedin-creator/tasks/${taskId}`)).json();
+      const compatibility=await context.request.post(`${url}/api/linkedin-creator/tasks/${taskId}/capture-proxy`,{data:{version:compatibilityDetail.task.version}});
+      check(compatibility.ok(),'denis_e2e_proxy_receipt_missing');
       const receipt = await read(async s => (await s.query('SELECT proxy_profile_id,proxy_uuid,proxy_saved_at FROM noco.linkedin_creation_task WHERE id=$1', [taskId])).rows[0]);
       check(Number(receipt?.proxy_profile_id) === bound.id && receipt.proxy_uuid === (await profiles.get(bound.id))?.proxy?.uuid &&
         !!receipt.proxy_saved_at, 'denis_e2e_proxy_receipt_missing');

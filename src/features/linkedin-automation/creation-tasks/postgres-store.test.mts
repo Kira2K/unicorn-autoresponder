@@ -71,6 +71,25 @@ test('completion is final, hidden from Denis and idempotent even with an old ver
  assert.equal((await f.store.detail(1,true)).task.status,'сделана экспертом');
 });
 
+test('completion atomically saves the checked proxy receipt and rolls it back when result is incomplete',async()=>{
+ for(const incomplete of [false,true]){
+  const f=fixture();f.state.task.proxy_saved_at=null;f.state.task.proxy_profile_id=null;f.state.task.proxy_uuid=null;
+  if(incomplete)f.state.li.password='';
+  const proof={profileId:2,proxyUuid:'proxy',revision:4};
+  if(incomplete){await assert.rejects(f.store.status(1,1,'сделана экспертом',proof));assert.equal(f.state.task.proxy_saved_at,null);assert.equal(f.state.task.status,'не начата');}
+  else{const done=await f.store.status(1,1,'сделана экспертом',proof);assert.equal(done.status,'сделана экспертом');assert.equal(done.proxyUuid,'proxy');assert.ok(done.proxySavedAt);}
+ }
+});
+
+test('automatic completion receipt rejects an outdated revision or active access',async()=>{
+ for(const kind of ['revision','grant','proxy']){
+  const f=fixture();f.state.task.proxy_saved_at=null;
+  if(kind==='grant')f.state.profile.state.grant={phase:'granted'};
+  await assert.rejects(f.store.status(1,1,'сделана экспертом',{profileId:2,proxyUuid:kind==='proxy'?'other':'proxy',revision:kind==='revision'?3:4}));
+  assert.equal(f.state.task.status,'не начата');assert.equal(f.state.task.proxy_saved_at,null);
+ }
+});
+
 test('a committed unknown completion is read back without starting another cycle',async()=>{
  const f=fixture();f.uncertain();
  await assert.rejects(f.store.status(1,1,'сделана экспертом'),{code:'commit_uncertain'});

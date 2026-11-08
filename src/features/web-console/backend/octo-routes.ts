@@ -1,6 +1,7 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import type { OctoService } from '../../octo-access/service.mts';
 import {safeClientFields} from '../../linkedin-automation/console-intake/contracts.mts';
+import {publicCountryFailure} from '../../linkedin-automation/proxy-move/checked-proxy.mts';
 type SessionRequest = Request & { webSession?: { role: string; clientId?: number } };
 export function registerOctoRoutes(app: Express, requireAuth: RequestHandler, service?: OctoService) {
   const guard: RequestHandler = (req: SessionRequest, res, next) => {
@@ -15,8 +16,9 @@ export function registerOctoRoutes(app: Express, requireAuth: RequestHandler, se
     try { res.status(status).json(await fn(req)); }
     catch (error) {
       const e = error as { code?: string; status?: number;fields?:Array<{field:string}> };
-      const code = e.code && /^(octo_|forbidden$|not_found$|invalid_profile_id$)/.test(e.code) ? e.code : 'octo_operation_failed';
+      const code = e.code && /^(octo_|linkedin_proxy_move_|forbidden$|not_found$|invalid_profile_id$|commit_uncertain$)/.test(e.code) ? e.code : 'octo_operation_failed';
       res.status(e.status && e.status >= 400 && e.status < 600 ? e.status : 503).json({ error: code,
+        ...(publicCountryFailure(error)?{proxyCheck:publicCountryFailure(error)}:{}),
         ...(code==='octo_client_data_required'?{fields:safeClientFields(e.fields?.map(item=>item.field))}:{}) });
     }
   };

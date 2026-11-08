@@ -9,21 +9,19 @@ const expertDoneStatus = 'сделана экспертом'
 const orderedTasks = computed(() => tasks.value.filter(task => task.status !== expertDoneStatus))
 const expertCompleted = computed(() => selected.value?.task.status === expertDoneStatus)
 const message = ref(''), busy = ref(false), selectedStatus = ref('не начата'), copied = ref('')
-const captureConfirmed = ref(false)
 const proxyDraftDirty = ref(false)
 const profileState = ref(null)
 const canCaptureProxy = computed(() => profileState.value?.profiles?.some(p => p.locale === 'en' &&
   p.phase === 'ready' && p.canEditProxy === true && p.proxy?.configured) && profileState.value?.newProxyReady !== false)
+const proxyAssigned = computed(() => profileState.value?.newProxyReady !== false &&
+  profileState.value?.profiles?.some(p => p.locale === 'en' && p.proxy?.configured))
 function updateTask(task) {
   if (task?.id !== selected.value?.task.id || task.version <= selected.value.task.version) return
   selected.value.task = task
-  captureConfirmed.value = !!task.proxySavedAt
 }
 function updateProfileStatus(status) {
   profileState.value = status
   if (status.task) updateTask(status.task)
-  if (status.newProxyReady === false || !status.profiles?.some(p => p.locale === 'en' && p.proxy?.configured))
-    captureConfirmed.value = false
 }
 const requestedTaskId = ref(null), taskLoading = ref(false), taskLoadError = ref('')
 const controller = new AbortController()
@@ -43,14 +41,14 @@ const transport = computed(() => {
     } }
 })
 const completionChecklist = computed(() => [
-  { key: 'proxy', label: 'Настройки прокси подтверждены для заявки',
-    done: !!selected.value?.task.proxySavedAt && captureConfirmed.value && !proxyDraftDirty.value,
+  { key: 'proxy', label: 'Прокси сохранён и проверен',
+    done: !!proxyAssigned.value && !proxyDraftDirty.value,
     hint: !profileState.value ? 'Дождитесь загрузки состояния профиля Octo.'
       : profileState.value.newProxyReady === false ? 'Введите новые реквизиты прокси в форме выше и дождитесь назначения. Прежнее подключение для нового LinkedIn не подходит.'
-      : canCaptureProxy.value ? 'Нажмите «Сохранить настройки прокси» над формой LinkedIn.'
+      : proxyAssigned.value ? 'Прокси сохранён. Повторно сохранять его после закрытия профиля не нужно.'
       : !profileState.value.profiles?.some(p => p.locale === 'en' && p.proxy?.configured)
-        ? 'Сохраните прокси в форме «Настроить прокси» и дождитесь завершения сохранения. Затем нажмите «Сохранить настройки прокси».'
-        : 'Закройте профиль Octo и дождитесь завершения доступа. Затем нажмите «Сохранить настройки прокси».' },
+        ? 'Сохраните прокси в форме «Настроить прокси» и дождитесь завершения сохранения.'
+        : 'Закройте профиль Octo и дождитесь завершения доступа.' },
   { key: 'url', label: 'Ссылка LinkedIn сохранена', done: !!selected.value?.intake.url,
     hint: 'Введите ссылку вида https://www.linkedin.com/in/... и нажмите «Сохранить данные LinkedIn».' },
   { key: 'login', label: 'Логин LinkedIn сохранён', done: !!selected.value?.intake.login,
@@ -65,7 +63,7 @@ function errorText(error) {
   if(code==='linkedin_task_new_proxy_required')return 'Для нового LinkedIn сначала назначьте и проверьте новый прокси.'
   if (code === 'linkedin_task_proxy_pending') return 'Прокси сохраняется. Дождитесь завершения и нажмите кнопку ещё раз.'
   if (code === 'linkedin_task_close_profile_first') return 'Закройте профиль Octo и дождитесь завершения доступа.'
-  if (code === 'linkedin_task_proxy_required' || code === 'linkedin_task_proxy_changed') return 'Дождитесь сохранения прокси и нажмите «Сохранить настройки прокси». Если сейчас выдан доступ к профилю, сначала завершите его.'
+  if (code === 'linkedin_task_proxy_required' || code === 'linkedin_task_proxy_changed') return 'Проверьте сохранённый прокси. Если сейчас выдан доступ к профилю, сначала закройте профиль и дождитесь завершения доступа.'
   if (code === 'linkedin_task_result_required') return 'Сохраните ссылку, логин и пароль LinkedIn кнопкой «Сохранить данные LinkedIn».'
   if (code === 'linkedin_task_stale_version') return 'Заявка изменилась. Откройте её заново перед сохранением.'
   if (code === 'commit_uncertain') return 'Результат неизвестен. Откройте заявку заново для проверки; повторная отправка не запускается.'
@@ -80,7 +78,7 @@ async function loadTasks() {
     tasks.value = list; tasksLoaded.value = true
     if (requestedTaskId.value && !list.some(t => t.id === requestedTaskId.value)) {
       selection++; taskController?.abort(); requestedTaskId.value = null; taskLoading.value = false; taskLoadError.value = ''
-      selected.value = null; captureConfirmed.value = false; profileState.value = null; result.value = { url: '', login: '', password: '' }
+      selected.value = null; profileState.value = null; result.value = { url: '', login: '', password: '' }
     }
   }
   catch (e) {
@@ -92,11 +90,11 @@ async function open(id) {
   const current = ++selection
   taskController?.abort(); taskController = new AbortController()
   requestedTaskId.value = id; taskLoading.value = true; taskLoadError.value = ''
-  selected.value = null; captureConfirmed.value = false; profileState.value = null; result.value = { url: '', login: '', password: '' }; message.value = ''
+  selected.value = null; profileState.value = null; result.value = { url: '', login: '', password: '' }; message.value = ''
   try {
     const data = await request(`${base}/tasks/${id}`, { signal: taskController.signal })
     if (current !== selection || controller.signal.aborted) return
-    selected.value = data; selectedStatus.value = data.task.status; captureConfirmed.value = !!data.task.proxySavedAt; proxyDraftDirty.value = false
+    selected.value = data; selectedStatus.value = data.task.status; proxyDraftDirty.value = false
     result.value = { url: data.intake.url, login: data.intake.login || data.intake.outlookLogin || '', password: '' }
   } catch (e) {
     if (e.name !== 'AbortError' && !controller.signal.aborted && current === selection) taskLoadError.value = errorText(e)
@@ -108,10 +106,9 @@ async function save(action, body) {
   const id = selected.value.task.id, current = selection
   try {
     const task = await request(`${base}/tasks/${id}/${action}`, { signal: controller.signal,
-      method: action === 'capture-proxy' ? 'POST' : 'PUT', body: JSON.stringify({ ...body, version: selected.value.task.version }) })
+      method: 'PUT', body: JSON.stringify({ ...body, version: selected.value.task.version }) })
     if (current !== selection || controller.signal.aborted) return
     selected.value.task = task
-    if (action === 'capture-proxy') { captureConfirmed.value = true; message.value = 'Настройки прокси сохранены.' }
     if (action === 'result') {
       const detail = await request(`${base}/tasks/${id}`, { signal: controller.signal })
       if (current !== selection || controller.signal.aborted) return
@@ -133,7 +130,6 @@ async function save(action, body) {
   } catch (e) {
     if (current === selection && !controller.signal.aborted) {
       message.value = errorText(e)
-      if (['linkedin_task_proxy_required', 'linkedin_task_proxy_changed'].includes(e.message)) captureConfirmed.value = false
     }
   } finally { busy.value = false }
 }
@@ -183,7 +179,7 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
           <dt>Реальная локация</dt><dd>{{ selected.intake.realLocation }}</dd><dt>Почта Outlook</dt><dd>{{ selected.intake.outlookLogin }}</dd>
           <dt>Дата и время регистрации Outlook</dt><dd>{{ selected.intake.outlookRegisteredAt?new Date(selected.intake.outlookRegisteredAt).toLocaleString():'Не указаны' }}</dd></dl>
         <label>Пароль Outlook <input type="password" value="saved-password" readonly aria-label="Пароль Outlook"></label>
-        <p data-testid="creator-forwarding">Пересылка писем: {{ selected.intake.outlookForwardingConfirmedAt ? '✅ включена ' + new Date(selected.intake.outlookForwardingConfirmedAt).toLocaleString() : '⚠️ не подтверждена' }}</p>
+        <p data-testid="creator-forwarding">Пересылка писем: {{ selected.intake.outlookForwardingConfirmedAt ? '✅ включена ' + new Date(selected.intake.outlookForwardingConfirmedAt).toLocaleString() : '⚠️ не включена — код придётся просить у ученика' }}</p>
         <p>Коды искать на kind.cute.unicorn@gmail.com по адресу {{ selected.intake.outlookLogin }}. Проверь также папку «Спам».</p>
         <button type="button" @click="copy('outlook')">{{ copied === 'outlook' ? 'Скопировано' : 'Копировать пароль Outlook' }}</button>
         <h3>Старые заблокированные аккаунты ({{ selected.intake.blockedAccounts.length }})</h3><p v-if="!selected.intake.blockedAccounts.length">Не указаны.</p>
@@ -193,10 +189,9 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
         </section>
         <p><strong>Для нового LinkedIn введи новые реквизиты прокси в форме ниже и нажми «Сохранить прокси».</strong> Старое подключение повторно использовать нельзя. Дождись статуса «Прокси сохранён». В приложении Octo Browser прокси вводить или менять не нужно.</p>
         <p v-if="profileState?.newProxyRequired && profileState.newProxyReady === false" role="status" data-testid="creation-new-proxy-required">Доступ к Octo появится после сохранения и проверки нового прокси для этой заявки.</p>
-        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @proxy-draft-changed="proxyDraftDirty = $event" @proxy-changed="captureConfirmed = false" />
-        <p>Дождись статуса «Прокси сохранён» и нажми «Сохранить настройки прокси» ниже: кнопка проверит фактические настройки профиля и подтвердит их для заявки. Открывать профиль Octo для этого не требуется. Если доступ к профилю уже выдан, сначала закрой его и дождись завершения доступа.</p>
-        <button type="button" :disabled="busy || !canCaptureProxy || proxyDraftDirty" @click="save('capture-proxy', {})">Сохранить настройки прокси</button>
-        <p v-if="captureConfirmed && !proxyDraftDirty">Прокси сохранён и проверен.</p>
+        <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @proxy-draft-changed="proxyDraftDirty = $event" />
+        <p>Дождись статуса «Прокси сохранён». Повторно сохранять прокси после закрытия профиля не нужно. Когда закончишь регистрацию, сохрани данные LinkedIn, закрой профиль Octo и дождись завершения доступа. Затем выбери статус «сделана экспертом».</p>
+        <p v-if="proxyAssigned && !proxyDraftDirty">Прокси сохранён и проверен.</p>
         <form @submit.prevent="save('result', result)">
           <h3>Созданный LinkedIn</h3>
           <label>Ссылка LinkedIn<input v-model="result.url" required placeholder="https://www.linkedin.com/in/..." autocomplete="off"></label>
@@ -213,7 +208,7 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
             </li>
           </ul>
           <p v-if="!checklistComplete">Статус «сделана экспертом» станет доступен после выполнения всех пунктов.</p>
-          <p v-else-if="!canComplete">{{ !profileState ? 'Дождитесь загрузки состояния профиля Octo.' : 'Закройте профиль Octo и дождитесь завершения доступа. Сохранённое подтверждение прокси остаётся действительным.' }}</p>
+          <p v-else-if="!canComplete">{{ !profileState ? 'Дождитесь загрузки состояния профиля Octo.' : 'Закройте профиль Octo и дождитесь завершения доступа. Повторно сохранять прокси не нужно.' }}</p>
         </section>
         <label>Статус заявки<select v-model="selectedStatus" aria-label="Статус заявки" aria-describedby="completion-checklist-title"><option>не начата</option><option>блок</option><option :disabled="!canComplete">{{ expertDoneStatus }}</option></select></label>
         <p v-if="expertCompleted" class="task-completion-note" role="status">Заявка завершена.</p>

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
+import {mkdir} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {createLinkedInMockFixture} from '../../linkedin-automation/local-console/mock-fixture.mts';
 import {runProxyMoveFlow} from './linkedin-proxy-move/flow.mts';
@@ -11,6 +12,7 @@ const server=f.app.listen(0,'127.0.0.1');await new Promise<void>(done=>server.on
 const url=`http://127.0.0.1:${(server.address() as {port:number}).port}`,browser=await chromium.launch({headless:true});
 try{
   const page=await browser.newPage();page.setDefaultTimeout(30000);
+  const browserErrors:string[]=[];page.on('pageerror',e=>browserErrors.push(e.message));
   await page.addInitScript(()=>localStorage.setItem('webConsole.octoWelcome.v1.901','closed'));
   await page.goto(url);await page.getByTestId('email-input').fill('linkedin-local-901@example.invalid');await page.locator('#password').fill('1234');await page.getByTestId('login-button').click();
   const existing=(await f.profiles.list(901))[0];
@@ -21,13 +23,26 @@ try{
   let statusRequests=0,releaseRead!:()=>void;const heldRead=new Promise<void>(resolve=>{releaseRead=resolve});
   await page.route('**/api/client/linkedin-proxy-move',async route=>{statusRequests++;await heldRead;await route.continue()});
   await page.getByTestId('proxy-move-open').click();await page.getByText('Проверяем готовность профиля Octo…',{exact:true}).waitFor();
-  await page.waitForTimeout(5500);assert.equal(statusRequests,1,'a slow initial status must never spawn overlapping polls');releaseRead();await page.getByTestId('proxy-move-save').waitFor();await page.unroute('**/api/client/linkedin-proxy-move');await page.getByTestId('proxy-move-open').click();
+  await page.waitForTimeout(5500);assert.equal(statusRequests,1,'a slow initial status must never spawn overlapping polls');releaseRead();await page.getByTestId('proxy-move-save').waitFor({state:'attached'});await page.unroute('**/api/client/linkedin-proxy-move');await page.getByTestId('proxy-move-open').click();
   await page.route('**/api/client/linkedin-proxy-move',route=>route.fulfill({status:403,json:{error:'linkedin_proxy_move_forbidden'}}));
   await page.getByTestId('proxy-move-open').click();
   const failed=page.getByTestId('linkedin-proxy-move');await failed.getByRole('alert').waitFor();
   assert.equal(await failed.locator('form').count(),0,'initial status failure must not show a false-ready form');
   assert.match(await failed.getByRole('alert').innerText(),/EN-профиля Octo с подключённым прокси/);
-  await page.unroute('**/api/client/linkedin-proxy-move');await failed.getByRole('button',{name:'Обновить состояние',exact:true}).click();await failed.getByTestId('proxy-move-save').waitFor();
+  await page.unroute('**/api/client/linkedin-proxy-move');await failed.getByRole('button',{name:'Обновить состояние',exact:true}).click();await failed.getByTestId('proxy-move-save').waitFor({state:'attached'});
+  assert.deepEqual(await failed.locator('[data-testid^="proxy-move-step-"]').evaluateAll(es=>es.map(e=>(e as HTMLDetailsElement).open)),[false,false,false,false,false,false]);
+  assert.equal(await failed.locator('a[href*="1uAbO8FUyic9PqdZ6Ohn1wsDW-xs4F_qPi0VJuyWJij0"]').count(),2);
+  await mkdir('tmp/ui-checks',{recursive:true});await failed.screenshot({path:'tmp/ui-checks/proxy-move-collapsed.png'});
+  await page.setViewportSize({width:390,height:844});await failed.getByTestId('proxy-move-step-0').locator('summary').click();
+  assert.equal(await failed.getByTestId('proxy-move-country-ES').locator('.move-country-tag').innerText(),'твоя страна');
+  assert.equal(await failed.getByTestId('proxy-move-country-GE').locator('.move-country-tag').count(),0);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile layout must not overflow');
+  await failed.screenshot({path:'tmp/ui-checks/proxy-move-mobile.png'});await page.setViewportSize({width:1280,height:900});
+  await failed.getByTestId('proxy-move-step-3').locator('summary').click();
+  await failed.getByTestId('proxy-move-line').fill('mock:mock-only@wrong.example.invalid:1080');
+  const wrongResponse=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/linkedin-proxy-move/proxy'));
+  await failed.getByTestId('proxy-move-save').click();assert.equal((await wrongResponse).status(),409);
+  await failed.getByRole('alert').filter({hasText:'Страна прокси — Грузия. Нужна Испания.'}).waitFor();assert.equal((await f.profiles.get(existing.id))?.proxy?.uuid,existing.proxy?.uuid);
   await page.getByTestId('proxy-move-open').click();
   const input={type:'socks5' as const,host:'proxy.example.invalid',port:1080,login:'mock',password:'mock-only'};
   const result=await runProxyMoveFlow(page,input,async()=>{
@@ -40,8 +55,17 @@ try{
   assert.equal(f.notices.length,1);assert.equal(f.notices[0].chatId,'-5216637594');assert.equal(result.move.country,'ES');
   assert.equal((await f.profiles.list(901))[0].proxy?.isMadeByExpert,false);
   assert.equal(JSON.stringify(result).includes('mock-only'),false);
-  await page.getByRole('dialog').getByRole('button',{name:'Понятно',exact:true}).click();await page.reload();await page.getByTestId('proxy-move-open').click();const completedConfirmation=page.getByTestId('proxy-move-country-confirmation');await completedConfirmation.waitFor();assert.equal(await completedConfirmation.isChecked(),true);assert.equal(await completedConfirmation.isDisabled(),true,'completed confirmation survives reload and cannot be unchecked');
+  const doneDialog=page.getByRole('dialog');await doneDialog.getByText('Заходи в LinkedIn только через антидетект-браузер (Octo/Dolphin) — не в обычном браузере и не в приложении на телефоне.',{exact:true}).waitFor();
+  await doneDialog.getByText('Если LinkedIn попросит подтвердить личность — ничего не делай сам и сразу напиши нам.',{exact:true}).waitFor();
+  await doneDialog.getByRole('button',{name:'Понятно',exact:true}).click();await page.reload();await page.getByTestId('proxy-move-open').click();await page.getByTestId('proxy-move-step-4').locator('summary').click();const completedConfirmation=page.getByTestId('proxy-move-country-confirmation');await completedConfirmation.waitFor();assert.equal(await completedConfirmation.isChecked(),true);assert.equal(await completedConfirmation.isDisabled(),true,'completed confirmation survives reload and cannot be unchecked');
   const completedMoveId=result.move.id,profileId=existing.id;
+  await page.getByTestId('proxy-move-step-3').locator(':scope > summary').click();
+  for(const host of ['wrong.example.invalid','unknown.example.invalid','dead.example.invalid','timeout.example.invalid']){
+    const before=(await f.profiles.get(profileId))?.proxy?.uuid;
+    await page.getByTestId(`octo-proxy-${profileId}-host`).fill(host);
+    await page.getByTestId(`octo-proxy-save-${profileId}`).click();await page.getByTestId(`octo-proxy-error-${profileId}`).waitFor();
+    assert.equal((await f.profiles.get(profileId))?.proxy?.uuid,before);
+  }
   for(const host of ['replacement-one.example.invalid','replacement-two.example.invalid']){
     const form=page.getByTestId(`octo-proxy-form-${profileId}`);
     await form.waitFor({state:'visible'});
@@ -54,6 +78,7 @@ try{
       if(Date.now()>until)throw Error('e2e_repeat_proxy_replacement_timeout');await new Promise(r=>setTimeout(r,250));
     }
     await page.reload();await page.getByTestId('proxy-move-open').click();
+    await page.getByTestId('proxy-move-step-3').locator(':scope > summary').click();
     await page.getByTestId(`octo-proxy-form-${profileId}`).waitFor({state:'visible'});
     assert.equal(await page.getByTestId(`octo-proxy-${profileId}-host`).inputValue(),host);
     assert.equal(f.moves.get(901)?.id,completedMoveId,'ordinary replacement preserves the completed move');
@@ -77,7 +102,7 @@ try{
   await form.getByRole('button',{name:'Сохранить изменения',exact:true}).click();await student.getByText('Заявка обновлена',{exact:true}).waitFor();
   const creator=await browser.newPage();creator.setDefaultTimeout(15000);await creator.goto(url);await creator.getByTestId('email-input').fill('local-denis');await creator.locator('#password').fill('local-test-only');await creator.getByTestId('login-button').click();
   await creator.getByTestId('creation-task-902').click();await creator.getByTestId('creator-forwarding').waitFor();
-  await creator.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
+  assert.equal(await creator.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).count(),0);await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
   const host=creator.getByLabel('Адрес прокси',{exact:true}),original=await host.inputValue();await host.fill('edited.example.invalid');
   await creator.getByText('Есть несохранённые изменения.',{exact:false}).waitFor();assert.equal(await creator.getByText('Прокси сохранён и проверен.',{exact:true}).count(),0);
   await host.fill(original);await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
@@ -86,6 +111,13 @@ try{
   const created=(await f.profiles.list(902))[0];await f.cloud.start(created.uuid!);await f.cloud.stop(created.uuid!);f.advanceClock(121000);
   const end=Date.now()+30000;while((await f.profiles.get(created.id))?.grant?.phase!=='complete'){if(Date.now()>end)throw Error('e2e_creator_cleanup_timeout');await new Promise(r=>setTimeout(r,500));}
   await creator.reload();await creator.getByTestId('creation-task-902').click();await creator.getByText('Прокси сохранён и проверен.',{exact:true}).waitFor();
-  console.log('Forwarding + Denis MOCK E2E passed: mandatory modal, server timestamp, repeat edit without duplicate, dirty/revert, access/expiry/close/reload preserve proxy confirmation.');
+  await creator.getByLabel('Ссылка LinkedIn',{exact:true}).fill('https://www.linkedin.com/in/synthetic-mock-created');
+  await creator.getByLabel('Пароль LinkedIn',{exact:true}).fill('mock-result-only');
+  await creator.getByRole('button',{name:'Сохранить данные LinkedIn',exact:true}).click();await creator.getByText('Данные LinkedIn сохранены.',{exact:true}).waitFor();
+  await creator.getByLabel('Статус заявки',{exact:true}).selectOption('сделана экспертом');await creator.getByRole('button',{name:'Сохранить статус',exact:true}).click();
+  await creator.getByText('Заявка завершена. LinkedIn и доступ к Octo доступны ученику. Уведомления поставлены в очередь.',{exact:true}).waitFor();
+  await student.reload();await student.getByTestId('linkedin-registration-completed').waitFor();
+  console.log('Forwarding + Denis MOCK E2E passed: mandatory modal, server timestamp, no duplicate request, dirty/revert, access expiry/close/reload and completion without an extra proxy receipt action.');
+  assert.deepEqual(browserErrors,[]);
   console.log('Proxy move MOCK E2E passed: real routes/service/worker, country assignment, reload, access cleanup, two subsequent proxy replacements with reload, one completion/event, no secrets. LinkedIn country itself remains a manual check.');
 }finally{await browser.close();await f.close();await new Promise<void>(done=>server.close(()=>done()));}

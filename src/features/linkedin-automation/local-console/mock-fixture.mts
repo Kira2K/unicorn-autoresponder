@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {createMemoryStore,createMockCloud,testConfig} from '../../octo-access/testing.mts';
 import {createOctoRuntime} from '../../octo-access/runtime.mts';
 import {createProxyMoveService} from '../proxy-move/service.mts';
+import {guardStudentProxy} from '../proxy-move/student-proxy.mts';
 import {createLinkedInIntakeService} from '../console-intake/service.mts';
 import type {Move,MoveStore} from '../proxy-move/contracts.mts';
 import type {SavedProxy} from '../../octo-access/contracts.mts';
@@ -53,10 +54,15 @@ export async function createLinkedInMockFixture() {
       return{saved:true as const,linkedinAccountId:id,outlookAccountId:id+100,task:{...task,created}};}
   }});
   const moveStore:MoveStore={async checkSchema(){},async read(id){return structuredClone(moves.get(id));},
+    async readForProfile(id,pid){const m=moves.get(id);return m?.profileId===pid?structuredClone(m):undefined;},
+    async queueReplacement(m,p,input,proof,operationId,fingerprint){
+      await profiles.save({...p,proxyChange:{id:operationId,phase:'queued',input,title:`${p.original.title} | ${p.uuid}`,isMadeByExpert:false}});
+      moves.set(m.clientId,{...m,lastProxyCheck:{...proof,operationId,fingerprint}});
+    },
     async begin(m,p,input){moves.set(m.clientId,structuredClone(m));await profiles.save({...p,proxyChange:{id:m.id,phase:'queued',input,title:`${p.original.title} | ${p.uuid}`,isMadeByExpert:false}});},
     async finish(m,p,at){const done={...m,phase:'completed' as const,completedAt:at,pauseUntil:new Date(Date.parse(at)+48*3600000).toISOString()};moves.set(m.clientId,done);notices.push({eventId:m.id,chatId:'-5216637594'});return done;}};
   const moveService=createProxyMoveService({store:moveStore,profiles,account:id=>intake.load(id),allowed:id=>[901,902].includes(id),hasDolphin:async()=>false,client:getClient,
-    check:async input=>({ok:true,exit_ip:'1.1.1.1',country:input.host==='wrong.example.invalid'?'Georgia':'Spain'}),previousProxy:api.readProfileProxy});
+    check:async input=>{if(input.host==='timeout.example.invalid')throw Error('mock timeout');return{ok:input.host!=='dead.example.invalid',exit_ip:'1.1.1.1',country:input.host==='wrong.example.invalid'?'Georgia':input.host==='unknown.example.invalid'?undefined:'Spain'};},previousProxy:api.readProfileProxy});
   const creator={async list(){return [...tasks.values()].filter(t=>t.status!=='сделана экспертом').map(t=>({...t,fio:'Тест Заявка',stack:'JAVA'}));},
     async detail(id:number){id=Number(id);return{task:structuredClone(tasks.get(id)!),intake:await intake.load(id),client:{id,fio:'Тест Заявка',stack:'JAVA'}};},
     async profileStatus(id:number,credentials:boolean){id=Number(id);return runtime.service.status(id,{staff:true,proxyCredentials:credentials});},
@@ -64,10 +70,10 @@ export async function createLinkedInMockFixture() {
     async acquire(id:number,pid:number){id=Number(id);pid=Number(pid);return runtime.service.acquire(id,pid);},async grant(id:number,gid:string){id=Number(id);return runtime.service.grant(id,gid);},
     async capture(id:number){id=Number(id);const t=tasks.get(id)!;t.proxySavedAt=new Date().toISOString();t.version++;return structuredClone(t);},
     async result(id:number,body:any){id=Number(id);const a=accounts.get(id)!;Object.assign(a,{url:body.url,login:body.login,hasPassword:true,hasLinkedIn:true});const t=tasks.get(id)!;t.version++;return structuredClone(t);},
-    async status(id:number,body:any){id=Number(id);const t=tasks.get(id)!;t.status=body.status;t.version++;return structuredClone(t);},
+    async status(id:number,body:any){id=Number(id);const t=tasks.get(id)!;if(body.status==='сделана экспертом'){const p=(await profiles.list(id))[0];if(!p.proxy||p.grant&&p.grant.phase!=='complete')throw Error('mock profile not ready');t.proxySavedAt=new Date().toISOString();t.proxyProfileId=p.id;t.proxyUuid=p.proxy.uuid;}t.status=body.status;t.version++;return structuredClone(t);},
     async secrets(){return{password:'mock-only'};},key(){return{key:'mock-only'};}
   } as unknown as CreationTaskService;
-  const app:import('express').Express=createWebConsoleApp({useMockData:true,repository,octoService:runtime.service,linkedinIntake:intake,linkedinProxyMove:moveService,
+  const app:import('express').Express=createWebConsoleApp({useMockData:true,repository,octoService:guardStudentProxy(runtime.service,moveService),linkedinIntake:intake,linkedinProxyMove:moveService,
     linkedinCreator:creator,linkedinCreatorAuth:{login:'local-denis',password:'local-test-only'}});
   await profiles.setCoverage(Date.now()-10000);await runtime.start();
   return{app,profiles,cloud,api,runtime,moves,notices,accounts,advanceClock(ms:number){clockOffset+=ms;},async close(){await runtime.stop();}};

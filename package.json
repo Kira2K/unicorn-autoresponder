@@ -16,6 +16,7 @@
     "linkedin:local:completed:e2e": "node --env-file=.env --env-file=.env.octo-pilot --env-file=.env.octo-onboarding src/features/web-console/e2e/linkedin-local-completed.e2e.mts",
     "linkedin:proxy-move:test": "node --test src/features/linkedin-automation/proxy-move/*.test.mts src/features/linkedin-automation/local-console/test-proxy.test.mts src/features/linkedin-automation/creation-tasks/local-delivery.test.mts src/features/web-console/backend/linkedin-proxy-move-routes.test.mts src/features/web-console/frontend/src/proxy-draft.test.js src/features/web-console/frontend/src/proxy-move-ui.test.js",
     "linkedin:proxy-move:e2e:mock": "node src/features/web-console/e2e/linkedin-proxy-move.e2e.mts",
+    "linkedin:proxy-move:test:sql": "node scripts/test-linkedin-proxy-sql.mts",
     "linkedin:proxy-move:e2e:live": "node --env-file=.env --env-file=.env.octo-pilot --env-file=.env.octo-onboarding src/features/web-console/e2e/linkedin-proxy-move-live.e2e.mts",
     "linkedin:intake:test": "node --test src/features/linkedin-automation/console-intake/*.test.mts src/features/web-console/backend/linkedin-intake-routes.test.mts src/features/web-console/frontend/src/linkedin-intake.test.js",
     "linkedin:intake:e2e": "node src/features/web-console/e2e/linkedin-octo.e2e.mts",
