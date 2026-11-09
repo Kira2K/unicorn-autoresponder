@@ -1,8 +1,9 @@
+const { TELEGRAM_TEST_CHAT_ID } = require('./destinations.ts') as typeof import('./destinations.ts')
 require('dotenv').config({ quiet: true })
 
 const { createTelegramIntegration } = require('./integration.ts') as typeof import('./integration.ts')
 
-const DESTINATIONS = ['-5216637594', '-1003187558078'] as const
+const DESTINATIONS = [TELEGRAM_TEST_CHAT_ID, '-1003187558078'] as const
 
 async function run(): Promise<void> {
   const telegram = createTelegramIntegration({

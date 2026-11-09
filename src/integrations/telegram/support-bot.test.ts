@@ -74,7 +74,7 @@ const polinaTemplates = require('./resume-polina-message-templates.ts') as Recor
 const studentActor = {
   userId: '100',
   username: 'student_user',
-  chatId: '-5216637594',
+  chatId: '-1003804004336',
   chatType: 'supergroup'
 }
 const kiraActor = {
@@ -589,7 +589,7 @@ function makeWorkflow(overrides: Record<string, any> = {}) {
     clientHhRuPhone: '+7 999 222 3344',
     clientPhoneRu: '+7 999 000 1122',
     clientPhoneEn: '+1 555 0100',
-    commonChatId: '-5216637594',
+    commonChatId: '-1003804004336',
     education: 'University',
     educationEntries: [
       { uni: 'University', faculty: '', grade: '', yearOfEnd: '' }
@@ -627,7 +627,7 @@ function makeWorkflowRepository(workflowRecord = makeWorkflow()) {
     patches,
     workflowRecord,
     async getResumeWorkflowByTelegramChatId(chatId: string, options: any) {
-      assert.equal(chatId, '-5216637594')
+      assert.equal(chatId, '-1003804004336')
       assert.equal(options.ensure, true)
       return workflowRecord
     },
@@ -756,7 +756,7 @@ function pollingUpdate(updateId: number) {
       message_id: updateId,
       date: 1_700_000_000 + updateId,
       text: '/backend_status',
-      chat: { id: -5216637594, type: 'supergroup' },
+      chat: { id: -1003804004336, type: 'supergroup' },
       from: { id: 42, username: 'tester' }
     }
   }
@@ -1093,7 +1093,7 @@ async function runTests() {
     resolveActorForWorkflow({
       userId: '7586552066',
       username: 'student_user',
-      chatId: '-5216637594',
+      chatId: '-1003804004336',
       chatType: 'supergroup'
     }, makeWorkflow()).role,
     'student'
@@ -1156,37 +1156,37 @@ async function runTests() {
   assert.equal(
     responseText(await handleSupportBotMessage({
       text: '/whoami',
-      chat: { id: -5216637594, type: 'supergroup' },
+      chat: { id: -1003804004336, type: 'supergroup' },
       from: { id: 42, username: 'tester' }
     }, foundApi)),
-    'ID чата: -5216637594\nТип чата: supergroup\nID пользователя: 42\nUsername: @tester'
+    'ID чата: -1003804004336\nТип чата: supergroup\nID пользователя: 42\nUsername: @tester'
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -1003804004336 } }, foundApi)),
     'Бэкенд: работает'
   )
   assert.match(
-    responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -1003804004336 } }, foundApi)),
     /\/resume - продвинуть резюме/
   )
   assert.match(
-    responseText(await handleSupportBotMessage({ text: '/commands@veu_support_bot', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/commands@veu_support_bot', chat: { id: -1003804004336 } }, foundApi)),
     /\/resume - продвинуть резюме/
   )
   assert.doesNotMatch(
-    responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -1003804004336 } }, foundApi)),
     /\/change_google_folder <url>/
   )
   assert.doesNotMatch(
-    responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/commands', chat: { id: -1003804004336 } }, foundApi)),
     /\/open_my_tasks - личная очередь задач/
   )
   assert.match(
-    responseText(await handleSupportBotMessage({ text: '/help', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/help', chat: { id: -1003804004336 } }, foundApi)),
     /Команды работают только если/
   )
   assert.match(
-    responseText(await handleSupportBotMessage({ text: 'show all my commands', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: 'show all my commands', chat: { id: -1003804004336 } }, foundApi)),
     /\/resume_status - показать текущий статус резюме/
   )
   assert.match(
@@ -1215,7 +1215,7 @@ async function runTests() {
     /\/open_my_tasks - личная очередь задач/
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/start', chat: { id: -5216637594, type: 'supergroup' } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/start', chat: { id: -1003804004336, type: 'supergroup' } }, foundApi)),
     [
       'Привет, Client One! Я бот поддержки Very Evil Unicorn! 🦄',
       '',
@@ -1224,7 +1224,7 @@ async function runTests() {
     ].join('\n')
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/student', chat: { id: -5216637594, type: 'supergroup' } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/student', chat: { id: -1003804004336, type: 'supergroup' } }, foundApi)),
     [
       'Ученик найден: Client One',
       '',
@@ -1233,22 +1233,22 @@ async function runTests() {
     ].join('\n')
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/change_google_folder https://drive.google.com/drive/folders/abc', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/change_google_folder https://drive.google.com/drive/folders/abc', chat: { id: -1003804004336 } }, foundApi)),
     'Редактирование Google-папки из Telegram отключено. Измени корневую Google-папку в админке Noco.'
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/change_google_folder', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/change_google_folder', chat: { id: -1003804004336 } }, foundApi)),
     'Редактирование Google-папки из Telegram отключено. Измени корневую Google-папку в админке Noco.'
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/resume', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/resume', chat: { id: -1003804004336 } }, foundApi)),
     'Статус резюме для Client One: заполнено'
   )
   assert.equal(lastResumeOptions?.studentDataFolderUrl, '')
   assert.equal(
     responseText(await handleSupportBotMessage({
       text: '/resume https://drive.google.com/drive/folders/student-source',
-      chat: { id: -5216637594, type: 'supergroup' },
+      chat: { id: -1003804004336, type: 'supergroup' },
       from: { id: 100, username: 'student_user' }
     }, foundApi)),
     'Статус резюме для Client One: заполнено'
@@ -1257,7 +1257,7 @@ async function runTests() {
   assert.equal(
     responseText(await handleSupportBotMessage({
       text: 'I approve',
-      chat: { id: -5216637594, type: 'supergroup' },
+      chat: { id: -1003804004336, type: 'supergroup' },
       from: { id: 100, username: 'student_user' }
     }, foundApi)),
     'Статус резюме для Client One: заполнено'
@@ -1271,16 +1271,16 @@ async function runTests() {
     'Работай с задачами по резюме через /open_my_tasks.'
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/resume_status', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/resume_status', chat: { id: -1003804004336 } }, foundApi)),
     'Статус резюме для Client One: черновик в работе'
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/resume_reset_test', chat: { id: -5216637594 } }, foundApi)),
+    responseText(await handleSupportBotMessage({ text: '/resume_reset_test', chat: { id: -1003804004336 } }, foundApi)),
     'Тестовый workflow резюме для Client One сброшен.'
   )
   const groupTasksResponse = await handleSupportBotMessage({
     text: 'open my tasks',
-    chat: { id: -5216637594, type: 'supergroup' },
+    chat: { id: -1003804004336, type: 'supergroup' },
     from: { id: 8222949251, username: 'veu_support' }
   }, foundApi)
   assert.match(responseText(groupTasksResponse), /личном чате/)
@@ -1319,13 +1319,13 @@ async function runTests() {
   clearActiveTaskContextsForTest()
   const rejectCallbackResponse = await handleSupportBotCallback({
     data: callbackData('reject', 98, 'Draft in approve by student'),
-    message: { chat: { id: -5216637594, type: 'supergroup' } },
+    message: { chat: { id: -1003804004336, type: 'supergroup' } },
     from: { id: 100, username: 'student_user' }
   }, foundApi)
   assert.match(responseText(rejectCallbackResponse), /для того чтобы вернуть на доработку введи \/resume_reject оставил комменты в резюме или кастомный комментарий/)
   const rejectCommentResponse = await handleSupportBotMessage({
     text: 'оставил комменты в резюме',
-    chat: { id: -5216637594, type: 'supergroup' },
+    chat: { id: -1003804004336, type: 'supergroup' },
     from: { id: 100, username: 'student_user' }
   }, foundApi)
   assert.match(responseText(rejectCommentResponse), /Резюме возвращено/)
@@ -1345,11 +1345,11 @@ async function runTests() {
 
   const rejectCommandResponse = await handleSupportBotMessage({
     text: '/resume_reject оставил комменты в резюме',
-    chat: { id: -5216637594, type: 'supergroup' },
+    chat: { id: -1003804004336, type: 'supergroup' },
     from: { id: 100, username: 'student_user' }
   }, foundApi)
   assert.match(responseText(rejectCommandResponse), /Резюме возвращено из чата/)
-  assert.equal(lastRejectResumeInput.chatId, '-5216637594')
+  assert.equal(lastRejectResumeInput.chatId, '-1003804004336')
   assert.equal(lastRejectResumeInput.comment, 'оставил комменты в резюме')
 
   const longStatusCallback = callbackData('advance', 98, 'English version in approve by Kira')
@@ -1508,7 +1508,7 @@ async function runTests() {
   assert.equal(
     responseText(await handleSupportBotGroupAdd({
       my_chat_member: {
-        chat: { id: -5216637594, type: 'supergroup', title: 'Test Group' },
+        chat: { id: -1003804004336, type: 'supergroup', title: 'Test Group' },
         old_chat_member: { status: 'left' },
         new_chat_member: { status: 'member' }
       }
@@ -1524,7 +1524,7 @@ async function runTests() {
   )
   assert.equal(await handleSupportBotGroupAdd({
     my_chat_member: {
-      chat: { id: -5216637594, type: 'supergroup', title: 'Test Group' },
+      chat: { id: -1003804004336, type: 'supergroup', title: 'Test Group' },
       old_chat_member: { status: 'member' },
       new_chat_member: { status: 'administrator' }
     }
@@ -1544,7 +1544,7 @@ async function runTests() {
         return [{
           update_id: 1,
           my_chat_member: {
-            chat: { id: -5216637594, type: 'supergroup', title: 'Test Group' },
+            chat: { id: -1003804004336, type: 'supergroup', title: 'Test Group' },
             old_chat_member: { status: 'left' },
             new_chat_member: { status: 'member' }
           }
@@ -1562,7 +1562,7 @@ async function runTests() {
   })
   assert.equal(runnerPollTimeout, 0)
   assert.deepEqual(runnerAllowedUpdates, SUPPORT_BOT_ALLOWED_UPDATES)
-  assert.equal(runnerSentMessages.at(-1).chatId, '-5216637594')
+  assert.equal(runnerSentMessages.at(-1).chatId, '-1003804004336')
   assert.equal(runnerSentMessages.at(-1).text, [
     'Привет, Client One! Я бот поддержки Very Evil Unicorn! 🦄',
     '',
@@ -1594,7 +1594,7 @@ async function runTests() {
             message_id: 2,
             date: 1_700_000_002,
             text: '/resume',
-            chat: { id: -5216637594, type: 'supergroup' },
+            chat: { id: -1003804004336, type: 'supergroup' },
             from: { id: 100, username: 'student_user' }
           }
         }]
@@ -1696,7 +1696,7 @@ async function runTests() {
             message_id: 4,
             date: 1_700_000_004,
             text: '/backend_status',
-            chat: { id: -5216637594, type: 'supergroup' },
+            chat: { id: -1003804004336, type: 'supergroup' },
             from: { id: 42, username: 'tester' }
           }
         }]
@@ -1733,7 +1733,7 @@ async function runTests() {
             message_id: 5,
             date: 1_700_000_005,
             text: '/student',
-            chat: { id: -5216637594, type: 'supergroup' },
+            chat: { id: -1003804004336, type: 'supergroup' },
             from: { id: 42, username: 'tester' }
           }
         }]
@@ -1792,11 +1792,11 @@ async function runTests() {
     }
   }
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -5216637594 } }, downApi)),
+    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -1003804004336 } }, downApi)),
     BACKEND_UNAVAILABLE_MESSAGE
   )
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/student', chat: { id: -5216637594 } }, downApi)),
+    responseText(await handleSupportBotMessage({ text: '/student', chat: { id: -1003804004336 } }, downApi)),
     BACKEND_UNAVAILABLE_MESSAGE
   )
   assert.equal(
@@ -1818,7 +1818,7 @@ async function runTests() {
     }
   })
   await assert.rejects(
-    () => connectionRefusedApi.findClient('-5216637594'),
+    () => connectionRefusedApi.findClient('-1003804004336'),
     (error: any) => {
       assert.equal(error.code, 'backend_unavailable')
       assert.equal(error.message, BACKEND_UNAVAILABLE_MESSAGE)
@@ -1837,7 +1837,7 @@ async function runTests() {
     })
   })
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -5216637594 } }, timedOutApi)),
+    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -1003804004336 } }, timedOutApi)),
     BACKEND_UNAVAILABLE_MESSAGE
   )
 
@@ -1853,7 +1853,7 @@ async function runTests() {
     })
   })
   assert.equal(
-    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -5216637594 } }, proxyDownApi)),
+    responseText(await handleSupportBotMessage({ text: '/backend_status', chat: { id: -1003804004336 } }, proxyDownApi)),
     BACKEND_UNAVAILABLE_MESSAGE
   )
 
@@ -1869,7 +1869,7 @@ async function runTests() {
     })
   })
   await assert.rejects(
-    () => overloadedApi.findClient('-5216637594'),
+    () => overloadedApi.findClient('-1003804004336'),
     (error: any) => {
       assert.equal(error.code, 'backend_overloaded')
       assert.equal(error.message, BACKEND_OVERLOADED_MESSAGE)
@@ -1971,7 +1971,7 @@ async function runTests() {
     const kiraWithStudentUsername = {
       ...manualKiraActor,
       username: 'student_user',
-      chatId: '-5216637594',
+      chatId: '-1003804004336',
       chatType: 'supergroup'
     }
     assert.equal(resolveActorForWorkflow(kiraWithStudentUsername, makeWorkflow()).role, 'student')
@@ -2001,7 +2001,7 @@ async function runTests() {
       ['Education', 'English level', 'Real age', 'Real location', 'Desired location', 'Github', 'Telegram RU', 'Telegram EN']
     )
     const missingRequiredStatusResult = await getResumeStatus(
-      '-5216637594',
+      '-1003804004336',
       missingRequiredClientDataRepository,
       { actor: studentActor }
     )
@@ -2021,7 +2021,7 @@ async function runTests() {
     )
     assert.doesNotMatch(missingRequiredStatusResult.message, /\/resume </)
 
-    const missingRequiredResumeResult = await resumeWorkflow('-5216637594', missingRequiredClientDataRepository, {
+    const missingRequiredResumeResult = await resumeWorkflow('-1003804004336', missingRequiredClientDataRepository, {
       actor: studentActor,
       studentDataFolderUrl: 'https://drive.google.com/drive/folders/student-source'
     })
@@ -2046,11 +2046,11 @@ async function runTests() {
         clientLinkedInUrl: '',
         clientLinkedInAccountExists: false
       }))
-      const status = await getResumeStatus('-5216637594', noLinkedInRepository, { actor: studentActor })
+      const status = await getResumeStatus('-1003804004336', noLinkedInRepository, { actor: studentActor })
       assert.match(status.message, /отправь \/resume </)
       assert.doesNotMatch(status.message, /аккаунт LinkedIn/)
       const sourceUrl = 'https://drive.google.com/drive/folders/student-source'
-      const result = await resumeWorkflow('-5216637594', noLinkedInRepository, {
+      const result = await resumeWorkflow('-1003804004336', noLinkedInRepository, {
         actor: studentActor,
         studentDataFolderUrl: sourceUrl
       })
@@ -2060,12 +2060,12 @@ async function runTests() {
     }
 
     const missingSourceRepository = makeWorkflowRepository()
-    const missingSourceStatusResult = await getResumeStatus('-5216637594', missingSourceRepository, { actor: studentActor })
+    const missingSourceStatusResult = await getResumeStatus('-1003804004336', missingSourceRepository, { actor: studentActor })
     assert.match(missingSourceStatusResult.message, /@veu_support/)
     assert.match(missingSourceStatusResult.message, /clients\.google_folder/)
     assert.doesNotMatch(missingSourceStatusResult.message, /\/resume </)
 
-    const missingSourceResult = await resumeWorkflow('-5216637594', missingSourceRepository, { actor: studentActor })
+    const missingSourceResult = await resumeWorkflow('-1003804004336', missingSourceRepository, { actor: studentActor })
     assert.equal(missingSourceResult.workflow.status, "collection student's data")
     assert.deepEqual(missingSourceResult.transitions, [])
     assert.equal(missingSourceRepository.workflowRecord.studentDataFolderUrl, '')
@@ -2075,11 +2075,11 @@ async function runTests() {
     const nocoFolderRepository = makeWorkflowRepository(makeWorkflow({
       clientGoogleFolder: 'https://drive.google.com/drive/folders/noco-root'
     }))
-    const nocoFolderStatusResult = await getResumeStatus('-5216637594', nocoFolderRepository, { actor: studentActor })
+    const nocoFolderStatusResult = await getResumeStatus('-1003804004336', nocoFolderRepository, { actor: studentActor })
     assert.match(nocoFolderStatusResult.message, /отправь \/resume <ссылка на папку с самопрезентацией\/исходными данными>/)
     assert.doesNotMatch(nocoFolderStatusResult.message, /заполнить обязательные данные в ЛК/)
 
-    const nocoFolderResult = await resumeWorkflow('-5216637594', nocoFolderRepository, { actor: studentActor })
+    const nocoFolderResult = await resumeWorkflow('-1003804004336', nocoFolderRepository, { actor: studentActor })
     assert.equal(nocoFolderResult.workflow.status, "collection student's data")
     assert.deepEqual(nocoFolderResult.transitions, [])
     assert.equal(nocoFolderRepository.workflowRecord.studentDataFolderUrl, '')
@@ -2089,7 +2089,7 @@ async function runTests() {
       1
     )
 
-    const suppliedStudentFolderResult = await resumeWorkflow('-5216637594', nocoFolderRepository, {
+    const suppliedStudentFolderResult = await resumeWorkflow('-1003804004336', nocoFolderRepository, {
       actor: studentActor,
       studentDataFolderUrl: 'https://drive.google.com/drive/folders/student-source'
     })
@@ -2609,7 +2609,7 @@ async function runTests() {
       status: 'English version in approve by Kira',
       enVersionUrl: 'https://docs.google.com/document/d/test-en'
     }))
-    const kiraRejectResult = await rejectResumeWorkflow('-5216637594', kiraRejectRepository, {
+    const kiraRejectResult = await rejectResumeWorkflow('-1003804004336', kiraRejectRepository, {
       actor: manualKiraActor,
       expectedStatus: 'English version in approve by Kira',
       rejectionComment: longComment
@@ -2688,7 +2688,7 @@ async function runTests() {
       clientGoogleFolder: 'https://drive.google.com/drive/folders/root',
       studentDataFolderUrl: 'https://drive.google.com/drive/folders/manual-source'
     }))
-    const statusResult = await getResumeStatus('-5216637594', repository, { actor: studentActor })
+    const statusResult = await getResumeStatus('-1003804004336', repository, { actor: studentActor })
     assert.equal(statusResult.workflow.status, "collection student's data")
 
     const steps = [
@@ -2707,7 +2707,7 @@ async function runTests() {
 
     let lastResult: any
     for (const step of steps) {
-      lastResult = await resumeWorkflow('-5216637594', repository, { actor: step.actor })
+      lastResult = await resumeWorkflow('-1003804004336', repository, { actor: step.actor })
       assert.equal(lastResult.workflow.status, step.after)
       if (step.notification) {
         assert.equal(lastResult.notifications.some((item: any) => item.kind === step.notification), true)
@@ -2808,7 +2808,7 @@ async function runTests() {
       workflow.lastResponsible = 'done'
       return workflow
     }
-    const filledNotificationResult = await resumeWorkflow('-5216637594', filledNotificationRepository, { actor: studentActor })
+    const filledNotificationResult = await resumeWorkflow('-1003804004336', filledNotificationRepository, { actor: studentActor })
     const filledNotification = filledNotificationResult.notifications.find((item: any) => item.kind === 'private_kira')
     assert.match(filledNotification.text, /^<b>🎉 Резюме готово!<\/b>/)
     assert.match(filledNotification.text, /Студент: Test/)
@@ -2834,7 +2834,7 @@ async function runTests() {
     })
     await assert.rejects(
       () => resumeWorkflow(
-        '-5216637594',
+        '-1003804004336',
         makeWorkflowRepository(makeWorkflow({ status: "collection Kira's comments" })),
         { actor: studentActor }
       ),
@@ -2847,7 +2847,7 @@ async function runTests() {
     )
     await assert.rejects(
       () => resumeWorkflow(
-        '-5216637594',
+        '-1003804004336',
         makeWorkflowRepository(makeWorkflow({ status: 'Draft in process' })),
         { actor: studentActor }
       ),
@@ -2998,7 +2998,7 @@ async function runTests() {
     process.env.RESUME_WORKFLOW_PROVIDER_PLATFORM_ACCOUNT_REFS = '102:473'
     await assert.rejects(
       () => resumeWorkflow(
-        '-5216637594',
+        '-1003804004336',
         makeWorkflowRepository(makeWorkflow({ clientId: 999, clientName: 'Other Client', status: 'Draft in process' })),
         { actor: providerActor }
       ),
@@ -3010,7 +3010,7 @@ async function runTests() {
       }
     )
 
-    const resetResult = await resetResumeWorkflowForTest('-5216637594', repository)
+    const resetResult = await resetResumeWorkflowForTest('-1003804004336', repository)
     assert.equal(resetResult.workflow.status, "collection student's data")
     assert.equal(resetResult.workflow.cvDraftUrl, '')
   } finally {
