@@ -12,9 +12,9 @@ const c:Client={id:1,name:'Synthetic',status:'onboarding',role:'ученик',ma
 const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
 test('every mandatory missing-field subset goes exclusively to support; allowed exceptions do not block HH/client',async()=>{
-  const fields=['tag','chatId','googleFolder','hardMentor','role'] as const;
-  for(let mask=1;mask<32;mask++){
-    const broken={...c};for(let i=0;i<5;i++)if(mask&(1<<i))broken[fields[i]]='';
+  const fields=['tag','chatId','googleFolder','role'] as const;
+  for(let mask=1;mask<2**fields.length;mask++){
+    const broken={...c,hardMentor:''};for(let i=0;i<fields.length;i++)if(mask&(1<<i))broken[fields[i]]='';
     const p=planStatusMessage(broken,{id:String(mask),oldStatus:'studying',newStatus:'onboarding',at:now},activatedAt);
     assert.equal(p.kind,'error');let sentTo='';
     await deliverPlan({client:broken,plan:p,now,enabled:true,store:{claim:async()=>true,finish:async()=>{}},messageConfig: testMessageConfig, supportChatId:'999',send:async chat=>{sentTo=chat;return {outcome:'sent',messageId:1}}});

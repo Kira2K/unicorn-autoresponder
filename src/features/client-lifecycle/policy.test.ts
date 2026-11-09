@@ -70,13 +70,13 @@ test("each supported transition gets the immutable history ID as its deduplicati
     if (result.kind === "send") assert.equal(result.key, "status:99");
   }
 });
-test("missing role/chat/tag/Drive/hard mentor produces an error, not a partial greeting", () => {
+test("missing required fields or malformed mentor produces an error, not a partial greeting", () => {
   for (const patch of [
     { role: "" },
     { chatId: "" },
     { tag: "" },
     { googleFolder: "" },
-    { hardMentor: "" },
+    { hardMentor: "invalid tag" },
   ])
     assert.equal(
       planStatusMessage(
@@ -95,6 +95,7 @@ test("missing role/chat/tag/Drive/hard mentor produces an error, not a partial g
     "send",
   );
 });
+
 test("referral/fake/blank roles do not get student reminders", () => {
   for (const role of ["реферал", "фейк", "клиент", ""])
     assert.equal(
