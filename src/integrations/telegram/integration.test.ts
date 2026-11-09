@@ -365,7 +365,7 @@ async function testReportingCannotRecurse(): Promise<void> {
   ]
   const telegram = createTelegramIntegration({
     token: 'secret-token',
-    regularErrorChatId: '-5216637594',
+    regularErrorChatId: '-1003804004336',
     summaryLogsChatId: '-1003187558078',
     logger() {},
     requester: async url => {
@@ -382,7 +382,7 @@ async function testReportingCannotRecurse(): Promise<void> {
   let calls = 0
   const reporterThrows = createTelegramIntegration({
     token: 'secret-token',
-    regularErrorChatId: '-5216637594',
+    regularErrorChatId: '-1003804004336',
     summaryLogsChatId: '-1003187558078',
     logger() {},
     botApi: {

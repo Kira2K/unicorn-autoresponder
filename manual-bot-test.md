@@ -6,7 +6,7 @@ existing Test client.
 ## Actors And Runtime
 
 - Test client: `102` / `Тест`
-- Common student chat: `-5216637594`
+- Common student chat: `-1003804004336`
 - Student: unchanged, resolved from the linked Test client/chat setup
 - Kira: Telegram user ID `343610488`
 - Provider: Telegram user ID `8222949251`, username `@veu_support`
@@ -48,7 +48,7 @@ looked up by the common chat ID.
    /whoami
    ```
 
-   Expected: chat ID is `-5216637594`.
+   Expected: chat ID is `-1003804004336`.
 
 3. In the common Test group, send:
 

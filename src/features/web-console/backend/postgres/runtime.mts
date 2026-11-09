@@ -171,7 +171,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
       cycleNotices=cycleNotificationRuntime(()=>deliverCycleNotification({store:cycleNotificationStore(pool,config.database,localClientIds.length?localClientIds:undefined,localTestChat),
         client:id=>options.repository.getClientById(id),sendOne:sendTaskNotice}),code=>console.error(JSON.stringify({feature:'linkedin',code})));
-      const reportStatusChange = createTaskStatusReporter({chatId:env.LINKEDIN_LOCAL_TEST_CLIENT_ID?'-5216637594':'-1003187558078',mention:notificationMention,
+      const reportStatusChange = createTaskStatusReporter({chatId:env.LINKEDIN_LOCAL_TEST_CLIENT_ID?localTestChat:'-1003187558078',mention:notificationMention,
         client:id=>options.repository.getClientById(id),
         sendOne:sendTaskNotice});
       linkedinCreator = createCreationTaskService({ store: tasks, profiles: octoStore, octo: octoService,

@@ -36,7 +36,7 @@ Commands:
 
 ## Live Facts
 
-- Test chat: `-5216637594`.
+- Test chat: `-1003804004336`.
 - Bot: `@veu_support_bot`.
 - Test client: `102` / `Test`.
 - Student command account: TDLib `102:473`; discover the actual Telegram user
@@ -513,7 +513,7 @@ default where `@veu_support` owns both provider lanes.
    same `WEB_CONSOLE_BOT_API_TOKEN`.
 3. Set `RESUME_WORKFLOW_TEST_MODE=true` only for a test run.
 4. Keep `RESUME_WORKFLOW_FAKE_DATA_MODE=false` for manual testing.
-5. Send `/resume` in chat `-5216637594`.
+5. Send `/resume` in chat `-1003804004336`.
 6. If the bot asks for required profile data, fill education rows, real age,
    English level, real/desired location, GitHub, and Telegram RU in the Console
    and retry. Non-RU clients also need Telegram EN. LinkedIn is optional.
@@ -563,7 +563,7 @@ npm run tg:resume:e2e:test-user
 ```
 
 This live runner is for dedicated test accounts only. It uses Test client `102`,
-common chat `-5216637594`, and student TDLib account `102:473`. It first sends
+common chat `-1003804004336`, and student TDLib account `102:473`. It first sends
 `/whoami` to discover the actual Telegram user ID for that account and maps it
 to client `102` for the local e2e backend. It leaves the Test workflow at
 `filled` and verifies that the student commands and bot replies are visible in

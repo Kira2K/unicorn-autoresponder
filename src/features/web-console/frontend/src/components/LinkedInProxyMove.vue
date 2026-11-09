@@ -10,6 +10,8 @@ const state=ref(null), proxy=ref(octoProxyDraft()), busy=ref(false), loading=ref
 const controller=new AbortController(), path='/api/client/linkedin-proxy-move'
 const loadError=ref('')
 const refreshing=ref(false)
+const step4Open=ref(false), step5Open=ref(false)
+let advanceToStep4=false
 let operationVersion=0
 let timer
 const target=computed(()=>state.value?.move?.destination||state.value?.destination)
@@ -35,9 +37,10 @@ function message(failure){const code=typeof failure==='string'?failure:failure.m
   linkedin_proxy_move_unavailable:'Смена прокси сейчас недоступна. Попробуй позже или напиши в поддержку.',
   commit_uncertain:'Результат неизвестен. Проверяем сохранённое состояние; не отправляй повторно вслепую.'
 })[code]||'Не удалось выполнить действие. Проверь реквизиты и обратись в поддержку при повторной ошибке.'}
-async function refresh(){if(refreshing.value)return;refreshing.value=true;const version=operationVersion;try{const next=await request(path,{signal:controller.signal});if(version===operationVersion){state.value=next;loadError.value=''}}catch(e){if(e.name!=='AbortError'&&version===operationVersion)loadError.value=message(e)}finally{loading.value=false;refreshing.value=false}}
-async function save(){if(busy.value)return;operationVersion++;busy.value=true;error.value='';try{state.value=await request(path+'/proxy',{method:'POST',body:JSON.stringify(octoProxyPayload(proxy.value)),signal:controller.signal});proxy.value=octoProxyDraft()}catch(e){if(e.name!=='AbortError'){error.value=message(e);await refresh()}}finally{busy.value=false}}
-async function finish(){if(busy.value||!countryChanged.value)return;operationVersion++;busy.value=true;error.value='';try{state.value=await request(path+'/finish',{method:'POST',body:JSON.stringify({countryChanged:true}),signal:controller.signal});complete.value=true}catch(e){if(e.name!=='AbortError'){error.value=message(e);await refresh()}}finally{busy.value=false}}
+function acceptState(next){state.value=next;if(advanceToStep4&&next.move?.phase==='assigned'){step4Open.value=true;advanceToStep4=false}}
+async function refresh(){if(refreshing.value)return;refreshing.value=true;const version=operationVersion;try{const next=await request(path,{signal:controller.signal});if(version===operationVersion){acceptState(next);loadError.value=''}}catch(e){if(e.name!=='AbortError'&&version===operationVersion)loadError.value=message(e)}finally{loading.value=false;refreshing.value=false}}
+async function save(){if(busy.value)return;operationVersion++;busy.value=true;error.value='';advanceToStep4=true;try{acceptState(await request(path+'/proxy',{method:'POST',body:JSON.stringify(octoProxyPayload(proxy.value)),signal:controller.signal}));proxy.value=octoProxyDraft()}catch(e){advanceToStep4=false;if(e.name!=='AbortError'){error.value=message(e);await refresh()}}finally{busy.value=false}}
+async function finish(){if(busy.value||!countryChanged.value)return;operationVersion++;busy.value=true;error.value='';try{acceptState(await request(path+'/finish',{method:'POST',body:JSON.stringify({countryChanged:true}),signal:controller.signal}));step5Open.value=true;complete.value=true}catch(e){if(e.name!=='AbortError'){error.value=message(e);await refresh()}}finally{busy.value=false}}
 onMounted(()=>{refresh();timer=setInterval(()=>{if(!document.hidden&&!busy.value&&state.value?.move?.phase!=='completed')refresh()},5000)})
 onUnmounted(()=>{clearInterval(timer);controller.abort();proxy.value=octoProxyDraft()})
 </script>
@@ -52,12 +55,13 @@ onUnmounted(()=>{clearInterval(timer);controller.abort();proxy.value=octoProxyDr
     <details data-testid="proxy-move-step-0"><summary>0. Твоя страна и город</summary>
       <p>Страна зависит от того, на каком рынке ты ищешь работу, а не от того, где ты живёшь.</p>
       <div class="move-countries"><div v-for="country in countries" :key="country.code" class="move-country" :class="{'move-country-mine':targetCode===country.code}" :data-testid="`proxy-move-country-${country.code}`"><strong>{{country.country}}, {{country.city}}</strong><span v-if="targetCode===country.code" class="move-country-tag">твоя страна</span><p>{{country.hint}}</p></div></div>
+      <p v-if="target">По твоей анкете: <strong>{{target.country}}, {{target.city}}</strong>. Перед покупкой подтверди страну с нами в чате.</p>
       <p v-if="!target">Заполни в анкете «Готовность к собеседованию на английском через 2 месяца», чтобы определить страну переезда.</p>
     </details>
     <details data-testid="proxy-move-step-1"><summary>1. Последний раз зайди в LinkedIn вечером — день 1</summary><p>Если приложение LinkedIn стоит на телефоне — выйди из аккаунта сейчас, до переезда. После переезда в нём заходить нельзя: там твой настоящий адрес.</p></details>
     <details data-testid="proxy-move-step-2"><summary>2. Весь следующий день не заходи в LinkedIn — день 2</summary><p>Ни с компьютера, ни с телефона.</p></details>
     <details data-testid="proxy-move-step-3"><summary>{{completed?'3. Замени собственный прокси EN':'3. Купи прокси новой страны и подключи его к профилю En — день 3'}}</summary>
-      <template v-if="!completed"><p>Шаги 3 и 4 — на следующий день после дня без LinkedIn, оба в один день.</p><p>Купи прокси по инструкции — разделы <a :href="guide" target="_blank" rel="noopener noreferrer">«Шаг 2» и «Шаг 3»</a>.</p><p>Купи прокси для {{countryForProxy}}. Страна и город — {{target?target.country+', '+target.city:'из анкеты'}}. Потом впиши данные прокси сюда.</p></template>
+      <template v-if="!completed"><p><strong>Шаги 3 и 4 — на следующий день после дня без LinkedIn, оба в один день.</strong></p><p>Купи прокси по <a :href="guide" target="_blank" rel="noopener noreferrer">инструкции</a> — разделы «Шаг 2» и «Шаг 3». Страна и город — <strong>{{target?target.country+', '+target.city:'из анкеты'}}</strong>. Потом впиши данные прокси сюда.</p><p>Купи прокси для {{countryForProxy}}.</p></template>
       <p v-else>Переезд завершён. Собственный прокси можно менять повторно в форме ниже. Используй подключение той же страны — {{target.country}}. Для замены закрой профиль Octo и дождись окончания доступа.</p>
       <form v-if="!state?.move" @submit.prevent="save">
         <fieldset :disabled="busy||!state?.canReplace||!state?.country"><OctoProxyFields v-model="proxy" prefix="proxy-move" :single-line="true" :guided="true" save-label="Проверить и подключить прокси" line-placeholder="USERNAME:PASSWORD@IP:PORT" />
@@ -68,17 +72,17 @@ onUnmounted(()=>{clearInterval(timer);controller.abort();proxy.value=octoProxyDr
       <p v-if="assigned && !completed" role="status">Новый прокси подключён к EN.</p>
       <OctoAccessCard v-if="completed" :client-id="clientId" :setup-enabled="false" :proxy-editing-enabled="true" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :transport="transport" @status="refresh" />
     </details>
-    <details data-testid="proxy-move-step-4"><summary>4. Открой LinkedIn в профиле En и смени страну в профиле — день 3</summary>
+    <details data-testid="proxy-move-step-4" :open="step4Open" @toggle="step4Open=$event.target.open"><summary>4. Открой LinkedIn в профиле En и смени страну в профиле — день 3</summary>
       <p v-if="!assigned">Сначала подключи прокси в шаге 3.</p>
       <template v-else>
-        <template v-if="!completed"><ol><li>Открой приложение Octo Browser на компьютере.</li><li>Здесь, в кабинете, нажми «Получить доступ» у EN-профиля — появятся почта, пароль от аккаунта и пароль к профилю.</li><li>Войди в Octo по почте и паролю от аккаунта и открой свой профиль по паролю к профилю. На это есть около 2 минут — не успел(а), нажми «Получить доступ» ещё раз. Уже открытый профиль продолжит работать.</li><li>В профиле открой LinkedIn и смени страну в профиле на страну нового прокси: {{target.country}}, {{target.city}}.</li><li>Потом закрой профиль.</li></ol><p>Дождись завершения доступа, затем подтверди переезд.</p></template>
+        <template v-if="!completed"><ol><li>Открой приложение Octo Browser на компьютере.</li><li>Здесь, в кабинете, нажми «Получить доступ» у EN-профиля — появятся почта, пароль от аккаунта и пароль к профилю.</li><li>Войди в Octo по почте и паролю от аккаунта и открой свой профиль по паролю к профилю. На это есть около 2 минут — не успел(а), нажми «Получить доступ» ещё раз. Уже открытый профиль продолжит работать.</li><li>В профиле открой LinkedIn и смени страну в профиле на страну нового прокси: {{target.country}}, {{target.city}}. Потом закрой профиль.</li></ol><p>Дождись завершения доступа, затем подтверди переезд.</p></template>
         <OctoAccessCard v-if="!completed" :client-id="clientId" :setup-enabled="false" :proxy-editing-enabled="false" :transport="transport" @status="refresh" />
-        <label><input :checked="countryChanged || state.move.phase==='completed'" :disabled="state.move.phase==='completed'" type="checkbox" data-testid="proxy-move-country-confirmation" @change="countryChanged=$event.target.checked">Я подключил(а) новый прокси и сменил(а) страну в LinkedIn на {{target.country}}, {{target.city}}</label>
+        <label><input :checked="countryChanged || state.move.phase==='completed'" :disabled="state.move.phase==='completed'" type="checkbox" data-testid="proxy-move-country-confirmation" @change="countryChanged=$event.target.checked">Я подключил(а) новый прокси и сменил(а) страну в профиле LinkedIn на {{target.country}}, {{target.city}}</label>
         <button v-if="state.move.phase!=='completed'" type="button" data-testid="proxy-move-finish" :disabled="busy||!countryChanged||!state.canFinish" @click="finish">Готово, переезд завершён</button>
         <p v-else role="status">Переезд завершён. Дата: {{new Date(state.move.completedAt).toLocaleString()}}</p>
       </template>
     </details>
-    <details data-testid="proxy-move-step-5"><summary>5. Первые несколько дней — минимум активности — с дня 4</summary><p>Не добавляй людей, не пиши посты, не откликайся массово.</p><p>Дальше постепенно возвращаемся к обычному режиму.</p></details>
+    <details data-testid="proxy-move-step-5" :open="step5Open" @toggle="step5Open=$event.target.open"><summary>5. Первые несколько дней — минимум активности — с дня 4</summary><p>Не добавляй людей, не пиши посты, не откликайся массово.</p><p>Дальше постепенно возвращаемся к обычному режиму.</p></details>
     <div class="move-rules"><p><strong>После переезда — только антидетект-браузер (Octo/Dolphin).</strong> Не открывай LinkedIn в обычном браузере и в приложении на телефоне: там у тебя твой настоящий адрес, и LinkedIn может заподозрить взлом.</p><p>Если LinkedIn попросит подтвердить личность — не регистрируй новый аккаунт и ничего не делай сам, сразу напиши нам. Если у тебя есть настоящий паспорт, держи его под рукой.</p></div>
     <p>Не получилось? <a href="https://t.me/veu_support_bot" target="_blank" rel="noopener noreferrer">Напиши в поддержку</a> и пришли скриншот.</p>
     </template>

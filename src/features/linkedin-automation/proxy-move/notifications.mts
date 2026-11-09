@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {TELEGRAM_TEST_CHAT_ID} from '../../../integrations/telegram/destinations.ts';
 import type {CopyDatabase,SqlPool} from '../../../integrations/postgres/contracts.mts';
 import {writeTransaction} from '../../../integrations/postgres/working-session.mts';
 import type {SendOneInput,SendOneResult} from '../../../integrations/telegram/types.ts';
@@ -26,7 +27,7 @@ export async function deliverMoveNotice(deps:{store:ReturnType<typeof moveNotice
   const {move,token}=claimed;
   try {
     const client=await deps.client(move.clientId),name=[client.firstName,client.lastName].filter(Boolean).join(' ')||client.fio||String(move.clientId);
-    const result=await deps.sendOne({chatId:claimed.test?(deps.testChatId??'-5216637594'):'-1003187558078',
+    const result=await deps.sendOne({chatId:claimed.test?(deps.testChatId??TELEGRAM_TEST_CHAT_ID):'-1003187558078',
       text:`Ученик переехал: ${name}\nСтек: ${client.primaryStack||'не указан'}\nСтрана: ${destinations[move.country].country}\nДата: ${move.completedAt}\n\n@juliafeels fyi`,
       reportContext:{clientId:move.clientId,clientName:name,chatType:'supergroup',chatPurpose:'Переезд LinkedIn'}});
     if(result.kind==='telegram-response')await deps.store.finish(move.id,token,result.response.ok?'sent':'failed',result.response.ok?result.response.result.message_id:undefined);

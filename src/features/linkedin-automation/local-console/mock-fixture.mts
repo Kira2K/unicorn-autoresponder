@@ -1,3 +1,4 @@
+import {TELEGRAM_TEST_CHAT_ID} from '../../../integrations/telegram/destinations.ts';
 import {createRequire} from 'node:module';
 import {randomUUID} from 'node:crypto';
 import {createMemoryStore,createMockCloud,testConfig} from '../../octo-access/testing.mts';
@@ -17,7 +18,7 @@ const {createWebConsoleApp}=require('../../web-console/backend/app.ts');
 export async function createLinkedInMockFixture() {
   const noco=createMockNocoClient(),rows=await noco.fetchRecords('mxza381054ldlza');
   for(const id of [901,902])rows.push({Id:id,first_name:'Тест',last_name:id===901?'Переезд':'Заявка',client_name:`Тест ${id}`,
-    calendar_email:`linkedin-local-${id}@example.invalid`,market:'En',telegram_general_chat_id:'-5216637594',
+    calendar_email:`linkedin-local-${id}@example.invalid`,market:'En',telegram_general_chat_id:TELEGRAM_TEST_CHAT_ID,
     rel_clients_primary_stack:{Id:14,name:'JAVA'},ready_for_interview_in_english_in_2_months:'Yes',real_location:'Tbilisi'});
   let clockOffset=0;const now=()=>Date.now()+clockOffset;
   const repository=createWebConsoleRepository({nocoClient:noco}),profiles=createMemoryStore(),cloud=createMockCloud(profiles,now);
@@ -60,7 +61,7 @@ export async function createLinkedInMockFixture() {
       moves.set(m.clientId,{...m,lastProxyCheck:{...proof,operationId,fingerprint}});
     },
     async begin(m,p,input){moves.set(m.clientId,structuredClone(m));await profiles.save({...p,proxyChange:{id:m.id,phase:'queued',input,title:`${p.original.title} | ${p.uuid}`,isMadeByExpert:false}});},
-    async finish(m,p,at){const done={...m,phase:'completed' as const,completedAt:at,pauseUntil:new Date(Date.parse(at)+48*3600000).toISOString()};moves.set(m.clientId,done);notices.push({eventId:m.id,chatId:'-5216637594'});return done;}};
+    async finish(m,p,at){const done={...m,phase:'completed' as const,completedAt:at,pauseUntil:new Date(Date.parse(at)+48*3600000).toISOString()};moves.set(m.clientId,done);notices.push({eventId:m.id,chatId:TELEGRAM_TEST_CHAT_ID});return done;}};
   const moveService=createProxyMoveService({store:moveStore,profiles,account:id=>intake.load(id),allowed:id=>[901,902].includes(id),hasDolphin:async()=>false,client:getClient,
     check:async input=>{if(input.host==='timeout.example.invalid')throw Error('mock timeout');return{ok:input.host!=='dead.example.invalid',exit_ip:'1.1.1.1',country:input.host==='wrong.example.invalid'?'Georgia':input.host==='unknown.example.invalid'?undefined:'Spain'};},previousProxy:api.readProfileProxy});
   const creator={async list(){return [...tasks.values()].filter(t=>t.status!=='сделана экспертом').map(t=>({...t,fio:'Тест Заявка',stack:'JAVA'}));},

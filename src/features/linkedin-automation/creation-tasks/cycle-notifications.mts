@@ -1,10 +1,11 @@
 import {randomUUID} from 'node:crypto';
+import {TELEGRAM_TEST_CHAT_ID} from '../../../integrations/telegram/destinations.ts';
 import {writeTransaction} from '../../../integrations/postgres/working-session.mts';
 import type {SqlPool,CopyDatabase} from '../../../integrations/postgres/contracts.mts';
 import type {SendOneInput,SendOneResult} from '../../../integrations/telegram/types.ts';
 import type {WebClient} from '../../web-console/backend/types.ts';
 export interface CycleNotice{taskId:number;clientId:number;url:string;token:string;recipient:'reports'|'student';chatId?:string;test?:boolean}
-export function cycleNotificationStore(pool:SqlPool,database:CopyDatabase,localClientIds?:readonly number[],testChatId='-5216637594'){
+export function cycleNotificationStore(pool:SqlPool,database:CopyDatabase,localClientIds?:readonly number[],testChatId=TELEGRAM_TEST_CHAT_ID){
  return{
   claim:():Promise<CycleNotice|undefined>=>writeTransaction(pool,database,async s=>{
    await s.query("UPDATE noco.linkedin_cycle_notifications SET state='uncertain',error_code='claim_expired' WHERE state='attempting' AND claimed_at<clock_timestamp()-interval '10 minutes' AND ($1::bigint[] IS NULL OR client_id=ANY($1))",[localClientIds??null]);
