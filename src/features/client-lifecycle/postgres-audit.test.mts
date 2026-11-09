@@ -203,13 +203,13 @@ test('actual PostgreSQL notification contract', {skip:!port},async t=>{
       assert.equal((await pool.query("SELECT outcome FROM noco.client_notifications WHERE event_key='status:retry'")).rows[0].outcome,'sent');
     });
     await t.test('missing-field alert cannot consume the status notification; correction resumes it once',async()=>{
-      await reset();await pool.query(`UPDATE noco.clients SET client_status='onboarding',tg_hard_mentor=NULL WHERE id=1;
+      await reset();await pool.query(`UPDATE noco.clients SET client_status='onboarding',google_folder=NULL WHERE id=1;
         INSERT INTO noco.client_status_history(client_id,old_status,new_status,changed_at) VALUES(1,'studying','onboarding','2026-10-14T15:00:00Z')`);
       const chats:string[]=[],options={store,messageConfig: testMessageConfig, supportChatId:'999',now,apply:true,statuses:true,reminders:false,
         send:async(chat:string)=>{chats.push(chat);return {outcome:'sent' as const,messageId:chats.length}}};
       await runLifecyclePass(options);await runLifecyclePass({...options,now:new Date(now.getTime()+61000)});
       assert.deepEqual(chats,['999']);
-      await pool.query("UPDATE noco.clients SET tg_hard_mentor='@audit_mentor' WHERE id=1");
+      await pool.query("UPDATE noco.clients SET google_folder='https://example.invalid/drive' WHERE id=1");
       await runLifecyclePass({...options,now:new Date(now.getTime()+122000)});
       await runLifecyclePass({...options,now:new Date(now.getTime()+183000)});
       assert.deepEqual(chats,['999','-1001111111111']);

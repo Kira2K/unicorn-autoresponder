@@ -151,7 +151,7 @@ test("lost result persistence keeps the claim and prevents a second delivery", a
 });
 test("missing data report goes exclusively to the supplied support chat", async () => {
   const f = fixture();
-  const broken = { ...client, hardMentor: "" };
+  const broken = { ...client, googleFolder: "" };
   const p = planStatusMessage(
     broken,
     { id: "9", oldStatus: null, newStatus: "onboarding", at: now },
@@ -172,7 +172,7 @@ test("missing data report goes exclusively to the supplied support chat", async 
   });
   assert.deepEqual(chats, ["999"]);
 });
-test("fixed greeting includes hard mentor only for the student role", () => {
+test("fixed greeting includes a mentor only when supplied for a student", () => {
   assert.equal(plan.kind, "send");
   if (plan.kind !== "send") return;
   const text = messageText(client, plan);
@@ -185,6 +185,18 @@ test("fixed greeting includes hard mentor only for the student role", () => {
     messageText({ ...client, role: "клиент" }, plan),
     /будет твоим ментором/,
   );
+  for (const hardMentor of ["", "   ", "\t\n"]) {
+    const withoutMentor = { ...client, hardMentor };
+    const greeting = planStatusMessage(
+      withoutMentor,
+      { id: "7", oldStatus: null, newStatus: "onboarding", at: now },
+      new Date("2026-10-01"),
+    );
+    assert.ok(greeting.kind === "send");
+    assert.equal(messageText(withoutMentor, greeting), text.replace(
+      "\n@hard_mentor будет твоим ментором по хардам.\n", "",
+    ));
+  }
 });
 
 test("a formatting/configuration failure happens before any durable claim or send", async () => {

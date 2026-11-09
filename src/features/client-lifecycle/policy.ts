@@ -111,7 +111,7 @@ export function planStatusMessage(
     return { kind: "skip", reason: "role_not_enabled" };
   if (change.newStatus === "onboarding") {
     if (!text(client.googleFolder)) fields.push("Google Drive");
-    if (client.role === "ученик" && !tag(client.hardMentor))
+    if (client.role === "ученик" && text(client.hardMentor) && !tag(client.hardMentor))
       fields.push("TG хард-ментора");
   }
   return fields.length
