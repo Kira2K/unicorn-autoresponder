@@ -7,6 +7,7 @@ export async function runProxyMoveFlow(page:Page,input:ProxyInput,openAndClose?:
   const card=page.getByTestId('linkedin-proxy-move');await card.waitFor();
   const status=async()=>{const r=await page.context().request.get(base+path);if(!r.ok())throw Error('e2e_proxy_move_status_unavailable');return r.json();};
   let state=await status();
+  const submittedHere=!state.move;
   await card.getByTestId('proxy-move-step-3').locator('summary').click();
   if(!state.move){
     await card.getByTestId('proxy-move-type').selectOption(input.type);
@@ -18,6 +19,7 @@ export async function runProxyMoveFlow(page:Page,input:ProxyInput,openAndClose?:
   do{state=await status();if(['assigned','completed'].includes(state.move?.phase))break;if(state.move?.error)throw Error('e2e_proxy_move_assignment_blocked');await new Promise(r=>setTimeout(r,1000));}while(Date.now()<until);
   assert.ok(['assigned','completed'].includes(state.move?.phase),'new connection must be confirmed before step 4');
   if(state.move.phase==='completed')return state;
+  if(submittedHere)await page.waitForFunction(()=>document.querySelector<HTMLDetailsElement>('[data-testid="proxy-move-step-4"]')?.open===true);
   await page.reload();await page.getByRole('button',{name:'Сменить прокси (Octo)',exact:true}).click();
   await card.getByTestId('proxy-move-step-3').locator('summary').click();
   await card.getByText('Новый прокси подключён к EN.',{exact:true}).waitFor();

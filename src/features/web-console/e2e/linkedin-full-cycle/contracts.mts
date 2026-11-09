@@ -1,6 +1,7 @@
+import {TELEGRAM_TEST_CHAT_ID} from '../../../../integrations/telegram/destinations.ts';
 export type CheckState='passed'|'failed'|'blocked';
 /** Permanent separate logs group used as the student's chat in authorized live E2E. */
-export const E2E_STUDENT_CHAT_ID='-5216637594';
+export const E2E_STUDENT_CHAT_ID=TELEGRAM_TEST_CHAT_ID;
 export interface Evidence {step:string;expected:string;actual:string;state:CheckState;at:string;screenshot?:string;db?:Record<string,unknown>}
 export const fixtureNames={auto:{first:'Павел',last:'Тестов'},manual:{first:'Илья',last:'Проверкин'}} as const;
 export function parseCycleArgs(args:string[]){

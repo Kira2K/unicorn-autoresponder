@@ -85,9 +85,10 @@ const creationStore={
   const data=saved.get(t.clientId)!;return{task:{...t},intake:{...data,hasPassword:!!data.password,outlookLogin:data.outlookLogin,hasOutlookPassword:true}};},
  async result(id:number,_version:number,data:any){const t=taskById(id),account=saved.get(t.clientId)!;Object.assign(account,data);t.version++;return{...t};},
  async receipt(id:number,_version:number,profileId:number,proxyUuid:string){const t=taskById(id);Object.assign(t,{proxySavedAt:new Date().toISOString(),proxyProfileId:profileId,proxyUuid,version:t.version+1});return{...t};},
- async status(id:number,version:number,next:string){const t=taskById(id);if(t.status==='сделана экспертом'){assert.equal(next,t.status);return{...t};}
+ async status(id:number,version:number,next:string,proof?:{profileId:number;proxyUuid:string}){const t=taskById(id);if(t.status==='сделана экспертом'){assert.equal(next,t.status);return{...t};}
   assert.equal(version,t.version);Object.assign(t,{status:next,version:t.version+1});
   if(next==='сделана экспертом'){
+   assert.ok(proof);Object.assign(t,{proxySavedAt:new Date().toISOString(),proxyProfileId:proof.profileId,proxyUuid:proof.proxyUuid});
    const data=saved.get(t.clientId)!;assert.ok(data.url&&data.login&&data.password&&t.proxySavedAt);completionCycles.push(t.id);
    for(const recipient of ['reports','student'] as const)pendingNotices.push({taskId:t.id,clientId:t.clientId,url:data.url,recipient,
     chatId:recipient==='reports'?'-1003187558078':'-700'+t.clientId,token:recipient});
@@ -128,7 +129,7 @@ async function completeViaDenis(taskId:number){
   const form=page.locator('.octo-proxy-form');await form.getByLabel('Адрес прокси',{exact:true}).fill('proxy.example.test');
   await form.getByLabel('Порт прокси',{exact:true}).fill('1080');await form.getByLabel('Логин прокси',{exact:true}).fill('new-fixture-'+taskId);
   await form.getByLabel('Пароль прокси',{exact:true}).fill('fixture-secret');await page.getByRole('button',{name:'Сохранить прокси',exact:true}).click();
-  await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).click();await page.getByText('Настройки прокси сохранены.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Сохранить настройки прокси',exact:true}).count(),0);
   await page.getByLabel('Ссылка LinkedIn',{exact:true}).fill('https://www.linkedin.com/in/mock-cycle-'+taskId);
   await page.getByLabel('Пароль LinkedIn',{exact:true}).fill('synthetic-password');await page.getByRole('button',{name:'Сохранить данные LinkedIn',exact:true}).click();
   await page.getByText('Данные LinkedIn сохранены.',{exact:true}).waitFor();await page.getByLabel('Статус заявки').selectOption('сделана экспертом');
@@ -156,7 +157,7 @@ try {
       'Номер телефона к почте привязывать не нужно.',
       'Почте нужно «полежать» хотя бы сутки до регистрации LinkedIn, поэтому сделай её сегодня.',
       'Двухфакторку не ставь.',
-      'Сразу включи пересылку писем на нашу почту по инструкции в блоке «Пересылка писем» ниже.'
+      'Сразу включи пересылку писем на нашу почту — как это сделать, написано ниже, в блоке «Пересылка писем».'
     ]);
     const registration = instructionCard.getByLabel('Дата и время регистрации Outlook-почты', { exact: true });
     await instructionCard.getByRole('checkbox',{name:'У меня есть заблокированные аккаунты',exact:true}).check();

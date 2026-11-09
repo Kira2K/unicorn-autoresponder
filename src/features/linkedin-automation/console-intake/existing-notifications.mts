@@ -1,3 +1,4 @@
+import {TELEGRAM_TEST_CHAT_ID} from '../../../integrations/telegram/destinations.ts';
 import {randomUUID} from 'node:crypto';
 import {writeTransaction} from '../../../integrations/postgres/working-session.mts';
 import type {SqlPool,CopyDatabase} from '../../../integrations/postgres/contracts.mts';
@@ -25,7 +26,7 @@ export async function deliverExistingNotification(deps:{store:ReturnType<typeof 
  const event=await deps.store.claim();if(!event)return false;
  try{
   const c=await deps.client(event.clientId),name=[c.firstName,c.lastName].filter(Boolean).join(' ')||c.fio||c.clientName;
-  const result=await deps.sendOne({chatId:event.test?'-5216637594':'-1003187558078',text:`Ученик подключил существующий LinkedIn\nКлиент: ${name}\nСтек: ${c.primaryStack||'не указан'}\nLinkedIn: ${event.url}\n\n${deps.mention??DEFAULT_NOTIFICATION_MENTION} fyi`,
+  const result=await deps.sendOne({chatId:event.test?TELEGRAM_TEST_CHAT_ID:'-1003187558078',text:`Ученик подключил существующий LinkedIn\nКлиент: ${name}\nСтек: ${c.primaryStack||'не указан'}\nLinkedIn: ${event.url}\n\n${deps.mention??DEFAULT_NOTIFICATION_MENTION} fyi`,
    reportContext:{clientId:event.clientId,clientName:name,chatType:'supergroup',chatPurpose:'Существующий LinkedIn'}});
   if(result.kind==='telegram-response'){
    if(result.response.ok)await deps.store.finish(event,'sent',result.response.result.message_id);

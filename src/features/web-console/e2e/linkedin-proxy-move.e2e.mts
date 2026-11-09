@@ -36,13 +36,16 @@ try{
   await page.setViewportSize({width:390,height:844});await failed.getByTestId('proxy-move-step-0').locator('summary').click();
   assert.equal(await failed.getByTestId('proxy-move-country-ES').locator('.move-country-tag').innerText(),'твоя страна');
   assert.equal(await failed.getByTestId('proxy-move-country-GE').locator('.move-country-tag').count(),0);
+  await failed.getByText('Перед покупкой подтверди страну с нами в чате.',{exact:false}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile layout must not overflow');
   await failed.screenshot({path:'tmp/ui-checks/proxy-move-mobile.png'});await page.setViewportSize({width:1280,height:900});
   await failed.getByTestId('proxy-move-step-3').locator('summary').click();
+  assert.equal(await failed.getByTestId('proxy-move-step-3').locator('strong').filter({hasText:'Шаги 3 и 4'}).count(),1);
   await failed.getByTestId('proxy-move-line').fill('mock:mock-only@wrong.example.invalid:1080');
   const wrongResponse=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/linkedin-proxy-move/proxy'));
   await failed.getByTestId('proxy-move-save').click();assert.equal((await wrongResponse).status(),409);
   await failed.getByRole('alert').filter({hasText:'Страна прокси — Грузия. Нужна Испания.'}).waitFor();assert.equal((await f.profiles.get(existing.id))?.proxy?.uuid,existing.proxy?.uuid);
+  assert.equal(await failed.getByTestId('proxy-move-step-4').evaluate((e:any)=>e.open),false,'failed proxy check must not advance to step 4');
   await page.getByTestId('proxy-move-open').click();
   const input={type:'socks5' as const,host:'proxy.example.invalid',port:1080,login:'mock',password:'mock-only'};
   const result=await runProxyMoveFlow(page,input,async()=>{
@@ -52,11 +55,12 @@ try{
     f.advanceClock(121000);
     const until=Date.now()+30000;while((await f.profiles.get(p.id))?.grant?.phase!=='complete'){if(Date.now()>until)throw Error('e2e_mock_cleanup_timeout');await new Promise(r=>setTimeout(r,500));}
   });
-  assert.equal(f.notices.length,1);assert.equal(f.notices[0].chatId,'-5216637594');assert.equal(result.move.country,'ES');
+  assert.equal(f.notices.length,1);assert.equal(f.notices[0].chatId,'-1003804004336');assert.equal(result.move.country,'ES');
   assert.equal((await f.profiles.list(901))[0].proxy?.isMadeByExpert,false);
   assert.equal(JSON.stringify(result).includes('mock-only'),false);
   const doneDialog=page.getByRole('dialog');await doneDialog.getByText('Заходи в LinkedIn только через антидетект-браузер (Octo/Dolphin) — не в обычном браузере и не в приложении на телефоне.',{exact:true}).waitFor();
   await doneDialog.getByText('Если LinkedIn попросит подтвердить личность — ничего не делай сам и сразу напиши нам.',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('proxy-move-step-5').evaluate((e:any)=>e.open),true,'completion opens the minimum-activity guidance');
   await doneDialog.getByRole('button',{name:'Понятно',exact:true}).click();await page.reload();await page.getByTestId('proxy-move-open').click();await page.getByTestId('proxy-move-step-4').locator('summary').click();const completedConfirmation=page.getByTestId('proxy-move-country-confirmation');await completedConfirmation.waitFor();assert.equal(await completedConfirmation.isChecked(),true);assert.equal(await completedConfirmation.isDisabled(),true,'completed confirmation survives reload and cannot be unchecked');
   const completedMoveId=result.move.id,profileId=existing.id;
   await page.getByTestId('proxy-move-step-3').locator(':scope > summary').click();

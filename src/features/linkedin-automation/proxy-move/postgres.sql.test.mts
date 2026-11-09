@@ -57,7 +57,7 @@ test('real SQL constraints accept atomic queue/completion; mailbox guard and all
       assert.equal((await tasks.notification(saved.task!.id)).deliveries.length,2);
       const notices=cycleNotificationStore(isolated,config.database,[Number(client.id)]);
       const recipients=[];
-      for(let index=0;index<2;index++){const claimed=await notices.claim();assert.equal(claimed?.taskId,saved.task!.id);assert.equal(claimed?.test,true);assert.equal(claimed?.chatId,'-5216637594');recipients.push(claimed!.recipient);await notices.finish(claimed!,'sent',12+index);}
+      for(let index=0;index<2;index++){const claimed=await notices.claim();assert.equal(claimed?.taskId,saved.task!.id);assert.equal(claimed?.test,true);assert.equal(claimed?.chatId,'-1003804004336');recipients.push(claimed!.recipient);await notices.finish(claimed!,'sent',12+index);}
       assert.deepEqual(recipients.sort(),['reports','student']);assert.equal(await notices.claim(),undefined);
       await tasks.status(saved.task!.id,Number(ready.version),'сделана экспертом');
       assert.ok((await tasks.notification(saved.task!.id)).deliveries.every(d=>d.state==='sent'));

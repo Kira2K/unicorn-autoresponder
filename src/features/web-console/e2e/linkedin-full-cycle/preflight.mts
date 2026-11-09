@@ -7,13 +7,14 @@ import {createRequire} from 'node:module';
 import {verifyNotificationRecipient} from './notification-recipient.mts';
 import {consoleUrl} from './context.mts';
 import {unusedTestProxy} from '../../../linkedin-automation/local-console/test-proxy.mts';
+import {verifyTestChat} from './test-chat.mts';
 export async function cyclePreflight(c:CycleContext,withProxyMove=false){
  const checks:Evidence[]=[],connections:Array<{sourceUuid:string;input:ProxyInput;exitIp:string}>=[];
  const check=async(step:string,expected:string,fn:()=>Promise<Record<string,unknown>>)=>{
   try{const db=await fn();checks.push({step,expected,actual:'Проверка выполнена',db,state:'passed',at:new Date().toISOString()});}
   catch(e){checks.push({step,expected,actual:/^e2e_[a-z_]+$/.test((e as Error).message)?(e as Error).message:'e2e_preflight_unavailable',state:'blocked',at:new Date().toISOString()});}
  };
- await check('render',c.localConsoleTarget?'Локальный кабинет подключён к действующему worker':'Кабинет и бот опубликованы из одного актуального commit',async()=>{
+ await check('render',c.localConsoleTarget?'Локальный кабинет подключён к действующему worker':'Кабинет и бот опубликованы из ожидаемых commit',async()=>{
   if(c.localConsoleTarget){
    const local=await fetch(consoleUrl+'/api/local/linkedin-ready',{signal:AbortSignal.timeout(5000)});
    if(!local.ok||(await local.json()).remoteOctoWorker!==true)throw Error('e2e_remote_worker_required');
@@ -22,9 +23,12 @@ export async function cyclePreflight(c:CycleContext,withProxyMove=false){
    return{target:'loopback',remoteOctoWorker:true};
   }
   const deployments=await Promise.all(['srv-d8nnraok1i2s73dhp190','srv-d9cp1uu1a83c739ht35g'].map(id=>c.render(`services/${id}/deploys?limit=1`)));
-  if(deployments.some(a=>a[0]?.deploy.status!=='live')||deployments[0][0].deploy.commit.id!==deployments[1][0].deploy.commit.id)throw Error('e2e_deployment_not_live');
-  return{commit:deployments[0][0].deploy.commit.id};
+  const web=deployments[0][0]?.deploy,bot=deployments[1][0]?.deploy;
+  const expectedWeb=c.env.LINKEDIN_E2E_EXPECTED_COMMIT,expectedBot=c.env.LINKEDIN_E2E_EXPECTED_BOT_COMMIT||expectedWeb||web?.commit.id;
+  if(web?.status!=='live'||bot?.status!=='live'||expectedWeb&&web.commit.id!==expectedWeb||bot.commit.id!==expectedBot)throw Error('e2e_deployment_not_live');
+  return{commit:web.commit.id,botCommit:bot.commit.id};
  });
+ await check('test-chat','Бот состоит в актуальной тестовой группе и может отправлять сообщения',()=>verifyTestChat(c.vars));
  if(withProxyMove)await check('proxy-move-input','Есть свободный тестовый прокси для дополнительного переезда',async()=>{
    const {proxyMoveTestInput}=await import('../linkedin-proxy-move/live.mts');await proxyMoveTestInput(c);return{ready:true};
  });

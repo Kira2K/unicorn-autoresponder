@@ -1,6 +1,7 @@
+import {TELEGRAM_TEST_CHAT_ID} from '../../../integrations/telegram/destinations.ts';
 import type {SendOneInput} from '../../../integrations/telegram/types.ts';
 // Explicitly authorized by the user on 2026-11-06 after Telegram migrated the old test group.
-export const localTestChat='-1003804004336';
+export const localTestChat=TELEGRAM_TEST_CHAT_ID;
 export const localTestTopic=1;
 export function routeLocalTestNotice(input:SendOneInput,clientIds:readonly number[]):SendOneInput{
   if(!clientIds.includes(Number(input.reportContext?.clientId)))return input;

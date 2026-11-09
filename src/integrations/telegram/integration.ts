@@ -19,6 +19,7 @@ import {
 } from './sanitize.ts'
 import { createTelegramBotApi } from './bot-api.ts'
 import { prepareTelegramRichMessage } from './prepare-message.ts'
+import { TELEGRAM_TEST_CHAT_ID } from './destinations.ts'
 
 type HttpResponseLike = {
   ok: boolean
@@ -53,7 +54,7 @@ type TelegramIntegrationOptions = {
 const COMMAND_NAME = /^\/[a-z0-9_]{1,32}$/i
 const COMMAND_TOKEN = /^\/[a-z0-9_]{1,32}(?:@[a-z0-9_]{1,32})?$/i
 const PARSE_MODES = new Set(['Markdown', 'MarkdownV2', 'HTML'])
-const REGULAR_ERROR_CHAT_ID = '-5216637594'
+const REGULAR_ERROR_CHAT_ID = TELEGRAM_TEST_CHAT_ID
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

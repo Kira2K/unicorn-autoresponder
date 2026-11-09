@@ -2,7 +2,7 @@ import {test} from 'node:test';import assert from 'node:assert/strict';
 import {parseCycleArgs,fixtureNames,fixtureEmail,fixtureMarker,assertFixture,E2E_STUDENT_CHAT_ID} from './contracts.mts';
 import {profileRules} from '../../../octo-access/profile-reservation.mts';
 test('student E2E notifications use the permanent logs group with its negative Bot API ID',()=>{
- assert.equal(E2E_STUDENT_CHAT_ID,'-5216637594');
+ assert.equal(E2E_STUDENT_CHAT_ID,'-1003804004336');
  assert.ok(BigInt(E2E_STUDENT_CHAT_ID)<0n,'a positive ID addresses a user, not the logs group');
 });
 test('live is opt-in and run IDs cannot escape private evidence storage',()=>{

@@ -246,7 +246,7 @@ key/token redaction. Logger, sanitizer, and remote reporter failures never
 change the original result.
 
 Validation/transport failures and non-401 Telegram API errors report to
-`-5216637594`. Configuration/response/internal failures and Telegram 401 report
+`-1003804004336`. Configuration/response/internal failures and Telegram 401 report
 to `summary_logs_channel_id`. Reporting uses a no-report internal send path, so
 its own failure cannot recurse.
 
@@ -259,6 +259,13 @@ delay, and a sanitized serialized error including its nested transport cause.
 Logging failures cannot stop polling, and token-bearing URLs and configured bot
 credentials are redacted. Message sends and CV business actions are never
 automatically repeated by this polling recovery path.
+
+The operational test group is defined once in `destinations.ts` as
+`TELEGRAM_TEST_CHAT_ID`. Live LinkedIn E2E checks `getMe`, `getChat` and
+`getChatMember` through the existing HTTP client before creating fixtures.
+Missing membership, denied/unknown send permission, a wrong destination or an
+unavailable read blocks the run without sending a probe or retrying a message.
+These read methods do not extend the four-operation public facade.
 
 ## Checks
 

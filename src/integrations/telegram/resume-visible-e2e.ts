@@ -1,3 +1,4 @@
+const { TELEGRAM_TEST_CHAT_ID } = require('./destinations.ts') as typeof import('./destinations.ts')
 require('dotenv').config({ quiet: true })
 
 const crypto = require('node:crypto')
@@ -63,7 +64,7 @@ type VisibleResumeE2eOptions = {
 
 const DEFAULT_VISIBLE_RESUME_E2E_CONFIG: VisibleResumeE2eConfig = {
   testClientId: 102,
-  testChatId: '-5216637594',
+  testChatId: TELEGRAM_TEST_CHAT_ID,
   studentAccountId: 473,
   providerAccountRef: '102:473',
   kiraUserId: '343610488',

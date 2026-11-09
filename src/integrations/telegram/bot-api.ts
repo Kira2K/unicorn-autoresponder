@@ -44,6 +44,7 @@ export function resolveBotToken(token = process.env.VEU_SUPPORT_BOT): string {
 
 export function createTelegramBotApi(options: {
   token?: string
+  env?: Record<string, string | undefined>
   requester?: BotApiRequester
   baseUrl?: string
   requestTimeoutMs?: number
@@ -51,7 +52,7 @@ export function createTelegramBotApi(options: {
   const baseUrl = String(options.baseUrl ?? 'https://api.telegram.org').replace(/\/+$/, '')
 
   async function requestResponse(method: string, body: Record<string, unknown> | FormData = {}): Promise<unknown> {
-    const token = resolveBotToken(options.token)
+    const token = resolveBotToken(options.token ?? (options.env ? options.env.VEU_SUPPORT_BOT ?? '' : undefined))
     const requester = options.requester ?? globalThis.fetch
     if (typeof requester !== 'function' || typeof AbortController !== 'function') {
       throw botError(
@@ -178,6 +179,15 @@ export function createTelegramBotApi(options: {
   }
 
   return {
+    async getMeResponse(): Promise<unknown> {
+      return await requestResponse('getMe')
+    },
+    async getChatResponse(chatId: string): Promise<unknown> {
+      return await requestResponse('getChat', { chat_id: chatId })
+    },
+    async getChatMemberResponse(chatId: string, userId: number): Promise<unknown> {
+      return await requestResponse('getChatMember', { chat_id: chatId, user_id: userId })
+    },
     async editMessageTextResponse(input: SendMessageInput): Promise<unknown> {
       if (!Number.isSafeInteger(input.editMessageId) || Number(input.editMessageId) <= 0 ||
         !input.chatId?.trim() || !input.text?.trim() || ('attachment' in input && input.attachment !== undefined) || input.messageThreadId !== undefined)
