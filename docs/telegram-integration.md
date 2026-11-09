@@ -246,7 +246,7 @@ key/token redaction. Logger, sanitizer, and remote reporter failures never
 change the original result.
 
 Validation/transport failures and non-401 Telegram API errors report to
-`-5216637594`. Configuration/response/internal failures and Telegram 401 report
+`-1003804004336`. Configuration/response/internal failures and Telegram 401 report
 to `summary_logs_channel_id`. Reporting uses a no-report internal send path, so
 its own failure cannot recurse.
 

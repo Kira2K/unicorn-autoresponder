@@ -22,7 +22,7 @@ function makeRepository() {
     desiredLocation: 'Remote RU proxy',
     googleFolder: '',
     telegramPersonalChatId: '@Kira_arbeitet',
-    commonChatId: '-5216637594',
+    commonChatId: '-1003804004336',
     market: 'EN'
   }
   const workflow = {
@@ -32,7 +32,7 @@ function makeRepository() {
     clientMarket: 'EN',
     clientTelegramUsername: '@Kira_arbeitet',
     clientGoogleFolder: '',
-    commonChatId: '-5216637594',
+    commonChatId: '-1003804004336',
     education: client.education,
     englishLevel: client.englishLevel,
     englishLevelId: client.englishLevelId,
@@ -180,7 +180,7 @@ function makeVisibleTelegramHarness() {
     },
     async sendMessage(input: any) {
       this.sentMessages.push(input)
-      if (String(input.chatId) === '-5216637594') {
+      if (String(input.chatId) === '-1003804004336') {
         pushMessage(String(input.chatId), input.text, false)
       }
       return { message_id: messageId++, chat: { id: input.chatId }, text: input.text }
@@ -231,7 +231,7 @@ async function runTests() {
     '/resume',
     '/resume'
   ])
-  const commonChatText = (harness.messagesByChat.get('-5216637594') || []).map((message: any) => message.text).join('\n')
+  const commonChatText = (harness.messagesByChat.get('-1003804004336') || []).map((message: any) => message.text).join('\n')
   assert.doesNotMatch(commonChatText, /Google folder updated/)
   assert.match(commonChatText, /черновик на согласовании у ученика/)
   assert.match(commonChatText, /английская версия на согласовании у ученика/)

@@ -243,7 +243,7 @@ npm run typecheck
 Manual chat ID for acceptance testing:
 
 ```text
--5216637594
+-1003804004336
 ```
 
 Manual scenario:
@@ -268,7 +268,7 @@ npm run tg:resume:e2e:test-user
 ```
 
 This command sends the student-owned workflow commands through TDLib account
-`102:473` into chat `-5216637594`, while Kira/provider steps stay private. It
+`102:473` into chat `-1003804004336`, while Kira/provider steps stay private. It
 starts with `/whoami` so the local e2e backend can map the actual Telegram user
 ID to Test client `102`. Do not repoint this flow to real accounts unless the
 acceptance criterion explicitly requires a visible live-account run.

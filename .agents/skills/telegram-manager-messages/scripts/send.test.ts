@@ -10,7 +10,7 @@ import {
 } from './send.ts'
 
 test('canonicalizes linked common group chat ids and rejects unrelated values', () => {
-  assert.equal(normalizeLinkedCommonChatId(' 5216637594 '), '-5216637594')
+  assert.equal(normalizeLinkedCommonChatId(' 1003804004336 '), '-1003804004336')
   assert.equal(normalizeLinkedCommonChatId('-1004450078294'), '-1004450078294')
   assert.throws(() => normalizeLinkedCommonChatId('0'), /common_chat_id_invalid/)
   assert.throws(() => normalizeLinkedCommonChatId(5216637594), /common_chat_id_invalid/)

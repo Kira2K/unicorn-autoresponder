@@ -131,7 +131,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
       let taskTelegram: ReturnType<typeof import('../../../../integrations/telegram/index.ts').telegramForReports> | undefined;
       const sendTaskNotice=(input:SendOneInput)=>{
         taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
-          typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
+          typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-1003804004336',env);
         return taskTelegram.sendOne(input);
       };
       const notificationMention='@KiraSamsonova';
@@ -143,7 +143,7 @@ export async function openSqlConsole(env: NodeJS.ProcessEnv, open = createPostgr
         client:id=>options.repository.getClientById(id),
         sendOne:input=>{
           taskTelegram ??= (createRequire(import.meta.url)('../../../../integrations/telegram/index.ts') as
-            typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-5216637594',env);
+            typeof import('../../../../integrations/telegram/index.ts')).telegramForReports('-1003804004336',env);
           return taskTelegram.sendOne(input);
         }});
       linkedinCreator = createCreationTaskService({ store: tasks, profiles: octoStore, octo: octoService,
