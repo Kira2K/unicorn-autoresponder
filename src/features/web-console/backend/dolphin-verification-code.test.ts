@@ -44,6 +44,12 @@ async function runTests(): Promise<void> {
   assert.equal(isDolphinVerificationEmail(email({ subject: 'Welcome to Dolphin' })), false)
   assert.equal(isDolphinVerificationEmail(email({ body: 'Your code is 123456' })), false)
 
+  const updatedBody = 'Suspicious sign-in attempt\nWe detected a sign-in attempt to your account from a new location.\nTo continue using Dolphin{anty}, return to the app and enter this code in the pop-up window: 654321'
+  assert.equal(isDolphinVerificationEmail(email({ body: updatedBody })), true)
+  assert.equal(isDolphinVerificationEmail(email({ from: 'not-dolphin@example.com', body: updatedBody })), false)
+  assert.equal(isDolphinVerificationEmail(email({ subject: 'Welcome to Dolphin', body: updatedBody })), false)
+  assert.equal(extractVerificationCode(updatedBody), '654321')
+
   assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\nEnter code from the email: 123 456`), '123456')
   assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\nCode: 123456`), '123456')
   assert.equal(extractVerificationCode(`${DOLPHIN_VERIFICATION_SUBJECT}\n<div>Enter code from the email: <b>654 321</b></div>`), '654321')
@@ -89,6 +95,57 @@ async function runTests(): Promise<void> {
   assert.equal(parsed.receivedAt, now - 5_000)
   assert.equal(isDolphinVerificationEmail(parsed), true)
   assert.equal(extractVerificationCode(parsed.body), '987654')
+
+  const updatedMessage = {
+    id: 'updated-template',
+    internalDate: String(now - 5_000),
+    payload: {
+      mimeType: 'multipart/alternative',
+      headers: [
+        { name: 'From', value: '"Dolphin{anty}" <no-reply@dolphin-anty.com>' },
+        { name: 'Subject', value: DOLPHIN_VERIFICATION_SUBJECT }
+      ],
+      parts: [{
+        mimeType: 'text/html',
+        body: { data: gmailData(`<h1>Suspicious sign-in attempt</h1><p>We detected a sign-in attempt to your account from a new location.</p><p>To continue using Dolphin{anty}, return to the app and enter this code in the pop-up window:</p><b>654321</b>`) }
+      }]
+    }
+  }
+  const updatedEmail = toVerificationEmail(updatedMessage)
+  assert.equal(isDolphinVerificationEmail(updatedEmail), true)
+  assert.equal(extractVerificationCode(updatedEmail.body), '654321')
+  assert.equal(latestVerificationCode([
+    email({ receivedAt: now - 10_000 }),
+    updatedEmail
+  ], { now }).code, '654321')
+  assert.equal(latestVerificationCode([updatedEmail], { now: now + 600_000 }), null)
+
+  let verificationQuery = ''
+  const updatedTemplateService = createGmailVerificationCodeService({
+    now: () => now,
+    gmail: {
+      users: {
+        messages: {
+          async list(input: { q: string }) {
+            verificationQuery = input.q
+            return { data: { messages: [{ id: updatedMessage.id }] } }
+          },
+          async get(input: { id: string; format: string }) {
+            assert.equal(input.id, updatedMessage.id)
+            assert.equal(input.format, 'full')
+            return { data: updatedMessage }
+          }
+        }
+      }
+    }
+  })
+  assert.deepEqual(await updatedTemplateService.getLatestCode(), {
+    ok: true,
+    code: '654321',
+    receivedAt: new Date(now - 5_000).toISOString(),
+    ageMs: 5_000
+  })
+  assert.equal(verificationQuery, `from:no-reply@dolphin-anty.com subject:"${DOLPHIN_VERIFICATION_SUBJECT}" newer_than:1d`)
 
   const authUrl = createGmailOAuthUrl({
     clientId: 'client-id',

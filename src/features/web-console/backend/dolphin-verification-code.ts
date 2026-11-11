@@ -98,7 +98,8 @@ function toVerificationEmail(message: GmailMessage): VerificationEmail {
 function isDolphinVerificationEmail(email: VerificationEmail): boolean {
   return senderEmail(email.from) === DOLPHIN_VERIFICATION_SENDER &&
     email.subject.includes(DOLPHIN_VERIFICATION_SUBJECT) &&
-    email.body.includes(DOLPHIN_VERIFICATION_SUBJECT)
+    (email.body.includes(DOLPHIN_VERIFICATION_SUBJECT) ||
+      email.body.includes('Suspicious sign-in attempt'))
 }
 
 function extractVerificationCode(body: string): string | null {
