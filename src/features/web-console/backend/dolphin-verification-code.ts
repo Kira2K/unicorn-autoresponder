@@ -40,8 +40,10 @@ type MailboxSetupError = Error & {
   reason?: string
 }
 
-const DOLPHIN_VERIFICATION_SENDER = 'no-reply@dolphin-anty.com'
+// Dolphin sends codes from several mailboxes of this domain (no-reply@, anty@).
+const DOLPHIN_VERIFICATION_SENDER = 'dolphin-anty.com'
 const DOLPHIN_VERIFICATION_SUBJECT = 'Suspicious Attempt to Access Your Account'
+const DOLPHIN_VERIFICATION_BODY_HEADING = 'Suspicious sign-in attempt'
 const DEFAULT_VERIFICATION_CODE_MAX_AGE_MS = 600_000
 const DEFAULT_GMAIL_USER = 'kind.cute.unicorn@gmail.com'
 const DEFAULT_OAUTH_REDIRECT_URI = 'http://localhost:4300/oauth2callback'
@@ -96,10 +98,10 @@ function toVerificationEmail(message: GmailMessage): VerificationEmail {
 }
 
 function isDolphinVerificationEmail(email: VerificationEmail): boolean {
-  return senderEmail(email.from) === DOLPHIN_VERIFICATION_SENDER &&
+  return senderEmail(email.from).endsWith(`@${DOLPHIN_VERIFICATION_SENDER}`) &&
     email.subject.includes(DOLPHIN_VERIFICATION_SUBJECT) &&
     (email.body.includes(DOLPHIN_VERIFICATION_SUBJECT) ||
-      email.body.includes('Suspicious sign-in attempt'))
+      email.body.includes(DOLPHIN_VERIFICATION_BODY_HEADING))
 }
 
 function extractVerificationCode(body: string): string | null {

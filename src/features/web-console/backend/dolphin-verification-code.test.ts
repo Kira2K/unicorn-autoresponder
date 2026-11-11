@@ -43,9 +43,12 @@ async function runTests(): Promise<void> {
   assert.equal(isDolphinVerificationEmail(email({ from: 'not-dolphin@example.com' })), false)
   assert.equal(isDolphinVerificationEmail(email({ subject: 'Welcome to Dolphin' })), false)
   assert.equal(isDolphinVerificationEmail(email({ body: 'Your code is 123456' })), false)
+  assert.equal(isDolphinVerificationEmail(email({ from: 'Dolphin <no-reply@evil-dolphin-anty.com>' })), false)
+  assert.equal(isDolphinVerificationEmail(email({ from: 'Dolphin <no-reply@dolphin-anty.com.evil.com>' })), false)
 
   const updatedBody = 'Suspicious sign-in attempt\nWe detected a sign-in attempt to your account from a new location.\nTo continue using Dolphin{anty}, return to the app and enter this code in the pop-up window: 654321'
   assert.equal(isDolphinVerificationEmail(email({ body: updatedBody })), true)
+  assert.equal(isDolphinVerificationEmail(email({ from: 'Dolphin{anty} <anty@dolphin-anty.com>', body: updatedBody })), true)
   assert.equal(isDolphinVerificationEmail(email({ from: 'not-dolphin@example.com', body: updatedBody })), false)
   assert.equal(isDolphinVerificationEmail(email({ subject: 'Welcome to Dolphin', body: updatedBody })), false)
   assert.equal(extractVerificationCode(updatedBody), '654321')
@@ -102,7 +105,7 @@ async function runTests(): Promise<void> {
     payload: {
       mimeType: 'multipart/alternative',
       headers: [
-        { name: 'From', value: '"Dolphin{anty}" <no-reply@dolphin-anty.com>' },
+        { name: 'From', value: '"Dolphin{anty}" <anty@dolphin-anty.com>' },
         { name: 'Subject', value: DOLPHIN_VERIFICATION_SUBJECT }
       ],
       parts: [{
@@ -145,7 +148,7 @@ async function runTests(): Promise<void> {
     receivedAt: new Date(now - 5_000).toISOString(),
     ageMs: 5_000
   })
-  assert.equal(verificationQuery, `from:no-reply@dolphin-anty.com subject:"${DOLPHIN_VERIFICATION_SUBJECT}" newer_than:1d`)
+  assert.equal(verificationQuery, `from:dolphin-anty.com subject:"${DOLPHIN_VERIFICATION_SUBJECT}" newer_than:1d`)
 
   const authUrl = createGmailOAuthUrl({
     clientId: 'client-id',
