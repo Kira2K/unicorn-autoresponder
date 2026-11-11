@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import Dialog from 'primevue/dialog'
 defineProps({ modelValue: Boolean })
 const emit = defineEmits(['update:modelValue'])
-const address = 'kind.cute.unicorn@gmail.com'
+const address = 'veulinkforwards@proton.me'
 const block = ref(null), visible = ref(false), copied = ref(false)
 async function copy() { try { await navigator.clipboard.writeText(address); copied.value = true } catch { copied.value = false } }
 function open() { visible.value = false; block.value.open = true; block.value.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
