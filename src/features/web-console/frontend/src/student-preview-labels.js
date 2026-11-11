@@ -26,6 +26,7 @@ const labels = {
   'Are you sure you have switched secure DNS off before opening LinkedIn?': 'Вы отключили защищённый DNS перед открытием LinkedIn?',
   'Required profile data': 'Обязательные данные профиля',
   'No fresh Dolphin verification code was found.': 'Свежий код подтверждения Dolphin не найден.',
+  'Account is busy now. Please try again shortly.': 'Общий аккаунт Dolphin сейчас занят. Попробуйте снова через пару минут.',
   'Gmail access expired. Contact Kira or Dasha for fixes.': 'Доступ к Gmail истёк. Обратитесь к Кире или Даше.',
   'Message': 'Сообщение', 'Read-only mode': 'Только чтение', 'Send': 'Отправить',
   'Writing enabled': 'Отправка включена', 'Read-only': 'Только чтение',

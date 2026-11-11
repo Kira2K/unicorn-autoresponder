@@ -263,6 +263,10 @@ const adminCanOpenDolphinProfiles = computed(() =>
   isAdmin.value && dolphinProfileStatus.value?.action === 'open_existing' && (dolphinProfileStatus.value?.existingProfiles || []).length > 0
 )
 const hasActiveDolphinLease = computed(() => dolphinLeaseSecondsLeft.value > 0)
+const showClientDolphinCard = computed(() =>
+  isClient.value && Boolean(dolphinProfileStatus.value?.existingProfiles?.length) &&
+  linkedInOctoClientId.value !== dashboard.value?.client?.id
+)
 const currentTelegramState = computed(() =>
   selectedTelegramAccount.value ? ensureTelegramState(selectedTelegramAccount.value) : createTelegramState()
 )
@@ -1969,7 +1973,7 @@ async function openDolphinProfile(clientName, clientId, mode = 'open_existing') 
       return
     }
     dolphinLeaseError.value = caught.status === 409
-      ? 'Account is busy now. Please come back in 5 mins.'
+      ? 'Account is busy now. Please try again shortly.'
       : `${caught instanceof Error ? caught.message : String(caught || '')}${dolphinCode}${attempted}`
   } finally {
     dolphinLeaseLoading.value = false
@@ -2085,10 +2089,10 @@ onUnmounted(() => {
       </nav>
 
       <Message v-if="error" severity="error" :closable="false">{{ ui(error) }}</Message>
-      <Message v-if="dolphinLeaseError" severity="error" :closable="false" data-testid="dolphin-lease-error">
+      <Message v-if="dolphinLeaseError && !showClientDolphinCard" severity="error" :closable="false" data-testid="dolphin-lease-error">
         {{ ui(dolphinLeaseError) }}
       </Message>
-      <Message v-if="dolphinProvisionMessage" severity="info" :closable="false" data-testid="dolphin-provision-message">
+      <Message v-if="dolphinProvisionMessage && !showClientDolphinCard" severity="info" :closable="false" data-testid="dolphin-provision-message">
         {{ ui(dolphinProvisionMessage) }}
       </Message>
       <Dialog v-model:visible="secureDnsWarningVisible" modal :header="ui('Before opening LinkedIn')" data-testid="secure-dns-warning">
@@ -2966,11 +2970,14 @@ onUnmounted(() => {
         </template>
         <template #actions>
         <BrowserWelcomeDialog v-if="isClient && !pageLoading && dashboard?.client?.id" :key="`browser-welcome-${dashboard.client.id}`" :client-id="dashboard.client.id" />
-        <Card v-if="isClient && dolphinProfileStatus?.existingProfiles?.length && linkedInOctoClientId !== dashboard.client.id" class="action-card">
+        <Card v-if="showClientDolphinCard" class="action-card" data-testid="dolphin-client-action-card">
           <template #title>{{ ui('Dolphin profile') }}</template>
           <template #subtitle>{{ ui('Open the connected automation profiles') }}</template>
           <template #content>
             <Button v-if="!hasActiveDolphinLease" :label="ui('Open Dolphin profiles')" icon="pi pi-external-link" severity="info" :loading="dolphinLeaseLoading" data-testid="open-dolphin-client-button" @click="openDolphinProfile(dashboard.client.clientName, dashboard.client.id, 'open_existing')" />
+            <Message v-if="dolphinProvisionMessage" severity="info" :closable="false" data-testid="dolphin-provision-message">
+              {{ ui(dolphinProvisionMessage) }}
+            </Message>
             <section v-if="dolphinLease" class="lease-panel" data-testid="dolphin-lease-panel">
               <h3>{{ ui('Dolphin access') }}</h3>
               <p>{{ ui('Open Dolphin Anty and enter the credentials below.') }}</p>
@@ -3003,6 +3010,9 @@ onUnmounted(() => {
             </section>
             <div class="verification-panel">
               <Button :label="ui('Get verification code')" icon="pi pi-envelope" size="small" severity="secondary" :loading="verificationCodeLoading" data-testid="get-verification-code-button" @click="getDolphinVerificationCode" />
+              <Message v-if="dolphinLeaseError" severity="error" :closable="false" data-testid="dolphin-lease-error">
+                {{ ui(dolphinLeaseError) }}
+              </Message>
               <Message v-if="verificationCodeError" severity="error" :closable="false" data-testid="verification-code-error">
                 {{ ui(verificationCodeError) }}
               </Message>

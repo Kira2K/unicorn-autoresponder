@@ -650,8 +650,11 @@ async function runTests(): Promise<void> {
     assert.equal(await page.getByTestId('admin-ai-tailor-open-button').count(), 0)
     await dismissRequiredDataDialogIfVisible(page)
     await page.getByTestId('open-dolphin-client-button').click()
-    await page.getByTestId('dolphin-lease-error').waitFor()
-    assert.match(await page.getByTestId('dolphin-lease-error').textContent(), /come back in 5 mins/)
+    const clientDolphinCard = page.getByTestId('dolphin-client-action-card')
+    const clientDolphinError = clientDolphinCard.getByTestId('dolphin-lease-error')
+    await clientDolphinError.waitFor()
+    assert.match(await clientDolphinError.textContent(), /try again shortly|попробуйте снова/i)
+    await clientDolphinCard.locator('[data-testid="get-verification-code-button"] + [data-testid="dolphin-lease-error"]').waitFor()
     await page.getByTestId('logout-button').click()
     await page.getByTestId('login-page').waitFor()
 
