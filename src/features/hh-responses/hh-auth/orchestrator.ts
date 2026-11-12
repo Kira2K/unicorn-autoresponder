@@ -454,8 +454,8 @@ async function ensureHHAuthOnCurrentPage(
 
   const result = await withTimeout(
     authorizeHHPage(page, {
-      artifactDir: getHHAuthArtifactDir(clientData),
-      errorArtifactDir: getHHAuthErrorArtifactDir(clientData),
+      artifactDir: process.env.HH_SUPERVISED_RUN === 'true' ? undefined : getHHAuthArtifactDir(clientData),
+      errorArtifactDir: process.env.HH_SUPERVISED_RUN === 'true' ? undefined : getHHAuthErrorArtifactDir(clientData),
       getCredentials: async () => {
         const credentials =
           clientData.hhAuthCredentials ??
@@ -482,7 +482,19 @@ async function ensureHHAuthOnCurrentPage(
       `${clientData.clientName}/${clientData.market} on the current page`
   )
 
-  return convertHHAuthResultToCheck(result)
+  const check = convertHHAuthResultToCheck(result)
+  if (check.state !== 'logged_in' && process.env.HH_SUPERVISED_RUN === 'true') {
+    const category = await withTimeout(require('./visible-failure.cjs').visibleAuthFailure(page),
+      2000, 'HH auth diagnostic timed out').catch(() => null)
+    if (category) {
+      check.signals.authFailure = { exists: true, text: category }
+      require('../orchestrator/local-run-log.ts').writeLocalRunLog({
+        kind: 'hh-auth-diagnostic', dolphinProfileId: clientData.dolphinProfileId,
+        clientName: clientData.clientName, market: clientData.market, category
+      })
+    }
+  }
+  return check
 }
 
 function formatAuthCheckBrief(check: HhAuthCheck): string {
@@ -490,7 +502,8 @@ function formatAuthCheckBrief(check: HhAuthCheck): string {
     .filter(([, signal]) => signal.exists)
     .map(([name]) => name)
 
-  return `${check.state}; signals ${signalNames.join(', ') || 'none'}; url ${check.url}`
+  return `${check.state}; signals ${signalNames.join(', ') || 'none'}; url ${check.url}` +
+    (check.signals.authFailure?.text ? `; ${check.signals.authFailure.text}` : '')
 }
 
 module.exports = {

@@ -150,6 +150,22 @@ function testPrelaunchReadinessReportShowsAllReady(): void {
   assert.match(message, /All enabled accounts are ready/)
 }
 
+function testPrelaunchShowsEachRemainingQuotaAndRejectsMissingQuota(): void {
+  const report = {
+    market: 'Ru', responseLimit: 120,
+    responseLimitsByProfileId: { 11: 1, 22: 77 },
+    readyTargets: [
+      {clientName:'First',market:'Ru',dolphinProfileId:11,problems:[]},
+      {clientName:'Second',market:'Ru',dolphinProfileId:22,problems:[]}
+    ], blockedTargets: []
+  }
+  const message = formatPrelaunchReadinessLog(report)
+  assert.match(message, /individual remaining quotas/)
+  assert.match(message, /First \/ Ru: response limit 1/)
+  assert.match(message, /Second \/ Ru: response limit 77/)
+  assert.throws(() => formatPrelaunchReadinessLog({...report,responseLimitsByProfileId:{11:1}}), /Missing remaining response limit/)
+}
+
 function testTimerReachedIsOkEvenWhenResponseLimitNotMet(): void {
   const status = makeStatus({
     autoResponderStopReason: 'orchestrator_stop_after_watch',
@@ -208,6 +224,7 @@ testRunSummaryIncludesCaptchaBlock()
 testRunSummaryIncludesAuthSupportBlock()
 testPrelaunchReadinessReportListsBlockedAccounts()
 testPrelaunchReadinessReportShowsAllReady()
+testPrelaunchShowsEachRemainingQuotaAndRejectsMissingQuota()
 testTimerReachedIsOkEvenWhenResponseLimitNotMet()
 testAcceptedTerminalStopsAreGreenDots()
 

@@ -14,7 +14,8 @@ const {
   isExecutionContextDestroyedError,
   waitForDomContentLoaded
 } = require('../../../platform/browser/page-utils.ts')
-const { wait } = require('../orchestrator/runtime-utils.ts')
+const { wait, withTimeout } = require('../orchestrator/runtime-utils.ts')
+const { createResponseDeadline } = require('./response-deadline.ts')
 
 type BrowserPageLike = import('../orchestrator/types.ts').BrowserPageLike
 const RESUME_LOOP_STALL_MS = 90 * 1000
@@ -28,6 +29,7 @@ type ResumeLoopProbe = {
 type AutoResponderProgressSnapshot = {
   key: string
   details: string
+  responseCount: number
 }
 
 function normalizeResumeLoopProbe(value: any): ResumeLoopProbe | undefined {
@@ -211,6 +213,7 @@ async function getAutoResponderProgressSnapshot(
 
         return {
           key,
+          responseCount: safeResponseCount,
           details: [
             `responses ${safeResponseCount}`,
             `logs ${logs.length}`,
@@ -374,13 +377,13 @@ async function waitForAutoResponderToFinish(
   browserDisconnected: boolean
 }> {
   const startedAt = Date.now()
-  let sawRunning = false
   let idleSince: number | undefined
   let progressKey: string | undefined
   let lastProgressAt = Date.now()
   let lastProgressDetails: string | undefined
   let resumeLoopProbeKey: string | undefined
   let resumeLoopSince: number | undefined
+  const responseDeadline = createResponseDeadline(idleTimeoutMs)
   const hasWatchTimeout =
     typeof timeoutMs === 'number' &&
     Number.isFinite(timeoutMs) &&
@@ -391,14 +394,42 @@ async function waitForAutoResponderToFinish(
     !isBrowserDisconnected() &&
     (!hasWatchTimeout || Date.now() - startedAt < timeoutMs)
   ) {
-    const running = await isAutoResponderRunning(page)
-    const resumeLoopProbe = await getResumeLoopProbe(page)
-    const progressSnapshot = await getAutoResponderProgressSnapshot(page)
+    // A stalled renderer can leave evaluate pending forever. A read must not
+    // prevent the existing idle and wall-clock deadlines from being checked.
+    const probeTimeout = hasWatchTimeout
+      ? Math.max(1, Math.min(5000, timeoutMs - (Date.now() - startedAt)))
+      : 5000
+    const probe = async <T,>(read: () => Promise<T>): Promise<T | undefined> => {
+      try { return await withTimeout(read(), probeTimeout, 'HH progress probe timed out') }
+      catch { return undefined }
+    }
+    const [running, resumeLoopProbe, progressSnapshot] = await Promise.all([
+      probe(() => isAutoResponderRunning(page)),
+      probe(() => getResumeLoopProbe(page)),
+      probe(() => getAutoResponderProgressSnapshot(page))
+    ])
 
     if (progressSnapshot && progressSnapshot.key !== progressKey) {
       progressKey = progressSnapshot.key
       lastProgressAt = Date.now()
       lastProgressDetails = progressSnapshot.details
+    }
+
+    // A navigation outside the responder routes (including about:blank) has
+    // no readable running flag. It still consumes the same idle deadline.
+    if (
+      running === undefined && idleTimeoutMs > 0 &&
+      Date.now() - lastProgressAt >= idleTimeoutMs
+    ) {
+      return {
+        finished: true,
+        timedOut: false,
+        idleTimedOut: true,
+        idleTimeoutMs,
+        lastProgress: lastProgressDetails ?? 'Responder page left supported HH routes without progress.',
+        pageClosed: page.isClosed(),
+        browserDisconnected: isBrowserDisconnected()
+      }
     }
 
     if (running === true && resumeLoopProbe) {
@@ -409,7 +440,8 @@ async function waitForAutoResponderToFinish(
         resumeLoopSince &&
         Date.now() - resumeLoopSince >= RESUME_LOOP_STALL_MS
       ) {
-        await stopAutoResponderForResumeLoop(page, resumeLoopProbe)
+        await withTimeout(stopAutoResponderForResumeLoop(page, resumeLoopProbe), 5000,
+          'HH resume-loop stop timed out').catch(() => false)
         return {
           finished: true,
           timedOut: false,
@@ -424,17 +456,17 @@ async function waitForAutoResponderToFinish(
     }
 
     if (running === true) {
-      sawRunning = true
       idleSince = undefined
       if (
         idleTimeoutMs > 0 &&
-        Date.now() - lastProgressAt >= idleTimeoutMs
+        (Date.now() - lastProgressAt >= idleTimeoutMs ||
+          responseDeadline.observe(progressSnapshot?.responseCount ?? 0))
       ) {
-        await stopAutoResponderForIdleTimeout(
+        await withTimeout(stopAutoResponderForIdleTimeout(
           page,
           idleTimeoutMs,
           progressSnapshot
-        )
+        ), 5000, 'HH idle stop timed out').catch(() => false)
         return {
           finished: true,
           timedOut: false,
@@ -445,7 +477,7 @@ async function waitForAutoResponderToFinish(
           browserDisconnected: false
         }
       }
-    } else if (sawRunning && running === false) {
+    } else if (running === false) {
       idleSince ??= Date.now()
 
       if (Date.now() - idleSince >= 3000) {
@@ -459,7 +491,9 @@ async function waitForAutoResponderToFinish(
       }
     }
 
-    await wait(1000)
+    await wait(hasWatchTimeout
+      ? Math.max(1, Math.min(1000, timeoutMs - (Date.now() - startedAt)))
+      : 1000)
   }
 
   return {

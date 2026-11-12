@@ -4,6 +4,7 @@ type LocalDolphinRequestOptions = {
   method?: 'GET' | 'POST'
   body?: unknown
   retryAuth?: boolean
+  timeoutMs?: number
 }
 
 function stringifyApiMessage(value: unknown): string | undefined {
@@ -52,13 +53,14 @@ function isDolphinLocalSessionError(status: number, data: any): boolean {
   )
 }
 
-async function loginLocalDolphinWithToken(): Promise<unknown> {
+async function loginLocalDolphinWithToken(timeoutMs?: number): Promise<unknown> {
   return await requestLocalDolphin('/auth/login-with-token', {
     method: 'POST',
     body: {
       token: getDolphinApiToken()
     },
-    retryAuth: false
+    retryAuth: false,
+    timeoutMs
   })
 }
 
@@ -69,7 +71,8 @@ async function requestLocalDolphin<T>(
   const response = await fetch(`${DOLPHIN_LOCAL_API_BASE_URL}${endpointPath}`, {
     method: options.method ?? 'GET',
     headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: options.body ? JSON.stringify(options.body) : undefined
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined
   })
   const responseText = await response.text()
   let data: any = null
@@ -86,7 +89,7 @@ async function requestLocalDolphin<T>(
       endpointPath !== '/auth/login-with-token' &&
       isDolphinLocalSessionError(response.status, data)
     ) {
-      await loginLocalDolphinWithToken()
+      await loginLocalDolphinWithToken(options.timeoutMs)
 
       return await requestLocalDolphin<T>(endpointPath, {
         ...options,

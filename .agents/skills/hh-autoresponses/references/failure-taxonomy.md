@@ -55,6 +55,7 @@ These can stop or prevent a market run:
 - code/config error before any client can be selected or started
 - readiness pipeline failure that prevents classifying ready versus blocked accounts
 - Telegram/global report failure that prevents required prelaunch reporting
+- Missing/unauthenticated/incompatible Codex CLI, failed synthetic inference or missing model usage in the shared supervised provider. Run the skill's first-check resource and repair the provider before opening profiles.
 
 When a blocker happens before profiles start, stop the sequence and report the global blocker instead of opening profiles blindly.
 

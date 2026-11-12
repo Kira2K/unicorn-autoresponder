@@ -30,36 +30,40 @@ test('storage uses process value, then .env, then SQL; rejects unknown storage',
   });
   fixture('APP_DB=invalid\n', cwd => assert.throws(() => resolveStorage({}, cwd), /APP_DB/));
 });
-function wrapper(cwd: string, selected: string, failRu = false) {
-  const npm = `function npm { Write-Output ('TEST_STORAGE:'+$env:APP_DB+':'+$env:ORCHESTRATOR_WORK_WITH_MARKET); $global:LASTEXITCODE=${failRu ? "if($env:ORCHESTRATOR_WORK_WITH_MARKET -eq 'Ru'){7}else{0}" : '0'} }`;
-  return spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `${npm}; & ${quote(script)} -AutoresponsesRepo ${quote(cwd)}; exit $LASTEXITCODE`], {
+function wrapper(extra: string[] = [], exitCode = 0, target = script) {
+  const fake = "$ErrorActionPreference='Stop'; function Test-HhNode { ConvertTo-Json -InputObject @($args) -Compress; $global:LASTEXITCODE=" + exitCode + " }";
+  return spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
+    fake + '; & ' + quote(target) + ' -NodePath Test-HhNode ' + extra.map(x=>x.startsWith('-')?x:quote(x)).join(' ') + '; exit $LASTEXITCODE'], {
     encoding: 'utf8', windowsHide: true, timeout: 30000,
-    env: { SystemRoot: process.env.SystemRoot, PATH: dirname(process.execPath) + ';' + process.env.PATH, PATHEXT: '.COM;.EXE;.BAT;.CMD', APP_DB: selected }
+    env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, PATHEXT: '.COM;.EXE;.BAT;.CMD' }
   });
 }
-for (const selected of ['', 'noco', 'postgres']) test(`daily wrapper uses configured storage: ${selected || '.env postgres'}`, { skip: process.platform !== 'win32' }, () => {
-  fixture('APP_DB=postgres\n', cwd => {
-    const result = wrapper(cwd, selected);
-    assert.equal(result.status, 0, result.error?.message || result.stderr);
-    assert.deepEqual(result.stdout.trim().split(/\r?\n/), [`TEST_STORAGE:${selected || 'postgres'}:Ru`, `TEST_STORAGE:${selected || 'postgres'}:En`]);
-  });
+test('daily task delegates once to the supervisor, allowing ENV or its 100/4 defaults', { skip: process.platform !== 'win32' }, () => {
+  const r = wrapper(); assert.equal(r.status, 0, r.stderr);
+  const args = JSON.parse(r.stdout.trim()); assert.match(args[0], /supervised[\\/]cli\.cjs$/);
+  assert.deepEqual(args.slice(1), []);
 });
-test('daily wrapper rejects unknown storage before either market is started', { skip: process.platform !== 'win32' }, () => {
-  fixture('APP_DB=typo\n', cwd => {
-    const result = wrapper(cwd, '');
-    assert.equal(result.error, undefined);
-    assert.notEqual(result.status, 0);
-    assert.equal(result.stdout.includes('TEST_STORAGE:'), false);
-    assert.match(result.stderr, /Cannot resolve HH autoresponses storage/);
-  });
+test('daily task preserves explicit parameters, ENV path with spaces and the failure exit code', { skip: process.platform !== 'win32' }, () => {
+  const r = wrapper(['-ResponseLimit','80','-Concurrency','2','-EnvFile','C:\\private folder\\hh.env','-AllowWeekend'], 7);
+  assert.equal(r.status, 7, r.stderr);
+  const args = JSON.parse(r.stdout.trim());
+  assert.deepEqual(args.slice(1), ['--limit=80','--concurrency=2','--env-file=C:\\private folder\\hh.env','--allow-weekend']);
 });
-test('daily wrapper continues En after Ru failure and preserves failure code', { skip: process.platform !== 'win32' }, () => {
-  fixture('APP_DB=postgres\n', cwd => {
-    const result = wrapper(cwd, '', true);
-    assert.equal(result.status, 7, result.error?.message || result.stderr);
-    assert.deepEqual(result.stdout.split(/\r?\n/).filter(line => line.startsWith('TEST_STORAGE:')),
-      ['TEST_STORAGE:postgres:Ru', 'TEST_STORAGE:postgres:En']);
-  });
+test('skill first step invokes service inspection; full mode explicitly tests inference', { skip: process.platform !== 'win32' }, () => {
+  const first = fileURLToPath(new URL('../.agents/skills/hh-autoresponses/scripts/first-check.ps1', import.meta.url));
+  for (const mode of ['inspect','full']) {
+    const r = wrapper(['-Mode',mode],0,first); assert.equal(r.status,0,r.stderr);
+    const args = JSON.parse(r.stdout.trim()); assert.match(args[0],/services-cli\.cjs$/);
+    assert.equal(args[1],'--mode='+mode);
+  }
+});
+
+test('real powershell -File registration resolves its own checkout and remains a dry run', { skip: process.platform !== 'win32' }, () => {
+ fixture('',cwd=>{
+  const register=fileURLToPath(new URL('./register-hh-autoresponses-task.ps1',import.meta.url));
+  const r=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',register,'-AtLocal','05:40','-EnvFile',join(cwd,'.env'),'-NodePath',process.execPath],{encoding:'utf8',windowsHide:true,timeout:30000});
+  assert.equal(r.status,0,r.stderr);const plan=JSON.parse(r.stdout);assert.equal(plan.apply,false);assert.equal(plan.atLocal,'05:40');assert.equal(plan.checkAtLocal,'04:40');assert.equal(plan.repo,dirname(dirname(register)));
+ });
 });
 test('direct HH entry point uses the same storage and logs no credentials', () => {
   const source = stripTypeScriptTypes(readFileSync(new URL('../src/features/hh-responses/cli/orchestrator.ts', import.meta.url), 'utf8'));
@@ -99,6 +103,7 @@ test('readiness CLI selects SQL before reads and closes it even when the read fa
         const module = { exports: {} as any };
         const sql = { async fetchRecords() { calls.push('sql-read'); if (failure) throw new Error('sql-unavailable'); return []; } };
         runInNewContext(source, { module, process: { env, argv: ['node', 'readiness', '--market=ru', '--json'] }, console: { log() {} }, require(id: string) {
+          if (id.endsWith('/shared/telegram-group-chat.ts')) return require('../shared/telegram-group-chat.ts');
           if (id === 'dotenv') return { config() {} };
           if (id.endsWith('/hh-autoresponses-storage.cjs')) return { resolveStorage: () => resolveStorage(env, cwd) };
           if (id.endsWith('/platform/db/index.ts')) return { createAppDb() { calls.push(`db:${env.APP_DB}`); return {}; } };

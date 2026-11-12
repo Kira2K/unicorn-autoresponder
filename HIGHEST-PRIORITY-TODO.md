@@ -14,46 +14,26 @@ deeper TODOs, playbooks, or source files instead of copying large plans.
 - [Agent context](./docs/AGENT_CONTEXT.md)
 - [Full AI context](./docs/AI_CONTEXT_FULL.md)
 
-## P0: Add Captcha Solver To HH
+## P0: Validate HH supervised rollout on the VDS
 
-Existing issue context:
-[HH autoresponses playbook captcha handling](./docs/hh-autoresponses-skill-playbook.md)
-and [orchestrator expected failure semantics](./src/features/hh-responses/orchestrator/README.md).
+The release provides the normal HH queue with isolated image-only Codex
+recognition, English image selection, identity checks, bounded attempts,
+provider preflight, accounting, cancellation and owned-profile cleanup.
+Model default: `gpt-6.1-sol`. Installation and operation are documented in
+[HH supervised deployment](./docs/hh-supervised-deployment.md) and the skill's
+executable first-check resource.
 
-Current baseline:
+Remaining rollout gates:
 
-- HH response automation can already identify captcha as a typed state.
-- Captcha currently stops the affected client/profile and requires human
-  action.
+1. Confirm the actual Windows VDS user, database, Dolphin, bot destinations,
+   pinned CLI authentication and first service check in its clean checkout.
+2. Run one explicitly scoped real-HH CAPTCHA/application canary and verify
+   acceptance, continuation, preserved history, delivery and cleanup.
+3. Confirm schedule execution after RDP disconnect/restart and retire only the
+   old HH task after successful cutover. Never run the same accounts on two hosts.
 
-Required work:
-
-1. Teach the HH response script to switch from RU captcha to EN captcha before
-   solving when HH presents the Russian variant.
-2. Add reusable token-based service infrastructure and architecture. This does
-   not exist as an enabled path today, and it must not be captcha-only because
-   future tasks will also need shared token accounting, limits, secrets,
-   provider adapters, and validation flows.
-3. Submit the solved captcha through the active HH browser/profile session.
-4. Validate that captcha was accepted before continuing.
-5. Resume the normal HH responses process after successful validation.
-6. Preserve typed failure behavior when captcha solving fails, token balance is
-   unavailable, HH changes the captcha UI, or validation cannot prove success.
-
-Implementation notes:
-
-- Start in `src/features/hh-responses/hh-auth` for detection and validation.
-- Continue through `src/features/hh-responses/orchestrator` so captcha solving
-  integrates with per-client run state instead of blocking the whole run.
-- Design token usage as a reusable internal capability: provider adapters,
-  token balance checks, reservation/consume semantics, retry policy, typed
-  errors, redacted logging, and per-feature integration points should be
-  separable from HH captcha specifics.
-- The first implementation may be driven by HH captcha, but the architecture
-  should also fit future paid/tokenized tasks without duplicating token
-  management in each feature.
-- Keep secrets and captcha-service tokens out of logs, reports, and committed
-  files.
+Synthetic model/browser fixtures and local unit tests are useful evidence but
+must not be presented as real HH acceptance on another machine.
 
 ## P0: Harness For AI-Driven Development
 

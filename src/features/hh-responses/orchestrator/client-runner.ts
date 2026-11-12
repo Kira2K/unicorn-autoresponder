@@ -66,6 +66,7 @@ const {
 } = require('./config.ts')
 
 type ClientAutomationData = import('./types.ts').ClientAutomationData
+const { createResponseLimitResolver } = require('./response-limit.ts')
 type LifecycleEvent = import('./types.ts').LifecycleEvent
 type ManualVacancy = import('./types.ts').ManualVacancy
 type OrchestratorStatus = import('./types.ts').OrchestratorStatus
@@ -137,18 +138,19 @@ async function openClientScenario(
       event: lifecycleEvent
     })
   }
-  const pageResult = await openScenarioAndInjectIndex(
+  const pageResult = await withTimeout(openScenarioAndInjectIndex(
     port,
     clientData.stackScenario,
     responseCounter,
     {
       coverText: clientData.coverText,
       blockedCompanies: clientData.blockedCompanies,
-      responseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+      responseLimit: status.requiredResponseLimit ?? ORCHESTRATOR_RESPONSE_LIMIT,
       skipManualVacanciesCleanup: options.skipManualVacanciesCleanup,
       logLifecycleEvent: logScenarioLifecycleEvent
     }
-  )
+  ), 10 * 60 * 1000, 'HH scenario preparation exceeded 10 minutes',
+    async () => { await stopDolphinProfile(clientData.dolphinProfileId) })
   const nextStatus = {
     ...status,
     ...pageResult.result,
@@ -174,7 +176,8 @@ async function openClientScenario(
 async function applyAutomationProfileLock(
   clientData: ClientAutomationData,
   status: OrchestratorStatus,
-  runStartedAt: number
+  runStartedAt: number,
+  beforeApply: (previous: number | null) => void
 ): Promise<{
   status: OrchestratorStatus
   previousProfileStatusId: number | null | undefined
@@ -187,10 +190,15 @@ async function applyAutomationProfileLock(
   const automationStatusId = await ensureAutomationLockStatusId()
   const profileBeforeLock = await getDolphinProfile(clientData.dolphinProfileId)
   const currentProfileStatusId = getDolphinProfileStatusId(profileBeforeLock)
-  const previousProfileStatusId =
-    currentProfileStatusId === automationStatusId
-      ? null
-      : currentProfileStatusId
+  if (currentProfileStatusId === automationStatusId || profileBeforeLock.tags?.includes(AUTOMATION_LOCK_TAG)) {
+    throw new Error('hh_profile_lock_busy')
+  }
+  const previousProfileStatusId = currentProfileStatusId
+  status = addLifecycleEvent(status, runStartedAt, 'automation profile lock planned',
+    `status ${automationStatusId}, previous ${String(previousProfileStatusId)}`)
+  // Arm the normal finally before either write: a transport failure may hide a
+  // successful tag/status change. This proof also survives a Windows restart.
+  beforeApply(previousProfileStatusId)
 
   await addDolphinProfileTag(clientData.dolphinProfileId, AUTOMATION_LOCK_TAG)
   await updateDolphinProfileStatus(
@@ -501,7 +509,7 @@ async function cleanupClientDolphinProfile(
     previousProfileStatusId: number | null | undefined
   }
 ): Promise<OrchestratorStatus> {
-  if (!DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN) {
+  if ((options.profileTagAdded || options.profileStatusApplied) && !DOLPHIN_KEEP_PROFILE_OPEN_AFTER_RUN) {
     try {
       status = addLifecycleEvent(
         status,
@@ -526,7 +534,7 @@ async function cleanupClientDolphinProfile(
         errorStack: status.errorStack ?? getErrorStack(error)
       }
     }
-  } else {
+  } else if (options.profileTagAdded || options.profileStatusApplied) {
     status = addLifecycleEvent(
       status,
       runStartedAt,
@@ -599,8 +607,12 @@ async function cleanupClientDolphinProfile(
 }
 
 async function runClientOrchestrator(
-  clientData: ClientAutomationData
+  clientData: ClientAutomationData,
+  options: { responseLimit?: number; stopRequested?: () => boolean } = {}
 ): Promise<OrchestratorStatus> {
+  const responseLimit = createResponseLimitResolver(ORCHESTRATOR_RESPONSE_LIMIT,
+    options.responseLimit === undefined ? undefined : { [clientData.dolphinProfileId]: options.responseLimit }
+  )(clientData.dolphinProfileId)
   if (!clientData.stackScenario) {
     throw new Error(`Stack scenario for ${clientData.clientName} was not found`)
   }
@@ -622,10 +634,10 @@ async function runClientOrchestrator(
     indexScriptInjected: false,
     watcherInstalled: false,
     startButtonClicked: false,
-    requiredResponseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+    requiredResponseLimit: responseLimit,
     metResponseLimit: false,
     completionGap: 'not_finished',
-    responsesRemaining: ORCHESTRATOR_RESPONSE_LIMIT,
+    responsesRemaining: responseLimit,
     responseLimitWatchMs: AUTO_RESPONDER_WATCH_MS
   }
   let disposeWatcher: (() => void) | undefined
@@ -637,15 +649,23 @@ async function runClientOrchestrator(
   status = addLifecycleEvent(status, runStartedAt, 'client run started')
 
   try {
+    if (options.stopRequested?.()) throw new Error('hh_run_cancelled')
     const profileLock = await applyAutomationProfileLock(
       runnableClientData,
       status,
-      runStartedAt
+      runStartedAt,
+      previous => {
+        previousProfileStatusId = previous
+        profileTagAdded = true
+        profileStatusApplied = true
+      }
     )
     status = profileLock.status
     previousProfileStatusId = profileLock.previousProfileStatusId
     profileTagAdded = true
     profileStatusApplied = true
+
+    if (options.stopRequested?.()) throw new Error('hh_run_cancelled')
 
     const startedDolphin = await startDolphinForClient(
       clientData,
@@ -653,12 +673,14 @@ async function runClientOrchestrator(
       runStartedAt
     )
     status = startedDolphin.status
+    if (options.stopRequested?.()) throw new Error('hh_run_cancelled')
     const port = startedDolphin.port
 
     const openAndAuthorizeScenario = async (
       currentStatus: OrchestratorStatus,
       skipManualVacanciesCleanup = false
     ): Promise<OrchestratorStatus> => {
+      if (options.stopRequested?.()) throw new Error('hh_run_cancelled')
       let nextStatus = addLifecycleEvent(
         currentStatus,
         runStartedAt,
@@ -732,12 +754,17 @@ async function runClientOrchestrator(
         return { status: currentStatus }
       }
 
-      const autoResponderResult = await waitForAutoResponderToFinish(
+      const watchResult = waitForAutoResponderToFinish(
         pageResult.page,
         AUTO_RESPONDER_WATCH_MS,
         pageResult.isBrowserDisconnected,
         ORCHESTRATOR_IDLE_TIMEOUT_MS
       )
+      const autoResponderResult = AUTO_RESPONDER_WATCH_MS > 0
+        ? await withTimeout(watchResult, AUTO_RESPONDER_WATCH_MS + 60000,
+          'HH watch exceeded its wall-clock deadline',
+          async () => { await stopDolphinProfile(clientData.dolphinProfileId) })
+        : await watchResult
 
       let nextStatus = {
         ...currentStatus,
@@ -771,12 +798,13 @@ async function runClientOrchestrator(
         )
       }
 
-      const collected = await collectAutoResponderRunData(
+      const collected = await withTimeout(collectAutoResponderRunData(
         pageResult,
         responseCounter,
         nextStatus,
         runStartedAt
-      )
+      ), 30000, 'HH responder result collection exceeded 30 seconds',
+        async () => { await closePageQuietly(pageResult?.page) })
 
       return {
         status: collected.status,

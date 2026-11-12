@@ -1,0 +1,30 @@
+name: HH supervised contracts
+on:
+  pull_request:
+    paths:
+      - 'src/features/hh-responses/**'
+      - 'src/integrations/dolphin/**'
+      - 'src/platform/db/**'
+      - 'scripts/*hh*'
+      - '.agents/skills/hh-autoresponses/**'
+      - 'package*.json'
+      - '.github/workflows/hh-supervised.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - run: npm ci
+      - run: npm run hh:supervised:test
+      - run: npm run orchestrator:test
+      - run: npm run typecheck
+      # No application credentials or model calls in CI. The skill's full
+      # service check and real HH canary run only on the authorized Windows host.

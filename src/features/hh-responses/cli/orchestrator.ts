@@ -89,6 +89,13 @@ const {
 } = require('../orchestrator/scraper-state.ts')
 
 type ClientAutomationData = import('../orchestrator/types.ts').ClientAutomationData
+type RunOptions = {
+  responseLimitsByProfileId?: Readonly<Record<string, number>>
+  beforeClientStart?: (client: ClientAutomationData) => Promise<boolean>
+}
+let stopRequested = false
+function requestOrchestratorStop(): void { stopRequested = true }
+const { createResponseLimitResolver } = require('../orchestrator/response-limit.ts')
 
 function createHHAppDb(): import('../../../platform/db/types.ts').AppDb {
   process.env.APP_DB = resolveStorage()
@@ -403,6 +410,7 @@ async function runWithBoundedConcurrency<T, R>(
     startDelayMs: number
     runItem: (item: T, index: number) => Promise<R>
     getWaitMessage?: (item: T, index: number, waitMs: number) => string
+    shouldStop?: () => boolean
   }
 ): Promise<R[]> {
   const results = new Array<R>(items.length)
@@ -428,7 +436,7 @@ async function runWithBoundedConcurrency<T, R>(
     try {
       const waitMs = Math.max(nextStartAt - Date.now(), 0)
 
-      if (waitMs > 0) {
+      if (waitMs > 0 && !options.shouldStop?.()) {
         const message = options.getWaitMessage?.(item, index, waitMs)
 
         if (message) {
@@ -742,9 +750,12 @@ async function runClientsOrchestrator(
   clients: ClientAutomationData[],
   options: {
     extraSummaryStatuses?: OrchestratorStatus[]
-  } = {}
+  } & RunOptions = {}
 ): Promise<OrchestratorStatus[]> {
   const readiness = splitClientsByReadiness(clients)
+  const responseLimitForClient = createResponseLimitResolver(ORCHESTRATOR_RESPONSE_LIMIT, options.responseLimitsByProfileId)
+  // Resolve every ready target before any Dolphin/API start, not lazily as slots open.
+  for (const client of readiness.clients) responseLimitForClient(client.dolphinProfileId)
   const extraSummaryStatuses = [
     ...(options.extraSummaryStatuses ?? []),
     ...readiness.skippedStatuses
@@ -809,7 +820,7 @@ async function runClientsOrchestrator(
       market: client.market,
       stack: client.stack,
       dolphinProfileId: client.dolphinProfileId,
-      responseLimit: ORCHESTRATOR_RESPONSE_LIMIT
+      responseLimit: responseLimitForClient(client.dolphinProfileId)
     }))
   })
 
@@ -817,14 +828,26 @@ async function runClientsOrchestrator(
   const results = await runWithBoundedConcurrency(readiness.clients, {
     concurrency: ORCHESTRATOR_CONCURRENCY,
     startDelayMs: CLIENT_START_DELAY_MS,
+    shouldStop: () => stopRequested,
     getWaitMessage: (client, _index, waitMs) =>
       `Waiting ${waitMs}ms before starting ${client.clientName}/${client.market}(${client.dolphinProfileId})`,
     runItem: async client => {
-      const status = await runClientOrchestrator(client).catch((error: unknown) => {
+      const responseLimit = responseLimitForClient(client.dolphinProfileId)
+      const status = await Promise.resolve().then(async () => {
+        if (stopRequested || options.beforeClientStart && !await options.beforeClientStart(client)) {
+          throw new Error(stopRequested ? 'hh_run_cancelled' : 'hh_market_disabled_before_start')
+        }
+        if (stopRequested) throw new Error('hh_run_cancelled')
+        return runClientOrchestrator(client, {
+          ...(options.responseLimitsByProfileId ? { responseLimit } : {}),
+          stopRequested: () => stopRequested
+        })
+      }).catch((error: unknown) => {
         const status = makeClientPreparationErrorStatus(
           client,
           error,
-          'client run failed before final status'
+          'client run failed before final status',
+          responseLimit
         )
         writeLocalRunLog({
           kind: 'client-final-status',
@@ -865,7 +888,8 @@ async function runClientsOrchestrator(
 function makeClientPreparationErrorStatus(
   client: ClientAutomationData,
   error: unknown,
-  event: string
+  event: string,
+  responseLimit = ORCHESTRATOR_RESPONSE_LIMIT
 ): OrchestratorStatus {
   return applyResponseRequirementStatus({
     clientName: client.clientName,
@@ -886,10 +910,10 @@ function makeClientPreparationErrorStatus(
     indexScriptInjected: false,
     watcherInstalled: false,
     startButtonClicked: false,
-    requiredResponseLimit: ORCHESTRATOR_RESPONSE_LIMIT,
+    requiredResponseLimit: responseLimit,
     metResponseLimit: false,
     completionGap: 'client_preparation_failed',
-    responsesRemaining: ORCHESTRATOR_RESPONSE_LIMIT,
+    responsesRemaining: responseLimit,
     responseLimitWatchMs: AUTO_RESPONDER_WATCH_MS,
     responseLimitElapsedMs: 0,
     responseLimitTimeLeftMs: AUTO_RESPONDER_WATCH_MS,
@@ -899,7 +923,8 @@ function makeClientPreparationErrorStatus(
 }
 
 async function runSelectedClientsOrchestrator(
-  clientNames: string[]
+  clientNames: string[],
+  options: RunOptions = {}
 ): Promise<OrchestratorStatus[]> {
   const db = createHHAppDb()
   const selectedFetch = await fetchSelectedClientsByUniqueNamesBestEffort(
@@ -967,6 +992,7 @@ async function runSelectedClientsOrchestrator(
   }
 
   return runClientsOrchestrator(credentialAttachResult.clients, {
+    ...options,
     extraSummaryStatuses: skippedStatuses
   })
 }
@@ -1164,9 +1190,12 @@ async function runAllClientsOrchestrator(): Promise<OrchestratorStatus[]> {
   })
 }
 
-async function runConfiguredOrchestrator(): Promise<OrchestratorStatus[]> {
+async function runConfiguredOrchestrator(options: RunOptions = {}): Promise<OrchestratorStatus[]> {
   const clientIds = getConfiguredClientIds()
   const clientNames = getConfiguredClientNames()
+  if (options.responseLimitsByProfileId && (clientIds.length || !clientNames.length)) {
+    throw Error('Remaining response limits require explicit client-name selection')
+  }
 
   if (clientIds.length) {
     if (clientNames.length) {
@@ -1179,7 +1208,7 @@ async function runConfiguredOrchestrator(): Promise<OrchestratorStatus[]> {
   }
 
   if (clientNames.length) {
-    return runSelectedClientsOrchestrator(clientNames)
+    return runSelectedClientsOrchestrator(clientNames, options)
   }
 
   return runAllClientsOrchestrator()
@@ -1228,10 +1257,10 @@ function installProcessShutdownCleanup(): void {
   })
 }
 
-async function main(): Promise<void> {
+async function main(options: RunOptions = {}): Promise<void> {
   installProcessShutdownCleanup()
 
-  await runConfiguredOrchestrator()
+  await runConfiguredOrchestrator(options)
     .then((results: OrchestratorStatus[]) => {
       writeRunExitLog({
         exitCode: 0,
@@ -1263,6 +1292,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  requestOrchestratorStop,
   createHHAppDb,
   getClientReadinessError,
   assertDolphinAppRunning,

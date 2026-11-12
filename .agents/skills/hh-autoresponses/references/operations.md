@@ -65,29 +65,23 @@ Reportable error states include Dolphin closed/unreachable, an unexpected active
 
 ## All-Market Launch Shape
 
-Run `Ru`, wait for exit, then run `En`.
+Use the maintained first check and the shipped supervisor:
 
 ```powershell
-$env:APP_DB = 'postgres'
-$env:ORCHESTRATOR_SUPERVISED = 'true'
-$env:ORCHESTRATOR_CONCURRENCY = '3'
-$env:ORCHESTRATOR_RESPONSE_LIMIT = '120'
-$env:ORCHESTRATOR_WATCH_MS = '7200000'
-$env:ORCHESTRATOR_IDLE_TIMEOUT_MS = '600000'
-Remove-Item Env:\ORCHESTRATOR_CLIENT_IDS -ErrorAction SilentlyContinue
-Remove-Item Env:\ORCHESTRATOR_CLIENT_NAMES -ErrorAction SilentlyContinue
-Remove-Item Env:\ORCHESTRATOR_EXCLUDE_CLIENT_IDS -ErrorAction SilentlyContinue
-Remove-Item Env:\ORCHESTRATOR_EXCLUDE_CLIENT_NAMES -ErrorAction SilentlyContinue
-Remove-Item Env:\ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES -ErrorAction SilentlyContinue
-
-$env:ORCHESTRATOR_WORK_WITH_MARKET = 'Ru'
-npm run orchestrator
-
-$env:ORCHESTRATOR_WORK_WITH_MARKET = 'En'
-npm run orchestrator
+powershell -NoProfile -File .agents/skills/hh-autoresponses/scripts/first-check.ps1
+npm run hh:supervised
 ```
 
-If a detached or scheduled wrapper is needed, write wrapper stdout/stderr under `logs/`, keep the same env values, and make the wrapper run the two markets sequentially.
+Default scope is all enabled PostgreSQL readiness-valid targets, Ru then En,
+100 per account, concurrency 4. The launch performs full service/model preflight
+and stops before En on a process/provider/cleanup/report failure. Explicit
+parameters use `--limit=80 --concurrency=4 --markets=en`. Do not start the legacy
+ordinary CLI and assume it supplies automatic recognition.
+
+See [deployment](../../../../docs/hh-supervised-deployment.md) for pinned
+installation, ENV, first-check modes, the outdated VDS, task registration,
+market-flag stop requests, recovery and rollback. Keep task stdout and run
+artifacts under `logs/`. Never attach Profile Filler to this task.
 
 ## Startup Verification
 
@@ -97,7 +91,7 @@ After launching each market:
 - Confirm `run-start` or early market/client lifecycle records are for the requested market.
 - Confirm a readiness report send starts and succeeds before Dolphin profile start events.
 - Confirm blocked accounts are skipped before Dolphin starts.
-- Confirm up to three clients can be in lifecycle startup/running state at once when enough ready targets exist.
+- Confirm the requested concurrency (default four) through overlapping lifecycle streams when enough ready targets exist.
 - Confirm first batch reaches either `auto responder started` or a terminal global blocker.
 
 If Dolphin/global preflight fails before profiles start, stop the market sequence and report the global blocker.
