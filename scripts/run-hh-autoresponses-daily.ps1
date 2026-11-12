@@ -1,49 +1,22 @@
 param(
-  [string]$AutoresponsesRepo = 'C:\Users\Administrator\Downloads\hh-autoparcer\hh-autoparcer'
+  [string]$AutoresponsesRepo,
+  [ValidateRange(1,1000)][int]$ResponseLimit = 100,
+  [ValidateRange(1,20)][int]$Concurrency = 4,
+  [string]$EnvFile,
+  [string]$NodePath = 'node',
+  [switch]$AllowWeekend
 )
-
 $ErrorActionPreference = 'Stop'
-$exitCode = 0
+if (!$AutoresponsesRepo) { $AutoresponsesRepo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')) }
 $originalLocation = Get-Location
-
 try {
   Set-Location -LiteralPath $AutoresponsesRepo
-  $storage = & node (Join-Path $PSScriptRoot 'hh-autoresponses-storage.cjs')
-  if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve HH autoresponses storage.' }
-  $env:APP_DB = $storage.Trim()
-  $env:ORCHESTRATOR_SUPERVISED = 'true'
-  $env:ORCHESTRATOR_CONCURRENCY = '3'
-  $env:ORCHESTRATOR_RESPONSE_LIMIT = '120'
-  $env:ORCHESTRATOR_WATCH_MS = '7200000'
-  $env:ORCHESTRATOR_IDLE_TIMEOUT_MS = '600000'
-  Remove-Item Env:ORCHESTRATOR_CLIENT_IDS -ErrorAction SilentlyContinue
-  Remove-Item Env:ORCHESTRATOR_CLIENT_NAMES -ErrorAction SilentlyContinue
-  Remove-Item Env:ORCHESTRATOR_EXCLUDE_CLIENT_IDS -ErrorAction SilentlyContinue
-  Remove-Item Env:ORCHESTRATOR_EXCLUDE_CLIENT_NAMES -ErrorAction SilentlyContinue
-  Remove-Item Env:ORCHESTRATOR_EXTRA_BLOCKED_COMPANIES -ErrorAction SilentlyContinue
-
-  foreach ($market in @('Ru', 'En')) {
-    try {
-      $env:ORCHESTRATOR_WORK_WITH_MARKET = $market
-      & npm run orchestrator
-      if ($LASTEXITCODE -ne 0) {
-        if ($exitCode -eq 0) {
-          $exitCode = $LASTEXITCODE
-        }
-        Write-Warning "$market autoresponses failed with exit code $LASTEXITCODE"
-      }
-    }
-    catch {
-      if ($exitCode -eq 0) {
-        $exitCode = 1
-      }
-      Write-Warning "$market autoresponses failed: $($_.Exception.Message)"
-    }
-  }
-}
-finally {
-  Remove-Item Env:ORCHESTRATOR_WORK_WITH_MARKET -ErrorAction SilentlyContinue
-  Set-Location -LiteralPath $originalLocation
-}
-
-exit $exitCode
+  $arguments = @((Join-Path $AutoresponsesRepo 'src/features/hh-responses/supervised/cli.cjs'))
+  if ($PSBoundParameters.ContainsKey('ResponseLimit')) { $arguments += "--limit=$ResponseLimit" }
+  if ($PSBoundParameters.ContainsKey('Concurrency')) { $arguments += "--concurrency=$Concurrency" }
+  if ($EnvFile) { $arguments += "--env-file=$([IO.Path]::GetFullPath($EnvFile))" }
+  if ($AllowWeekend) { $arguments += '--allow-weekend' }
+  & $NodePath @arguments
+  $runExit = $LASTEXITCODE
+} finally { Set-Location -LiteralPath $originalLocation }
+exit $runExit

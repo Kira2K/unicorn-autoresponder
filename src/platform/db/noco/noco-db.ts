@@ -283,12 +283,19 @@ function findClientDolphinProfile(
   clientName: string,
   market: Market
 ): NocoRecord {
-  const matches = profiles.filter(
+  const candidates = profiles.filter(
     profile =>
       isDolphinProfile(profile) &&
       getProfileClientId(profile) === clientId &&
       normalizeMarket(profile.locale) === market
   )
+  // Retired rows such as "неактуально" cannot identify a runnable browser.
+  // Keep genuine ambiguity between multiple valid profiles blocked.
+  const runnable = candidates.filter(profile => {
+    const id = Number(normalizeId(profile.dolphin_profile_id))
+    return Number.isSafeInteger(id) && id > 0
+  })
+  const matches = runnable.length ? runnable : candidates
 
   if (!matches.length) {
     throw new Error(`Noco Dolphin ${market} profile for "${clientName}" was not found`)
