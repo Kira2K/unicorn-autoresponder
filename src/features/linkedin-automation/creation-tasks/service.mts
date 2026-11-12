@@ -13,7 +13,7 @@ export function createCreationTaskService(deps: {
   store: CreationTaskStore; profiles: Pick<OctoStore,'list'|'get'>; octo: OctoService;
   client(id: number): Promise<WebClient>;
   secrets(clientId: number, accountId: number): Promise<unknown>;
-  capture(profile: ManagedProfile): Promise<ManagedProfile>;
+  capture(profile: ManagedProfile, options?: { allowActiveAccess?: boolean }): Promise<ManagedProfile>;
   nodeMavenKey(): string;
   newProxy?:ReturnType<typeof createNewTaskProxy>;
   reportStatusChange?(change: TaskStatusChange): Promise<StatusNotification>;
@@ -105,9 +105,9 @@ export function createCreationTaskService(deps: {
         const d = await en(id);
         if (d.task.version !== taskId(body.version)) throw new IntakeError('linkedin_task_stale_version',409);
         await requireNewProxy(d);
-        // Completion itself confirms the actual closed cloud profile. A prior receipt,
+        // Completion confirms the attached proxy independently of access cleanup. A prior receipt,
         // when present, still cannot silently accept a different connection.
-        const p = await deps.capture(d.profile);
+        const p = await deps.capture(d.profile,{allowActiveAccess:true});
         if (!p.proxy || d.task.proxySavedAt && (p.proxy.uuid !== d.task.proxyUuid || p.id !== d.task.proxyProfileId))
           throw new IntakeError('linkedin_task_proxy_required',409);
         proxyReceipt={profileId:p.id,proxyUuid:p.proxy.uuid,revision:p.revision};
