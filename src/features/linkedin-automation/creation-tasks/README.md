@@ -13,10 +13,15 @@ The admin LinkedIn tab is a read-only history with independent delivery outcomes
 
 The completion checklist lists saved LinkedIn URL, login, password and the current attached EN proxy,
 with instructions for each missing item. Unsaved proxy edits, a missing connection or pending assignment
-block completion. Opening and closing EN requires no extra proxy confirmation; completion stays disabled
-until access cleanup ends. Completing an unfinished task re-reads the actual closed cloud profile and
+block completion. Opening and closing EN requires no extra proxy confirmation. Completion is independent
+of an open profile or access cleanup: it verifies an active profile's saved attachment without changing
+its grant, masked metadata, revision or cleanup state. Proxy editing and legacy explicit capture still
+require an idle profile. Completing an unfinished task re-reads the actual cloud attachment and
 atomically saves its verified receipt with the final status. A changed existing receipt still rejects
 completion; an old explicit capture API remains compatible but has no separate UI button.
+Existing installations apply `migrate-completion-access.mts` (rollback by default, `--apply` to commit).
+It replaces only the access predicate in the two installed completion guards, fails on an unfamiliar
+definition and never rewrites task rows or disables triggers. Access cleanup remains owned by Octo.
 The Denis result form keeps the profile URL in `url` and the account login in `login`.
 If no LinkedIn login has been saved, the form prefills it from this task's linked Outlook account,
 without checking its email domain. It remains editable and is persisted only by the explicit result save.

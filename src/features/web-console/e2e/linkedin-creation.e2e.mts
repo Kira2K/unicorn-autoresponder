@@ -13,6 +13,7 @@ const intake={firstName:'Test',lastName:'Student',realLocation:'Tbilisi',outlook
   blockedAccounts:[{fullName:'Blocked Test',country:'France'},{company:'Old Company'}],url:'',login:'',hasPassword:false};
 let acquired=0,grants=0,proxySaved=0;
 let missingSecondProfile=true;
+let activeAccess=false;
 let oldGrantRequests=0;
 let savedProxy={type:'socks5',host:'saved-proxy.example.test',port:1080,login:'saved-fixture-login',password:'saved-fixture-password',changeIpUrl:'https://example.test/saved-rotate'};
 const service={
@@ -21,7 +22,7 @@ const service={
     const selected=Number(id)===3?completedTask:Number(id)===2?secondTask:task;
     return {task:{...selected},intake:{...intake},client:{id:selected.clientId,fio:selected.fio,stack:selected.stack}};},
   key(){return{key:'mock-key-copy-only'};},async secrets(){return{password:'mock-mail-secret'};},
-  async profileStatus(id:unknown,credentials=false){return{newProxyRequired:Number(id)===2,newProxyReady:Number(id)!==2,profiles:Number(id)===2&&missingSecondProfile?[]:[{id:2,locale:'en',title:'EN Test',phase:'ready',canEditProxy:true,...(Number(id)===2?{grantId:'completed-old-grant',canAcquire:false}:{}),proxy:{configured:true,canViewCredentials:true,type:savedProxy.type,host:savedProxy.host,port:savedProxy.port,...(credentials?{...savedProxy,credentialsLoaded:true}:{}),phase:proxySaved?'complete':undefined}}],requiredLocales:['en'],onboarding:{phase:'idle'}};},
+  async profileStatus(id:unknown,credentials=false){return{newProxyRequired:Number(id)===2,newProxyReady:Number(id)!==2,profiles:Number(id)===2&&missingSecondProfile?[]:[{id:2,locale:'en',title:'EN Test',phase:activeAccess?'granted':'ready',canEditProxy:!activeAccess,...(Number(id)===2?{grantId:'completed-old-grant',canAcquire:false}:{}),proxy:{configured:true,canViewCredentials:true,type:savedProxy.type,host:savedProxy.host,port:savedProxy.port,...(credentials?{...savedProxy,credentialsLoaded:true}:{}),phase:proxySaved?'complete':undefined}}],requiredLocales:['en'],onboarding:{phase:'idle'}};},
   async saveProxy(id:unknown,profileId:unknown,input:any){assert.equal(Number(id),1);assert.equal(Number(profileId),2);
     assert.deepEqual(input,{host:'demo-proxy.example.test',type:'socks5',port:1080,login:'fixture',password:'mock-proxy-secret',changeIpUrl:'https://example.test/rotate'});savedProxy={...input};proxySaved++;return{queued:true};},
   async acquire(_id:unknown,profileId:unknown){assert.equal(profileId,2);acquired++;return{id:'grant-1',phase:'preparing'};},
@@ -184,6 +185,11 @@ try{
   assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false,'saved proxy confirmation survives reopening while the actual profile remains ready');
   assert.equal(task.proxySavedAt,undefined,'no extra receipt action before completion');
   assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false);
+  activeAccess=true;
+  await page.reload();await page.getByTestId('creation-task-1').click();await page.getByTestId('creation-task-detail').waitFor();
+  await page.getByTestId('octo-profile-2').getByText('Доступ выдан',{exact:true}).waitFor();
+  assert.equal(await done.evaluate((e:HTMLOptionElement)=>e.disabled),false,'saved LinkedIn and proxy allow completion while Octo access is active');
+  assert.equal(await page.getByTestId('octo-proxy-save-2').isDisabled(),true,'editing the proxy still requires idle access');
   let releaseOlderList!:()=>void;
   const heldOlderList=new Promise<void>(resolve=>{releaseOlderList=resolve;});
   const oldList=JSON.stringify([{...completedTask},{...task},{...secondTask}]);
@@ -191,6 +197,7 @@ try{
   await page.getByRole('button',{name:'Обновить список',exact:true}).click();await listLoader.waitFor();
   await page.getByLabel('Статус заявки').selectOption('сделана экспертом');await page.getByRole('button',{name:'Сохранить статус',exact:true}).click();
   await page.getByText('Заявка завершена. LinkedIn и доступ к Octo доступны ученику. Уведомления поставлены в очередь.',{exact:true}).waitFor();assert.equal(task.status,'сделана экспертом');
+  assert.equal(activeAccess,true,'completion does not close or clear access');
   await listLoader.waitFor({state:'hidden'});
   const olderResponse=page.waitForResponse(r=>r.url().endsWith('/api/linkedin-creator/tasks')&&r.request().method()==='GET');
   releaseOlderList();await olderResponse;

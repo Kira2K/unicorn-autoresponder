@@ -12,7 +12,7 @@ const message = ref(''), busy = ref(false), selectedStatus = ref('не нача�
 const proxyDraftDirty = ref(false)
 const profileState = ref(null)
 const canCaptureProxy = computed(() => profileState.value?.profiles?.some(p => p.locale === 'en' &&
-  p.phase === 'ready' && p.canEditProxy === true && p.proxy?.configured) && profileState.value?.newProxyReady !== false)
+  p.proxy?.configured) && profileState.value?.newProxyReady !== false)
 const proxyAssigned = computed(() => profileState.value?.newProxyReady !== false &&
   profileState.value?.profiles?.some(p => p.locale === 'en' && p.proxy?.configured))
 function updateTask(task) {
@@ -48,7 +48,7 @@ const completionChecklist = computed(() => [
       : proxyAssigned.value ? 'Прокси сохранён. Повторно сохранять его после закрытия профиля не нужно.'
       : !profileState.value.profiles?.some(p => p.locale === 'en' && p.proxy?.configured)
         ? 'Сохраните прокси в форме «Настроить прокси» и дождитесь завершения сохранения.'
-        : 'Закройте профиль Octo и дождитесь завершения доступа.' },
+        : 'Дождитесь завершения сохранения прокси.' },
   { key: 'url', label: 'Ссылка LinkedIn сохранена', done: !!selected.value?.intake.url,
     hint: 'Введите ссылку вида https://www.linkedin.com/in/... и нажмите «Сохранить данные LinkedIn».' },
   { key: 'login', label: 'Логин LinkedIn сохранён', done: !!selected.value?.intake.login,
@@ -63,7 +63,7 @@ function errorText(error) {
   if(code==='linkedin_task_new_proxy_required')return 'Для нового LinkedIn сначала назначьте и проверьте новый прокси.'
   if (code === 'linkedin_task_proxy_pending') return 'Прокси сохраняется. Дождитесь завершения и нажмите кнопку ещё раз.'
   if (code === 'linkedin_task_close_profile_first') return 'Закройте профиль Octo и дождитесь завершения доступа.'
-  if (code === 'linkedin_task_proxy_required' || code === 'linkedin_task_proxy_changed') return 'Проверьте сохранённый прокси. Если сейчас выдан доступ к профилю, сначала закройте профиль и дождитесь завершения доступа.'
+  if (code === 'linkedin_task_proxy_required' || code === 'linkedin_task_proxy_changed') return 'Проверьте сохранённый прокси и дождитесь завершения его назначения.'
   if (code === 'linkedin_task_result_required') return 'Сохраните ссылку, логин и пароль LinkedIn кнопкой «Сохранить данные LinkedIn».'
   if (code === 'linkedin_task_stale_version') return 'Заявка изменилась. Откройте её заново перед сохранением.'
   if (code === 'commit_uncertain') return 'Результат неизвестен. Откройте заявку заново для проверки; повторная отправка не запускается.'
@@ -190,7 +190,7 @@ onUnmounted(() => { selection++; taskController?.abort(); controller.abort(); re
         <p><strong>Для нового LinkedIn введи новые реквизиты прокси в форме ниже и нажми «Сохранить прокси».</strong> Старое подключение повторно использовать нельзя. Дождись статуса «Прокси сохранён». В приложении Octo Browser прокси вводить или менять не нужно.</p>
         <p v-if="profileState?.newProxyRequired && profileState.newProxyReady === false" role="status" data-testid="creation-new-proxy-required">Доступ к Octo появится после сохранения и проверки нового прокси для этой заявки.</p>
         <OctoAccessCard :key="selected.task.id" :client-id="selected.client.id" :setup-enabled="false" :proxy-expanded="true" :proxy-checking="true" :proxy-single-line="true" :proxy-save-below-card="true" :transport="transport" @status="updateProfileStatus" @proxy-draft-changed="proxyDraftDirty = $event" />
-        <p>Дождись статуса «Прокси сохранён». Повторно сохранять прокси после закрытия профиля не нужно. Когда закончишь регистрацию, сохрани данные LinkedIn, закрой профиль Octo и дождись завершения доступа. Затем выбери статус «сделана экспертом».</p>
+        <p>Дождись статуса «Прокси сохранён». Когда закончишь регистрацию, сохрани данные LinkedIn и выбери статус «сделана экспертом». Закрывать Octo для сохранения статуса не нужно. После работы закрой профиль — завершение доступа и очистка выполнятся отдельно.</p>
         <p v-if="proxyAssigned && !proxyDraftDirty">Прокси сохранён и проверен.</p>
         <form @submit.prevent="save('result', result)">
           <h3>Созданный LinkedIn</h3>

@@ -44,6 +44,39 @@ test('completion captures the actual closed profile without a separate receipt a
  assert.equal(done.status,'сделана экспертом');assert.deepEqual(receipt,{profileId:2,proxyUuid:'proxy',revision:p.revision});
  assert.equal(f.received(),undefined,'manual receipt action is not required');
 });
+
+test('completion verifies an open or closing profile without changing its access or proxy metadata',async()=>{
+ for(const phase of ['granted','awaiting_close'] as const){
+  const f=await fixture(),p=(await f.profiles.get(2))!;
+  await f.profiles.save({...p,proxy:{uuid:'proxy',title:'original proxy',type:'socks5',host:'example.org',port:1080,isMadeByExpert:true},
+   grant:{id:'active-grant',phase,alias:'temporary alias',createdAt:1,eventsAfter:0,original:p.original}});
+  const before=structuredClone(await f.profiles.get(2));
+  Object.assign(f.cloud.profiles.get(p.uuid!)!,{status:1,folder:'guest',title:'temporary alias',description:'unicorn-access:active-grant'});
+  let receipt:unknown;f.store.status=async(_id,_version,_status,proof)=>{receipt=proof;return{...f.task,status:'сделана экспертом'};};
+  const calls=f.cloud.calls.slice();
+  assert.equal((await f.service.status(1,{version:1,status:'сделана экспертом'})).status,'сделана экспертом');
+  assert.deepEqual(receipt,{profileId:2,proxyUuid:'proxy',revision:before!.revision});
+  assert.deepEqual(await f.profiles.get(2),before,'completion leaves the live grant and cleanup state intact');
+  assert.deepEqual(f.cloud.calls,calls,'completion does not write or stop a cloud profile');
+  await assert.rejects(f.service.capture(1,{version:1}),{code:'linkedin_task_close_profile_first'},'explicit legacy capture still requires idle access');
+ }
+});
+
+test('open-profile completion rejects changed, shared, pending and unknown proxy bindings',async()=>{
+ for(const variant of ['changed','shared','pending','unknown','revision']){
+  const f=await fixture(),p=(await f.profiles.get(2))!;
+  await f.profiles.save({...p,proxy:{uuid:'proxy',title:'original proxy'},grant:{id:'g',phase:'granted',alias:'a',createdAt:1,eventsAfter:0,original:p.original},
+   ...(variant==='pending'?{proxyChange:{id:'pending',phase:'queued',input:{type:'socks5',host:'example.org',port:1080,login:'',password:''},title:'pending'}}:{})});
+  f.cloud.profiles.get(p.uuid!)!.status=1;
+  if(variant==='changed')f.cloud.profiles.get(p.uuid!)!.proxy={uuid:'other'};
+  const read=f.cloud.api.readProfileProxy!;
+  if(variant==='shared')f.cloud.api.readProfileProxy=async uuid=>{const v=await read(uuid);return{saved:{...v.saved!,profiles_count:2}};};
+  if(variant==='unknown')f.cloud.api.readProfileProxy=async()=>{throw Error('provider unavailable');};
+  if(variant==='revision')f.cloud.api.readProfileProxy=async uuid=>{const current=(await f.profiles.get(2))!;await f.profiles.save({...current});return read(uuid);};
+  let written=false;f.store.status=async()=>{written=true;return f.task;};
+  await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}));assert.equal(written,false,variant);
+ }
+});
 test('task lists bound client reads to two connections and reuse repeated client summaries',async()=>{
  const f=await fixture();const rows=Array.from({length:13},(_,i)=>({...f.task,id:i+1,clientId:901+i}));rows.push({...f.task,id:14});
  const scopes:boolean[]=[];f.store.list=async(admin=false)=>{scopes.push(admin);return rows;};
@@ -64,16 +97,15 @@ test('SQL task lists use one bounded summary read rather than hydrating full cli
  assert.equal((await service.list())[0].fio,'Тест Ученик');assert.equal((await service.adminList())[0].stack,'JAVA');assert.equal(reads,2);
 });
 
-test('completion rechecks closure for new and legacy proxies; repeated completion performs no cloud read or status report',async()=>{
+test('completion allows a running profile for new and legacy saved proxies; replay performs no capture or status report',async()=>{
  for(const requiresNewProxy of [false,true]){
   let reports=0;
   const f=await fixture(async()=>{reports++;return{outcome:'sent',messageId:1}}, {assert:async()=>{},ready:async()=>true,queue:async()=>({queued:true})});
   Object.assign(f.task,{requiresNewProxy,proxyUuid:'proxy',proxyProfileId:2,proxySavedAt:new Date().toISOString()});
   let writes=0;f.store.status=async()=>{writes++;Object.assign(f.task,{status:'сделана экспертом'});return f.task;};
   const en=(await f.profiles.get(2))!,live=f.cloud.profiles.get(en.uuid!)!;
+  await f.profiles.save({...en,proxy:{uuid:'proxy',title:'saved'}});
   live.status=1;
-  await assert.rejects(f.service.status(1,{version:1,status:'сделана экспертом'}),{code:'linkedin_task_close_profile_first'});
-  assert.equal(writes,0);live.status=0;
   assert.equal((await f.service.status(1,{version:1,status:'сделана экспертом'})).status,'сделана экспертом');
   assert.equal(writes,1);assert.equal(reports,0);
   const revision=(await f.profiles.get(2))!.revision;live.status=1;

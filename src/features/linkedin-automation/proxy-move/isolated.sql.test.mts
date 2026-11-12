@@ -65,14 +65,15 @@ test('isolated PostgreSQL: replacement commits atomically, preserves notices and
     CREATE TABLE noco.linkedin_creation_task(id bigint PRIMARY KEY,client_id bigint,linkedin_account_id bigint,outlook_account_id bigint,source text,status text,version bigint,proxy_profile_id bigint,proxy_uuid text,proxy_saved_at timestamptz,created_at timestamptz,updated_at timestamptz,requires_new_proxy boolean);
     INSERT INTO noco.linkedin_creation_task VALUES(1,901,10,11,'student_intake','не начата',1,NULL,NULL,NULL,now(),now(),true);
     UPDATE noco.platform_accounts SET url='https://www.linkedin.com/in/isolated-synthetic',login='synthetic@example.invalid',password='' WHERE id=10;`);
-   const state=(await query('SELECT state FROM noco.octo_profiles WHERE profile_id=1')).rows[0].state as ManagedProfile;delete state.grant;
-   await write('UPDATE noco.octo_profiles SET state=$1 WHERE profile_id=1',[JSON.stringify(state)]);
+   const state=(await query('SELECT state FROM noco.octo_profiles WHERE profile_id=1')).rows[0].state as ManagedProfile;
+   assert.equal(state.grant?.phase,'granted','completion is tested while access remains active');
    let hooks=0;const tasks=createCreationTaskStore(pool,config.database,false,async()=>{hooks++;}),proof={profileId:1,proxyUuid:state.proxy!.uuid,revision:state.revision};
    await assert.rejects(tasks.status(1,1,'сделана экспертом',proof),e=>(e as {code?:string}).code==='linkedin_task_result_required');
    const pending=(await query('SELECT status,proxy_saved_at FROM noco.linkedin_creation_task WHERE id=1')).rows[0];assert.equal(pending.status,'не начата');assert.equal(pending.proxy_saved_at,null);assert.equal(hooks,0);
    await write("UPDATE noco.platform_accounts SET password='synthetic-only' WHERE id=10");
    const done=await tasks.status(1,1,'сделана экспертом',proof);assert.equal(done.status,'сделана экспертом');assert.equal(done.proxyUuid,proof.proxyUuid);assert.ok(done.proxySavedAt);assert.equal(hooks,1);
    await tasks.status(1,1,'сделана экспертом',proof);assert.equal(hooks,1);
+   assert.deepEqual((await query('SELECT state FROM noco.octo_profiles WHERE profile_id=1')).rows[0].state,state,'task completion preserves the active grant for the cleanup worker');
   });
   await t.test('installed CRM SQL pauses exactly 48 hours, deduplicates and restores Раскачка at the boundary',
    {skip:!process.env.LINKEDIN_CRM_SQL_SNAPSHOT},async()=>{

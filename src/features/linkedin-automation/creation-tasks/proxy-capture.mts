@@ -13,7 +13,21 @@ export function createTaskProxyCapture(deps: { store: OctoStore; api: CloudApi; 
       live.description !== p.original.description) throw new IntakeError('linkedin_task_close_profile_first', 409);
     return live;
   }
-  return async (p: ManagedProfile) => {
+  return async (p: ManagedProfile, options: { allowActiveAccess?: boolean } = {}) => {
+    if (options.allowActiveAccess && (!canEditProxy(p) || p.uuid && (await deps.api.getProfile(p.uuid)).status !== 0)) {
+      // Finishing a task only verifies an already saved connection. Never rewrite
+      // an active grant's masked metadata, move/stop its profile or advance cleanup.
+      if (!p.uuid || p.phase !== 'ready' || p.deletion || p.pending || !p.proxy ||
+        p.proxyChange && p.proxyChange.phase !== 'complete') throw new IntakeError('linkedin_task_proxy_required',409);
+      if (!deps.api.readProfileProxy) throw new IntakeError('linkedin_task_proxy_capture_unavailable',503);
+      const actual = await deps.api.readProfileProxy(p.uuid);
+      if (!actual.saved || actual.saved.profiles_count !== 1) throw new IntakeError('linkedin_task_proxy_shared_or_missing',409);
+      const live = await deps.api.getProfile(p.uuid), current = await deps.store.get(p.id);
+      if (!current || current.revision !== p.revision || current.clientId !== p.clientId || current.uuid !== p.uuid ||
+        actual.saved.uuid !== p.proxy.uuid || live.proxy?.uuid !== actual.saved.uuid)
+        throw new IntakeError('linkedin_task_proxy_changed',409);
+      return current;
+    }
     await idle(p);
     if (!deps.api.readProfileProxy) throw new IntakeError('linkedin_task_proxy_capture_unavailable', 503);
     const actual = await deps.api.readProfileProxy(p.uuid!);

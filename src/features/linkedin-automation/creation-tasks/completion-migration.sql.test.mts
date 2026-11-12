@@ -54,8 +54,20 @@ test('actual PostgreSQL: three-status migration guards pending work, rolls back,
   await q("UPDATE noco.octo_profiles SET state=state||'{\"grant\":{\"phase\":\"granted\"}}'::jsonb WHERE profile_id=2");
   await assert.rejects(q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом' WHERE id=2"),/proxy_required/);
   assert.equal((await q('SELECT count(*) FROM noco.linkedin_account_cycles')).rows[0].count,'1');
-  await q("UPDATE noco.octo_profiles SET state=state-'grant' WHERE profile_id=2");
+  const access=sql('./sql/005-completion-access.up.sql'),beforeAccess=await snapshot();
+  await q('BEGIN');await q(access.replace(/^BEGIN;\s*$/m,'').replace(/^COMMIT;\s*$/m,''));await q('ROLLBACK');
+  await assert.rejects(q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом' WHERE id=2"),/proxy_required/);
+  assert.deepEqual(await snapshot(),beforeAccess,'dry-run preserves all historical rows');
+  await q(access);await q(access);assert.deepEqual(await snapshot(),beforeAccess,'install and reinstall never replay task effects');
+  // New-proxy validation remains mandatory while the completion no longer waits for access cleanup.
+  const operation='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  await q("UPDATE noco.linkedin_creation_task SET requires_new_proxy=true WHERE id=2");
+  await q("UPDATE noco.octo_profiles SET state=state||jsonb_build_object('proxyChange',jsonb_build_object('id',$1::text,'phase','complete')) WHERE profile_id=2",[operation]);
+  await q(`UPDATE noco.linkedin_creation_proxy SET baseline_uuid='old-two',baseline_fingerprint='old',fingerprint='old',exit_ip='203.0.113.20',baseline_ip=NULL,comparison='skipped',operation_id=$1,profile_id=2 WHERE task_id=2`,[operation]);
+  await assert.rejects(q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом' WHERE id=2"),/new_proxy_required/);
+  await q("UPDATE noco.linkedin_creation_proxy SET fingerprint='new' WHERE task_id=2");
   await q("UPDATE noco.linkedin_creation_task SET status='сделана экспертом' WHERE id=2");
+  assert.equal((await q("SELECT state->'grant'->>'phase' AS phase FROM noco.octo_profiles WHERE profile_id=2")).rows[0].phase,'granted');
   assert.deepEqual((await q('SELECT recipient,chat_id,state FROM noco.linkedin_cycle_notifications WHERE task_id=2 ORDER BY recipient')).rows,
    [{recipient:'reports',chat_id:'-1003187558078',state:'pending'},{recipient:'student',chat_id:'-7102',state:'pending'}]);
   await q("UPDATE noco.clients SET telegram_general_chat_id='-9999' WHERE id=102");
