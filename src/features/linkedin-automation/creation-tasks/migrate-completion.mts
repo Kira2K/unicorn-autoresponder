@@ -14,6 +14,9 @@ export async function migrateTaskCompletion(env:NodeJS.ProcessEnv,apply=false,op
   const sql=(await readFile(new URL('./sql/004-three-statuses.up.sql',import.meta.url),'utf8'))
    .replace(/^BEGIN;\s*$/m,'').replace(/^COMMIT;\s*$/m,'');
   await s.query(sql);
+  const access=(await readFile(new URL('./sql/005-completion-access.up.sql',import.meta.url),'utf8'))
+   .replace(/^BEGIN;\s*$/m,'').replace(/^COMMIT;\s*$/m,'');
+  await s.query(access);
   await s.query('SELECT recipient,chat_id,state,message_id,error_code FROM noco.linkedin_cycle_notifications LIMIT 0');
   const remaining=(await s.query("SELECT count(*)::int AS count FROM noco.linkedin_creation_task WHERE status='выполнение подтверждено'")).rows[0]?.count;
   if(Number(remaining)!==0)throw Error('linkedin_completion_schema_incomplete');

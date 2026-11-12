@@ -31,17 +31,17 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
       [task.proxyProfileId??null,task.clientId])).rows[0];
     const p=row?.state as any;
     if(!task.proxySavedAt||!task.proxyUuid||!p||p.proxy?.uuid!==task.proxyUuid||p.phase!=='ready'||p.deletion||p.pending||
-      p.proxyChange&&p.proxyChange.phase!=='complete'||p.grant&&p.grant.phase!=='complete')return fail('linkedin_task_proxy_required');
+      p.proxyChange&&p.proxyChange.phase!=='complete')return fail('linkedin_task_proxy_required');
     const li=(await s.query('SELECT url,login,password FROM noco.platform_accounts WHERE id=$1 FOR UPDATE',[task.linkedinAccountId])).rows[0];
     try{parseLinkedInResult(li);}catch{return fail('linkedin_task_result_required');}
     if(!li.password)return fail('linkedin_task_result_required');
   }
-  async function saveProxyReceipt(s:SqlSession,task:ReturnType<typeof taskRow>,proof:TaskProxyReceipt,preserveExisting=false){
+  async function saveProxyReceipt(s:SqlSession,task:ReturnType<typeof taskRow>,proof:TaskProxyReceipt,options:{preserveExisting?:boolean;allowActiveAccess?:boolean}={}){
     const p=(await s.query("SELECT state,revision FROM noco.octo_profiles WHERE profile_id=$1 AND client_id=$2 AND locale='en' FOR UPDATE",[proof.profileId,task.clientId])).rows[0];
     const state=p?.state as any;
     if(!p||Number(p.revision)!==proof.revision||state.proxy?.uuid!==proof.proxyUuid||state.phase!=='ready'||state.deletion||state.pending||
-      state.grant&&state.grant.phase!=='complete'||state.proxyChange&&state.proxyChange.phase!=='complete')return fail('linkedin_task_proxy_changed');
-    if(preserveExisting&&task.proxyProfileId===proof.profileId&&task.proxyUuid===proof.proxyUuid&&task.proxySavedAt)return task;
+      !options.allowActiveAccess&&state.grant&&state.grant.phase!=='complete'||state.proxyChange&&state.proxyChange.phase!=='complete')return fail('linkedin_task_proxy_changed');
+    if(options.preserveExisting&&task.proxyProfileId===proof.profileId&&task.proxyUuid===proof.proxyUuid&&task.proxySavedAt)return task;
     return taskRow((await s.query(`UPDATE noco.linkedin_creation_task SET proxy_profile_id=$2,proxy_uuid=$3,proxy_saved_at=clock_timestamp()
       WHERE id=$1 RETURNING *`,[task.id,proof.profileId,proof.proxyUuid])).rows[0]);
   }
@@ -106,7 +106,7 @@ export function createCreationTaskStore(pool: SqlPool, database: CopyDatabase, l
         }
         if (task.status === status) return {task,completed:false};
         if (status === 'сделана экспертом') {
-          if(proxyReceipt)task=await saveProxyReceipt(s,task,proxyReceipt,true);
+          if(proxyReceipt)task=await saveProxyReceipt(s,task,proxyReceipt,{preserveExisting:true,allowActiveAccess:true});
           await requireResult(s,task);
         }
         const updated=taskRow((await s.query('UPDATE noco.linkedin_creation_task SET status=$2 WHERE id=$1 RETURNING *', [id, status])).rows[0]);

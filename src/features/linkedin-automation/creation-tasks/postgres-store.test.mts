@@ -59,8 +59,6 @@ test('the existing CRM completion hook runs only after the first known commit, n
 
 test('completion is final, hidden from Denis and idempotent even with an old version or a later active grant',async()=>{
  const f=fixture();f.state.profile.state.grant={phase:'granted'};
- await assert.rejects(f.store.status(1,1,'сделана экспертом'),{code:'linkedin_task_proxy_required'});
- f.state.profile.state.grant=undefined;
  const done=await f.store.status(1,1,'сделана экспертом');
  const writes=f.calls.filter(sql=>sql.includes('SET status=')).length;
  f.state.profile.state.grant={phase:'granted'};
@@ -81,12 +79,21 @@ test('completion atomically saves the checked proxy receipt and rolls it back wh
  }
 });
 
-test('automatic completion receipt rejects an outdated revision or active access',async()=>{
- for(const kind of ['revision','grant','proxy']){
+test('automatic completion receipt rejects an outdated revision or different proxy',async()=>{
+ for(const kind of ['revision','proxy']){
   const f=fixture();f.state.task.proxy_saved_at=null;
-  if(kind==='grant')f.state.profile.state.grant={phase:'granted'};
   await assert.rejects(f.store.status(1,1,'сделана экспертом',{profileId:2,proxyUuid:kind==='proxy'?'other':'proxy',revision:kind==='revision'?3:4}));
   assert.equal(f.state.task.status,'не начата');assert.equal(f.state.task.proxy_saved_at,null);
+ }
+});
+
+test('atomic completion accepts active access but leaves its cleanup state untouched; explicit receipt remains idle-only',async()=>{
+ for(const phase of ['preparing','granted','awaiting_close','blocked']){
+  const f=fixture();f.state.task.proxy_saved_at=null;f.state.profile.state.grant=Object.assign({phase},{id:'g',pending:'clear',bridgeClear:{result:{state:'succeeded'}}});
+  const before=structuredClone(f.state.profile);
+  await assert.rejects(f.store.receipt(1,1,2,'proxy',4),{code:'linkedin_task_proxy_changed'});
+  assert.equal((await f.store.status(1,1,'сделана экспертом',{profileId:2,proxyUuid:'proxy',revision:4})).status,'сделана экспертом');
+  assert.deepEqual(f.state.profile,before);
  }
 });
 
@@ -123,11 +130,10 @@ test('Denis detail includes the archived account alongside the current submitted
   assert.ok(!JSON.stringify(detail).includes('"password"'));
 });
 test('completion requires result and matching saved proxy; active grants and stale edits cannot bypass it',async()=>{
-  for(const variant of ['receipt','proxy','grant','pending','password','url']){
+  for(const variant of ['receipt','proxy','pending','password','url']){
     const f=fixture();
     if(variant==='receipt')f.state.task.proxy_saved_at=null;
     if(variant==='proxy')f.state.profile.state.proxy.uuid='other';
-    if(variant==='grant')f.state.profile.state.grant={phase:'granted'};
     if(variant==='pending')f.state.profile.state.proxyChange={phase:'queued'};
     if(variant==='password')f.state.li.password='';
     if(variant==='url')f.state.li.url='';
