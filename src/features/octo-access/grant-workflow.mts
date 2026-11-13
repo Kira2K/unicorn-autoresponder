@@ -5,6 +5,7 @@ import type { CloudApi, Grant, ManagedProfile, Metadata, OctoConfig, OctoStore }
 import { inFolder, safeCode } from './provision.mts';
 import { normalizeUuid } from './cloud-api.mts';
 import { cleanupHistoryReady, sameMetadata } from './cleanup-readiness.mts';
+const retryableReadErrors = new Set(['octo_request_outcome_unknown', 'octo_request_failed', 'invalid_octo_response']);
 export async function advanceGrant(initial: ManagedProfile, deps: {
   store: OctoStore; api: CloudApi; config: OctoConfig; check(): Promise<void>; now?: () => number;
   historyCheckpoint?: () => string | number | undefined;
@@ -15,10 +16,18 @@ export async function advanceGrant(initial: ManagedProfile, deps: {
   if (!p.uuid || !p.grant || p.grant.phase === 'complete') return;
   let g = p.grant;
   if (g.phase === 'granted' && !g.pending && now() < g.expiresAt!) return;
+  const waitingForBridgeReceipt = () => g.pending === 'clear' && g.clearMethod === 'bridge'
+    && !!g.bridgeClear && !g.bridgeClear.result;
+  const recoverableBridgeReadBlock = () => g.phase === 'blocked' && waitingForBridgeReceipt()
+    && retryableReadErrors.has(g.error ?? '') && g.bridgeClear!.claim?.authorizedAt === undefined;
+  if (g.phase === 'blocked' && waitingForBridgeReceipt() && !recoverableBridgeReadBlock()) return;
   const anon: Metadata = { title: g.alias, description: `unicorn-access:${g.id}`, tags: [], start_pages: [] };
   const save = async () => { await check(); p.grant = g; p = await store.save(p); g = p.grant!; };
+  let failedProfileRead = false;
   const read = async () => {
+    failedProfileRead = true;
     const live = await api.getProfile(p.uuid!);
+    failedProfileRead = false;
     if (normalizeUuid(live.uuid) !== normalizeUuid(p.uuid!)) throw new OctoError('octo_profile_changed');
     return live;
   };
@@ -45,7 +54,16 @@ export async function advanceGrant(initial: ManagedProfile, deps: {
       if (step === 'clear' && g.clearMethod === 'bridge') {
         const receipt = g.bridgeClear?.result;
         if (!receipt) {
-          if (g.phase === 'blocked') return;
+          if (g.phase === 'blocked') {
+            // Old read failures may have frozen an unexecuted bridge job. Resume
+            // only before authorization, after rechecking every cleanup barrier.
+            const checkpoint = historyCheckpoint();
+            if (!recoverableBridgeReadBlock() || checkpoint === undefined || live.status !== 0 || !live.has_user_password
+              || !Number.isFinite(g.expiresAt) || !Number.isFinite(g.hiddenAt) || now() < g.expiresAt!
+              || g.hiddenAt! < g.expiresAt! || !inFolder(live, config.homeFolder)
+              || !sameMetadata(live as Metadata, g.original) || !await cleanupHistoryReady(p, store)
+              || historyCheckpoint() !== checkpoint) return;
+          }
           if (g.error !== 'octo_bridge_waiting' || g.phase !== 'awaiting_close') {
             g.phase = 'awaiting_close'; g.error = 'octo_bridge_waiting'; await save();
           }
@@ -133,7 +151,12 @@ export async function advanceGrant(initial: ManagedProfile, deps: {
     await complete();
   } catch (error) {
     if (/^(postgres_|octo_stale_revision|commit_|octo_leadership)/.test(String((error as any)?.code))) throw error;
-    if (g.pending === 'clear' && (error as any)?.code === 'octo_event_history_pending') {
+    if (failedProfileRead && g.phase === 'awaiting_close' && waitingForBridgeReceipt()
+      && retryableReadErrors.has(String((error as any)?.code))) {
+      // A failed GET is not a failed Desktop operation. Preserve its journal,
+      // claim and deadline; only the bridge may execute and acknowledge cleanup.
+      g.error = safeCode(error);
+    } else if (g.pending === 'clear' && (error as any)?.code === 'octo_event_history_pending') {
       // The request was never sent; do not leave an uncertain-write journal.
       g.phase = 'awaiting_close'; delete g.pending; delete g.attemptedAt; g.error = 'octo_event_history_pending';
       delete g.clearMethod; delete g.bridgeClear;
@@ -141,7 +164,7 @@ export async function advanceGrant(initial: ManagedProfile, deps: {
       // Explicit refusal can be retried: cloud synchronization can lag normal stop.
       g.phase = 'awaiting_close'; delete g.pending; delete g.attemptedAt; g.error = 'octo_waiting_for_sync';
     } else if (!g.pending && ['granted','awaiting_close'].includes(g.phase)
-      && ['octo_request_outcome_unknown','octo_request_failed','invalid_octo_response'].includes((error as any)?.code)) {
+      && retryableReadErrors.has(String((error as any)?.code))) {
       // A temporary read failure must never turn an exposed grant into a terminal
       // block that prevents its deadline from being enforced.
       g.error = safeCode(error);
