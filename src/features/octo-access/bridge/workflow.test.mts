@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { advanceGrant } from '../grant-workflow.mts';
+import { OctoError } from '../contracts.mts';
 import { provisionProfile } from '../provision.mts';
 import { createOctoService } from '../service.mts';
 import { createMemoryStore, createMockCloud, mockClient, testConfig } from '../testing.mts';
@@ -22,6 +23,112 @@ async function fixture() {
     connection(value: string | undefined) { checkpoint = value; } };
 }
 const device = 'a'.repeat(64), otherDevice = 'b'.repeat(64);
+
+test('bridge: a cloud read failure after a running-profile refusal preserves cleanup until ordinary closure', async () => {
+  for (const code of ['octo_request_failed', 'octo_request_outcome_unknown', 'invalid_octo_response']) {
+    const f = await fixture(), [p] = await f.store.list();
+    await f.service.acquire(p.clientId, p.id); await f.advance(); f.tick(120000); await f.advance();
+    const job = (await f.broker.poll(device))!;
+    const before = (await f.store.get(p.id))!;
+    await f.cloud.start(p.uuid!);
+    await assert.rejects(f.broker.authorize(device, job.id), { code: 'octo_bridge_task_not_ready' });
+    const read = f.cloud.api.getProfile;
+    f.cloud.api.getProfile = code === 'octo_request_failed'
+      ? () => { throw new OctoError(code, 502); }
+      : async () => { throw new OctoError(code, 502); };
+    await f.advance();
+    const waiting = (await f.store.get(p.id))!;
+    assert.equal(waiting.grant!.phase, 'awaiting_close', code);
+    assert.equal(waiting.grant!.pending, 'clear');
+    assert.equal(waiting.grant!.error, code);
+    assert.deepEqual(waiting.grant!.bridgeClear, before.grant!.bridgeClear);
+    assert.equal(waiting.grant!.id, before.grant!.id);
+    assert.equal(waiting.grant!.expiresAt, before.grant!.expiresAt);
+    assert.equal(waiting.password, before.password);
+    f.cloud.api.getProfile = read;
+    await f.advance();
+    assert.equal(await f.broker.poll(device), null);
+    await f.cloud.stop(p.uuid!); await f.advance();
+    assert.equal((await f.broker.poll(device))!.id, job.id);
+    await f.broker.authorize(device, job.id);
+    f.cloud.profiles.get(p.uuid!)!.has_user_password = false;
+    await f.broker.result(device, job.id, { state: 'succeeded' });
+    await f.advance(); await f.advance();
+    assert.equal((await f.store.get(p.id))!.grant!.phase, 'complete');
+    assert.equal(f.cloud.calls.filter(call => call.startsWith('clear:')).length, 0);
+    assert.equal(f.cloud.calls.filter(call => call.startsWith('protect:')).length, 1);
+  }
+});
+
+test('bridge: a legacy pre-authorization read block resumes the same job only after verified ordinary closure', async () => {
+  for (const code of ['octo_request_failed', 'octo_request_outcome_unknown', 'invalid_octo_response']) {
+    const f = await fixture(), [p] = await f.store.list();
+    await f.service.acquire(p.clientId, p.id); await f.advance(); f.tick(120000); await f.advance();
+    const job = (await f.broker.poll(device))!;
+    const blocked = (await f.store.get(p.id))!;
+    blocked.grant!.phase = 'blocked'; blocked.grant!.error = code;
+    await f.store.save(blocked);
+    await f.cloud.start(p.uuid!); await f.advance();
+    assert.equal((await f.store.get(p.id))!.grant!.phase, 'blocked');
+    assert.equal(await f.broker.poll(device), null);
+    await f.cloud.stop(p.uuid!); await f.advance();
+    const recovered = (await f.store.get(p.id))!;
+    assert.equal(recovered.grant!.phase, 'awaiting_close', code);
+    assert.equal(recovered.grant!.pending, 'clear');
+    assert.deepEqual(recovered.grant!.bridgeClear, blocked.grant!.bridgeClear);
+    assert.equal(recovered.grant!.id, job.id);
+    assert.equal(recovered.grant!.attemptedAt, blocked.grant!.attemptedAt);
+    assert.equal(recovered.password, blocked.password);
+    await f.broker.authorize(device, job.id);
+    f.cloud.profiles.get(p.uuid!)!.has_user_password = false;
+    await f.broker.result(device, job.id, { state: 'succeeded' }); await f.advance();
+    assert.equal((await f.store.get(p.id))!.grant!.phase, 'complete');
+    assert.equal(f.cloud.calls.filter(call => call.startsWith('clear:')).length, 0);
+  }
+});
+
+test('bridge: read-block recovery preserves authorization, receipts and all cleanup barriers', async () => {
+  for (const barrier of ['authorized', 'uncertain', 'rejected', 'metadata', 'folder', 'password', 'force', 'gap', 'disconnect', 'non-read-error'] as const) {
+    const f = await fixture(), [p] = await f.store.list();
+    await f.service.acquire(p.clientId, p.id); await f.advance(); f.tick(120000); await f.advance();
+    const job = (await f.broker.poll(device))!;
+    if (['authorized', 'uncertain', 'rejected'].includes(barrier)) await f.broker.authorize(device, job.id);
+    if (barrier === 'uncertain' || barrier === 'rejected') await f.broker.result(device, job.id, { state: barrier, code: 'bridge_local_failed' });
+    const blocked = (await f.store.get(p.id))!;
+    blocked.grant!.phase = 'blocked';
+    blocked.grant!.error = barrier === 'non-read-error' ? 'octo_force_stop_observed' : 'octo_request_failed';
+    await f.store.save(blocked);
+    if (barrier === 'metadata') f.cloud.profiles.get(p.uuid!)!.title = 'changed';
+    if (barrier === 'folder') f.cloud.profiles.get(p.uuid!)!.folder = 'guest';
+    if (barrier === 'password') f.cloud.profiles.get(p.uuid!)!.has_user_password = false;
+    if (barrier === 'force') await f.cloud.force(p.uuid!);
+    if (barrier === 'gap') await f.store.setCoverage(f.now() + 1);
+    if (barrier === 'disconnect') f.connection(undefined);
+    await f.advance(); await f.advance();
+    const after = (await f.store.get(p.id))!;
+    assert.equal(after.grant!.phase, 'blocked', barrier);
+    assert.deepEqual(after.grant!.bridgeClear, blocked.grant!.bridgeClear, barrier);
+    assert.equal(after.password, blocked.password);
+    assert.equal(f.cloud.calls.filter(call => call.startsWith('clear:')).length, 0);
+  }
+});
+
+test('bridge: recovery cannot overwrite a concurrent authorization', async () => {
+  const f = await fixture(), [p] = await f.store.list();
+  await f.service.acquire(p.clientId, p.id); await f.advance(); f.tick(120000); await f.advance();
+  await f.broker.poll(device);
+  const blocked = (await f.store.get(p.id))!;
+  blocked.grant!.phase = 'blocked'; blocked.grant!.error = 'octo_request_failed'; await f.store.save(blocked);
+  const read = f.cloud.api.getProfile;
+  f.cloud.api.getProfile = async uuid => {
+    const live = await read(uuid), current = (await f.store.get(p.id))!;
+    current.grant!.bridgeClear!.claim!.authorizedAt = f.now(); await f.store.save(current);
+    return live;
+  };
+  await assert.rejects(f.advance(), { code: 'octo_stale_revision' });
+  assert.equal((await f.store.get(p.id))!.grant!.bridgeClear!.claim!.authorizedAt, f.now());
+  assert.equal(f.cloud.calls.filter(call => call.startsWith('clear:')).length, 0);
+});
 test('bridge: two clients, three cycles, independent 120s, offline hiding and unchanged passwords', async () => {
   const f = await fixture(), [a, b] = await f.store.list();
   for (let cycle = 0; cycle < 3; cycle++) {

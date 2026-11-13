@@ -60,6 +60,12 @@ backend first, then the separately running bridge agent while preserving its jou
   The stored five-digit key is applied before sharing. Expiry hides the profile and
   credentials; protection removal waits for ordinary closure and verified cleanup.
   A running guest profile is never force-stopped to remove its protection.
+  A failed cloud profile read while awaiting a bridge receipt retains the pending
+  cleanup and retries the read. Legacy blocks caused by these reads resume only
+  before Desktop authorization, with no receipt, after private metadata, ordinary
+  closure, history coverage and the current checkpoint are verified again. The
+  existing grant, password, claim and bridge journal are preserved; uncertain or
+  rejected Desktop results never authorize a retry.
 - `runtime.mts`: independent per-profile work, one PostgreSQL advisory-lock leader,
   durable Action Log cursor and recovery. The separate pool is a database connection
   pool, not a separate service/process. Use a direct/session-pinned PostgreSQL connection,
