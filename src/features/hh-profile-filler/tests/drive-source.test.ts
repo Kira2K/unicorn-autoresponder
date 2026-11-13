@@ -132,6 +132,15 @@ async function runIncompleteListingTests() {
 }
 
 export async function runDriveSourceTests() {
+  const noRequests = createDriveSourceLoader({ drive: { files: {
+    get: async () => { throw new Error('Unexpected Drive request for absent folder') }
+  } } })
+  for (const absent of [undefined, '', ' ', '-', ' - ']) {
+    assert.deepEqual(await noRequests.loadExperienceDescriptions(absent), [])
+  }
+  await assert.rejects(noRequests.loadExperienceDescriptions('invalid-folder'),
+    expectSafeError('profile_drive_url_invalid'))
+  await assert.rejects(noRequests.loadCv('-'), expectSafeError('profile_drive_url_invalid'))
   runAuthTests()
   await runDownloadTests()
   await runFailureTests()

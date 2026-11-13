@@ -82,6 +82,27 @@ export function runProfileBuilderTests() {
   assert.equal(singleExpandedInstitution.cv.education[0].graduationYear, 2024)
   assert.equal(singleExpandedInstitution.cv.education[0].specialization, 'Applied Informatics')
 
+  const sameUniversity = { ...client, fallbacks: { ...client.fallbacks,
+    education: JSON.stringify([
+      { uni: 'University', grade: 'Specialist', faculty: 'Security', yearOfEnd: '2024' },
+      { uni: 'University', grade: 'Specialist', faculty: 'Data analysis', yearOfEnd: '2024' }
+    ])
+  } }
+  const missingYear = { ...cv, education: [{ institution: 'University', degree: 'Specialist' }] }
+  const consensus = buildPreparedProfile(sameUniversity, missingYear, '2026-09-03T00:00:00Z')
+  assert.equal(consensus.cv.education[0].graduationYear, 2024,
+    'Use a missing year when every compatible exact-institution source agrees')
+  assert.equal(consensus.cv.education[0].specialization, undefined,
+    'Do not choose an ambiguous program to obtain its year')
+  const differingYears = JSON.parse(sameUniversity.fallbacks.education)
+  differingYears[1].yearOfEnd = '2023'
+  assert.equal(buildPreparedProfile({ ...sameUniversity, fallbacks: {
+    ...sameUniversity.fallbacks, education: JSON.stringify(differingYears)
+  } }, missingYear, '2026-09-03T00:00:00Z').cv.education[0].graduationYear, undefined)
+  assert.equal(buildPreparedProfile(sameUniversity, { ...cv, education: [{
+    institution: 'University', degree: 'Specialist', graduationYear: 2025
+  }] }, '2026-09-03T00:00:00Z').cv.education[0].graduationYear, 2025)
+
   const cvEnglishWins = buildPreparedProfile({ ...client,
     fallbacks: { ...client.fallbacks, englishLevel: 'B1' }
   }, { ...cv, languages: [{ name: 'English', level: 'C1' }] },

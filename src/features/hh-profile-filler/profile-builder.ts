@@ -124,7 +124,14 @@ function mergeEducationFallback(extracted: CvEducation[], fallbackValue?: string
       normalizedInstitution(candidate.institution) === normalizedInstitution(item.institution))
     const candidate = exact.length === 1 ? exact[0] :
       extracted.length === 1 && compatible.length === 1 && fallback.length === 1 ? compatible[0] : undefined
-    if (!candidate) return item
+    if (!candidate) {
+      // Multiple programs at the same university can still give unambiguous
+      // evidence for a missing year. Keep all other ambiguous fields unchanged.
+      const year = exact[0]?.graduationYear
+      return item.graduationYear === undefined && year !== undefined &&
+        exact.every(record => record.graduationYear === year)
+        ? { ...item, graduationYear: year } : item
+    }
     return {
       ...item,
       degree: first(item.degree, candidate.degree),
